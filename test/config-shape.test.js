@@ -12,7 +12,7 @@ test('пустой конфиг даёт рабочие значения по у
   assert.strictEqual(c.sshHost, 'example-host');
   assert.strictEqual(c.hotkey, 'Cmd+Shift+T');
   assert.strictEqual(c.caps.reptyr, false);
-  assert.deepStrictEqual(c.terminal, { file: 'open', args: ['-na', 'kitty', '--args'] });
+  assert.deepStrictEqual(c.terminal, { file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] });
   assert.deepStrictEqual(c.projects, []);
 });
 

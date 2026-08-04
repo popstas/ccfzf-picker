@@ -6,7 +6,11 @@
   const DEFAULTS = {
     sshHost: 'example-host',
     hotkey: 'Cmd+Shift+T',
-    terminal: { file: 'open', args: ['-na', 'kitty', '--args'] },
+    // Прямой запуск бинаря, а не `open -na kitty --args`. Обе формы доводят
+    // команду до kitty (проверено), но `open -n` каждый раз поднимает новый
+    // экземпляр приложения, а --single-instance отдаёт окно уже запущенному
+    // процессу и сразу выходит. Так же kitty зовёт hammerspoon на этой машине.
+    terminal: { file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] },
     // false, хотя опыт признал reptyr пригодным: умолчание отвечает на вопрос
     // «что делать, когда про ту сторону ничего не известно», а не «работает ли
     // reptyr на example-host». Без конфига хост может быть любым, и `reptyr -T`
