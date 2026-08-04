@@ -5,9 +5,11 @@ const {
 } = require('../frontend-src/open-strategy');
 
 test('команда переклейки собирается только при настоящем pid', () => {
-  assert.strictEqual(buildAttachCommand({ pid: 42 }), 'sudo reptyr -T 42');
-  assert.strictEqual(buildAttachCommand({ pid: '42' }), 'sudo reptyr -T 42');
-  // Нечисловой pid дал бы `sudo reptyr -T NaN` — команду, которая выглядит
+  assert.strictEqual(buildAttachCommand({ pid: 42 }), 'reptyr -T 42');
+  assert.strictEqual(buildAttachCommand({ pid: '42' }), 'reptyr -T 42');
+  // Без sudo намеренно: он заводит собственный pty, и сессия уехала бы в него.
+  assert.ok(!buildAttachCommand({ pid: 42 }).includes('sudo'));
+  // Нечисловой pid дал бы `reptyr -T NaN` — команду, которая выглядит
   // рабочей и не работает. Пустая строка честнее: пункт меню просто не
   // появится.
   assert.strictEqual(buildAttachCommand({ pid: 'ой' }), '');
