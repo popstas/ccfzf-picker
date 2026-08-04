@@ -61,10 +61,19 @@ fn hide_picker(app: tauri::AppHandle) {
     hide_window(&app);
 }
 
+/// Спросить агрегатор.
+///
+/// `async` и `spawn_blocking` здесь не украшение. Синхронную команду Tauri
+/// исполняет в главном потоке, а внутри — ssh на другую машину секунд на
+/// полсекунды: окно замирало на это время каждый опрос, то есть раз в секунду.
+/// `async` уводит вызов в рантайм, `spawn_blocking` — на поток для блокирующей
+/// работы, чтобы не занимать им рабочий поток рантайма.
 #[tauri::command]
-fn fetch_state() -> Result<serde_json::Value, String> {
+async fn fetch_state() -> Result<serde_json::Value, String> {
     // Хост зашит до Task 14, где появляется конфиг.
-    state_source::fetch("example-host")
+    tauri::async_runtime::spawn_blocking(|| state_source::fetch("example-host"))
+        .await
+        .map_err(|e| format!("fetch_state task failed: {e}"))?
 }
 
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
@@ -222,6 +231,26 @@ fn main() {
             // самой поломке фронтенд скажет отдельно — он читает тот же файл
             // и печатает ошибку в статуслайн.
             let config = load_config().unwrap_or(serde_json::Value::Null);
+
+            // Клик мимо окна закрывает пикер. Окно безрамочное и всегда
+            // поверх: не закрывшись само, оно осталось бы висеть над той
+            // работой, ради которой его и открывали. Ключ в конфиге на случай,
+            // когда список нужен рядом с терминалом — например, чтобы читать
+            // из него pid, пока набираешь команду в другом окне.
+            let hide_on_blur = config
+                .get("hideOnBlur")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            if hide_on_blur {
+                if let Some(window) = app.get_webview_window("picker") {
+                    let handle = app.handle().clone();
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::Focused(false) = event {
+                            hide_window(&handle);
+                        }
+                    });
+                }
+            }
 
             let picker_shortcut = config
                 .get("hotkey")

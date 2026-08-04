@@ -480,7 +480,14 @@
     render();
   }
 
+  // Один запрос за раз. Опрос тикает раз в секунду, а ssh на example-host столько
+  // же и стоит: без сторожа медленный ответ копил бы очередь вызовов, и каждый
+  // следующий отставал бы сильнее предыдущего.
+  let inFlight = false;
+
   async function refresh() {
+    if (inFlight) return;
+    inFlight = true;
     let state;
     try {
       state = await invoke('fetch_state');
@@ -488,6 +495,8 @@
       error = String(e);
       render();
       return;
+    } finally {
+      inFlight = false;
     }
     const problems = window.StateShape.validateState(state);
     if (problems.length) {

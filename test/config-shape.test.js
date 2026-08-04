@@ -14,6 +14,7 @@ test('пустой конфиг даёт рабочие значения по у
   assert.strictEqual(c.caps.reptyr, false);
   assert.strictEqual(c.caps.takeover, false);
   assert.strictEqual(c.onlyLive, true);
+  assert.strictEqual(c.hideOnBlur, true);
   assert.deepStrictEqual(c.terminal, { file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] });
   assert.deepStrictEqual(c.projects, []);
 });
@@ -27,10 +28,12 @@ test('заданные значения перекрывают умолчани�
 
 // Единственное поле с умолчанием true, поэтому его выключение проверяется
 // отдельно: `false` не должен потеряться на проверке «значение задано».
-test('onlyLive выключается только явным false', () => {
-  assert.strictEqual(normalizeConfig({ onlyLive: false }).onlyLive, false);
-  assert.strictEqual(normalizeConfig({ onlyLive: 'нет' }).onlyLive, true);
-  assert.strictEqual(normalizeConfig({}).onlyLive, true);
+test('поля с умолчанием true выключаются только явным false', () => {
+  for (const key of ['onlyLive', 'hideOnBlur']) {
+    assert.strictEqual(normalizeConfig({ [key]: false })[key], false, key);
+    assert.strictEqual(normalizeConfig({ [key]: 'нет' })[key], true, key);
+    assert.strictEqual(normalizeConfig({})[key], true, key);
+  }
 });
 
 test('проект без пути отбрасывается, а не роняет конфиг', () => {
