@@ -1,6 +1,18 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { chooseOpenStrategy, buildOpenCommand } = require('../frontend-src/open-strategy');
+const { q, chooseOpenStrategy, buildOpenCommand } = require('../frontend-src/open-strategy');
+
+test('q закрывает кавычку, а не пропускает её дальше', () => {
+  assert.strictEqual(q('/home/user/x'), "'/home/user/x'");
+  assert.strictEqual(q("/home/user/it's"), "'/home/user/it'\\''s'");
+  assert.strictEqual(q(''), "''");
+  assert.strictEqual(q(null), "''");
+  assert.strictEqual(q(undefined), "''");
+  // Точка с запятой и подстановка внутри кавычек — обычные знаки: ровно ради
+  // этого q и стоит перед каждым путём, уезжающим в удалённую команду.
+  assert.strictEqual(q('a; rm -rf /'), "'a; rm -rf /'");
+  assert.strictEqual(q('$(id)'), "'$(id)'");
+});
 
 const OPTS = {
   sshHost: 'user@example-host',

@@ -17,6 +17,7 @@ const FILES = [
   'frontend-src/session-glyph.js',
   'frontend-src/session-info.js',
   'frontend-src/session-actions.js',
+  'frontend-src/config-shape.js',
   'frontend-src/picker-filter.js',
   'frontend-src/picker-list-sync.js',
   'frontend-src/open-strategy.js',

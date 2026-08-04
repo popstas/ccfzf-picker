@@ -236,6 +236,7 @@
 <script src="session-glyph.js"></script>
 <script src="session-info.js"></script>
 <script src="session-actions.js"></script>
+<script src="config-shape.js"></script>
 <script src="picker-filter.js"></script>
 <script src="picker-list-sync.js"></script>
 <script src="open-strategy.js"></script>
@@ -248,15 +249,10 @@
   // само открытие сессии. Читается из ~/.config/ccfzf-picker/seen.json один
   // раз за загрузку окна — см. start().
   let seen = {};
-  const OPEN_OPTS = {
-    sshHost: 'example-host',
-    terminal: { file: 'open', args: ['-na', 'kitty', '--args'] },
-  };
-  // Заполняется из конфига в Task 14; до тех пор — вердикт опыта
-  // (docs/reptyr-experiment.md: «пригоден»). На example-host reptyr 0.9.0 с
-  // поддержкой -T, ptrace_scope = 0, так что живая сессия переезжает в kitty,
-  // а не убивается перехватом.
-  const CAPS = { reptyr: true };
+  // Умолчания до того, как прочитан ~/.config/ccfzf-picker/config.yaml: без
+  // файла пикер должен работать целиком, поэтому здесь не пусто, а
+  // нормализованный конфиг по умолчанию. См. start().
+  let CONFIG = window.ConfigShape.normalizeConfig(null);
   // Последний ответ агрегатора. Смена сортировки и чекбоксов перекладывает эти
   // же сессии, а не ждёт следующего опроса: ждать пришлось бы до секунды, и
   // клик выглядел бы не сработавшим.
@@ -533,13 +529,15 @@
    */
   async function openSession(row) {
     if (!row) return;
-    const strategy = window.OpenStrategy.chooseOpenStrategy(row, CAPS);
-    const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, OPEN_OPTS);
+    const strategy = window.OpenStrategy.chooseOpenStrategy(row, CONFIG.caps);
+    const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, {
+      sshHost: CONFIG.sshHost, terminal: CONFIG.terminal,
+    });
     if (!cmd) return;
     if (cmd.destructive) {
       const ok = confirm(
         `Перехватить сессию «${sessionName(row)}»?\n\n`
-        + `Процесс ${row.pid} на ${OPEN_OPTS.sshHost} получит SIGHUP и завершится, окно на Windows закроется.\n`
+        + `Процесс ${row.pid} на ${CONFIG.sshHost} получит SIGHUP и завершится, окно на Windows закроется.\n`
         + `Фоновые задачи, запущенные в её шелле, умрут вместе с ней.`,
       );
       if (!ok) return;
@@ -834,6 +832,31 @@
     } catch (e) {
       error = String(e);
     }
+
+    // Тоже до первого опроса: из конфига берётся хост, которому этот опрос и
+    // адресован. Испорченный yaml — это ошибка в статуслайне и умолчания, а не
+    // пикер, который не открылся.
+    try {
+      CONFIG = window.ConfigShape.normalizeConfig(await invoke('load_config'));
+    } catch (e) {
+      error = String(e);
+    }
+
+    // Проектный хоткей открывает новую сессию, а не продолжает старую:
+    // продолжать нечего — сессии у него нет, есть только каталог.
+    await listen('project-hotkey', (event) => {
+      const argv = [
+        CONFIG.terminal.file, ...CONFIG.terminal.args,
+        'ssh', '-t', CONFIG.sshHost,
+        // Через ту же q, что собирает команды открытия: это единственный
+        // барьер между путём из конфига и шеллом на той стороне.
+        `cd ${window.OpenStrategy.q(event.payload)} && claude`,
+      ];
+      invoke('spawn_detached', { argv }).catch((e) => {
+        error = String(e);
+        render();
+      });
+    });
 
     // Fired by Rust every time the window is shown.
     await listen('picker-shown', beginShow);

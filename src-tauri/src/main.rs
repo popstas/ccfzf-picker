@@ -65,6 +65,23 @@ fn fetch_state() -> Result<serde_json::Value, String> {
     state_source::fetch("example-host")
 }
 
+/// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
+/// тесты. Отсутствующий файл — не ошибка: умолчания рассчитаны на работу без
+/// него.
+#[tauri::command]
+fn load_config() -> Result<serde_json::Value, String> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Ok(serde_json::Value::Null);
+    };
+    let path = std::path::Path::new(&home).join(".config/ccfzf-picker/config.yaml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(serde_json::Value::Null),
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+    serde_yaml::from_str(&text).map_err(|e| format!("bad yaml in {}: {e}", path.display()))
+}
+
 /// Запуск терминала. Открепляется сразу: пикер не ждёт, пока человек
 /// закончит работать в сессии, и не держит его вывод.
 #[tauri::command]
@@ -114,35 +131,127 @@ fn save_seen(seen: serde_json::Value) -> Result<(), String> {
     std::fs::rename(&tmp, &path).map_err(|e| format!("cannot rename onto {}: {e}", path.display()))
 }
 
-fn main() {
-    let picker_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT);
-    // Отдельный экземпляр под хендлер: он уезжает в замыкание плагина, а
-    // регистрация в setup ниже забирает исходный.
-    let handled_shortcut = picker_shortcut;
+/// Хоткей пикера по умолчанию: `Cmd+Shift+T`.
+///
+/// Умолчание живёт здесь, а не только в config-shape.js: без файла конфига
+/// фронтенд его и не увидит, а окно поднимать всё равно чем-то надо.
+fn default_picker_shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT)
+}
 
+fn main() {
     tauri::Builder::default()
         .manage(LastToggle(Mutex::new(None)))
         .plugin(tauri_plugin_shell::init())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(move |app, shortcut, event| {
-                    // Хендлер плагина общий на все зарегистрированные хоткеи, а
-                    // не только на свой. Без сверки проектные хоткеи из Task 14
-                    // поднимали бы окно пикера — ровно то, чего они делать не
-                    // должны: они открывают сессию мимо списка.
-                    if shortcut == &handled_shortcut && event.state() == ShortcutState::Pressed {
-                        toggle_picker(app);
-                    }
-                })
-                .build(),
-        )
+        // Без общего with_handler: он зовётся на каждый зарегистрированный
+        // хоткей, и одна ветка внутри него разбирала бы, чей это был. Здесь у
+        // каждого хоткея свой обработчик — пикерный поднимает окно, проектный
+        // шлёт событие, и перепутать их нечем.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            hide_picker, fetch_state, spawn_detached, load_seen, save_seen
+            hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config
         ])
         .setup(move |app| {
-            app.global_shortcut().register(picker_shortcut)?;
+            // Испорченный конфиг не должен оставлять человека без пикера:
+            // отказ читается как «конфига нет», и дальше идут умолчания. О
+            // самой поломке фронтенд скажет отдельно — он читает тот же файл
+            // и печатает ошибку в статуслайн.
+            let config = load_config().unwrap_or(serde_json::Value::Null);
+
+            let picker_shortcut = config
+                .get("hotkey")
+                .and_then(|v| v.as_str())
+                .and_then(|s| match s.parse::<Shortcut>() {
+                    Ok(sc) => Some(sc),
+                    Err(_) => {
+                        eprintln!("ccfzf-picker: cannot parse hotkey {s}, using default");
+                        None
+                    }
+                })
+                .unwrap_or_else(default_picker_shortcut);
+            app.global_shortcut()
+                .on_shortcut(picker_shortcut, |app, _sc, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        toggle_picker(app);
+                    }
+                })?;
+
+            // Проектный хоткей открывает новую сессию мимо списка, поэтому
+            // окно пикера не поднимается: наружу уходит только событие.
+            let projects = config
+                .get("projects")
+                .and_then(|p| p.as_array())
+                .cloned()
+                .unwrap_or_default();
+            for item in projects {
+                let (Some(path), Some(hotkey)) = (
+                    item.get("path").and_then(|v| v.as_str()),
+                    item.get("hotkey").and_then(|v| v.as_str()),
+                ) else { continue };
+                if hotkey.is_empty() { continue }
+                let Ok(sc) = hotkey.parse::<Shortcut>() else {
+                    eprintln!("ccfzf-picker: cannot parse hotkey {hotkey}");
+                    continue;
+                };
+                let handle = app.handle().clone();
+                let path = path.to_string();
+                app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        let _ = handle.emit("project-hotkey", path.clone());
+                    }
+                })?;
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running ccfzf-picker");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Хоткеи из конфига разбираются той же строкой, какой их пишет человек.
+    ///
+    /// Проверка нужна потому, что в бою неразобранный хоткей только пишет в
+    /// stderr и молча пропускается: приложение при этом работает, а клавиша
+    /// не отзывается — заметить это можно лишь пальцами.
+    #[test]
+    fn config_hotkeys_parse() {
+        for s in ["Cmd+Shift+T", "Cmd+Shift+1", "Cmd+Shift+2"] {
+            assert!(s.parse::<Shortcut>().is_ok(), "не разобрался хоткей {s}");
+        }
+        assert_eq!("Cmd+Shift+T".parse::<Shortcut>().unwrap(), default_picker_shortcut());
+        assert!("не хоткей".parse::<Shortcut>().is_err());
+    }
+
+    /// Конфиг доезжает до фронтенда теми же типами, какими написан.
+    ///
+    /// Разбирает его serde_yaml, а решения по нему принимает normalizeConfig в
+    /// JS, и между ними стоит перевод yaml -> json. Приедь `reptyr` строкой
+    /// «true» или `args` не массивом — normalizeConfig молча вернул бы
+    /// умолчания, и единственным следом была бы клавиша, которая не работает.
+    #[test]
+    fn config_yaml_keeps_its_types() {
+        let text = r#"
+sshHost: example-host
+hotkey: Cmd+Shift+T
+caps:
+  reptyr: true
+terminal:
+  file: open
+  args: ['-na', 'kitty', '--args']
+projects:
+  - path: /home/user/projects/demo
+    hotkey: Cmd+Shift+1
+"#;
+        let v: serde_json::Value = serde_yaml::from_str(text).unwrap();
+        assert_eq!(v["sshHost"].as_str(), Some("example-host"));
+        assert_eq!(v["caps"]["reptyr"].as_bool(), Some(true));
+        assert_eq!(v["terminal"]["file"].as_str(), Some("open"));
+        assert_eq!(v["terminal"]["args"].as_array().unwrap().len(), 3);
+        let projects = v["projects"].as_array().unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0]["hotkey"].as_str(), Some("Cmd+Shift+1"));
+    }
 }
