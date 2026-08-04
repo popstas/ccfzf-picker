@@ -236,6 +236,16 @@ def head_gist(path):
     return ""
 
 
+def num(v):
+    """Положительное число или 0.
+
+    Файлы состояния пишут хуки, и одно испорченное поле не должно ронять разбор
+    всех сессий: сравнение или max() со строкой поднимает TypeError, а он в
+    --state уносит с собой весь ответ, а не одну сессию.
+    """
+    return v if isinstance(v, (int, float)) and v > 0 else 0
+
+
 def usage_of(sid):
     """(проценты контекста, доллары) сессии, 0 — «данных нет».
 
@@ -248,8 +258,6 @@ def usage_of(sid):
             o = json.load(fh)
     except (OSError, ValueError):
         return 0, 0
-    def num(v):
-        return v if isinstance(v, (int, float)) and v > 0 else 0
     return int(num(o.get("contextPct"))), int(num(o.get("costUsd")))
 
 
@@ -281,9 +289,9 @@ def agent_of(sid):
         "prompt": state.get("prompt", ""),
         "branch": state.get("branch", ""),
         "pr_url": state.get("pr_url", ""),
-        "costUsd": status.get("costUsd", state.get("costUsd", 0)) or 0,
-        "contextPct": status.get("contextPct", state.get("contextPct", 0)) or 0,
-        "updated": max(state.get("updated", 0) or 0, status.get("updated", 0) or 0),
+        "costUsd": num(status.get("costUsd", state.get("costUsd", 0))),
+        "contextPct": num(status.get("contextPct", state.get("contextPct", 0))),
+        "updated": max(num(state.get("updated")), num(status.get("updated"))),
     }
     return out
 
