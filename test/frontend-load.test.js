@@ -53,6 +53,19 @@ test('обратный порядок ломается — то есть тес�
   assert.throws(() => ctx.SessionActions.availableActions({ id: 'a', live: true, pid: 42 }));
 });
 
+// Буквенные хоткеи сверяются по физической клавише. `e.key` — это
+// напечатанный знак: в русской раскладке ^R приходит как «к», ^K как «л», и
+// действие молча перестаёт отзываться. Проверить это в браузере некому, а
+// регрессия правится одним неосторожным `e.key` — поэтому сторож здесь.
+test('буквенные клавиши не читаются через e.key', () => {
+  const script = HTML.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const suspects = [
+    ...script.matchAll(/e\.key\s*===\s*'[A-Za-z]'/g),
+    ...script.matchAll(/e\.key\.toLowerCase\(\)/g),
+  ].map(m => m[0]);
+  assert.deepStrictEqual(suspects, [], 'буква должна сверяться через e.code');
+});
+
 test('каждый тег из sessions.html копируется в frontend/', () => {
   const prepare = fs.readFileSync(path.join(ROOT, 'scripts/prepare-frontend.js'), 'utf8');
   const copied = [...prepare.matchAll(/'frontend-src\/([^']+)'/g)].map(m => m[1]);

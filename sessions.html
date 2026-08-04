@@ -319,7 +319,12 @@
   // здесь больше нет: на маке открытие сессии и есть открытие терминала, оно
   // висит на Enter и на клике, и пунктом меню было бы вторым именем того же.
   const ACTION_KEYS = { pr: 'p', unread: 'u', attach: 'r', info: 'i' };
-  const KEY_TO_ACTION = Object.fromEntries(Object.entries(ACTION_KEYS).map(([id, key]) => [key, id]));
+  // Обработчики сверяют e.code, а не e.key: key — это напечатанный знак, и в
+  // русской раскладке ^R приходит как «к», ^K как «л». Физическая клавиша от
+  // раскладки не зависит, и подпись в меню остаётся честной в любой из них.
+  const CODE_TO_ACTION = Object.fromEntries(
+    Object.entries(ACTION_KEYS).map(([id, key]) => [`Key${key.toUpperCase()}`, id]),
+  );
 
   const search = document.getElementById('search');
   const list = document.getElementById('list');
@@ -768,7 +773,7 @@
       else if (!(e.ctrlKey || e.metaKey || e.altKey)) { e.preventDefault(); }
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyK') {
       e.preventDefault();
       openMenu();
       return;
@@ -776,7 +781,7 @@
     // ^P/^U/^I — те же три действия, что и в меню. preventDefault здесь
     // обязателен: иначе Ctrl+P в webview уйдёт в печать.
     if (e.ctrlKey || e.metaKey) {
-      const directActionId = KEY_TO_ACTION[e.key.toLowerCase()];
+      const directActionId = CODE_TO_ACTION[e.code];
       if (directActionId) {
         e.preventDefault();
         runAction(rows[active], directActionId);
