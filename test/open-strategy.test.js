@@ -4,9 +4,11 @@ const {
   q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand,
 } = require('../frontend-src/open-strategy');
 
+const ATTACH_42 = `reptyr -T 42 || reptyr "$(pgrep -x -f 'reptyr -T 42' | head -1)"`;
+
 test('команда переклейки собирается только при настоящем pid', () => {
-  assert.strictEqual(buildAttachCommand({ pid: 42 }), 'reptyr -T 42');
-  assert.strictEqual(buildAttachCommand({ pid: '42' }), 'reptyr -T 42');
+  assert.strictEqual(buildAttachCommand({ pid: 42 }), ATTACH_42);
+  assert.strictEqual(buildAttachCommand({ pid: '42' }), ATTACH_42);
   // Без sudo намеренно: он заводит собственный pty, и сессия уехала бы в него.
   assert.ok(!buildAttachCommand({ pid: 42 }).includes('sudo'));
   // Нечисловой pid дал бы `reptyr -T NaN` — команду, которая выглядит
@@ -17,6 +19,25 @@ test('команда переклейки собирается только пр
   assert.strictEqual(buildAttachCommand({ pid: -1 }), '');
   assert.strictEqual(buildAttachCommand({}), '');
   assert.strictEqual(buildAttachCommand(null), '');
+});
+
+test('второй перенос целится в первый reptyr, а не в сессию', () => {
+  // Проверено на example-host 2026-08-05: повторный `-T` по сессии падает с
+  // «Unable to find the fd for the pty!», потому что мастер pty уже унесён из
+  // sshd первым reptyr. Запасная половина команды тянет самого reptyr.
+  const cmd = buildAttachCommand({ pid: 42 });
+  const [first, second] = cmd.split(' || ');
+  assert.strictEqual(first, 'reptyr -T 42');
+  assert.ok(second.startsWith('reptyr "$('), second);
+  // Запасная половина не должна быть повторением первой: `-T` там встречается
+  // ровно один раз и только внутри шаблона поиска, а сам вызов идёт по pid.
+  assert.ok(!/^reptyr\s+-T/.test(second), second);
+  assert.strictEqual(second.match(/-T/g).length, 1, second);
+  // Шаблон поиска — вся командная строка целиком (-x -f). Без -x подстрока
+  // «reptyr -T 42» нашлась бы и в самой этой команде, и в чужих обёртках.
+  assert.ok(second.includes("pgrep -x -f 'reptyr -T 42'"), second);
+  // Несколько совпадений оборвали бы вызов лишними аргументами.
+  assert.ok(second.includes('head -1'), second);
 });
 
 test('q закрывает кавычку, а не пропускает её дальше', () => {
@@ -92,7 +113,9 @@ test('команда attach ведёт в панель tmux', () => {
 test('команда reptyr забирает процесс по pid', () => {
   const cmd = buildOpenCommand(row({ live: true, pid: 42 }), 'reptyr', OPTS);
   assert.strictEqual(cmd.destructive, false);
-  assert.strictEqual(cmd.argv[cmd.argv.length - 1], 'reptyr -T 42');
+  // exec обязателен: иначе рядом остаётся шелл ssh в той же группе процессов,
+  // и следующий перенос этой сессии упрётся в «shares process group».
+  assert.strictEqual(cmd.argv[cmd.argv.length - 1], 'exec reptyr -T 42');
 });
 
 test('команда resume заходит в каталог сессии', () => {
