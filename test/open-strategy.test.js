@@ -1,6 +1,21 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { q, chooseOpenStrategy, buildOpenCommand } = require('../frontend-src/open-strategy');
+const {
+  q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand,
+} = require('../frontend-src/open-strategy');
+
+test('команда переклейки собирается только при настоящем pid', () => {
+  assert.strictEqual(buildAttachCommand({ pid: 42 }), 'sudo reptyr -T 42');
+  assert.strictEqual(buildAttachCommand({ pid: '42' }), 'sudo reptyr -T 42');
+  // Нечисловой pid дал бы `sudo reptyr -T NaN` — команду, которая выглядит
+  // рабочей и не работает. Пустая строка честнее: пункт меню просто не
+  // появится.
+  assert.strictEqual(buildAttachCommand({ pid: 'ой' }), '');
+  assert.strictEqual(buildAttachCommand({ pid: 0 }), '');
+  assert.strictEqual(buildAttachCommand({ pid: -1 }), '');
+  assert.strictEqual(buildAttachCommand({}), '');
+  assert.strictEqual(buildAttachCommand(null), '');
+});
 
 test('q закрывает кавычку, а не пропускает её дальше', () => {
   assert.strictEqual(q('/home/user/x'), "'/home/user/x'");

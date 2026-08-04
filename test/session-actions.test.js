@@ -8,6 +8,14 @@ test('информация о сессии есть всегда', () => {
   assert.deepStrictEqual(ids, ['info']);
 });
 
+test('переклейку предлагают только живой сессии с pid', () => {
+  const attach = row => availableActions(row).find(a => a.id === 'attach');
+  assert.strictEqual(attach({ id: 'a', live: true, pid: 42 }).label, 'Copy reptyr command');
+  // Мёртвой тянуть нечего, даже если pid откуда-то остался.
+  assert.ok(!attach({ id: 'a', live: false, pid: 42 }));
+  assert.ok(!attach({ id: 'a', live: true, pid: 0 }));
+});
+
 test('PR предлагается, когда ссылка разбирается в номер', () => {
   const actions = availableActions({ id: 'a', pr_url: 'https://github.com/o/r/pull/42' });
   const pr = actions.find(a => a.id === 'pr');

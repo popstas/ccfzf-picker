@@ -101,6 +101,33 @@ fn spawn_detached(argv: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("failed to spawn {file}: {e}"))
 }
 
+/// Положить текст в буфер обмена.
+///
+/// Через pbcopy, а не плагином: единственное, что пикеру нужно от буфера, —
+/// отдать человеку строку с командой, и ради этого тянуть ещё одну зависимость
+/// не за что. pbcopy есть в любой macOS.
+#[tauri::command]
+fn copy_to_clipboard(text: String) -> Result<(), String> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to spawn pbcopy: {e}"))?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or("pbcopy has no stdin")?
+        .write_all(text.as_bytes())
+        .map_err(|e| format!("cannot write to pbcopy: {e}"))?;
+    // Ждать обязательно: pbcopy забирает буфер, только закончив читать stdin, а
+    // открепившийся процесс мог бы не успеть до того, как человек нажмёт Cmd+V.
+    let status = child.wait().map_err(|e| format!("pbcopy failed: {e}"))?;
+    if !status.success() {
+        return Err(format!("pbcopy exited with {status}"));
+    }
+    Ok(())
+}
+
 fn seen_path() -> Result<std::path::PathBuf, String> {
     let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
     Ok(std::path::Path::new(&home).join(".config/ccfzf-picker/seen.json"))
@@ -151,7 +178,8 @@ fn main() {
         // шлёт событие, и перепутать их нечем.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config
+            hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config,
+            copy_to_clipboard
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из

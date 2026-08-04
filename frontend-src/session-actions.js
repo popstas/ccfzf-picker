@@ -8,6 +8,9 @@
   const glyphApi = typeof module === 'object' && module.exports
     ? require('./session-glyph')
     : globalThis.SessionGlyph;
+  const openApi = typeof module === 'object' && module.exports
+    ? require('./open-strategy')
+    : globalThis.OpenStrategy;
 
   // Номер PR берётся у отрисовщика строки, а не разбирается здесь вторым
   // регэкспом. Два разбора одной ссылки разъезжаются молча: строка показала бы
@@ -32,6 +35,12 @@
     const num = prNumber((row || {}).pr_url);
     if (num) actions.push({ id: 'pr', label: `Open PR #${num}` });
     if (row && row.lastActivity && row.agentSeen) actions.push({ id: 'unread', label: 'Mark unread' });
+    // Переклейка предлагается только там, где ей есть за что тянуть: живая
+    // сессия с известным pid. Пикер эту команду не выполняет — отдаёт человеку,
+    // см. buildAttachCommand.
+    if (row && row.live && openApi.buildAttachCommand(row)) {
+      actions.push({ id: 'attach', label: 'Copy reptyr command' });
+    }
     actions.push({ id: 'info', label: 'Session info' });
     return actions;
   }

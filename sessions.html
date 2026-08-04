@@ -211,7 +211,7 @@
 <div id="message">Loading…</div>
 <div id="statusline">
   <span id="sort-control" title="Click to change sort"><span class="icon">⇅</span><span id="sort-label">cost</span></span>
-  <span id="menu-hint">^K - Session menu</span>
+  <span id="menu-hint">^K - Session menu, ^R - copy reptyr command</span>
   <!-- Наполняется из TOGGLE_CHECKS: разметка и обработчики не должны
        расходиться в именах ключей. -->
   <span class="status-checks" id="status-checks"></span>
@@ -235,11 +235,14 @@
 <script src="session-groups.js"></script>
 <script src="session-glyph.js"></script>
 <script src="session-info.js"></script>
+<!-- open-strategy до session-actions: тот берёт из него buildAttachCommand в
+     момент загрузки, и в обратном порядке ему достался бы undefined. Тесты
+     этого не поймают — там require, а он от порядка тегов не зависит. -->
+<script src="open-strategy.js"></script>
 <script src="session-actions.js"></script>
 <script src="config-shape.js"></script>
 <script src="picker-filter.js"></script>
 <script src="picker-list-sync.js"></script>
-<script src="open-strategy.js"></script>
 <script>
   let groups = [];
   let rows = [];
@@ -261,6 +264,18 @@
   // Держится до первого удачного опроса, а не до следующей отрисовки, — иначе
   // он мигал бы раз в секунду.
   let error = '';
+  // Сообщение об удавшемся действии. Живёт по таймеру, а не до следующей
+  // отрисовки: список перерисовывается раз в секунду, и без таймера подпись
+  // мелькнула бы и исчезла раньше, чем её успели прочитать.
+  let notice = '';
+  let noticeTimer = null;
+
+  function showNotice(text) {
+    notice = text;
+    if (noticeTimer !== null) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { notice = ''; noticeTimer = null; render(); }, 4000);
+    render();
+  }
   // Чекбоксы statusline. На маке они живут только в памяти окна: конфига,
   // который их помнил бы между запусками, у пикера нет (Task 14 заводит
   // config.yaml, но не под них).
@@ -303,7 +318,7 @@
   // Ключи — те же три, что перечисляет availableActions. Действия `terminal`
   // здесь больше нет: на маке открытие сессии и есть открытие терминала, оно
   // висит на Enter и на клике, и пунктом меню было бы вторым именем того же.
-  const ACTION_KEYS = { pr: 'p', unread: 'u', info: 'i' };
+  const ACTION_KEYS = { pr: 'p', unread: 'u', attach: 'r', info: 'i' };
   const KEY_TO_ACTION = Object.fromEntries(Object.entries(ACTION_KEYS).map(([id, key]) => [key, id]));
 
   const search = document.getElementById('search');
@@ -431,7 +446,12 @@
     syncList(items);
     // Отказ показывается и поверх непустого списка: строки в нём с прошлого
     // удачного опроса, и молчать о том, что свежих больше не приходит, нельзя.
-    if (error) {
+    if (notice) {
+      // Ответ на только что нажатую клавишу важнее отказа опроса: отказ никуда
+      // не денется и вернётся, когда таймер погасит подпись.
+      message.style.display = 'block';
+      message.textContent = notice;
+    } else if (error) {
       message.style.display = 'block';
       message.textContent = error;
     } else {
@@ -666,6 +686,17 @@
       // seenSinceUpdate снова сказал «не видел». Перерисовка — из последнего
       // ответа, без похода на example-host: изменились отметки, а не сессии.
       markSeen(row.id, row.lastActivity - 1).then(regroup);
+      return;
+    }
+    if (id === 'attach') {
+      // Команду отдаём человеку, а не запускаем: reptyr тянет процесс к тому
+      // tty, из которого его позвали, и требует root — пароль к sudo вводит
+      // тот, кто сидит за терминалом. Пикер тут не при чём, и пытаться быть
+      // при чём — значит спрашивать чужой пароль.
+      const cmd = window.OpenStrategy.buildAttachCommand(row);
+      invoke('copy_to_clipboard', { text: cmd })
+        .then(() => showNotice(`Скопировано: ${cmd} — вставь в терминал на example-host, куда нужна сессия`))
+        .catch((e) => { error = String(e); render(); });
       return;
     }
     if (id === 'info') openInfo(row);
