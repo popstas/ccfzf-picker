@@ -216,9 +216,9 @@ test('rowTitle separates the path from what the agent last said with a blank lin
 
 test('rowTitle shows the description a working session came with', () => {
   // Свежей сводки у неё нет: ход ещё идёт. Подставить последнюю — дело
-  // window-tracker (`agentDescription`), здесь строка только показывается;
-  // сырые summary / lastSummary подсказка не склеивает, чтобы не разойтись с
-  // Home Assistant и платой.
+  // sessionDescription (session-agent.js) на сборке строки; здесь строка только
+  // показывается, сырые summary / lastSummary подсказка не склеивает, чтобы не
+  // разойтись с той склейкой.
   assert.strictEqual(
     rowTitle({ cwd: '/home/user', agentSummary: '', agentDescription: 'Оба сделано.' }),
     '~\n\nОба сделано.'
@@ -440,7 +440,7 @@ test('prNumber returns an empty string for anything else', () => {
 });
 
 test('prNumber rejects a payload hidden inside the owner/repo segment, not just after the number', () => {
-  // Ссылка идёт в аргумент `cmd.exe /c start` без экранирования: `[^/]+`
+  // Ссылка уходит в команду открытия браузера без экранирования: `[^/]+`
   // пропускал бы что угодно, кроме слэша, включая эти символы внутри сегмента.
   assert.strictEqual(prNumber('https://github.com/a&whoami/b/pull/1'), '');
   assert.strictEqual(prNumber('https://github.com/a/b|whoami/pull/1'), '');
