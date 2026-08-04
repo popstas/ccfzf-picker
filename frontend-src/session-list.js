@@ -14,6 +14,14 @@
    * Фоновый агент своей строки не получает: у него нет ни терминала, ни
    * заголовка — он форкнут от родителя и работает вместо него. Его поля
    * подставляются в строку родителя, а сам он из списка исключается.
+   *
+   * Имена полей здесь — те же, что читают отрисовщики (session-glyph.js,
+   * session-info.js, session-groups.js, picker-filter.js): всё, что пришло из
+   * записи агента, носит префикс `agent`, а `pr_url` и `lastActivity` названы
+   * так же, как у них. Один словарь на весь проект — иначе строка собирается
+   * под одними именами, а рисуется по другим, и половина колонок молча пустеет.
+   * Единственное поле, которое строка не отдаёт наружу, — `label`: его
+   * приписывает labelSessions (session-groups.js) уже над готовым списком.
    */
   function buildSessionList({ sessions, seen } = {}) {
     const list = Array.isArray(sessions) ? sessions : [];
@@ -40,17 +48,25 @@
           mtime: s.mtime || 0,
           gist: s.gist || '',
           branch: (agent || {}).branch || '',
-          prUrl: (agent || {}).pr_url || '',
-          state: (agent || {}).state || '',
-          event: (agent || {}).event || '',
-          summary: agentApi.sessionDescription(agent),
-          prompt: (agent || {}).prompt || '',
-          cost: (agent || {}).costUsd || 0,
-          contextPct: (agent || {}).contextPct || 0,
-          updated: agentApi.lastActivityAt(agent) || 0,
-          unread: Boolean(agent) && !agentApi.seenSinceUpdate(agent, focusedAt),
-          background: active.background,
+          pr_url: (agent || {}).pr_url || '',
+          agentState: (agent || {}).state || '',
+          agentEvent: (agent || {}).event || '',
+          agentDescription: agentApi.sessionDescription(agent),
+          agentPrompt: (agent || {}).prompt || '',
+          agentCostUsd: (agent || {}).costUsd || 0,
+          agentContextPct: (agent || {}).contextPct || 0,
+          lastActivity: agentApi.lastActivityAt(agent) || 0,
+          // «Человек это видел», а не «не видел»: отрисовщики спрашивают именно
+          // так (dotState гасит кружок по agentSeen, карточка печатает
+          // «seen: yes»). У сессии без записи агента видеть нечего — там false,
+          // и звать она всё равно не будет: и кружок, и текст статуса завязаны
+          // на пустой agentState.
+          agentSeen: agentApi.seenSinceUpdate(agent, focusedAt),
+          agentBackground: active.background,
           agentSessionId: active.id,
+          // Отметка открытия сессии, epoch-секунды: карточка показывает её
+          // строкой «focused», и без неё seen нечем объяснить.
+          focusedAt: focusedAt || 0,
         };
       });
   }

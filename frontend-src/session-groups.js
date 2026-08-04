@@ -6,6 +6,12 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.SessionGroups = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
+  // globalThis, а не `root`: тот виден только внешней функции шима, а внутрь
+  // factory не передаётся.
+  const listApi = typeof module === 'object' && module.exports
+    ? require('./session-list')
+    : globalThis.SessionList;
+
   // Сессия с неизвестным столом сортируется перед всеми настоящими.
   const DESKTOP_UNKNOWN = -1;
 
@@ -23,8 +29,8 @@
   }
 
   /**
-   * Имя, под которым сессию видно везде: строка списка, поиск, заголовок диалога,
-   * текст слота на панели openHASP.
+   * Имя, под которым сессию видно везде: строка списка, поиск, заголовок
+   * диалога.
    *
    * Раньше здесь же двойники — одинаковые имя и проект, то есть переоткрытая
    * сессия или пара «живая и протухшая» — получали к имени хвост из четырёх
@@ -33,7 +39,7 @@
    * — в имени, где он мешает и в списке, и в заголовках диалогов, и на панели.
    *
    * Ничего, кроме показа, на label не завязано: строки списка узнаются по
-   * `s:<id>`, слоты панели носят с собой `id`, фокус уходит тоже по id.
+   * `s:<id>`, фокус уходит тоже по id.
    */
   function labelSessions(sessions) {
     return sessions.map(s => ({ ...s, label: s.title }));
@@ -119,16 +125,22 @@
   }
 
   /**
-   * Shape the result of the native claudeWtSessions() call into the
-   * claude-wt-sessions event payload the picker UI consumes.
+   * Ответ агрегатора (`ccfzf --state`) — в тот пакет claude-wt-sessions,
+   * который читает пикер.
    *
-   * Pure: takes the already-fetched `res`, does no I/O of its own.
+   * Здесь и сходится вся цепочка, и другого места у неё нет: buildSessionList
+   * превращает сырые сессии в строки, labelSessions приписывает им имя, под
+   * которым их видно и ищут, groupSessions раскладывает по группам и сортирует.
+   * Пропусти середину — и строка приедет в разметку без `label`: имя
+   * нарисуется как `undefined`, а поиск перестанет находить хоть что-нибудь.
+   *
+   * Pure: берёт уже полученный `res`, сама ничего не читает.
    */
   function buildSessionsPayload(res, sort = DEFAULT_SORT) {
     const mode = normalizeSort(sort);
-    return res.ok
-      ? { ok: true, groups: groupSessions(labelSessions(res.sessions), mode), sort: mode }
-      : { ok: false, reason: res.reason };
+    if (!res.ok) return { ok: false, reason: res.reason };
+    const rows = listApi.buildSessionList({ sessions: res.sessions, seen: res.seen });
+    return { ok: true, groups: groupSessions(labelSessions(rows), mode), sort: mode };
   }
 
   return {
