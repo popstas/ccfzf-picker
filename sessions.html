@@ -287,12 +287,12 @@
   // зашита в DIRECT_OPEN_KEYS, а Ctrl+U/Ctrl+I проверялись отдельными
   // литералами рядом — эти две записи могли разъехаться, и меню обещало бы
   // клавишу, которая на деле не работает (или наоборот).
-  const ACTION_KEYS = { explorer: 'e', cursor: 'c', terminal: 't', unread: 'u', pr: 'p', info: 'i' };
+  const ACTION_KEYS = { terminal: 't', unread: 'u', pr: 'p', info: 'i' };
   const KEY_TO_ACTION = Object.fromEntries(Object.entries(ACTION_KEYS).map(([id, key]) => [key, id]));
-  // Эта четвёрка уходит в claude-session-open как есть; unread и info шлют
+  // Эта пара уходит в claude-session-open как есть; unread и info шлют
   // другой invoke и обрабатываются отдельными ветками ниже — но клавишу и
-  // подпись в меню все шестеро берут из ACTION_KEYS.
-  const DIRECT_OPEN_ACTIONS = ['explorer', 'cursor', 'terminal', 'pr'];
+  // подпись в меню все четверо берут из ACTION_KEYS.
+  const DIRECT_OPEN_ACTIONS = ['terminal', 'pr'];
 
   const search = document.getElementById('search');
   const list = document.getElementById('list');
@@ -395,8 +395,8 @@
             ? `<div class="cwd">${escapeHtml(shortPath(session.cwd))}</div>` : '') +
           // Две строки под карточкой: что спросили и чем ответили. Пустой div
           // всё равно занял бы высоту, поэтому рисуем только то, что есть.
-          // Склейку «сводка, а у работающей — последняя» считает window-tracker
-          // (`agentDescription`): та же строка уходит в Home Assistant и на плату.
+          // Склейку «сводка, а у работающей — предыдущая» считает
+          // sessionDescription (session-agent.js) на сборке строки.
           (toggles.showPrompt && session.agentPrompt
             ? `<div class="prompt">${escapeHtml(session.agentPrompt)}</div>` : '') +
           (toggles.showAnswer && session.agentDescription
@@ -480,8 +480,8 @@
   function openInfo(session) {
     if (!session) return;
     const nowSec = Math.floor(Date.now() / 1000);
-    // Не label: в нём у сессий-двойников висит хвост «(abcd)», а полный id
-    // и так стоит первой строкой таблицы — см. sessionName.
+    // Через sessionName, а не по label напрямую: у безымянной сессии он пуст,
+    // и заголовок диалога тогда остаётся с одним путём. См. sessionName.
     infoTitle.textContent = `${sessionName(session)} — ${shortPath(session.cwd || '')}`;
     infoRows.innerHTML = window.SessionInfo.buildSessionInfoRows(session, nowSec)
       .map(row => `<div class="info-row"><span class="k">${escapeHtml(row.label)}</span>`
@@ -594,13 +594,11 @@
     document.body.classList.remove('shift');
   });
 
-  // Прямые клавиши дублируют четыре пункта меню Ctrl+K (PR, терминал,
-  // Explorer, Cursor) без открытия самого меню — буква ведёт прямо к id
-  // действия, который уходит в windows/claude-session-open как есть.
-  // Применимость действия (есть ли PR у сессии, запущен ли Cursor,
-  // переводится ли путь на диск Windows) проверяет сервер и сам сообщает
-  // человеку через уведомление, если действие невозможно — здесь это не
-  // дублируется.
+  // Прямые клавиши дублируют пункты меню Ctrl+K (PR, терминал) без открытия
+  // самого меню — буква ведёт прямо к id действия, который уходит в
+  // claude-session-open как есть. Применимость действия (есть ли у сессии PR)
+  // проверяет сервер и сам сообщает человеку, если действие невозможно, —
+  // здесь это не дублируется.
 
   document.addEventListener('keydown', (e) => {
     if (infoOpen) {
@@ -626,12 +624,8 @@
       openInfo(rows[active]);
       return;
     }
-    // Ctrl+P/T/E/C — прямые клавиши на открытие PR/терминала/Explorer/Cursor,
-    // preventDefault здесь обязателен: иначе Ctrl+P в webview уйдёт в печать.
-    // Ctrl+C из этой таблицы означает то же самое: до правки это было
-    // копирование выделенного текста в поле поиска, после — открытие Cursor.
-    // Человек попросил именно Ctrl+C для Cursor, зная про этот размен;
-    // недосмотра тут нет.
+    // Ctrl+P/T — прямые клавиши на открытие PR и терминала; preventDefault
+    // здесь обязателен: иначе Ctrl+P в webview уйдёт в печать.
     if (e.ctrlKey || e.metaKey) {
       const directActionId = KEY_TO_ACTION[e.key.toLowerCase()];
       if (directActionId && DIRECT_OPEN_ACTIONS.includes(directActionId)) {
