@@ -79,9 +79,18 @@ async fn fetch_state() -> Result<serde_json::Value, String> {
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
 /// тесты. Отсутствующий файл — не ошибка: умолчания рассчитаны на работу без
 /// него.
+/// Домашний каталог человека.
+///
+/// На Windows `HOME` обычно не выставлен — там эту роль играет `USERPROFILE`.
+/// Без запасного варианта пикер на Windows не видел бы ни конфига, ни отметок
+/// просмотра и молча жил бы на умолчаниях.
+fn home_dir() -> Option<std::ffi::OsString> {
+    std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+}
+
 #[tauri::command]
 fn load_config() -> Result<serde_json::Value, String> {
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(home) = home_dir() else {
         return Ok(serde_json::Value::Null);
     };
     let path = std::path::Path::new(&home).join(".config/ccfzf-picker/config.yaml");
@@ -110,35 +119,41 @@ fn spawn_detached(argv: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("failed to spawn {file}: {e}"))
 }
 
-/// Положить текст в буфер обмена.
+/// Утилита, забирающая буфер обмена со стандартного ввода.
 ///
-/// Через pbcopy, а не плагином: единственное, что пикеру нужно от буфера, —
-/// отдать человеку строку с командой, и ради этого тянуть ещё одну зависимость
-/// не за что. pbcopy есть в любой macOS.
+/// Своя на каждой системе, но обе есть из коробки: pbcopy в macOS, clip.exe в
+/// Windows. Плагин ради одной строки с командой не за что тянуть.
+#[cfg(target_os = "windows")]
+const CLIPBOARD_TOOL: &str = "clip";
+#[cfg(not(target_os = "windows"))]
+const CLIPBOARD_TOOL: &str = "pbcopy";
+
+/// Положить текст в буфер обмена.
 #[tauri::command]
 fn copy_to_clipboard(text: String) -> Result<(), String> {
     use std::io::Write;
-    let mut child = std::process::Command::new("pbcopy")
+    let tool = CLIPBOARD_TOOL;
+    let mut child = std::process::Command::new(tool)
         .stdin(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| format!("failed to spawn pbcopy: {e}"))?;
+        .map_err(|e| format!("failed to spawn {tool}: {e}"))?;
     child
         .stdin
         .as_mut()
-        .ok_or("pbcopy has no stdin")?
+        .ok_or_else(|| format!("{tool} has no stdin"))?
         .write_all(text.as_bytes())
-        .map_err(|e| format!("cannot write to pbcopy: {e}"))?;
-    // Ждать обязательно: pbcopy забирает буфер, только закончив читать stdin, а
+        .map_err(|e| format!("cannot write to {tool}: {e}"))?;
+    // Ждать обязательно: утилита забирает буфер, только закончив читать stdin, а
     // открепившийся процесс мог бы не успеть до того, как человек нажмёт Cmd+V.
-    let status = child.wait().map_err(|e| format!("pbcopy failed: {e}"))?;
+    let status = child.wait().map_err(|e| format!("{tool} failed: {e}"))?;
     if !status.success() {
-        return Err(format!("pbcopy exited with {status}"));
+        return Err(format!("{tool} exited with {status}"));
     }
     Ok(())
 }
 
 fn seen_path() -> Result<std::path::PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("neither HOME nor USERPROFILE is set")?;
     Ok(std::path::Path::new(&home).join(".config/ccfzf-picker/seen.json"))
 }
 
@@ -169,12 +184,17 @@ fn save_seen(seen: serde_json::Value) -> Result<(), String> {
     std::fs::rename(&tmp, &path).map_err(|e| format!("cannot rename onto {}: {e}", path.display()))
 }
 
-/// Хоткей пикера по умолчанию: `Cmd+Shift+T`.
+/// Хоткей пикера по умолчанию: `Cmd+Shift+C` на macOS, `Win+Shift+C` на Windows.
 ///
 /// Умолчание живёт здесь, а не только в config-shape.js: без файла конфига
 /// фронтенд его и не увидит, а окно поднимать всё равно чем-то надо.
+///
+/// Развилки по системам нет: `SUPER` — это Cmd на маке и Win на Windows, то
+/// есть одна запись даёт обе комбинации. Прежнее умолчание с `T` так не могло:
+/// `Win+Shift+T` система держит за собой (переключение окон в панели задач),
+/// `RegisterHotKey` отвечал на него «already registered».
 fn default_picker_shortcut() -> Shortcut {
-    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT)
+    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyC)
 }
 
 fn main() {
@@ -263,12 +283,23 @@ fn main() {
                     }
                 })
                 .unwrap_or_else(default_picker_shortcut);
-            app.global_shortcut()
+            // Занятый хоткей — не повод не запуститься. Клавишу мог отобрать и
+            // сосед по системе, и сама система (так Windows держит за собой
+            // `Win+Shift+T`, прежнее умолчание пикера), а
+            // окно всё это время можно поднять из трея. Падение на старте
+            // отняло бы и трей.
+            if let Err(e) = app
+                .global_shortcut()
                 .on_shortcut(picker_shortcut, |app, _sc, event| {
                     if event.state() == ShortcutState::Pressed {
                         toggle_picker(app);
                     }
-                })?;
+                })
+            {
+                eprintln!(
+                    "ccfzf-picker: cannot register picker hotkey: {e}; окно поднимается из трея"
+                );
+            }
 
             // Проектный хоткей открывает новую сессию мимо списка, поэтому
             // окно пикера не поднимается: наружу уходит только событие.
@@ -289,11 +320,13 @@ fn main() {
                 };
                 let handle = app.handle().clone();
                 let path = path.to_string();
-                app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
+                if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
                     if event.state() == ShortcutState::Pressed {
                         let _ = handle.emit("project-hotkey", path.clone());
                     }
-                })?;
+                }) {
+                    eprintln!("ccfzf-picker: cannot register hotkey {hotkey}: {e}");
+                }
             }
             Ok(())
         })
@@ -312,10 +345,10 @@ mod tests {
     /// не отзывается — заметить это можно лишь пальцами.
     #[test]
     fn config_hotkeys_parse() {
-        for s in ["Cmd+Shift+T", "Cmd+Shift+1", "Cmd+Shift+2"] {
+        for s in ["Cmd+Shift+C", "Cmd+Shift+1", "Cmd+Shift+2"] {
             assert!(s.parse::<Shortcut>().is_ok(), "не разобрался хоткей {s}");
         }
-        assert_eq!("Cmd+Shift+T".parse::<Shortcut>().unwrap(), default_picker_shortcut());
+        assert_eq!("Cmd+Shift+C".parse::<Shortcut>().unwrap(), default_picker_shortcut());
         assert!("не хоткей".parse::<Shortcut>().is_err());
     }
 

@@ -10,7 +10,7 @@ const { normalizeConfig } = require('../frontend-src/config-shape');
 test('пустой конфиг даёт рабочие значения по умолчанию', () => {
   const c = normalizeConfig(null);
   assert.strictEqual(c.sshHost, 'example-host');
-  assert.strictEqual(c.hotkey, 'Cmd+Shift+T');
+  assert.strictEqual(c.hotkey, 'Cmd+Shift+C');
   assert.strictEqual(c.caps.reptyr, false);
   assert.strictEqual(c.caps.takeover, false);
   assert.strictEqual(c.onlyLive, true);

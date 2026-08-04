@@ -5,7 +5,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   const DEFAULTS = {
     sshHost: 'example-host',
-    hotkey: 'Cmd+Shift+T',
+    hotkey: 'Cmd+Shift+C',
     // Прямой запуск бинаря, а не `open -na kitty --args`. Обе формы доводят
     // команду до kitty (проверено), но `open -n` каждый раз поднимает новый
     // экземпляр приложения, а --single-instance отдаёт окно уже запущенному
