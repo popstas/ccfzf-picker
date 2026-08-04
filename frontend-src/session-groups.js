@@ -134,12 +134,18 @@
    * Пропусти середину — и строка приедет в разметку без `label`: имя
    * нарисуется как `undefined`, а поиск перестанет находить хоть что-нибудь.
    *
+   * `opts.onlyLive` оставляет в списке одни работающие сессии. Отсев идёт
+   * здесь, а не до buildSessionList: фоновый агент ищется по всему ответу, и
+   * отними у него соседей заранее — живая сессия, чью работу ведёт форк,
+   * осталась бы без записи агента и выглядела бы замершей.
+   *
    * Pure: берёт уже полученный `res`, сама ничего не читает.
    */
-  function buildSessionsPayload(res, sort = DEFAULT_SORT) {
+  function buildSessionsPayload(res, sort = DEFAULT_SORT, opts = {}) {
     const mode = normalizeSort(sort);
     if (!res.ok) return { ok: false, reason: res.reason };
-    const rows = listApi.buildSessionList({ sessions: res.sessions, seen: res.seen });
+    let rows = listApi.buildSessionList({ sessions: res.sessions, seen: res.seen });
+    if (opts.onlyLive) rows = rows.filter(r => r.live);
     return { ok: true, groups: groupSessions(labelSessions(rows), mode), sort: mode };
   }
 

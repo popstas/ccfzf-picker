@@ -2,7 +2,53 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   normalizeSort, cycleSort, compareSessions, groupSessions, labelSessions, SORT_MODES,
+  buildSessionsPayload,
 } = require('../frontend-src/session-groups');
+
+// Сырые сессии — то, что отдаёт `ccfzf --state`, а не строки списка.
+const RAW = {
+  ok: true,
+  seen: {},
+  sessions: [
+    { id: 'live-1', title: 'Живая', cwd: '/home/user/a', live: true },
+    { id: 'dead-1', title: 'Мёртвая', cwd: '/home/user/b', live: false },
+    { id: 'live-2', title: 'Тоже живая', cwd: '/home/user/c', live: true },
+  ],
+};
+
+function idsOf(payload) {
+  return payload.groups.flatMap(g => g.sessions).map(s => s.id).sort();
+}
+
+test('без onlyLive в списке остаются все сессии', () => {
+  assert.deepStrictEqual(idsOf(buildSessionsPayload(RAW, 'name')), ['dead-1', 'live-1', 'live-2']);
+});
+
+test('onlyLive оставляет одни работающие', () => {
+  const payload = buildSessionsPayload(RAW, 'name', { onlyLive: true });
+  assert.deepStrictEqual(idsOf(payload), ['live-1', 'live-2']);
+  // Группа «Not running» при этом не остаётся пустой — её просто нет.
+  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active sessions - 2']);
+});
+
+test('onlyLive не отбирает у живой сессии её фонового агента', () => {
+  const withChild = {
+    ok: true,
+    seen: {},
+    sessions: [
+      { id: 'p', title: 'Родитель', cwd: '/home/user/a', live: true },
+      // Форк не живой и под onlyLive из списка уходит — но запись агента, под
+      // которой сейчас идёт работа, обязана доехать до родителя.
+      { id: 'c', kind: 'background', parent: 'p', live: false,
+        agent: { state: 'active', updated: 100, summary: 'форк работает' } },
+    ],
+  };
+  const [row] = buildSessionsPayload(withChild, 'name', { onlyLive: true })
+    .groups.flatMap(g => g.sessions);
+  assert.strictEqual(row.id, 'p');
+  assert.strictEqual(row.agentBackground, true);
+  assert.strictEqual(row.agentDescription, 'форк работает');
+});
 
 // Имена полей — те же, что кладёт buildSessionList (см. test/row-contract.test.js).
 function row(extra) {

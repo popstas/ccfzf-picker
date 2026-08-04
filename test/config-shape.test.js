@@ -12,14 +12,25 @@ test('пустой конфиг даёт рабочие значения по у
   assert.strictEqual(c.sshHost, 'example-host');
   assert.strictEqual(c.hotkey, 'Cmd+Shift+T');
   assert.strictEqual(c.caps.reptyr, false);
+  assert.strictEqual(c.caps.takeover, false);
+  assert.strictEqual(c.onlyLive, true);
   assert.deepStrictEqual(c.terminal, { file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] });
   assert.deepStrictEqual(c.projects, []);
 });
 
 test('заданные значения перекрывают умолчания', () => {
-  const c = normalizeConfig({ sshHost: 'other', caps: { reptyr: true } });
+  const c = normalizeConfig({ sshHost: 'other', caps: { reptyr: true, takeover: true } });
   assert.strictEqual(c.sshHost, 'other');
   assert.strictEqual(c.caps.reptyr, true);
+  assert.strictEqual(c.caps.takeover, true);
+});
+
+// Единственное поле с умолчанием true, поэтому его выключение проверяется
+// отдельно: `false` не должен потеряться на проверке «значение задано».
+test('onlyLive выключается только явным false', () => {
+  assert.strictEqual(normalizeConfig({ onlyLive: false }).onlyLive, false);
+  assert.strictEqual(normalizeConfig({ onlyLive: 'нет' }).onlyLive, true);
+  assert.strictEqual(normalizeConfig({}).onlyLive, true);
 });
 
 test('проект без пути отбрасывается, а не роняет конфиг', () => {

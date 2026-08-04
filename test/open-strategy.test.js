@@ -38,8 +38,19 @@ test('живая сессия вне tmux переносится через rept
   assert.strictEqual(chooseOpenStrategy(row({ live: true, pid: 42 }), { reptyr: true }), 'reptyr');
 });
 
-test('без reptyr живая сессия требует перехвата', () => {
-  assert.strictEqual(chooseOpenStrategy(row({ live: true, pid: 42 }), { reptyr: false }), 'takeover');
+test('без reptyr живая сессия открывается рядом, а не убивается', () => {
+  assert.strictEqual(chooseOpenStrategy(row({ live: true, pid: 42 }), { reptyr: false }), 'resume');
+  assert.strictEqual(chooseOpenStrategy(row({ live: true, pid: 42 }), {}), 'resume');
+});
+
+test('перехват выбирается, только когда его просят явно', () => {
+  assert.strictEqual(
+    chooseOpenStrategy(row({ live: true, pid: 42 }), { reptyr: false, takeover: true }), 'takeover');
+  // reptyr сохраннее перехвата, поэтому выигрывает, когда доступны оба.
+  assert.strictEqual(
+    chooseOpenStrategy(row({ live: true, pid: 42 }), { reptyr: true, takeover: true }), 'reptyr');
+  // Просить перехват у мёртвой сессии бессмысленно: убивать в ней нечего.
+  assert.strictEqual(chooseOpenStrategy(row({ live: false }), { takeover: true }), 'resume');
 });
 
 test('живая сессия без pid перехватить нечего — идёт resume', () => {

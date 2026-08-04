@@ -452,7 +452,7 @@
    */
   function regroup() {
     const payload = window.SessionGroups.buildSessionsPayload(
-      { ok: true, sessions: lastSessions, seen }, sortMode,
+      { ok: true, sessions: lastSessions, seen }, sortMode, { onlyLive: CONFIG.onlyLive },
     );
     groups = payload.groups;
     sortMode = payload.sort;

@@ -11,11 +11,16 @@
     // экземпляр приложения, а --single-instance отдаёт окно уже запущенному
     // процессу и сразу выходит. Так же kitty зовёт hammerspoon на этой машине.
     terminal: { file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] },
-    // false, хотя опыт признал reptyr пригодным: умолчание отвечает на вопрос
-    // «что делать, когда про ту сторону ничего не известно», а не «работает ли
-    // reptyr на example-host». Без конфига хост может быть любым, и `reptyr -T`
-    // упал бы там, где его не установили. Вердикт опыта живёт в config.yaml.
-    caps: { reptyr: false },
+    // Оба false: умолчания отвечают на вопрос «что делать, когда про ту
+    // сторону ничего не известно». Без конфига хост может быть любым, `reptyr`
+    // там может быть не установлен, а перехват — это чужой процесс под
+    // сигналом, и делать такое по умолчанию нельзя. Незнание ведёт к resume:
+    // он в худшем случае откроет сессию рядом со своей же копией.
+    caps: { reptyr: false, takeover: false },
+    // Список из одних работающих сессий. Пикер на Windows показывает те, за
+    // кем закреплено окно терминала; на маке трекера окон нет, и «работает
+    // прямо сейчас» — ближайшее по смыслу.
+    onlyLive: true,
   };
 
   /**
@@ -37,7 +42,13 @@
       terminal: src.terminal && typeof src.terminal === 'object' && src.terminal.file
         ? { file: src.terminal.file, args: Array.isArray(src.terminal.args) ? src.terminal.args : [] }
         : DEFAULTS.terminal,
-      caps: { reptyr: Boolean((src.caps || {}).reptyr) },
+      caps: {
+        reptyr: Boolean((src.caps || {}).reptyr),
+        takeover: Boolean((src.caps || {}).takeover),
+      },
+      // Единственное поле, где умолчание true: отсутствие ключа значит «как
+      // договорились», а не «показывай две сотни транскриптов».
+      onlyLive: typeof src.onlyLive === 'boolean' ? src.onlyLive : DEFAULTS.onlyLive,
       projects,
     };
   }
