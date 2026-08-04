@@ -442,15 +442,13 @@
     const row = rows[active];
     if (!row) return;
     await invoke('hide_picker');
-    // Always go through claude-focus rather than picking the action here from
-    // this ~1s-stale snapshot. claudeFocus() re-fetches live session state and
-    // runs it through chooseAction() (src/picker/session-groups.js), which is
-    // the single place that decides focus-vs-restore against the current
-    // handle. Deciding it here too would leave two decision points that must
-    // agree — and this one, working off a stale snapshot, previously routed a
-    // session that had actually opened since the last snapshot into
-    // claude-restore-one, which correctly refused to double-spawn it but then
-    // reported a bogus "failed to restore" instead of focusing the live window.
+    // Always go through claude-focus rather than picking the open strategy
+    // here from this ~1s-stale snapshot. Choosing attach vs. reptyr vs.
+    // resume (see chooseOpenStrategy() in frontend-src/open-strategy.js)
+    // needs the session's current pid/tmux state, which only the backend has
+    // fresh at the moment of the click — deciding it here too would leave
+    // two decision points that must agree, one of them working off data that
+    // is already stale by the time this row was drawn.
     await invoke('picker_send', {
       action: 'windows/claude-focus',
       payload: { id: row.id },

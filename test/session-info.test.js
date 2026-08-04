@@ -7,10 +7,6 @@ const session = {
   label: 'ccfzf',
   cwd: '/home/user/projects/shell/ccfzf',
   live: true,
-  windowId: 42,
-  desktop: 2,
-  monitor: 1,
-  bounds: { x: 0, y: 0, width: 1600, height: 900 },
   agentState: 'review',
   agentEvent: 'stop',
   agentMessage: '',
@@ -35,12 +31,20 @@ function valueOf(rows, label) {
 test('buildSessionInfoRows shows the fields a row cannot fit', () => {
   const rows = buildSessionInfoRows(session, 3460);
   assert.strictEqual(valueOf(rows, 'id'), 'abc-123');
-  assert.strictEqual(valueOf(rows, 'desktop'), '2');
-  assert.strictEqual(valueOf(rows, 'monitor'), '1');
-  assert.strictEqual(valueOf(rows, 'bounds'), '1600×900 @ 0,0');
   assert.strictEqual(valueOf(rows, 'event'), 'stop');
   assert.strictEqual(valueOf(rows, 'branch'), 'feat/x');
   assert.strictEqual(valueOf(rows, 'pr_url'), 'https://github.com/popstas/ccfzf/pull/3');
+});
+
+// На маке нет окон — карточка описывает процесс, а не окно: "process: live"
+// вместо "window: open · hwnd N". См. session-glyph.js о том же сдвиге
+// смысла для statusDotHtml/stateText.
+test('buildSessionInfoRows describes the process instead of a window', () => {
+  assert.strictEqual(valueOf(buildSessionInfoRows(session, 3460), 'process'), 'live');
+  assert.strictEqual(
+    valueOf(buildSessionInfoRows({ ...session, live: false }, 3460), 'process'),
+    'not running',
+  );
 });
 
 test('buildSessionInfoRows prints timestamps as clock plus age', () => {
@@ -57,7 +61,6 @@ test('buildSessionInfoRows skips fields the session does not have', () => {
   const labels = rows.map(r => r.label);
   assert.ok(!labels.includes('pr_url'));
   assert.ok(!labels.includes('branch'));
-  assert.ok(!labels.includes('bounds'));
   assert.ok(labels.includes('id'));
 });
 
@@ -85,14 +88,13 @@ test('buildSessionInfoRows spells recent activity in seconds', () => {
   assert.match(valueOf(rows, 'last activity'), /^\d{2}:\d{2} · 1s$/);
 });
 
-test('buildSessionInfoRows skips explicit null bounds and zero timestamps', () => {
+test('buildSessionInfoRows skips zero timestamps', () => {
   const rows = buildSessionInfoRows(
     {
       id: 'x',
       label: 'x',
       cwd: '/p',
       live: false,
-      bounds: null,
       agentStarted: 0,
       lastActivity: 0,
       focusedAt: 0,
@@ -100,7 +102,6 @@ test('buildSessionInfoRows skips explicit null bounds and zero timestamps', () =
     100,
   );
   const labels = rows.map(r => r.label);
-  assert.ok(!labels.includes('bounds'));
   assert.ok(!labels.includes('started'));
   assert.ok(!labels.includes('last activity'));
   assert.ok(!labels.includes('focused'));

@@ -35,15 +35,11 @@
    */
   function buildSessionInfoRows(session, nowSec) {
     const s = session ?? {};
-    const b = s.bounds;
     const rows = [
       ['id', s.id ?? ''],
       ['name', s.label ?? ''],
       ['cwd', s.cwd ?? ''],
-      ['window', s.live ? `open · hwnd ${s.windowId ?? '—'}` : 'closed'],
-      ['desktop', Number.isFinite(s.desktop) ? String(s.desktop) : ''],
-      ['monitor', Number.isFinite(s.monitor) ? String(s.monitor) : ''],
-      ['bounds', b ? `${b.width}×${b.height} @ ${b.x},${b.y}` : ''],
+      ['process', s.live ? 'live' : 'not running'],
       ['state', s.agentState ?? ''],
       ['event', s.agentEvent ?? ''],
       ['message', s.agentMessage ?? ''],
