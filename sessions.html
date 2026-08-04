@@ -244,9 +244,18 @@
   let active = 0;
   let sortMode = 'cost';
   // Прочитанное живёт на этой машине: трекера окон здесь нет, отметку ставит
-  // само открытие сессии. Чтение из файла добавляется в Task 12; пока пусто —
-  // список от этого только показывает всё непрочитанным.
+  // само открытие сессии. Читается из ~/.config/ccfzf-picker/seen.json один
+  // раз за загрузку окна — см. start().
   let seen = {};
+  const OPEN_OPTS = {
+    sshHost: 'example-host',
+    terminal: { file: 'open', args: ['-na', 'kitty', '--args'] },
+  };
+  // Заполняется из конфига в Task 14; до тех пор — вердикт опыта
+  // (docs/reptyr-experiment.md: «пригоден»). На example-host reptyr 0.9.0 с
+  // поддержкой -T, ptrace_scope = 0, так что живая сессия переезжает в kitty,
+  // а не убивается перехватом.
+  const CAPS = { reptyr: true };
   // Последний ответ агрегатора. Смена сортировки и чекбоксов перекладывает эти
   // же сессии, а не ждёт следующего опроса: ждать пришлось бы до секунды, и
   // клик выглядел бы не сработавшим.
@@ -500,21 +509,49 @@
     if (current) current.scrollIntoView({ block: 'nearest' });
   }
 
-  async function choose() {
-    const row = rows[active];
+  function markSeen(id, at) {
+    seen[id] = at;
+    // Карта уходит целиком: она маленькая (одна запись на сессию), а частичная
+    // запись потребовала бы слияния на стороне Rust.
+    return invoke('save_seen', { seen });
+  }
+
+  /**
+   * Открыть сессию в новом окне kitty.
+   *
+   * Стратегию выбирает эта же сторона по строке списка. Строка старше
+   * секунды, и на Windows выбор делал бэкенд в момент клика по живому
+   * состоянию — здесь такого бэкенда нет: ccfzf --state отдаёт снимок и
+   * уходит. Расхождение стоит недорого: tmux-панель, которой уже нет, даст
+   * ошибку в самом kitty, а не тихо откроет не то.
+   */
+  async function openSession(row) {
     if (!row) return;
-    await invoke('hide_picker');
-    // Always go through claude-focus rather than picking the open strategy
-    // here from this ~1s-stale snapshot. Choosing attach vs. reptyr vs.
-    // resume (see chooseOpenStrategy() in frontend-src/open-strategy.js)
-    // needs the session's current pid/tmux state, which only the backend has
-    // fresh at the moment of the click — deciding it here too would leave
-    // two decision points that must agree, one of them working off data that
-    // is already stale by the time this row was drawn.
-    await invoke('picker_send', {
-      action: 'windows/claude-focus',
-      payload: { id: row.id },
-    });
+    const strategy = window.OpenStrategy.chooseOpenStrategy(row, CAPS);
+    const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, OPEN_OPTS);
+    if (!cmd) return;
+    if (cmd.destructive) {
+      const ok = confirm(
+        `Перехватить сессию «${sessionName(row)}»?\n\n`
+        + `Процесс ${row.pid} на ${OPEN_OPTS.sshHost} получит SIGHUP и завершится, окно на Windows закроется.\n`
+        + `Фоновые задачи, запущенные в её шелле, умрут вместе с ней.`,
+      );
+      if (!ok) return;
+    }
+    try {
+      await invoke('spawn_detached', { argv: cmd.argv });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    // Отметка «посмотрел» ставится здесь: другого повода на маке нет.
+    await markSeen(row.id, Math.floor(Date.now() / 1000));
+    invoke('hide_picker');
+  }
+
+  function choose() {
+    return openSession(rows[active]);
   }
 
   function onSearchInput() {
@@ -800,6 +837,14 @@
     if (!window.__TAURI__) { message.textContent = 'No backend detected.'; return; }
     const { listen } = window.__TAURI__.event;
     const { getCurrentWindow } = window.__TAURI__.window;
+
+    // До первого опроса: без отметок список показал бы всё непрочитанным, и
+    // кружки перекрасились бы через секунду — заметным миганием.
+    try {
+      seen = await invoke('load_seen') || {};
+    } catch (e) {
+      error = String(e);
+    }
 
     // Fired by Rust every time the window is shown.
     await listen('picker-shown', beginShow);

@@ -65,6 +65,55 @@ fn fetch_state() -> Result<serde_json::Value, String> {
     state_source::fetch("example-host")
 }
 
+/// Запуск терминала. Открепляется сразу: пикер не ждёт, пока человек
+/// закончит работать в сессии, и не держит его вывод.
+#[tauri::command]
+fn spawn_detached(argv: Vec<String>) -> Result<(), String> {
+    let Some((file, args)) = argv.split_first() else {
+        return Err("empty argv".into());
+    };
+    std::process::Command::new(file)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("failed to spawn {file}: {e}"))
+}
+
+fn seen_path() -> Result<std::path::PathBuf, String> {
+    let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
+    Ok(std::path::Path::new(&home).join(".config/ccfzf-picker/seen.json"))
+}
+
+/// Отметки «эту сессию человек уже видел», id -> epoch-секунды.
+/// Отсутствующий файл — это пустая карта, а не отказ: до первого открытия
+/// сессии его и не должно быть.
+#[tauri::command]
+fn load_seen() -> Result<serde_json::Value, String> {
+    let path = seen_path()?;
+    match std::fs::read_to_string(&path) {
+        Ok(t) => serde_json::from_str(&t).map_err(|e| format!("bad json in {}: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::json!({})),
+        Err(e) => Err(format!("cannot read {}: {e}", path.display())),
+    }
+}
+
+/// Запись через временный файл и переименование: читатель никогда не видит
+/// половину карты.
+#[tauri::command]
+fn save_seen(seen: serde_json::Value) -> Result<(), String> {
+    let path = seen_path()?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let text = serde_json::to_string(&seen).map_err(|e| format!("cannot serialize seen: {e}"))?;
+    std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("cannot rename onto {}: {e}", path.display()))
+}
+
 fn main() {
     let picker_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT);
     // Отдельный экземпляр под хендлер: он уезжает в замыкание плагина, а
@@ -87,7 +136,9 @@ fn main() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![hide_picker, fetch_state])
+        .invoke_handler(tauri::generate_handler![
+            hide_picker, fetch_state, spawn_detached, load_seen, save_seen
+        ])
         .setup(move |app| {
             app.global_shortcut().register(picker_shortcut)?;
             Ok(())
