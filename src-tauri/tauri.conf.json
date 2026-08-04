@@ -9,6 +9,7 @@
     "frontendDist": "../frontend"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [{
       "label": "picker",
       "title": "claude sessions",

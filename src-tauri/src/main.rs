@@ -3,6 +3,8 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 // GlobalShortcutExt — тот самый трейт, без которого `app.global_shortcut()`
 // не резолвится.
@@ -152,6 +154,41 @@ fn main() {
             hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config
         ])
         .setup(move |app| {
+            // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
+            // любого приложения, окно у него одно и то безрамочное. Иконка в
+            // Dock обещала бы окно, которое можно найти мышью, — а найти его
+            // можно только клавишей. Accessory снимает и иконку, и пункт в
+            // переключателе задач.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            let show_item = MenuItem::with_id(app, "show", "Показать список", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&tray_menu)
+                // Левая кнопка переключает окно, меню — под правой. Иначе
+                // самый частый жест (показать список) требовал бы двух
+                // движений вместо одного.
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => toggle_picker(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        toggle_picker(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
             // Испорченный конфиг не должен оставлять человека без пикера:
             // отказ читается как «конфига нет», и дальше идут умолчания. О
             // самой поломке фронтенд скажет отдельно — он читает тот же файл
