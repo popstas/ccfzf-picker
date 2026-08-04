@@ -8,6 +8,8 @@ use tauri::{Emitter, Manager};
 // не резолвится.
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+mod state_source;
+
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
 /// только что открытое окно. Тот же ограничитель стоит в neighbor-picker.
 const DEBOUNCE: Duration = Duration::from_millis(400);
@@ -57,6 +59,12 @@ fn hide_picker(app: tauri::AppHandle) {
     hide_window(&app);
 }
 
+#[tauri::command]
+fn fetch_state() -> Result<serde_json::Value, String> {
+    // Хост зашит до Task 14, где появляется конфиг.
+    state_source::fetch("example-host")
+}
+
 fn main() {
     let picker_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT);
     // Отдельный экземпляр под хендлер: он уезжает в замыкание плагина, а
@@ -79,7 +87,7 @@ fn main() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![hide_picker])
+        .invoke_handler(tauri::generate_handler![hide_picker, fetch_state])
         .setup(move |app| {
             app.global_shortcut().register(picker_shortcut)?;
             Ok(())
