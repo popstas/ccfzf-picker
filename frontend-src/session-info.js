@@ -40,7 +40,7 @@
       ['id', s.id ?? ''],
       ['name', s.label ?? ''],
       ['cwd', s.cwd ?? ''],
-      ['window', s.open ? `open · hwnd ${s.windowId ?? '—'}` : 'closed'],
+      ['window', s.live ? `open · hwnd ${s.windowId ?? '—'}` : 'closed'],
       ['desktop', Number.isFinite(s.desktop) ? String(s.desktop) : ''],
       ['monitor', Number.isFinite(s.monitor) ? String(s.monitor) : ''],
       ['bounds', b ? `${b.width}×${b.height} @ ${b.x},${b.y}` : ''],

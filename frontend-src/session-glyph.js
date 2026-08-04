@@ -51,7 +51,7 @@
   }
 
   function statusDotHtml(session) {
-    if (!session || !session.open) return '<div class="dot closed"></div>';
+    if (!session || !session.live) return '<div class="dot closed"></div>';
     return `<div class="dot ${dotState(session)}"></div>`;
   }
 
@@ -91,7 +91,7 @@
     // Закрытая сессия ничего не делает — кроме той, за которую работает фоновый
     // агент (`claude agents`): своего окна у него нет, и «окно закрыто» про него
     // ничего не сообщает. Строка при этом остаётся строкой родителя.
-    if (!session.open && !session.agentBackground) return '';
+    if (!session.live && !session.agentBackground) return '';
     const { agentState, agentEvent } = session;
     const text = !agentEvent || agentEvent === agentState
       ? agentState

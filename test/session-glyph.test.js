@@ -44,7 +44,7 @@ test('escapeHtml coerces non-string input to a string first', () => {
 test('statusDotHtml paints each agent state its own colour class', () => {
   for (const state of ['active', 'question', 'idle']) {
     assert.strictEqual(
-      statusDotHtml({ open: true, agentState: state }),
+      statusDotHtml({ live: true, agentState: state }),
       `<div class="dot ${state}"></div>`
     );
   }
@@ -55,7 +55,7 @@ test('statusDotHtml paints "waiting for your input" as needing review, not as id
   // notification arrives a minute after the agent stopped, so the work is
   // finished and unread — the same thing a stop means.
   assert.strictEqual(
-    statusDotHtml({ open: true, agentState: 'idle', agentEvent: 'attention' }),
+    statusDotHtml({ live: true, agentState: 'idle', agentEvent: 'attention' }),
     '<div class="dot review"></div>'
   );
 });
@@ -64,14 +64,14 @@ test('statusDotHtml greys out a waiting session once its window was focused', ()
   // Focus is the only honest "I looked at it" signal there is — the same one
   // Windows itself uses to drop the taskbar highlight.
   assert.strictEqual(
-    statusDotHtml({ open: true, agentState: 'idle', agentEvent: 'attention', agentSeen: true }),
+    statusDotHtml({ live: true, agentState: 'idle', agentEvent: 'attention', agentSeen: true }),
     '<div class="dot idle"></div>'
   );
 });
 
 test('statusDotHtml keeps a waiting session orange while it is unseen', () => {
   assert.strictEqual(
-    statusDotHtml({ open: true, agentState: 'idle', agentEvent: 'attention', agentSeen: false }),
+    statusDotHtml({ live: true, agentState: 'idle', agentEvent: 'attention', agentSeen: false }),
     '<div class="dot review"></div>'
   );
 });
@@ -81,25 +81,25 @@ test('statusDotHtml lets being seen mute a pending question', () => {
   // blocked — but a list that keeps calling after you have been there stops
   // meaning anything, so focus wins here too.
   assert.strictEqual(
-    statusDotHtml({ open: true, agentState: 'question', agentEvent: 'attention', agentSeen: true }),
+    statusDotHtml({ live: true, agentState: 'question', agentEvent: 'attention', agentSeen: true }),
     '<div class="dot idle"></div>'
   );
 });
 
 test('statusDotHtml keeps an unseen question yellow', () => {
   assert.strictEqual(
-    statusDotHtml({ open: true, agentState: 'question', agentEvent: 'attention', agentSeen: false }),
+    statusDotHtml({ live: true, agentState: 'question', agentEvent: 'attention', agentSeen: false }),
     '<div class="dot question"></div>'
   );
 });
 
 test('statusDotHtml leaves idle grey when it did not come from a notification', () => {
   assert.strictEqual(
-    statusDotHtml({ open: true, agentState: 'idle', agentEvent: 'tool-done' }),
+    statusDotHtml({ live: true, agentState: 'idle', agentEvent: 'tool-done' }),
     '<div class="dot idle"></div>'
   );
   assert.strictEqual(
-    statusDotHtml({ open: true, agentState: 'idle' }),
+    statusDotHtml({ live: true, agentState: 'idle' }),
     '<div class="dot idle"></div>'
   );
 });
@@ -108,7 +108,7 @@ test('statusDotHtml falls back to idle for a live session with no agent state', 
   // The hook may not be installed, or may not have fired yet. Green would
   // claim the agent is working right now, which is exactly what is unknown.
   assert.strictEqual(
-    statusDotHtml({ open: true }),
+    statusDotHtml({ live: true }),
     '<div class="dot idle"></div>'
   );
 });
@@ -117,14 +117,14 @@ test('statusDotHtml ignores an agent state it does not know', () => {
   // The state file is written by another process on another machine; an
   // unknown string must not become a CSS class of its own.
   assert.strictEqual(
-    statusDotHtml({ open: true, agentState: 'exploded' }),
+    statusDotHtml({ live: true, agentState: 'exploded' }),
     '<div class="dot idle"></div>'
   );
 });
 
 test('statusDotHtml marks a remembered-but-closed session closed', () => {
   assert.strictEqual(
-    statusDotHtml({ open: false }),
+    statusDotHtml({ live: false }),
     '<div class="dot closed"></div>'
   );
 });
@@ -133,7 +133,7 @@ test('statusDotHtml keeps a closed session closed even when a state lingers', ()
   // The window is gone; the last state the agent wrote before it went says
   // nothing about now.
   assert.strictEqual(
-    statusDotHtml({ open: false, agentState: 'active' }),
+    statusDotHtml({ live: false, agentState: 'active' }),
     '<div class="dot closed"></div>'
   );
 });
@@ -150,7 +150,7 @@ test('statusDotHtml survives a missing session object', () => {
 
 test('statusDotHtml ignores the geometry fields the row no longer draws', () => {
   const session = {
-    open: true,
+    live: true,
     agentState: 'active',
     bounds: { x: 100, y: 50, width: 200, height: 100 },
     monitorBounds: { x: 0, y: 0, width: 1000, height: 500 },
@@ -315,36 +315,36 @@ test('stateText shows the state and the event that produced it', () => {
   // Neither half is enough on its own: review comes from both stop and fail,
   // and attention arrives for both a question and an idle notice.
   assert.strictEqual(
-    stateText({ open: true, agentState: 'idle', agentEvent: 'attention' }),
+    stateText({ live: true, agentState: 'idle', agentEvent: 'attention' }),
     'idle · attention'
   );
   assert.strictEqual(
-    stateText({ open: true, agentState: 'review', agentEvent: 'stop' }),
+    stateText({ live: true, agentState: 'review', agentEvent: 'stop' }),
     'review · stop'
   );
 });
 
 test('stateText drops the event when it just repeats the state', () => {
-  assert.strictEqual(stateText({ open: true, agentState: 'active', agentEvent: 'active' }), 'active');
-  assert.strictEqual(stateText({ open: true, agentState: 'active' }), 'active');
+  assert.strictEqual(stateText({ live: true, agentState: 'active', agentEvent: 'active' }), 'active');
+  assert.strictEqual(stateText({ live: true, agentState: 'active' }), 'active');
 });
 
 test('stateText says nothing for a closed session or one with no state', () => {
-  assert.strictEqual(stateText({ open: false, agentState: 'active', agentEvent: 'tool-done' }), '');
-  assert.strictEqual(stateText({ open: true }), '');
+  assert.strictEqual(stateText({ live: false, agentState: 'active', agentEvent: 'tool-done' }), '');
+  assert.strictEqual(stateText({ live: true }), '');
   assert.strictEqual(stateText(undefined), '');
 });
 
 test('stateHtml always emits the element so the age column cannot jump', () => {
   assert.strictEqual(
-    stateHtml({ open: true, agentState: 'active', agentEvent: 'tool-done' }),
+    stateHtml({ live: true, agentState: 'active', agentEvent: 'tool-done' }),
     '<div class="state">active · tool-done</div>'
   );
-  assert.strictEqual(stateHtml({ open: false }), '<div class="state"></div>');
+  assert.strictEqual(stateHtml({ live: false }), '<div class="state"></div>');
 });
 
 test('stateHtml escapes an event string it did not choose', () => {
-  const out = stateHtml({ open: true, agentState: 'idle', agentEvent: '<script>alert(1)</script>' });
+  const out = stateHtml({ live: true, agentState: 'idle', agentEvent: '<script>alert(1)</script>' });
   assert.ok(!out.includes('<script>'), 'must not leave an openable script tag');
 });
 
@@ -353,11 +353,11 @@ test('statusDotHtml keeps a stopped session orange until its window is focused',
   // notice says the same thing a minute later. One meaning, one colour, and
   // both are cleared by the same thing — looking at the window.
   assert.strictEqual(
-    statusDotHtml({ open: true, agentState: 'review', agentEvent: 'stop' }),
+    statusDotHtml({ live: true, agentState: 'review', agentEvent: 'stop' }),
     '<div class="dot review"></div>'
   );
   assert.strictEqual(
-    statusDotHtml({ open: true, agentState: 'review', agentEvent: 'stop', agentSeen: true }),
+    statusDotHtml({ live: true, agentState: 'review', agentEvent: 'stop', agentSeen: true }),
     '<div class="dot idle"></div>'
   );
 });
@@ -365,7 +365,7 @@ test('statusDotHtml keeps a stopped session orange until its window is focused',
 // Раньше id и событие делили одну колонку: выключенное событие показывало id.
 // Теперь у каждого свой чекбокс, и они независимы — в том числе оба сразу.
 test('sessionIdHtml is its own column, independent of the event one', () => {
-  const session = { open: true, id: 'e8afde49-4254-4c64-970e-46c05bf5d516', agentState: 'active' };
+  const session = { live: true, id: 'e8afde49-4254-4c64-970e-46c05bf5d516', agentState: 'active' };
   assert.strictEqual(sessionIdHtml(session, true), '<div class="sid">e8af</div>');
   assert.strictEqual(sessionIdHtml(session, false), '');
   assert.strictEqual(sessionIdHtml(session), '', 'id занимает место — по умолчанию выключен');
@@ -375,7 +375,7 @@ test('sessionIdHtml is its own column, independent of the event one', () => {
 // Выключенный чекбокс убирает колонку сразу у всего списка, и распорка под неё
 // не нужна — в отличие от строки, у которой просто нет данных.
 test('a toggled-off column leaves no element behind', () => {
-  const session = { open: true, agentState: 'active', agentContextPct: 13, agentCostUsd: 2 };
+  const session = { live: true, agentState: 'active', agentContextPct: 13, agentCostUsd: 2 };
   assert.strictEqual(stateHtml(session, false), '');
   assert.strictEqual(usageHtml(session, { showCost: false, showContext: false }), '');
   assert.strictEqual(
@@ -419,11 +419,11 @@ test('stateText marks a session whose work moved to a background agent', () => {
   // Окно закрыто, а работа идёт: `claude agents` уводит сессию в форк без
   // своего окна, и «закрыто» про него ничего не сообщает.
   assert.strictEqual(
-    stateText({ open: false, agentBackground: true, agentState: 'active', agentEvent: 'tool-done' }),
+    stateText({ live: false, agentBackground: true, agentState: 'active', agentEvent: 'tool-done' }),
     'bg active · tool-done'
   );
   assert.strictEqual(
-    stateText({ open: false, agentBackground: false, agentState: 'active' }),
+    stateText({ live: false, agentBackground: false, agentState: 'active' }),
     ''
   );
 });

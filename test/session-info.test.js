@@ -6,7 +6,7 @@ const session = {
   id: 'abc-123',
   label: 'ccfzf',
   cwd: '/home/user/projects/shell/ccfzf',
-  open: true,
+  live: true,
   windowId: 42,
   desktop: 2,
   monitor: 1,
@@ -51,7 +51,7 @@ test('buildSessionInfoRows prints timestamps as clock plus age', () => {
 
 test('buildSessionInfoRows skips fields the session does not have', () => {
   const rows = buildSessionInfoRows(
-    { id: 'x', label: 'x', cwd: '', open: false },
+    { id: 'x', label: 'x', cwd: '', live: false },
     100,
   );
   const labels = rows.map(r => r.label);
@@ -91,7 +91,7 @@ test('buildSessionInfoRows skips explicit null bounds and zero timestamps', () =
       id: 'x',
       label: 'x',
       cwd: '/p',
-      open: false,
+      live: false,
       bounds: null,
       agentStarted: 0,
       lastActivity: 0,
