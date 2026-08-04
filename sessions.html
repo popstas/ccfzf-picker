@@ -243,9 +243,21 @@
   let rows = [];
   let active = 0;
   let sortMode = 'cost';
-  // Чекбоксы statusline. Ключи и умолчания те же, что в PICKER_TOGGLES
-  // (src/picker/sessions-sort-config.js): оттуда они приезжают с каждым
-  // списком, туда же уходят при клике и там же сохраняются в config.yml.
+  // Прочитанное живёт на этой машине: трекера окон здесь нет, отметку ставит
+  // само открытие сессии. Чтение из файла добавляется в Task 12; пока пусто —
+  // список от этого только показывает всё непрочитанным.
+  let seen = {};
+  // Последний ответ агрегатора. Смена сортировки и чекбоксов перекладывает эти
+  // же сессии, а не ждёт следующего опроса: ждать пришлось бы до секунды, и
+  // клик выглядел бы не сработавшим.
+  let lastSessions = [];
+  // Текст отказа: не смогли спросить example-host или ответ пришёл не той формы.
+  // Держится до первого удачного опроса, а не до следующей отрисовки, — иначе
+  // он мигал бы раз в секунду.
+  let error = '';
+  // Чекбоксы statusline. На маке они живут только в памяти окна: конфига,
+  // который их помнил бы между запусками, у пикера нет (Task 14 заводит
+  // config.yaml, но не под них).
   // Порядок и группы — как в самой строке списка: сначала то, что рисуется
   // слева под именем сессии, потом, через отбивку, правые колонки. Иначе
   // чекбоксы перечисляют то же самое в третьем порядке, и глазами их каждый
@@ -275,12 +287,6 @@
   let menuActive = 0;
   let menuSessionId = null;
   let infoOpen = false;
-  // Показ ждёт первого свежего пакета сессий. Пока ждёт, на экране список
-  // прошлого показа — см. beginShow().
-  let awaitingSessions = false;
-  // Номер показа: сторож «бэкенд молчит» должен гаснуть вместе со своим
-  // показом, а не срабатывать в следующий.
-  let showToken = 0;
 
   // Одна таблица «id действия ⇄ клавиша» на всё: подписи в меню Ctrl+K и
   // обработчики прямых клавиш ниже читают именно её. Раньше клавиша была
@@ -341,10 +347,6 @@
     input.addEventListener('change', () => {
       toggles[key] = input.checked;
       render();
-      invoke('picker_send', {
-        action: 'windows/claude-sessions-toggle',
-        payload: { key, value: input.checked },
-      });
     });
   }
 
@@ -416,10 +418,70 @@
       }
     }
     syncList(items);
-    message.style.display = rows.length ? 'none' : 'block';
-    if (!rows.length) message.textContent = groups.length ? 'Nothing matches.' : 'No claude sessions yet.';
+    // Отказ показывается и поверх непустого списка: строки в нём с прошлого
+    // удачного опроса, и молчать о том, что свежих больше не приходит, нельзя.
+    if (error) {
+      message.style.display = 'block';
+      message.textContent = error;
+    } else {
+      message.style.display = rows.length ? 'none' : 'block';
+      if (!rows.length) message.textContent = groups.length ? 'Nothing matches.' : 'No claude sessions yet.';
+    }
     if (active >= rows.length) active = Math.max(0, rows.length - 1);
     paint();
+  }
+
+  /**
+   * Разложить последний ответ агрегатора по группам и перерисовать.
+   *
+   * Через buildSessionsPayload, а не groupSessions напрямую: имя строки
+   * приписывает labelSessions внутри него, и мимо него строка приезжает в
+   * разметку без label — имя рисуется как undefined, а поиск перестаёт
+   * находить что-либо.
+   */
+  function regroup() {
+    const payload = window.SessionGroups.buildSessionsPayload(
+      { ok: true, sessions: lastSessions, seen }, sortMode,
+    );
+    groups = payload.groups;
+    sortMode = payload.sort;
+    paintSort();
+    render();
+  }
+
+  async function refresh() {
+    let state;
+    try {
+      state = await invoke('fetch_state');
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    const problems = window.StateShape.validateState(state);
+    if (problems.length) {
+      error = problems[0];
+      render();
+      return;
+    }
+    error = '';
+    lastSessions = state.sessions;
+    regroup();
+  }
+
+  // Опрос идёт, только пока окно на экране: закрытый пикер спрашивать незачем,
+  // а каждый вызов — это ssh на другую машину. Границы показа приходят из Rust
+  // событиями picker-shown/picker-hidden; visibilitychange для этого не годится
+  // — скрытому окну Tauri он не приходит.
+  let timer = null;
+
+  function startPolling() {
+    refresh();
+    if (timer === null) timer = setInterval(refresh, 1000);
+  }
+
+  function stopPolling() {
+    if (timer !== null) { clearInterval(timer); timer = null; }
   }
 
   function paint() {
@@ -696,7 +758,10 @@
   sortControl.addEventListener('click', (e) => {
     e.preventDefault();
     if (menuOpen) return;
-    invoke('picker_send', { action: 'windows/claude-sessions-sort-cycle' });
+    // Сортировку крутит сам пикер: спрашивать было некого — на маке за списком
+    // стоит ccfzf --state, который отдаёт сессии, а не готовые группы.
+    sortMode = window.SessionGroups.cycleSort(sortMode);
+    regroup();
   });
 
   // Reset the palette for a show and (re)start the feed. Called both from the
@@ -714,36 +779,21 @@
     document.body.classList.remove('shift');
     search.focus();
     search.select();
-    // Список предыдущего показа остаётся на экране до первого свежего пакета.
+    // Список предыдущего показа остаётся на экране до первого свежего ответа.
     // Здесь стояло `groups = []` — окно открывалось пустым, с «Loading…», и
-    // настоящий список дорисовывался только через ~300 мс (столько стоит
-    // claudeWtSessions() на сетевом диске). Этот пустой кадр и мелькал при
-    // каждом открытии. Строки в нём те же самые, а выбор всё равно уходит по
-    // id через claude-focus, который перечитывает живое состояние (см.
-    // choose()), — то есть устаревший кадр никуда не уводит по ошибке.
+    // настоящий список дорисовывался только через полсекунды (столько стоит
+    // ssh на example-host). Этот пустой кадр и мелькал при каждом открытии. Строки в
+    // нём те же самые, а открытие сверяет живое состояние отдельно, — то есть
+    // устаревший кадр никуда не уводит по ошибке.
     //
     // Свою отрисовку показ всё же делает: search.value только что очищен, и
     // фильтр предыдущего показа надо снять. Строки при этом на месте, syncList
     // трогает только те, что изменились.
-    awaitingSessions = true;
-    showToken += 1;
-    const token = showToken;
     render();
     // Первый показ за загрузку страницы: рисовать нечего, и «Loading…» стоит
     // вместо пустоты. Дальше сюда не попадаем — список уже есть.
-    if (!rows.length) message.textContent = 'Loading…';
-    invoke('picker_send', { action: 'windows/claude-sessions-start' });
-    setTimeout(() => {
-      // Сторож своего показа, а не вообще: за две секунды пикер могли закрыть
-      // и открыть заново, и тогда молчание относится к прошлому показу.
-      // Строки к этому моменту заведомо устарели — снимаем их вместе с
-      // сообщением, иначе «не отвечает» осталось бы невидимым под списком.
-      if (token !== showToken || !awaitingSessions) return;
-      groups = [];
-      render();
-      message.style.display = 'block';
-      message.textContent = 'Backend not responding.';
-    }, 2000);
+    if (!rows.length && !error) message.textContent = 'Loading…';
+    startPolling();
   }
 
   async function start() {
@@ -751,52 +801,17 @@
     const { listen } = window.__TAURI__.event;
     const { getCurrentWindow } = window.__TAURI__.window;
 
-    await listen('claude-wt-sessions', (event) => {
-      const data = event.payload || {};
-      // Бэкенд ответил — сторож показа больше не нужен, даже если ответ
-      // ошибочный: там своё сообщение, и затирать его через две секунды
-      // словами «не отвечает» неверно.
-      awaitingSessions = false;
-      if (!data.ok) {
-        groups = [];
-        render();
-        message.style.display = 'block';
-        message.textContent = data.reason || 'claude-wt is not available.';
-        return;
-      }
-      groups = data.groups || [];
-      if (data.sort) sortMode = data.sort;
-      // Состояние чекбоксов — из конфига, а не из того, что помнит страница:
-      // пикер живёт между показами, а config.yml могли поправить руками.
-      for (const { key } of TOGGLE_CHECKS) {
-        if (typeof data[key] === 'boolean') toggles[key] = data[key];
-      }
-      paintSort();
-      paintToggles();
-      render();
-    });
-
-    await listen('claude-wt-session-actions', (event) => {
-      const data = event.payload || {};
-      if (!data.ok) {
-        if (menuSessionId) {
-          renderMenu({ id: menuSessionId, label: '', cwd: '', actions: [] });
-        }
-        return;
-      }
-      if (menuSessionId && data.id !== menuSessionId) return;
-      renderMenu(data);
-    });
-
     // Fired by Rust every time the window is shown.
     await listen('picker-shown', beginShow);
 
     await listen('picker-hidden', () => {
       closeMenu();
       closeInfo();
-      invoke('picker_send', { action: 'windows/claude-sessions-stop' });
+      stopPolling();
     });
 
+    paintSort();
+    paintToggles();
     search.focus();
 
     // The hotkey is live from Rust's setup(), before this webview has
