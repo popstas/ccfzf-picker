@@ -1,3 +1,6 @@
 node_modules/
 frontend/
 src-tauri/target/
+# Схемы разрешений, которые tauri-build пересобирает из capabilities/ на каждой
+# сборке: в репозитории они только устаревали бы.
+src-tauri/gen/schemas/
