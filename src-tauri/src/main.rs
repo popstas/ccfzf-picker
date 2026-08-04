@@ -18,6 +18,25 @@ const DEBOUNCE: Duration = Duration::from_millis(400);
 
 struct LastToggle(Mutex<Option<Instant>>);
 
+/// Когда окно погасло в последний раз. См. `picker_toggle`.
+struct LastHidden(Mutex<Option<Instant>>);
+
+/// Показывать ли окно по нажатию.
+///
+/// `just_hidden` — окно погасло только что, в пределах `DEBOUNCE`. Без этой
+/// отметки иконка в трее перестаёт гасить пикер: клик по ней сначала уводит
+/// фокус, окно гаснет по blur, и только потом до обработчика доходит
+/// отпускание кнопки — которое видит уже скрытое окно и показывает его заново.
+/// `DEBOUNCE` в `toggle_picker` этот случай не ловит: он считает промежутки
+/// между самими нажатиями и о гашении по blur ничего не знает.
+///
+/// Цена — своя: намеренное «Esc, сразу клик по иконке» в пределах `DEBOUNCE`
+/// не покажет окно. Жест редкий, а обратный случай — иконка, которая не гасит,
+/// — встречается на каждом клике.
+fn picker_toggle(visible: bool, just_hidden: bool) -> bool {
+    !visible && !just_hidden
+}
+
 /// Окно скрыто — сказать об этом фронтенду.
 ///
 /// Опрос `ccfzf --state` идёт по ssh на другую машину и должен прекращаться
@@ -25,10 +44,20 @@ struct LastToggle(Mutex<Option<Instant>>);
 /// `visibilitychange` на скрытом окне Tauri не приходит, так что единственный
 /// надёжный сигнал — этот. Отсюда и требование звать `hide_window` вместо
 /// голого `window.hide()` в каждой ветке.
+///
+/// Уже скрытое окно не гасится повторно: иначе Esc даёт две посылки
+/// `picker-hidden` — сначала от явного скрытия, потом от потери фокуса, которая
+/// заходит сюда же.
 fn hide_window(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("picker") else { return };
+    if !window.is_visible().unwrap_or(false) {
+        return;
+    }
     let _ = window.hide();
     let _ = app.emit("picker-hidden", ());
+    if let Some(state) = app.try_state::<LastHidden>() {
+        *state.0.lock().unwrap() = Some(Instant::now());
+    }
 }
 
 fn toggle_picker(app: &tauri::AppHandle) {
@@ -45,14 +74,18 @@ fn toggle_picker(app: &tauri::AppHandle) {
     }
 
     let Some(window) = app.get_webview_window("picker") else { return };
-    if window.is_visible().unwrap_or(false) {
-        hide_window(app);
-    } else {
+    let just_hidden = app
+        .try_state::<LastHidden>()
+        .and_then(|s| *s.0.lock().unwrap())
+        .is_some_and(|t| Instant::now().duration_since(t) < DEBOUNCE);
+    if picker_toggle(window.is_visible().unwrap_or(false), just_hidden) {
         let _ = window.show();
         let _ = window.set_focus();
         // Список обновляется на показе: между открытиями он устаревает, а
         // опрашивать закрытый пикер незачем.
         let _ = app.emit("picker-shown", ());
+    } else {
+        hide_window(app);
     }
 }
 
@@ -200,6 +233,7 @@ fn default_picker_shortcut() -> Shortcut {
 fn main() {
     tauri::Builder::default()
         .manage(LastToggle(Mutex::new(None)))
+        .manage(LastHidden(Mutex::new(None)))
         .plugin(tauri_plugin_shell::init())
         // Без общего with_handler: он зовётся на каждый зарегистрированный
         // хоткей, и одна ветка внутри него разбирала бы, чей это был. Здесь у
@@ -337,6 +371,23 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Клик по иконке в трее гасит пикер, а не мигает им.
+    ///
+    /// Порядок событий на этом клике: сначала окно теряет фокус и гаснет по
+    /// blur, потом до обработчика доходит отпускание кнопки. Третья строка
+    /// таблицы — про этот случай: окно уже скрыто, но скрыто **только что**,
+    /// и показывать его заново нельзя. Проверка здесь потому, что руками это
+    /// ловится только глазами и только на живом трее.
+    #[test]
+    fn tray_click_hides_instead_of_reopening() {
+        assert!(picker_toggle(false, false), "скрытое окно открывается");
+        assert!(!picker_toggle(true, false), "видимое окно гасится");
+        assert!(!picker_toggle(false, true), "только что погасшее не всплывает");
+        // Видимое окно, погасшее «только что», — состояние противоречивое
+        // (гашение отмечается уже после hide), но решение то же: не показывать.
+        assert!(!picker_toggle(true, true));
+    }
 
     /// Хоткеи из конфига разбираются той же строкой, какой их пишет человек.
     ///
