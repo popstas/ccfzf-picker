@@ -105,7 +105,7 @@ Nothing here reads a history in full: cwd sits in the first jsonl line, the
 title (custom-title/ai-title) and the latest activity sit in the tail, and the
 first prompt is looked up from the start of the file under a size cap.
 """
-import glob, json, os, re, sys, time
+import glob, json, os, re, subprocess, sys, time
 from collections import Counter
 
 PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
@@ -386,6 +386,50 @@ def is_claude(args):
     return os.path.basename(exe) == "claude" or "/.local/share/claude/versions/" in exe
 
 
+def proc_tty(pid):
+    """Управляющий терминал процесса — из fd 0, а не из /proc/<pid>/stat.
+
+    tty_nr в stat — это номер устройства, который ещё надо разворачивать в
+    путь; fd 0 у интерактивной сессии и так указывает прямо на /dev/pts/N.
+    """
+    try:
+        target = os.readlink("/proc/%s/fd/0" % pid)
+    except OSError:
+        return ""
+    return target if target.startswith("/dev/") else ""
+
+
+def proc_tmux(pid):
+    """`session:window.pane`, если процесс живёт внутри tmux, иначе None.
+
+    TMUX_PANE в окружении — это id панели (%3), а не адрес, по которому к ней
+    можно присоединиться. Разворачивает его сам tmux; делается это здесь, а не
+    у читателя, потому что читатель на другой машине и tmux ему недоступен.
+    """
+    try:
+        with open("/proc/%s/environ" % pid, "rb") as fh:
+            env = fh.read().decode("utf-8", "ignore").split("\0")
+    except OSError:
+        return None
+    pane = ""
+    for item in env:
+        if item.startswith("TMUX_PANE="):
+            pane = item[len("TMUX_PANE="):]
+            break
+    if not pane:
+        return None
+    try:
+        out = subprocess.run(
+            ["tmux", "display", "-p", "-t", pane,
+             "#{session_name}:#{window_index}.#{pane_index}"],
+            capture_output=True, text=True, timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    target = out.stdout.strip()
+    return target or None
+
+
 def running_sessions():
     """(ids running right now, {id: {kind, parent}}) from /proc.
 
@@ -401,11 +445,11 @@ def running_sessions():
     - neither: a fresh start writes to the newest jsonl of its cwd directory,
       so K processes in one cwd claim the K newest files there.
     """
-    live, fresh, agents = set(), [], {}
+    live, fresh, agents, procs = set(), [], {}, {}
     try:
         pids = [p for p in os.listdir("/proc") if p.isdigit()]
     except OSError:
-        return live, agents
+        return live, agents, procs
     for pid in pids:
         try:
             args = proc_args(pid)
@@ -439,6 +483,9 @@ def running_sessions():
             continue
 
         live.add(sid)
+        # Чем сессия занята: без pid её нельзя ни перехватить, ни хотя бы
+        # честно показать человеку, что открытие будет не тихим resume.
+        procs[sid] = {"pid": int(pid), "tty": proc_tty(pid), "tmux": proc_tmux(pid)}
         # A background agent is hosted by the daemon through a pty host; that
         # ancestry is the only honest mark of one. `--fork-session` alone is
         # not: it is a normal way to branch a session by hand.
@@ -460,7 +507,7 @@ def running_sessions():
             if sid not in live:
                 live.add(sid)
                 k -= 1
-    return live, agents
+    return live, agents, procs
 
 
 def scan_dirs():
@@ -543,7 +590,7 @@ if mode == "projects":
     now = time.time()
 
     dirs = scan_dirs()
-    live, _ = running_sessions()
+    live, _, _ = running_sessions()
 
     with open(index_path, "w", encoding="utf-8") as fh:
         json.dump({"dirs": [{"cwd": e["cwd"], "files": e["files"]} for e in dirs],
@@ -637,7 +684,7 @@ elif mode == "dump":
     now = time.time()
 
     dirs = scan_dirs()
-    live, agents = running_sessions()
+    live, agents, _ = running_sessions()
 
     if projects_path:
         write_json(projects_path, {
@@ -693,7 +740,7 @@ elif mode == "state":
     now = time.time()
 
     dirs = scan_dirs()
-    live, agents = running_sessions()
+    live, agents, procs = running_sessions()
     frozen = frozen_ids()
 
     files = []
@@ -715,6 +762,9 @@ elif mode == "state":
             "live": sid in live, "frozen": sid in frozen,
             "kind": agent.get("kind", "interactive"),
             "parent": agent.get("parent", ""),
+            "pid": (procs.get(sid) or {}).get("pid", 0),
+            "tty": (procs.get(sid) or {}).get("tty", ""),
+            "tmux": (procs.get(sid) or {}).get("tmux"),
             "agent": agent_of(sid),
         })
 
