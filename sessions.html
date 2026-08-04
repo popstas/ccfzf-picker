@@ -235,6 +235,7 @@
 <script src="session-groups.js"></script>
 <script src="session-glyph.js"></script>
 <script src="session-info.js"></script>
+<script src="session-actions.js"></script>
 <script src="picker-filter.js"></script>
 <script src="picker-list-sync.js"></script>
 <script src="open-strategy.js"></script>
@@ -302,12 +303,12 @@
   // зашита в DIRECT_OPEN_KEYS, а Ctrl+U/Ctrl+I проверялись отдельными
   // литералами рядом — эти две записи могли разъехаться, и меню обещало бы
   // клавишу, которая на деле не работает (или наоборот).
-  const ACTION_KEYS = { terminal: 't', unread: 'u', pr: 'p', info: 'i' };
+  //
+  // Ключи — те же три, что перечисляет availableActions. Действия `terminal`
+  // здесь больше нет: на маке открытие сессии и есть открытие терминала, оно
+  // висит на Enter и на клике, и пунктом меню было бы вторым именем того же.
+  const ACTION_KEYS = { pr: 'p', unread: 'u', info: 'i' };
   const KEY_TO_ACTION = Object.fromEntries(Object.entries(ACTION_KEYS).map(([id, key]) => [key, id]));
-  // Эта пара уходит в claude-session-open как есть; unread и info шлют
-  // другой invoke и обрабатываются отдельными ветками ниже — но клавишу и
-  // подпись в меню все четверо берут из ACTION_KEYS.
-  const DIRECT_OPEN_ACTIONS = ['terminal', 'pr'];
 
   const search = document.getElementById('search');
   const list = document.getElementById('list');
@@ -397,7 +398,12 @@
       for (const session of group.sessions) {
         const index = rows.length;
         rows.push(session);
-        const html = `<div class="row ${session.live ? '' : 'closed'}${session.agentState ? ' markable' : ''}" data-index="${index}"${titleAttr(session)}>` +
+        // Подсказка про Shift+клик — ровно у тех строк, которые Shift+клик и
+        // пометит: спрашиваем то же availableActions, что и меню Ctrl+K.
+        // Раньше здесь стоял agentState, и обещание расходилось с делом на
+        // сессиях, которых человек ещё не открывал.
+        const markable = window.SessionActions.availableActions(session).some(a => a.id === 'unread');
+        const html = `<div class="row ${session.live ? '' : 'closed'}${markable ? ' markable' : ''}" data-index="${index}"${titleAttr(session)}>` +
           statusDotHtml(session) +
           `<div class="text"><div class="name">${escapeHtml(session.label)}` +
           `${prBadgeHtml(session)}` +
@@ -629,44 +635,57 @@
   function openMenu() {
     const session = rows[active];
     if (!session) return;
-    menuSessionId = session.id;
-    invoke('picker_send', {
-      action: 'windows/claude-session-actions',
-      payload: { id: session.id },
+    // Меню считается здесь же, а не спрашивается у бэкенда: всё, из чего оно
+    // складывается, уже лежит в строке.
+    renderMenu({
+      id: session.id,
+      label: session.label,
+      cwd: session.cwd,
+      actions: window.SessionActions.availableActions(session),
     });
   }
 
-  async function runMenuAction() {
+  /**
+   * Выполнить действие над строкой.
+   *
+   * Применимость проверяется здесь, а не у вызывающего: пунктов меню и прямых
+   * клавиш два разных входа, и правило «что этой строке можно» должно быть
+   * одно. На Windows его знал сервер и сам сообщал об отказе — здесь спрашивать
+   * некого.
+   */
+  function runAction(row, id) {
+    if (!row) return;
+    if (!window.SessionActions.availableActions(row).some(a => a.id === id)) return;
+    if (id === 'pr') {
+      // Форму ссылки уже проверил availableActions — до сюда доходит только
+      // https://github.com/<owner>/<repo>/pull/<число>.
+      invoke('spawn_detached', { argv: ['open', row.pr_url] });
+      invoke('hide_picker');
+      return;
+    }
+    if (id === 'unread') {
+      // Отматывается на секунду раньше записи агента: ровно настолько, чтобы
+      // seenSinceUpdate снова сказал «не видел». Перерисовка — из последнего
+      // ответа, без похода на example-host: изменились отметки, а не сессии.
+      markSeen(row.id, row.lastActivity - 1).then(regroup);
+      return;
+    }
+    if (id === 'info') openInfo(row);
+  }
+
+  function runMenuAction() {
     const action = menuActions[menuActive];
     if (!action || !menuSessionId) return;
     const id = menuSessionId;
     const actionId = action.id;
     closeMenu();
-    // Пометка непрочитанным — единственное действие, после которого смотреть
-    // надо на этот же список: кружок перекрашивается в ближайшую секунду, и
-    // сессий за раз помечают несколько.
-    if (actionId === 'unread') {
-      await invoke('picker_send', {
-        action: 'windows/claude-session-unread',
-        payload: { id },
-      });
-      return;
-    }
-    if (actionId === 'info') {
-      // По id, а не по индексу active: список перерисовывается раз в секунду,
-      // пока меню открыто, render() пересобирает rows в порядке текущей
-      // сортировки, и active остаётся числом — строка под этим индексом может
-      // смениться на другую сессию. Ctrl+I из списка (обработчик ниже) этой
-      // ловушке не подвержен: там меню не открыто, и active — это и есть
-      // выбранная строка.
-      openInfo(rows.find(r => r.id === id));
-      return;
-    }
-    await invoke('hide_picker');
-    await invoke('picker_send', {
-      action: 'windows/claude-session-open',
-      payload: { id, action: actionId },
-    });
+    // По id, а не по индексу active: список перерисовывается раз в секунду,
+    // пока меню открыто, render() пересобирает rows в порядке текущей
+    // сортировки, и active остаётся числом — строка под этим индексом может
+    // смениться на другую сессию. Прямые клавиши из списка (обработчик ниже)
+    // этой ловушке не подвержены: там меню не открыто, и active — это и есть
+    // выбранная строка.
+    runAction(rows.find(r => r.id === id), actionId);
   }
 
   function moveMenu(delta) {
@@ -693,11 +712,9 @@
     document.body.classList.remove('shift');
   });
 
-  // Прямые клавиши дублируют пункты меню Ctrl+K (PR, терминал) без открытия
-  // самого меню — буква ведёт прямо к id действия, который уходит в
-  // claude-session-open как есть. Применимость действия (есть ли у сессии PR)
-  // проверяет сервер и сам сообщает человеку, если действие невозможно, —
-  // здесь это не дублируется.
+  // Прямые клавиши дублируют пункты меню Ctrl+K без открытия самого меню —
+  // буква ведёт прямо к id действия. Применимость проверяет runAction: у
+  // строки без PR ^P просто ничего не делает.
 
   document.addEventListener('keydown', (e) => {
     if (infoOpen) {
@@ -718,38 +735,15 @@
       openMenu();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === ACTION_KEYS.info) {
-      e.preventDefault();
-      openInfo(rows[active]);
-      return;
-    }
-    // Ctrl+P/T — прямые клавиши на открытие PR и терминала; preventDefault
-    // здесь обязателен: иначе Ctrl+P в webview уйдёт в печать.
+    // ^P/^U/^I — те же три действия, что и в меню. preventDefault здесь
+    // обязателен: иначе Ctrl+P в webview уйдёт в печать.
     if (e.ctrlKey || e.metaKey) {
       const directActionId = KEY_TO_ACTION[e.key.toLowerCase()];
-      if (directActionId && DIRECT_OPEN_ACTIONS.includes(directActionId)) {
+      if (directActionId) {
         e.preventDefault();
-        const session = rows[active];
-        if (!session) return;
-        invoke('hide_picker');
-        invoke('picker_send', {
-          action: 'windows/claude-session-open',
-          payload: { id: session.id, action: directActionId },
-        });
+        runAction(rows[active], directActionId);
         return;
       }
-    }
-    // Ctrl+U — пометить непрочитанным, как пункт unread в меню Ctrl+K: в
-    // отличие от четвёрки выше пикер после него не закрывается.
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === ACTION_KEYS.unread) {
-      e.preventDefault();
-      const session = rows[active];
-      if (!session) return;
-      invoke('picker_send', {
-        action: 'windows/claude-session-unread',
-        payload: { id: session.id },
-      });
-      return;
     }
     if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
@@ -766,12 +760,7 @@
     // должен превращаться в открытие сессии, поэтому строка без записи агента
     // (сессия без хука) просто ничего не делает.
     if (e.shiftKey) {
-      const session = rows[active];
-      if (!session || !session.agentState) return;
-      invoke('picker_send', {
-        action: 'windows/claude-session-unread',
-        payload: { id: session.id },
-      });
+      runAction(rows[active], 'unread');
       return;
     }
     choose();
