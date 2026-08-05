@@ -788,7 +788,7 @@ elif mode == "state":
               sys.stdout, ensure_ascii=False)
 PYEOF
 
-# External callers (neighbor-picker picker) need the dumps rewritten without opening
+# External callers (the picker) need the dumps rewritten without opening
 # the interactive UI. Run in the foreground so ssh returns only after the rename.
 if ((dump_only)); then
   [[ -n $SESSIONS_FILE || -n $PROJECTS_FILE ]] || exit 0
@@ -1019,7 +1019,7 @@ while :; do
     __cmd2__)  cmd=${cmd_list[1]} ;;
     __cmd3__)  cmd=${cmd_list[2]} ;;
     # Name the session after the project folder so WT titles and the
-    # neighbor-picker project hotkeys can find it without waiting for /rename.
+    # project hotkeys can find it without waiting for /rename.
     __new__)   cmd="$CLAUDE_CMD -n $(printf '%q' "$(basename "$dir")")$claude_tail" ;;
     *)         cmd="$CLAUDE_CMD --resume $(printf '%q' "$sid")$claude_tail" ;;
   esac
