@@ -14,6 +14,7 @@ const FILES = [
   'frontend-src/session-agent.js',
   'frontend-src/session-list.js',
   'frontend-src/session-groups.js',
+  'frontend-src/ui-state.js',
   'frontend-src/session-glyph.js',
   'frontend-src/session-info.js',
   'frontend-src/session-actions.js',

@@ -233,6 +233,9 @@
 <script src="session-agent.js"></script>
 <script src="session-list.js"></script>
 <script src="session-groups.js"></script>
+<!-- ui-state после session-groups: он берёт оттуда normalizeSort в момент
+     загрузки, и в обратном порядке ему достался бы undefined. -->
+<script src="ui-state.js"></script>
 <script src="session-glyph.js"></script>
 <script src="session-info.js"></script>
 <!-- open-strategy до session-actions: тот берёт из него buildAttachCommand в
@@ -373,11 +376,25 @@
     input.addEventListener('change', () => {
       toggles[key] = input.checked;
       render();
+      saveUi();
     });
   }
 
   function paintToggles() {
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
+  }
+
+  /**
+   * Запомнить вид списка.
+   *
+   * Молча и без ожидания: сортировку крутят подряд по нескольку раз, и ни
+   * задержка на запись, ни подпись об удаче тут не нужны. Отказ уходит в ту же
+   * строку ошибки, что и остальное, — не показать её было бы хуже: человек
+   * решил бы, что вид запомнен, и удивился бы после перезапуска.
+   */
+  function saveUi() {
+    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, toggles) })
+      .catch((e) => { error = String(e); render(); });
   }
 
   // Что сейчас нарисовано: ключи в порядке DOM и разметка каждого элемента.
@@ -833,6 +850,7 @@
     // стоит ccfzf --state, который отдаёт сессии, а не готовые группы.
     sortMode = window.SessionGroups.cycleSort(sortMode);
     regroup();
+    saveUi();
   });
 
   // Reset the palette for a show and (re)start the feed. Called both from the
@@ -885,6 +903,18 @@
     // пикер, который не открылся.
     try {
       CONFIG = window.ConfigShape.normalizeConfig(await invoke('load_config'));
+    } catch (e) {
+      error = String(e);
+    }
+
+    // Вид списка — до первой отрисовки: иначе первый показ рисуется чужой
+    // сортировкой и перекладывается на глазах.
+    try {
+      const ui = window.UiState.normalizeUiState(await invoke('load_ui'), {
+        sort: sortMode, toggles,
+      });
+      sortMode = ui.sort;
+      toggles = ui.toggles;
     } catch (e) {
       error = String(e);
     }

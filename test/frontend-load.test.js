@@ -44,6 +44,10 @@ test('порядок тегов таков, что каждый модуль н�
     1,
   );
   assert.strictEqual(ctx.ConfigShape.normalizeConfig(null).onlyLive, true);
+  assert.strictEqual(
+    ctx.UiState.normalizeUiState({ sort: 'нет такой' }, { toggles: {} }).sort,
+    'cost',
+  );
 });
 
 test('обратный порядок ломается — то есть тест и правда сторожит', () => {
@@ -51,6 +55,13 @@ test('обратный порядок ломается — то есть тес�
   swapped.push('open-strategy.js');
   const ctx = loadAsBrowser(swapped);
   assert.throws(() => ctx.SessionActions.availableActions({ id: 'a', live: true, pid: 42 }));
+
+  // То же самое для второй такой пары: ui-state берёт normalizeSort у
+  // session-groups на загрузке.
+  const late = TAGS.filter(f => f !== 'session-groups.js');
+  late.push('session-groups.js');
+  const ctx2 = loadAsBrowser(late);
+  assert.throws(() => ctx2.UiState.normalizeUiState({}, { toggles: {} }));
 });
 
 // Буквенные хоткеи сверяются по физической клавише. `e.key` — это

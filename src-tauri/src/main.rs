@@ -185,17 +185,15 @@ fn copy_to_clipboard(text: String) -> Result<(), String> {
     Ok(())
 }
 
-fn seen_path() -> Result<std::path::PathBuf, String> {
+fn state_path(name: &str) -> Result<std::path::PathBuf, String> {
     let home = home_dir().ok_or("neither HOME nor USERPROFILE is set")?;
-    Ok(std::path::Path::new(&home).join(".config/ccfzf-picker/seen.json"))
+    Ok(std::path::Path::new(&home).join(".config/ccfzf-picker").join(name))
 }
 
-/// Отметки «эту сессию человек уже видел», id -> epoch-секунды.
-/// Отсутствующий файл — это пустая карта, а не отказ: до первого открытия
-/// сессии его и не должно быть.
-#[tauri::command]
-fn load_seen() -> Result<serde_json::Value, String> {
-    let path = seen_path()?;
+/// Отсутствующий файл — пустой объект, а не отказ: до первого сохранения его и
+/// не должно быть.
+fn load_json(name: &str) -> Result<serde_json::Value, String> {
+    let path = state_path(name)?;
     match std::fs::read_to_string(&path) {
         Ok(t) => serde_json::from_str(&t).map_err(|e| format!("bad json in {}: {e}", path.display())),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::json!({})),
@@ -204,17 +202,42 @@ fn load_seen() -> Result<serde_json::Value, String> {
 }
 
 /// Запись через временный файл и переименование: читатель никогда не видит
-/// половину карты.
-#[tauri::command]
-fn save_seen(seen: serde_json::Value) -> Result<(), String> {
-    let path = seen_path()?;
+/// половину файла.
+fn save_json(name: &str, value: &serde_json::Value) -> Result<(), String> {
+    let path = state_path(name)?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     }
     let tmp = path.with_extension("json.tmp");
-    let text = serde_json::to_string(&seen).map_err(|e| format!("cannot serialize seen: {e}"))?;
+    let text = serde_json::to_string(value).map_err(|e| format!("cannot serialize {name}: {e}"))?;
     std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, &path).map_err(|e| format!("cannot rename onto {}: {e}", path.display()))
+}
+
+/// Отметки «эту сессию человек уже видел», id -> epoch-секунды.
+#[tauri::command]
+fn load_seen() -> Result<serde_json::Value, String> {
+    load_json("seen.json")
+}
+
+#[tauri::command]
+fn save_seen(seen: serde_json::Value) -> Result<(), String> {
+    save_json("seen.json", &seen)
+}
+
+/// Вид списка: сортировка и чекбоксы statusline.
+///
+/// Отдельным файлом, а не в config.yaml: конфиг пишет человек, а это пикер
+/// меняет на каждый клик — переписывая чужой файл, он затирал бы комментарии.
+/// На Windows то же самое помнит бэкенд соседнего пикера, здесь бэкенда нет.
+#[tauri::command]
+fn load_ui() -> Result<serde_json::Value, String> {
+    load_json("ui.json")
+}
+
+#[tauri::command]
+fn save_ui(ui: serde_json::Value) -> Result<(), String> {
+    save_json("ui.json", &ui)
 }
 
 /// Хоткей пикера по умолчанию: `Cmd+Shift+C` на macOS, `Win+Shift+C` на Windows.
@@ -242,7 +265,7 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config,
-            copy_to_clipboard
+            copy_to_clipboard, load_ui, save_ui
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
