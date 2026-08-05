@@ -512,7 +512,7 @@
     inFlight = true;
     let state;
     try {
-      state = await invoke('fetch_state');
+      state = await invoke('fetch_state', { sshHost: CONFIG.sshHost });
     } catch (e) {
       error = String(e);
       render();

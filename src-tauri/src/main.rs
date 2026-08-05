@@ -107,6 +107,20 @@ fn tray_icon() -> tauri::image::Image<'static> {
         .expect("icons/favicon.png не разбирается как изображение")
 }
 
+/// Хост берётся из конфига, а не зашит: список и открытие сессии обязаны
+/// ходить на одну машину. Раньше здесь стоял литерал, а `open-strategy.js`
+/// читал `sshHost` из конфига, и правка конфига молча разводила их по разным
+/// хостам.
+fn check_ssh_host(ssh_host: &str) -> Result<(), String> {
+    if ssh_host.trim().is_empty() {
+        return Err(
+            "sshHost не задан: скопируйте config.example.yml в ~/.config/ccfzf-picker/config.yaml"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 /// Спросить агрегатор.
 ///
 /// `async` и `spawn_blocking` здесь не украшение. Синхронную команду Tauri
@@ -115,9 +129,9 @@ fn tray_icon() -> tauri::image::Image<'static> {
 /// `async` уводит вызов в рантайм, `spawn_blocking` — на поток для блокирующей
 /// работы, чтобы не занимать им рабочий поток рантайма.
 #[tauri::command]
-async fn fetch_state() -> Result<serde_json::Value, String> {
-    // Хост зашит до Task 14, где появляется конфиг.
-    tauri::async_runtime::spawn_blocking(|| state_source::fetch("example-host"))
+async fn fetch_state(ssh_host: String) -> Result<serde_json::Value, String> {
+    check_ssh_host(&ssh_host)?;
+    tauri::async_runtime::spawn_blocking(move || state_source::fetch(&ssh_host))
         .await
         .map_err(|e| format!("fetch_state task failed: {e}"))?
 }
@@ -607,5 +621,16 @@ projects:
         let projects = v["projects"].as_array().unwrap();
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0]["hotkey"].as_str(), Some("Cmd+Shift+1"));
+    }
+
+    /// Пустой `sshHost` — это ненастроенный конфиг, а не «сходи в никуда».
+    /// Без этой проверки ssh звался бы с пустым первым аргументом и человек
+    /// увидел бы невнятную ошибку ssh вместо «настройте config.yaml».
+    #[test]
+    fn empty_ssh_host_is_a_config_error() {
+        let err = check_ssh_host("").unwrap_err();
+        assert!(err.contains("config.yaml"), "{err}");
+        assert!(check_ssh_host("example-host").is_ok());
+        assert!(check_ssh_host("  ").is_err(), "пробелы — тот же пустой хост");
     }
 }
