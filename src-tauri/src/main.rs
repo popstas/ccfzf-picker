@@ -253,6 +253,47 @@ fn default_picker_shortcut() -> Shortcut {
     Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyC)
 }
 
+/// То же умолчание в записи для меню трея.
+///
+/// Лежит рядом с `default_picker_shortcut`, потому что разойтись им нельзя:
+/// меню обещало бы одну клавишу, а слушалась бы другая. Что это одна и та же
+/// комбинация, сторожит тест.
+const DEFAULT_HOTKEY_ACCELERATOR: &str = "Super+Shift+C";
+
+/// Действующий хоткей пикера и запись, которой его показывать в меню.
+///
+/// Запись нельзя взять у самого `Shortcut`: его `Display` печатает
+/// `shift+super+KeyC` — форма для разбора, а не для человека. Поэтому наружу
+/// идёт строка из конфига как написана, а при откате к умолчанию — запись
+/// умолчания. Показывается именно действующий хоткей: непонятая строка в меню
+/// обещала бы клавишу, которой никто не слушает.
+fn picker_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
+    if let Some(s) = config.get("hotkey").and_then(|v| v.as_str()) {
+        match s.parse::<Shortcut>() {
+            Ok(sc) => return (sc, s.to_string()),
+            Err(_) => eprintln!("ccfzf-picker: cannot parse hotkey {s}, using default"),
+        }
+    }
+    (
+        default_picker_shortcut(),
+        DEFAULT_HOTKEY_ACCELERATOR.to_string(),
+    )
+}
+
+/// Подпись пункта «показать» в меню трея.
+///
+/// Про занятый хоткей говорит подпись, а не правая колонка: колонка — нативный
+/// слот акселератора, и произвольный текст туда не положить. Сама комбинация
+/// при этом остаётся на месте — человеку надо видеть, какая именно клавиша не
+/// сработала, а не только то, что что-то не сработало.
+fn show_item_label(hotkey_registered: bool) -> &'static str {
+    if hotkey_registered {
+        "Показать список"
+    } else {
+        "Хоткей занят, жмите сюда"
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(LastToggle(Mutex::new(None)))
@@ -275,33 +316,6 @@ fn main() {
             // переключателе задач.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-
-            let show_item = MenuItem::with_id(app, "show", "Показать список", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&tray_menu)
-                // Левая кнопка переключает окно, меню — под правой. Иначе
-                // самый частый жест (показать список) требовал бы двух
-                // движений вместо одного.
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => toggle_picker(app),
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        toggle_picker(tray.app_handle());
-                    }
-                })
-                .build(app)?;
 
             // Испорченный конфиг не должен оставлять человека без пикера:
             // отказ читается как «конфига нет», и дальше идут умолчания. О
@@ -329,34 +343,82 @@ fn main() {
                 }
             }
 
-            let picker_shortcut = config
-                .get("hotkey")
-                .and_then(|v| v.as_str())
-                .and_then(|s| match s.parse::<Shortcut>() {
-                    Ok(sc) => Some(sc),
-                    Err(_) => {
-                        eprintln!("ccfzf-picker: cannot parse hotkey {s}, using default");
-                        None
-                    }
-                })
-                .unwrap_or_else(default_picker_shortcut);
+            let (picker_shortcut, hotkey_accelerator) = picker_hotkey(&config);
             // Занятый хоткей — не повод не запуститься. Клавишу мог отобрать и
             // сосед по системе, и сама система (так Windows держит за собой
             // `Win+Shift+T`, прежнее умолчание пикера), а
             // окно всё это время можно поднять из трея. Падение на старте
             // отняло бы и трей.
-            if let Err(e) = app
+            //
+            // Ответ запоминается: меню трея ниже говорит им, работает клавиша
+            // или окно осталось только на иконке. Сообщение в stderr эту
+            // разницу тоже пишет, но stderr у приложения из Finder не читает
+            // никто.
+            let hotkey_registered = match app
                 .global_shortcut()
                 .on_shortcut(picker_shortcut, |app, _sc, event| {
                     if event.state() == ShortcutState::Pressed {
                         toggle_picker(app);
                     }
+                }) {
+                Ok(()) => true,
+                Err(e) => {
+                    eprintln!(
+                        "ccfzf-picker: cannot register picker hotkey: {e}; окно поднимается из трея"
+                    );
+                    false
+                }
+            };
+
+            // Меню трея строится здесь, а не в начале setup: ему нужны и
+            // хоткей, и то, чем кончилась его регистрация.
+            //
+            // Акселератор — украшение, и разбирает его не тот код, что хоткей
+            // (muda против global-hotkey). Строку, которую muda не понял,
+            // `with_id` вернёт ошибкой, а `?` уронил бы приложение на старте —
+            // из-за подписи в меню. Поэтому отказ означает пункт без правой
+            // колонки, а не отсутствие трея.
+            let label = show_item_label(hotkey_registered);
+            let show_item = match MenuItem::with_id(
+                app,
+                "show",
+                label,
+                true,
+                Some(hotkey_accelerator.as_str()),
+            ) {
+                Ok(item) => item,
+                Err(e) => {
+                    eprintln!(
+                        "ccfzf-picker: cannot show hotkey {hotkey_accelerator} in tray menu: {e}"
+                    );
+                    MenuItem::with_id(app, "show", label, true, None::<&str>)?
+                }
+            };
+            let quit_item = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&tray_menu)
+                // Левая кнопка переключает окно, меню — под правой. Иначе
+                // самый частый жест (показать список) требовал бы двух
+                // движений вместо одного.
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => toggle_picker(app),
+                    "quit" => app.exit(0),
+                    _ => {}
                 })
-            {
-                eprintln!(
-                    "ccfzf-picker: cannot register picker hotkey: {e}; окно поднимается из трея"
-                );
-            }
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        toggle_picker(tray.app_handle());
+                    }
+                })
+                .build(app)?;
 
             // Проектный хоткей открывает новую сессию мимо списка, поэтому
             // окно пикера не поднимается: наружу уходит только событие.
@@ -424,6 +486,48 @@ mod tests {
         }
         assert_eq!("Cmd+Shift+C".parse::<Shortcut>().unwrap(), default_picker_shortcut());
         assert!("не хоткей".parse::<Shortcut>().is_err());
+    }
+
+    /// Запись умолчания для меню — та же клавиша, что и само умолчание.
+    ///
+    /// Два значения живут рядом и меняются порознь: поправив одно, легко забыть
+    /// второе, и тогда меню обещает клавишу, которой никто не слушает.
+    #[test]
+    fn default_accelerator_matches_default_shortcut() {
+        assert_eq!(
+            DEFAULT_HOTKEY_ACCELERATOR.parse::<Shortcut>().unwrap(),
+            default_picker_shortcut()
+        );
+    }
+
+    /// В меню показывается тот хоткей, который слушается на самом деле.
+    ///
+    /// Развилок три, и врать нельзя ни в одной: своя строка из конфига, откат к
+    /// умолчанию на мусоре и откат при отсутствии ключа. Непонятая строка,
+    /// доехавшая до меню, обещала бы несуществующую клавишу.
+    #[test]
+    fn picker_hotkey_shows_what_is_listened_to() {
+        let own = serde_json::json!({ "hotkey": "Cmd+Shift+T" });
+        let (sc, accel) = picker_hotkey(&own);
+        assert_eq!(sc, "Cmd+Shift+T".parse::<Shortcut>().unwrap());
+        assert_eq!(accel, "Cmd+Shift+T");
+
+        for config in [
+            serde_json::json!({ "hotkey": "не хоткей" }),
+            serde_json::json!({}),
+            serde_json::Value::Null,
+        ] {
+            let (sc, accel) = picker_hotkey(&config);
+            assert_eq!(sc, default_picker_shortcut(), "конфиг {config}");
+            assert_eq!(accel, DEFAULT_HOTKEY_ACCELERATOR, "конфиг {config}");
+        }
+    }
+
+    /// Про занятый хоткей меню говорит подписью, и подписи эти разные.
+    #[test]
+    fn tray_label_tells_when_hotkey_is_taken() {
+        assert_eq!(show_item_label(true), "Показать список");
+        assert_ne!(show_item_label(false), show_item_label(true));
     }
 
     /// Конфиг доезжает до фронтенда теми же типами, какими написан.
