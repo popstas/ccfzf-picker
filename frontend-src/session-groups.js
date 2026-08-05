@@ -110,7 +110,7 @@
       const desktop = s.desktop ?? null;
       const key = `${desktop}`;
       if (!groups.has(key)) {
-        groups.set(key, { desktop, monitor: null, label: desktop === null ? 'Not running' : `Desktop ${desktop}`, sessions: [] });
+        groups.set(key, { desktop, label: desktop === null ? 'Not running' : `Desktop ${desktop}`, sessions: [] });
       }
       groups.get(key).sessions.push(s);
     }
@@ -121,7 +121,7 @@
 
     if (!open.length) return past;
     sortGroupSessions(open, mode);
-    return [{ desktop: null, monitor: null, label: `Active sessions - ${open.length}`, sessions: open }, ...past];
+    return [{ desktop: null, label: `Active sessions - ${open.length}`, sessions: open }, ...past];
   }
 
   /**
