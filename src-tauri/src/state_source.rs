@@ -1,12 +1,16 @@
-use std::process::Command;
+use crate::proc::hidden_command;
 
 /// Один вызов агрегатора на example-host.
 ///
 /// Ответ не разбирается и не чинится: форму проверяет фронтенд той же
 /// функцией, что и тесты. Здесь важно только отличить «не смогли спросить» от
 /// «спросили, ответили не тем».
+///
+/// `ssh` поднимается через `hidden_command`, а не `Command::new`: на Windows
+/// иначе на каждый опрос всплывает консольное окно. Опрос идёт раз в секунду,
+/// пока пикер показан, — см. `proc.rs`.
 pub fn fetch(ssh_host: &str) -> Result<serde_json::Value, String> {
-    let out = Command::new("ssh")
+    let out = hidden_command("ssh")
         .arg(ssh_host)
         .arg("ccfzf --state")
         .output()

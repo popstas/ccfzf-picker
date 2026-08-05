@@ -10,6 +10,7 @@ use tauri::{Emitter, Manager};
 // не резолвится.
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+mod proc;
 mod state_source;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
@@ -137,6 +138,10 @@ fn load_config() -> Result<serde_json::Value, String> {
 
 /// Запуск терминала. Открепляется сразу: пикер не ждёт, пока человек
 /// закончит работать в сессии, и не держит его вывод.
+///
+/// Единственное место, которое сознательно идёт мимо `proc::hidden_command`:
+/// здесь окно и есть цель. Спрятать его значило бы открыть сессию, которую
+/// человек не увидит.
 #[tauri::command]
 fn spawn_detached(argv: Vec<String>) -> Result<(), String> {
     let Some((file, args)) = argv.split_first() else {
@@ -162,11 +167,14 @@ const CLIPBOARD_TOOL: &str = "clip";
 const CLIPBOARD_TOOL: &str = "pbcopy";
 
 /// Положить текст в буфер обмена.
+///
+/// Утилита поднимается через `proc::hidden_command`: `clip` — консольная
+/// программа, и без флага она мигала бы своим окном на каждое копирование.
 #[tauri::command]
 fn copy_to_clipboard(text: String) -> Result<(), String> {
     use std::io::Write;
     let tool = CLIPBOARD_TOOL;
-    let mut child = std::process::Command::new(tool)
+    let mut child = proc::hidden_command(tool)
         .stdin(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("failed to spawn {tool}: {e}"))?;
@@ -528,6 +536,31 @@ mod tests {
     fn tray_label_tells_when_hotkey_is_taken() {
         assert_eq!(show_item_label(true), "Показать список");
         assert_ne!(show_item_label(false), show_item_label(true));
+    }
+
+    /// Опрос агрегатора не поднимает процессов мимо `proc::hidden_command`.
+    ///
+    /// Сторожит ту самую поломку, ради которой `proc.rs` и появился: на Windows
+    /// `Command::new("ssh")` из GUI-процесса всплывал консольным окном на
+    /// каждый опрос — раз в секунду, — уводил фокус, и `hideOnBlur` гасил
+    /// пикер. Поймать это тестом поведения нельзя: флаги `Command` обратно не
+    /// читаются, а окно есть только на Windows и только в release. Поэтому
+    /// сторожится форма: в файле опроса не должно остаться голого
+    /// `Command::new`.
+    #[test]
+    fn state_poll_spawns_ssh_without_console() {
+        let src = include_str!("state_source.rs");
+        assert!(
+            src.contains("hidden_command(\"ssh\")"),
+            "опрос должен поднимать ssh через proc::hidden_command"
+        );
+        // Ищется форма вызова, а не слово: `Command::new` упоминается в
+        // тамошнем комментарии, и проверка на подстроку без скобки ловила бы
+        // его же.
+        assert!(
+            !src.contains("Command::new("),
+            "в state_source.rs остался голый Command::new( — вернётся консольное окно"
+        );
     }
 
     /// Конфиг доезжает до фронтенда теми же типами, какими написан.
