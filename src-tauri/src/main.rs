@@ -95,6 +95,18 @@ fn hide_picker(app: tauri::AppHandle) {
     hide_window(&app);
 }
 
+/// Иконка трея.
+///
+/// Отдельная от иконки приложения: `default_window_icon` — это `icon.png`
+/// 512×512, и система ужимала его до размера строки меню, размазывая детали.
+/// `favicon.png` нарисован сразу под 16×16. Вшивается в бинарь на компиляции,
+/// а не читается с диска: иначе иконка зависела бы от рабочего каталога и
+/// пропадала бы в собранном приложении.
+fn tray_icon() -> tauri::image::Image<'static> {
+    tauri::image::Image::from_bytes(include_bytes!("../icons/favicon.png"))
+        .expect("icons/favicon.png не разбирается как изображение")
+}
+
 /// Спросить агрегатор.
 ///
 /// `async` и `spawn_blocking` здесь не украшение. Синхронную команду Tauri
@@ -405,7 +417,11 @@ fn main() {
             let quit_item = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
             TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icon())
+                // Иконка одноцветная и просвечивает фоном: система сама красит
+                // её под светлую и тёмную строку меню. Без template-режима
+                // белый глиф пропадал бы на светлом фоне.
+                .icon_as_template(true)
                 .menu(&tray_menu)
                 // Левая кнопка переключает окно, меню — под правой. Иначе
                 // самый частый жест (показать список) требовал бы двух
