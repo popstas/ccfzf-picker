@@ -9,7 +9,10 @@ const { normalizeConfig } = require('../frontend-src/config-shape');
 // которой на хосте нет.
 test('пустой конфиг даёт рабочие значения по умолчанию', () => {
   const c = normalizeConfig(null);
-  assert.strictEqual(c.sshHost, 'example-host');
+  // Умолчания у хоста нет и быть не может: любое значение здесь — либо чужое
+  // имя машины, либо ложь. Пустой хост пикер показывает как ненастроенный
+  // конфиг (check_ssh_host в src-tauri/src/main.rs).
+  assert.strictEqual(c.sshHost, '');
   assert.strictEqual(c.hotkey, 'Cmd+Shift+C');
   assert.strictEqual(c.caps.reptyr, false);
   assert.strictEqual(c.caps.takeover, false);
