@@ -14,7 +14,7 @@ mod proc;
 mod state_source;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
-/// только что открытое окно. Тот же ограничитель стоит в neighbor-picker.
+/// только что открытое окно. Тот же ограничитель стоит в соседнем пикере.
 const DEBOUNCE: Duration = Duration::from_millis(400);
 
 struct LastToggle(Mutex<Option<Instant>>);
