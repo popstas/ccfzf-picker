@@ -695,6 +695,15 @@
   async function focusSession(row) {
     await invoke('hide_picker');
     try {
+      // MQTT вперёд, когда брокер настроен: http до трекера дотягивается не
+      // отовсюду, а брокер в этой установке слышат обе машины. Ответа с полем
+      // `ok` у этой ветки нет — приёмник отчитывается в свой лог, а не нам.
+      if (CONFIG.mqtt.configured) {
+        await invoke('focus_window_mqtt', { id: row.id });
+        error = '';
+        await markSeen(row.id, Math.floor(Date.now() / 1000));
+        return;
+      }
       const res = await invoke('focus_window', {
         url: trackerUrl(), id: row.id, pid: trackerPid,
       });

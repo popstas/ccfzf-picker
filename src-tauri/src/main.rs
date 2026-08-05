@@ -10,6 +10,7 @@ use tauri::{Emitter, Manager};
 // не резолвится.
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+mod mqtt;
 mod proc;
 mod state_source;
 mod window_source;
@@ -184,6 +185,28 @@ async fn focus_window(url: String, id: String, pid: u32) -> Result<serde_json::V
     tauri::async_runtime::spawn_blocking(move || window_source::focus(&url, &id))
         .await
         .map_err(|e| format!("focus_window task failed: {e}"))?
+}
+
+/// Поднять окно сессии через MQTT.
+///
+/// Второй способ той же просьбы: тело и топик — те, что уже слушает демон на
+/// Windows-машине. Нужен там, где http до трекера не дотягивается, а брокер
+/// слышат обе машины.
+///
+/// Права на передний план здесь не выдаётся, и выдать его нечему: подъём делает
+/// процесс, о pid которого мы не спрашивали. Работает это потому же, почему
+/// работает нажатие с панели, — пикер гасит себя до публикации, и к моменту
+/// подъёма передний план не держит никто.
+#[tauri::command]
+async fn focus_window_mqtt(id: String) -> Result<(), String> {
+    let raw = load_config()?;
+    let broker = mqtt::broker_from_config(&raw);
+    if !broker.is_configured() {
+        return Err("mqtt не настроен: нужны host и base в config.yaml".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || mqtt::focus(&broker, &id))
+        .await
+        .map_err(|e| format!("focus_window_mqtt task failed: {e}"))?
 }
 
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
@@ -390,7 +413,8 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config,
-            copy_to_clipboard, load_ui, save_ui, fetch_windows, focus_window
+            copy_to_clipboard, load_ui, save_ui, fetch_windows, focus_window,
+            focus_window_mqtt
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из

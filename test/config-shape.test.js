@@ -23,6 +23,19 @@ test('пустой конфиг даёт рабочие значения по у
   // Пустой url — выключенный трекер. Умолчания у него нет по той же причине,
   // что и у sshHost: любое значение было бы чужим именем машины.
   assert.deepStrictEqual(c.windowTracker, { url: '' });
+  assert.deepStrictEqual(c.mqtt, { configured: false });
+});
+
+test('брокер считается настроенным только с адресом и префиксом сразу', () => {
+  // Те же два условия, что и в Broker::is_configured на стороне Rust: без
+  // адреса публиковать нечем, без префикса топиков — некуда.
+  const has = (mqtt) => normalizeConfig({ mqtt }).mqtt.configured;
+  assert.strictEqual(has({ host: 'broker', base: 'home/room/pc' }), true);
+  assert.strictEqual(has({ host: 'broker' }), false);
+  assert.strictEqual(has({ base: 'home/room/pc' }), false);
+  assert.strictEqual(has({ host: '  ', base: 'home/room/pc' }), false);
+  assert.strictEqual(has({ host: 42, base: 'home/room/pc' }), false);
+  assert.strictEqual(has(undefined), false);
 });
 
 test('url трекера чистится от пробелов, мусор выключает его', () => {

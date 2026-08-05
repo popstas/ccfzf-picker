@@ -32,6 +32,11 @@
     // было бы чужим именем машины. Пустой url выключает функцию целиком: ни
     // одного запроса, ни одной пометки, список как раньше.
     windowTracker: { url: '' },
+    // Брокер MQTT — второй способ попросить о подъёме окна: тот же топик, что
+    // уже слушает демон на Windows-машине. Здесь остался один признак «настроен
+    // или нет»: сами настройки читает Rust из того же файла, чтобы пароль не
+    // ездил через мост в webview на каждое нажатие.
+    mqtt: { configured: false },
   };
 
   /**
@@ -41,6 +46,10 @@
    * Пикер без одного проектного хоткея работает; пикер, который не открылся
    * из-за опечатки в yaml, — нет.
    */
+  function nonEmpty(value) {
+    return typeof value === 'string' && value.trim() !== '';
+  }
+
   function normalizeConfig(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
     const projects = (Array.isArray(src.projects) ? src.projects : [])
@@ -66,6 +75,11 @@
           ? src.windowTracker.url.trim()
           : DEFAULTS.windowTracker.url,
       },
+      // Те же два условия, что и в Rust (`Broker::is_configured`): без адреса
+      // публиковать нечем, без префикса топиков — некуда, а угадывать чужой
+      // префикс нельзя. Разойтись им не дадут заметно: фронтенд предложил бы
+      // ветку, которую Rust тут же отклонил бы с «mqtt не настроен».
+      mqtt: { configured: Boolean(nonEmpty((src.mqtt || {}).host) && nonEmpty((src.mqtt || {}).base)) },
       projects,
     };
   }
