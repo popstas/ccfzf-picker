@@ -279,6 +279,17 @@
     noticeTimer = setTimeout(() => { notice = ''; noticeTimer = null; render(); }, 4000);
     render();
   }
+
+  // check_ssh_host в src-tauri/src/main.rs закрывает только fetch_state.
+  // Запуск терминала идёт мимо неё, через spawn_detached, и без этой
+  // проверки ненастроенный конфиг показал бы сырую ошибку ssh в отдельном
+  // окне — там, где её никто не связывает с конфигом пикера.
+  function sshHostMissing() {
+    if (CONFIG.sshHost && CONFIG.sshHost.trim()) return false;
+    error = 'sshHost не задан: скопируйте config.example.yml в ~/.config/ccfzf-picker/config.yaml';
+    render();
+    return true;
+  }
   // Чекбоксы statusline. На маке они живут только в памяти окна: конфига,
   // который их помнил бы между запусками, у пикера нет (Task 14 заводит
   // config.yaml, но не под них).
@@ -580,6 +591,7 @@
    */
   async function openSession(row) {
     if (!row) return;
+    if (sshHostMissing()) return;
     const strategy = window.OpenStrategy.chooseOpenStrategy(row, CONFIG.caps);
     const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, {
       sshHost: CONFIG.sshHost, terminal: CONFIG.terminal,
@@ -922,6 +934,7 @@
     // Проектный хоткей открывает новую сессию, а не продолжает старую:
     // продолжать нечего — сессии у него нет, есть только каталог.
     await listen('project-hotkey', (event) => {
+      if (sshHostMissing()) return;
       const argv = [
         CONFIG.terminal.file, ...CONFIG.terminal.args,
         'ssh', '-t', CONFIG.sshHost,
