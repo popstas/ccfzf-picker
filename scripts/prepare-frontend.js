@@ -13,6 +13,7 @@ const FILES = [
   'frontend-src/state-shape.js',
   'frontend-src/session-agent.js',
   'frontend-src/session-list.js',
+  'frontend-src/session-windows.js',
   'frontend-src/session-groups.js',
   'frontend-src/ui-state.js',
   'frontend-src/session-glyph.js',

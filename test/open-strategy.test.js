@@ -100,6 +100,39 @@ test('мёртвая сессия просто возобновляется', ()
   assert.strictEqual(chooseOpenStrategy(row(), {}), 'resume');
 });
 
+const WINDOW = { title: 'ccfzf-picker', desktop: 2, lastSeen: 1000 };
+
+test('открытое окно выигрывает у всех остальных веток', () => {
+  // Иначе у сессии с уже открытым терминалом любая ветка заводит вторую копию
+  // рядом с первой — ровно то, ради чего трекер и опрашивается.
+  const live = row({ live: true, pid: 42, window: WINDOW });
+  assert.strictEqual(chooseOpenStrategy(live, { reptyr: true }, { canFocus: true }), 'focus');
+  assert.strictEqual(chooseOpenStrategy(live, { takeover: true }, { canFocus: true }), 'focus');
+  assert.strictEqual(
+    chooseOpenStrategy(row({ tmux: 'work:2.0', window: WINDOW }), {}, { canFocus: true }), 'focus');
+});
+
+test('без разрешения фокусировать окно ничего не меняется', () => {
+  // canFocus приходит false на маке: окна там на другой машине, и подъём окна
+  // отнял бы у Enter открытие терминала, не дав взамен ничего видимого.
+  const live = row({ live: true, pid: 42, window: WINDOW });
+  assert.strictEqual(chooseOpenStrategy(live, { reptyr: true }, { canFocus: false }), 'reptyr');
+  assert.strictEqual(chooseOpenStrategy(live, { reptyr: true }, {}), 'reptyr');
+  assert.strictEqual(chooseOpenStrategy(live, { reptyr: true }), 'reptyr');
+});
+
+test('без окна разрешение фокусировать ничего не даёт', () => {
+  assert.strictEqual(
+    chooseOpenStrategy(row({ live: true, pid: 42, window: null }), {}, { canFocus: true }), 'resume');
+});
+
+test('у фокуса нет команды терминала', () => {
+  // Окно уже открыто, поднимает его трекер по http. Вызывающий обязан развести
+  // фокус и остальные ветки до сборки команды — здесь ему возвращается null,
+  // и запуск терминала с пустым argv так не случится.
+  assert.strictEqual(buildOpenCommand(row({ window: WINDOW }), 'focus', OPTS), null);
+});
+
 test('команда attach ведёт в панель tmux', () => {
   const cmd = buildOpenCommand(row({ tmux: 'work:2.0' }), 'attach', OPTS);
   assert.strictEqual(cmd.destructive, false);

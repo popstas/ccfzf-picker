@@ -12,6 +12,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 mod proc;
 mod state_source;
+mod window_source;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
 /// только что открытое окно. Тот же ограничитель стоит в соседнем пикере.
@@ -134,6 +135,55 @@ async fn fetch_state(ssh_host: String) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || state_source::fetch(&ssh_host))
         .await
         .map_err(|e| format!("fetch_state task failed: {e}"))?
+}
+
+/// Спросить оконный трекер, у какой сессии открыто окно терминала.
+///
+/// `async` + `spawn_blocking` по той же причине, что и у `fetch_state`: вызов
+/// уходит по сети и тикает раз в секунду, а синхронная команда исполнялась бы
+/// в главном потоке и подвешивала окно на каждый опрос.
+#[tauri::command]
+async fn fetch_windows(url: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || window_source::fetch(&url))
+        .await
+        .map_err(|e| format!("fetch_windows task failed: {e}"))?
+}
+
+/// Выдать процессу трекера право занять передний план.
+///
+/// Windows позволяет вызвать `SetForegroundWindow` только процессу, который
+/// передним планом уже владеет либо получил последнее событие ввода. Демон
+/// трекера — не тот и не другой: к моменту запроса он просто отвечает на http.
+/// Право ему передаёт пикер, и именно сейчас: нажатие, из-за которого мы здесь,
+/// было последним событием ввода, и оно наше. Без этого `bringToTop()` на той
+/// стороне отчитается об успехе, а на экране мигнёт кнопка на таскбаре.
+///
+/// `pid` берётся из ответа `/claude-wt/status` — трекер кладёт туда свой.
+/// Отказ не фатален: он значит ровно то же, что и отсутствие грамоты, — окно
+/// не поднимется, а пикер об этом узнает из ответа трекера.
+#[cfg(target_os = "windows")]
+fn allow_tracker_foreground(pid: u32) {
+    use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+    if let Err(e) = unsafe { AllowSetForegroundWindow(pid) } {
+        eprintln!("ccfzf-picker: cannot grant foreground to pid {pid}: {e}");
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn allow_tracker_foreground(_pid: u32) {}
+
+/// Поднять окно сессии через трекер.
+///
+/// Зовётся вместо `spawn_detached` у стратегии `focus`: окно уже открыто, и
+/// заводить рядом второй процесс на том же транскрипте незачем.
+#[tauri::command]
+async fn focus_window(url: String, id: String, pid: u32) -> Result<serde_json::Value, String> {
+    // До запроса, а не после: право должно быть у трекера к моменту, когда он
+    // дойдёт до подъёма окна.
+    allow_tracker_foreground(pid);
+    tauri::async_runtime::spawn_blocking(move || window_source::focus(&url, &id))
+        .await
+        .map_err(|e| format!("focus_window task failed: {e}"))?
 }
 
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
@@ -340,7 +390,7 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config,
-            copy_to_clipboard, load_ui, save_ui
+            copy_to_clipboard, load_ui, save_ui, fetch_windows, focus_window
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из

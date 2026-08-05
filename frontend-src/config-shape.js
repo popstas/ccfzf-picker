@@ -27,6 +27,11 @@
     // здесь оно описано затем же, зачем и остальные: чтобы форма конфига была
     // в одном месте и проверялась одним тестом.
     hideOnBlur: true,
+    // Оконный трекер: откуда пикер узнаёт, у какой сессии уже открыт терминал.
+    // Умолчания нет по той же причине, что и у sshHost, — любое значение здесь
+    // было бы чужим именем машины. Пустой url выключает функцию целиком: ни
+    // одного запроса, ни одной пометки, список как раньше.
+    windowTracker: { url: '' },
   };
 
   /**
@@ -56,6 +61,11 @@
       // договорились», а не «показывай две сотни транскриптов».
       onlyLive: typeof src.onlyLive === 'boolean' ? src.onlyLive : DEFAULTS.onlyLive,
       hideOnBlur: typeof src.hideOnBlur === 'boolean' ? src.hideOnBlur : DEFAULTS.hideOnBlur,
+      windowTracker: {
+        url: typeof (src.windowTracker || {}).url === 'string'
+          ? src.windowTracker.url.trim()
+          : DEFAULTS.windowTracker.url,
+      },
       projects,
     };
   }

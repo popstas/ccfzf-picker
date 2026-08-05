@@ -135,6 +135,29 @@
   }
 
   /**
+   * Пометка «у этой сессии уже открыто окно терминала».
+   *
+   * Данные приходят от оконного трекера соседа, и это единственное в строке,
+   * чего не знает `ccfzf --state`: он видит живые процессы, а не окна. Без
+   * пометки живая сессия и живая сессия с окном выглядят одинаково, и Enter на
+   * второй заводит второй процесс на том же транскрипте.
+   *
+   * Номер рабочего стола идёт в подсказку, а не в строку: на плитке места нет,
+   * а спрашивают его редко — обычно достаточно знать, что окно вообще есть.
+   * Стол `null` (трекер его не знал) подсказку не портит: тогда её просто нет.
+   *
+   * Пустой элемент вместо пропуска — по той же причине, что у hotkeyHtml:
+   * правые колонки стоят друг за другом, и дырка сдвинула бы соседние строки.
+   */
+  function windowHtml(session, showWindow = true) {
+    if (!showWindow) return '';
+    const win = session?.window;
+    if (!win) return '<div class="win"></div>';
+    const desktop = Number.isFinite(win.desktop) ? ` title="Desktop ${win.desktop}"` : '';
+    return `<div class="win open"${desktop}>▣</div>`;
+  }
+
+  /**
    * Имя сессии для заголовка диалога.
    *
    * Меню действий приходит с одним `label` и без заголовка окна, список — с
@@ -320,7 +343,7 @@
 
   return {
     statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
-    sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
+    sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml,
     shortPath, rowTitle, titleAttr, escapeHtml,
     prNumber, prBadgeHtml,
   };

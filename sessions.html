@@ -126,6 +126,14 @@
             flex: 0 0 auto; padding-left: 10px;
             font-size: 11px; color: #7d838c; white-space: nowrap;
         }
+        /* Пометка «окно терминала уже открыто». Ширина задана жёстко: у сессий
+           без окна элемент пустой, и без ширины колонка дышала бы от строки к
+           строке. Цвет как у живого статуса — это признак того же рода: сессия,
+           до которой можно дотянуться прямо сейчас. */
+        .win {
+            flex: 0 0 auto; width: 10px; padding-left: 10px;
+            font-size: 11px; color: #3fb950; text-align: center;
+        }
         /* Контекст и деньги, между статусом и возрастом. */
         .usage {
             flex: 0 0 auto; padding-left: 10px;
@@ -232,6 +240,9 @@
 <script src="state-shape.js"></script>
 <script src="session-agent.js"></script>
 <script src="session-list.js"></script>
+<!-- session-windows до session-groups: тот берёт из него withWindows в момент
+     загрузки, и в обратном порядке ему достался бы undefined. -->
+<script src="session-windows.js"></script>
 <script src="session-groups.js"></script>
 <!-- ui-state после session-groups: он берёт оттуда normalizeSort в момент
      загрузки, и в обратном порядке ему достался бы undefined. -->
@@ -296,6 +307,11 @@
   // слева под именем сессии, потом, через отбивку, правые колонки. Иначе
   // чекбоксы перечисляют то же самое в третьем порядке, и глазами их каждый
   // раз приходится искать заново.
+  //
+  // Третья группа, `filter`, — не про колонки вовсе: она решает, какие строки
+  // вообще попадут в список. Стоит последней и за своей отбивкой именно
+  // поэтому: перепутать «спрятать колонку» с «спрятать сессии» стоит дороже
+  // всего остального в этом ряду.
   const TOGGLE_CHECKS = [
     { key: 'showPrompt', label: 'prompt', side: 'left' },
     { key: 'showAnswer', label: 'answer', side: 'left' },
@@ -305,6 +321,8 @@
     { key: 'showId', label: 'id', side: 'right' },
     { key: 'showCost', label: 'cost', side: 'right' },
     { key: 'showContext', label: 'context', side: 'right' },
+    { key: 'showWindow', label: 'window', side: 'right' },
+    { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
   ];
   // Умолчания. Выключены те колонки, что отвечают на вопрос «как эта сессия
   // дошла до жизни такой», а не «стоит ли в неё заходить»: событие и цена
@@ -319,6 +337,10 @@
     showId: false,
     showCost: false,
     showContext: true,
+    showWindow: true,
+    // Выключен: список без трекера и так весь без окон, и включённый фильтр
+    // показал бы пустоту вместо сессий — с виду неотличимо от сломанного ssh.
+    onlyWindow: false,
   };
   let menuOpen = false;
   let menuActions = [];
@@ -369,16 +391,16 @@
 
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml,
-    shortPath, titleAttr, escapeHtml, prBadgeHtml,
+    windowHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
   // чекбоксу не должен всплывать до statusline: там висит смена сортировки.
   const toggleInputs = new Map();
-  // Отбивка между половинами — на первом чекбоксе правой группы: отдельный
+  // Отбивка между группами — на первом чекбоксе каждой следующей: отдельный
   // пустой элемент-разделитель пришлось бы ещё и прятать, когда группа пуста.
   statusChecks.innerHTML = TOGGLE_CHECKS.map(({ key, label, side }, i) => {
-    const gap = side === 'right' && TOGGLE_CHECKS[i - 1]?.side === 'left' ? ' gap' : '';
+    const gap = i > 0 && TOGGLE_CHECKS[i - 1].side !== side ? ' gap' : '';
     return `<label class="status-check${gap}"><input type="checkbox" data-toggle="${key}"> ${escapeHtml(label)}</label>`;
   }).join('');
   for (const input of statusChecks.querySelectorAll('input[data-toggle]')) {
@@ -470,6 +492,7 @@
           // это делала `.state` своим margin-left: auto, и стоило снять с неё
           // чекбокс, как всё съезжало к названию сессии.
           `<div class="meta">` +
+          windowHtml(session, toggles.showWindow) +
           stateHtml(session, toggles.showEvent) +
           sessionIdHtml(session, toggles.showId) +
           hotkeyHtml(session, toggles.showHotkey) +
@@ -508,7 +531,8 @@
    */
   function regroup() {
     const payload = window.SessionGroups.buildSessionsPayload(
-      { ok: true, sessions: lastSessions, seen }, sortMode, { onlyLive: CONFIG.onlyLive },
+      { ok: true, sessions: lastSessions, seen }, sortMode,
+      { onlyLive: CONFIG.onlyLive, windows: trackerWindows, onlyWindow: toggles.onlyWindow },
     );
     groups = payload.groups;
     sortMode = payload.sort;
@@ -520,6 +544,66 @@
   // столько же и стоит: без сторожа медленный ответ копил бы очередь вызовов, и каждый
   // следующий отставал бы сильнее предыдущего.
   let inFlight = false;
+
+  // Окна от оконного трекера: `{ id сессии: { title, desktop, lastSeen } }`.
+  // Пустой справочник — рабочее состояние, а не поломка: трекер не настроен,
+  // погашен или машина спит.
+  let trackerWindows = {};
+  // pid демона трекера. Нужен, чтобы выдать ему право занять передний план
+  // перед подъёмом окна, — без него окно только мигнёт кнопкой на таскбаре.
+  // Ноль значит «трекер не отвечал или ответил без pid», и фокус тогда не
+  // предлагается вовсе: молча не сработавший Enter хуже прежнего поведения.
+  let trackerPid = 0;
+  let windowsInFlight = false;
+
+  function trackerUrl() {
+    return (CONFIG.windowTracker || {}).url || '';
+  }
+
+  /**
+   * Можно ли поднимать окно вместо открытия терминала.
+   *
+   * Петлевой адрес трекера — это и есть «окна на той же машине, где пикер».
+   * На маке трекер отвечает по имени Windows-машины: пометка о её окнах
+   * полезна, а подъём окна там ничего не дал бы человеку перед экраном и
+   * отнял бы у Enter привычное открытие терминала.
+   */
+  function canFocusWindows() {
+    return window.SessionWindows.isLoopback(trackerUrl()) && trackerPid > 0;
+  }
+
+  /**
+   * Спросить оконный трекер.
+   *
+   * Отказ гасится молча и до конца: справочник обнуляется, ошибка не пишется.
+   * Строка ошибки в пикере одна на всё, и сообщение про спящую соседнюю
+   * машину затмевало бы отказ ssh — тот, из-за которого списка нет вовсе.
+   * Обнуление обязательно: пометка от прошлого удачного ответа пережила бы
+   * погасший трекер и обещала бы окно, которого уже нет.
+   */
+  async function refreshWindows() {
+    const url = trackerUrl();
+    if (!url || windowsInFlight) return;
+    windowsInFlight = true;
+    let next = {};
+    let pid = 0;
+    try {
+      const raw = await invoke('fetch_windows', { url });
+      next = window.SessionWindows.normalizeWindows(raw);
+      pid = Number.isFinite(raw?.pid) ? raw.pid : 0;
+    } catch {
+      // Ровно ничего: см. выше.
+    } finally {
+      windowsInFlight = false;
+    }
+    const changed = Object.keys(next).join() !== Object.keys(trackerWindows).join();
+    trackerWindows = next;
+    trackerPid = pid;
+    // Перерисовка только на смене состава окон. Ответ трекера приходит быстрее
+    // ssh, и звать regroup() на каждый тик значило бы собирать список дважды за
+    // секунду ради одних и тех же пометок.
+    if (changed && lastSessions.length) regroup();
+  }
 
   async function refresh() {
     if (inFlight) return;
@@ -551,9 +635,17 @@
   // — скрытому окну Tauri он не приходит.
   let timer = null;
 
-  function startPolling() {
+  // Трекер спрашивается на том же тике, но не внутри refresh(): у него свой
+  // сторож и своё гашение отказа, и связывать их значило бы дать соседней
+  // машине задержать список.
+  function tick() {
     refresh();
-    if (timer === null) timer = setInterval(refresh, 1000);
+    refreshWindows();
+  }
+
+  function startPolling() {
+    tick();
+    if (timer === null) timer = setInterval(tick, 1000);
   }
 
   function stopPolling() {
@@ -584,6 +676,44 @@
   }
 
   /**
+   * Поднять окно, которое у сессии уже есть.
+   *
+   * Ветка `focus`: терминал не запускается вовсе, окно поднимает оконный
+   * трекер на своей стороне.
+   *
+   * Пикер гасится **до** запроса, а не после. Windows отдаёт передний план
+   * только владельцу либо тому, кто получил последнее событие ввода; трекеру
+   * это право выдаёт `focus_window` на стороне Rust, и выдать его надо, пока
+   * последнее нажатие ещё наше. Гасить после значило бы отбирать у окна фокус
+   * сразу после того, как оно его получило.
+   *
+   * Отказ трекера («окна нет», «сессия неизвестна») приезжает полем `ok` в
+   * обычном ответе. Показать его сразу уже некому — окно погашено, — но в
+   * строке ошибки он дождётся следующего открытия: молчащий Enter человек
+   * прочитал бы как поломку пикера.
+   */
+  async function focusSession(row) {
+    await invoke('hide_picker');
+    try {
+      const res = await invoke('focus_window', {
+        url: trackerUrl(), id: row.id, pid: trackerPid,
+      });
+      if (res && res.ok === false) {
+        error = `окно не поднялось: ${res.reason}`;
+        render();
+        return;
+      }
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    error = '';
+    // Та же отметка «посмотрел», что и у открытия: сессию человек увидел.
+    await markSeen(row.id, Math.floor(Date.now() / 1000));
+  }
+
+  /**
    * Открыть сессию в новом окне kitty.
    *
    * Стратегию выбирает эта же сторона по строке списка. Строка старше
@@ -594,8 +724,11 @@
    */
   async function openSession(row) {
     if (!row) return;
+    const strategy = window.OpenStrategy.chooseOpenStrategy(
+      row, CONFIG.caps, { canFocus: canFocusWindows() },
+    );
+    if (strategy === 'focus') return focusSession(row);
     if (sshHostMissing()) return;
-    const strategy = window.OpenStrategy.chooseOpenStrategy(row, CONFIG.caps);
     const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, {
       sshHost: CONFIG.sshHost, terminal: CONFIG.terminal,
     });

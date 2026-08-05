@@ -3,7 +3,7 @@
 ## Next tasks
 - [x] replace icon to favicon.png
 - [x] default hide events, cost from list, uncheck checkboxes
-- [ ] должен быть http api для получения данных по окнам активных сессий
+- [x] должен быть http api для получения данных по окнам активных сессий
 - [ ] должен быть способ указать маппинг папки: local v: = remote /home/user, если указан, то добавлять опции открытия explorer, finder, cursor, vscode
 
 ## Future tasks

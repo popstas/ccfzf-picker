@@ -15,6 +15,17 @@ serde_yaml = "0.9"
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-global-shortcut = "2"
+# Клиент оконного трекера. Блокирующий и без TLS намеренно: трекер отвечает по
+# http в локальной сети, а запрос всё равно уходит в spawn_blocking рядом с
+# ssh. rustls тянуть было бы не за что.
+ureq = { version = "2", default-features = false, features = ["json"] }
+
+# AllowSetForegroundWindow: Windows отдаёт передний план только тому, кто им
+# уже владеет. Право надо выдать демону трекера явно, иначе он поднимет окно
+# «успешно», а на экране только мигнёт кнопка на таскбаре. Версия та же, что
+# уже тянет Tauri, — иначе в сборке оказались бы два разных `windows`.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 lto = true

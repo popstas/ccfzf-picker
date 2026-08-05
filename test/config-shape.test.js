@@ -20,6 +20,21 @@ test('пустой конфиг даёт рабочие значения по у
   assert.strictEqual(c.hideOnBlur, true);
   assert.deepStrictEqual(c.terminal, { file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] });
   assert.deepStrictEqual(c.projects, []);
+  // Пустой url — выключенный трекер. Умолчания у него нет по той же причине,
+  // что и у sshHost: любое значение было бы чужим именем машины.
+  assert.deepStrictEqual(c.windowTracker, { url: '' });
+});
+
+test('url трекера чистится от пробелов, мусор выключает его', () => {
+  // Пробел вокруг адреса — самая частая опечатка в yaml, и она превратила бы
+  // url в непустой, но нерабочий: запросы шли бы каждую секунду и падали.
+  assert.strictEqual(
+    normalizeConfig({ windowTracker: { url: '  http://localhost:9722 ' } }).windowTracker.url,
+    'http://localhost:9722',
+  );
+  for (const windowTracker of [{ url: 42 }, {}, 'мусор', null]) {
+    assert.strictEqual(normalizeConfig({ windowTracker }).windowTracker.url, '', String(windowTracker));
+  }
 });
 
 test('заданные значения перекрывают умолчания', () => {
