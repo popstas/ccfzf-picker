@@ -6,8 +6,9 @@
 
 ## Установка
 
-Нужен Rust, Node 22+ и терминал на локальной машине; на удалённой — `ccfzf`
-(снимок лежит в `vendor/ccfzf`).
+Нужен Rust, Node 22+, `tauri-cli` (`cargo install tauri-cli`) и терминал на
+локальной машине; на удалённой — `ccfzf` (снимок лежит в `vendor/ccfzf`).
+Без `tauri-cli` `cargo tauri build` упадёт с `no such subcommand: tauri`.
 
 ```
 npm test                      # тесты фронтенда

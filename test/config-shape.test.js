@@ -2,8 +2,8 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { normalizeConfig } = require('../frontend-src/config-shape');
 
-// Умолчание reptyr — false, хотя в бою в config.yaml стоит true (вердикт
-// docs/reptyr-experiment.md). Это не рассинхрон: без конфига пикер не знает,
+// Умолчание reptyr — false, хотя в бою в config.yaml стоит true (вердикт —
+// см. архив скилла claude-wt). Это не рассинхрон: без конфига пикер не знает,
 // установлен ли reptyr на той стороне, и обещать перенос процесса вслепую
 // нельзя — незнание должно вести к перехвату с подтверждением, а не к команде,
 // которой на хосте нет.
