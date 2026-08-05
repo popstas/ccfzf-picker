@@ -36,6 +36,9 @@ cargo tauri build             # сборка
   без сборщика. Запускается из `beforeBuildCommand` в Tauri.
 - `scripts/check-state.js` — прогон живого ответа агрегатора через ту же
   проверку формы, что и тесты: `ccfzf --state | node scripts/check-state.js`.
+- `scripts/make-icons.py` — иконки приложения из иконки трея:
+  `python3 scripts/make-icons.py`. Руками рисуется только
+  `src-tauri/icons/favicon.png`, остальное в `src-tauri/icons/` — вывод скрипта.
 - `scripts/check-agent-of.py` — проверка склейки `state.json` и `status.json`
   внутри агрегатора: `python3 scripts/check-agent-of.py vendor/ccfzf`. Тесты
   проекта туда не достают — они про фронтенд, — а «последняя активность» уже

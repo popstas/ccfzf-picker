@@ -45,6 +45,9 @@ cd src-tauri && cargo test    # оболочка
 
 - `src-tauri/icons/icon.ico` обязателен: без него `tauri-build` не собирает
   Windows-ресурс и падает до компиляции.
+- **Руками в `src-tauri/icons/` правится только `favicon.png`.** Остальные семь
+  файлов — вывод `python3 scripts/make-icons.py`, и правка любого из них
+  переживёт ровно до следующего запуска скрипта.
 - Умолчание хоткея — `Cmd+Shift+C` (на Windows `Win+Shift+C`). `Win+Shift+T`
   система держит за собой: `RegisterHotKey` отвечает «already registered».
 - Отказ регистрации хоткея не фатален — пишет в stderr и не мешает запуску:
