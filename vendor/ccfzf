@@ -265,8 +265,9 @@ def agent_of(sid):
     """Склеенные <id>.state.json и <id>.status.json, или None.
 
     Склейка живёт здесь, а не у читателя: файлы локальные, а читатель —
-    на другой машине через ssh. Числа из статуслайна перекрывают те, что
-    хук успел положить в state.json: status.json пишется чаще.
+    на другой машине через ssh. Деньги и проценты из статуслайна перекрывают
+    те, что хук успел положить в state.json: status.json пишется чаще. На время
+    это правило не распространяется — см. `updated` ниже.
     """
     def load(suffix):
         try:
@@ -291,7 +292,14 @@ def agent_of(sid):
         "pr_url": state.get("pr_url", ""),
         "costUsd": num(status.get("costUsd", state.get("costUsd", 0))),
         "contextPct": num(status.get("contextPct", state.get("contextPct", 0))),
-        "updated": max(num(state.get("updated")), num(status.get("updated"))),
+        # Только из state.json, и max() здесь был бы неверен: `updated` у
+        # статуслайна — это время его последней перерисовки, а она идёт по
+        # таймеру (statusLine.refreshInterval), пока открыт терминал. Через
+        # max() у любой живой сессии «последняя активность» вечно оказывалась
+        # секундной давности, даже если та спит шестой час. Статуслайн берётся
+        # только тогда, когда state.json нет вовсе, — у старых сессий, поднятых
+        # до появления хука, других отметок времени не осталось.
+        "updated": num(state.get("updated")) or num(status.get("updated")),
     }
     return out
 
