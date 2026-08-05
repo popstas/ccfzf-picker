@@ -10,7 +10,7 @@ const {
 test('shortPath collapses the agent home directory, and survives a missing path', () => {
   // The list shows it too, not just the tooltip, so the rule lives in one place.
   assert.strictEqual(shortPath('/home/user/projects/x'), '~/projects/x');
-  assert.strictEqual(shortPath('/home/other'), '~');
+  assert.strictEqual(shortPath('/home/someone'), '~');
   assert.strictEqual(shortPath('/opt/home/x'), '/opt/home/x');
   assert.strictEqual(shortPath(undefined), '');
 });
@@ -191,7 +191,7 @@ test('rowTitle shortens the agent home directory to a tilde', () => {
     '~/projects/python/telegram-assistant'
   );
   // The user name is not hard-coded: agents live on other machines too.
-  assert.strictEqual(rowTitle({ cwd: '/home/other/x' }), '~/x');
+  assert.strictEqual(rowTitle({ cwd: '/home/someone/x' }), '~/x');
   // Anything that is not a home directory is left alone.
   assert.strictEqual(rowTitle({ cwd: '/opt/home/x' }), '/opt/home/x');
 });
