@@ -925,9 +925,10 @@
       const argv = [
         CONFIG.terminal.file, ...CONFIG.terminal.args,
         'ssh', '-t', CONFIG.sshHost,
-        // Через ту же q, что собирает команды открытия: это единственный
-        // барьер между путём из конфига и шеллом на той стороне.
-        `cd ${window.OpenStrategy.q(event.payload)} && claude`,
+        // Через ту же обёртку, что и открытие сессии: и кавычки вокруг пути из
+        // конфига, и интерактивный шелл, без которого агент поднимается мимо
+        // .zshrc — то есть без хука chpwd и без project= в телеметрии.
+        window.OpenStrategy.inDir(event.payload, 'claude'),
       ];
       invoke('spawn_detached', { argv }).catch((e) => {
         error = String(e);

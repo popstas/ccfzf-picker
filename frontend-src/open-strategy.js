@@ -36,6 +36,35 @@
   }
 
   /**
+   * Команда, поднимающая агента в каталоге проекта.
+   *
+   * Через **интерактивный** шелл и с `cd` внутри него — форма взята у ccfzf
+   * (`in_dir` там же), и она не про красоту. `ssh host 'cmd'` запускает
+   * неинтерактивный шелл, а zsh в этом случае читает только `.zshenv`: хуки и
+   * экспорты из `.zshrc` не отрабатывают. Проверено 2026-08-05 на example-host:
+   *
+   *   ssh example-host "cd '<проект>' && env | grep OTEL"      -> пусто
+   *   ssh example-host '$SHELL -ic "cd -- <проект> && env|…"'   -> project=neighbor-picker
+   *
+   * То есть агент, поднятый прежней формой, писал телеметрию без имени
+   * проекта. `cd` стоит **после** чтения rc намеренно: так отрабатывает хук
+   * `chpwd` для выбранного каталога, а rc, который сам куда-то переходит
+   * (SSH_STARTDIR и подобное), уже не может увести каталог обратно.
+   *
+   * Кавычки навешиваются дважды: внутренняя команда собирается через `q`, а
+   * потом целиком уходит в `q` ещё раз — её будет разбирать сначала шелл на
+   * той стороне ssh, и только потом `$SHELL -ic`. Двойные кавычки вместо этого
+   * поставить нельзя: в них `$(…)` из чужого пути выполнилось бы.
+   */
+  function inDir(cwd, cmd) {
+    return `exec $SHELL -ic ${q(`cd -- ${q(cwd)} && ${cmd}`)}`;
+  }
+
+  function resumeCommand(cwd, id) {
+    return inDir(cwd, `claude --resume ${q(id)}`);
+  }
+
+  /**
    * argv для запуска терминала. Ввод-вывод делает вызывающий.
    *
    * `destructive` поднимается только у перехвата: это единственная ветка, где
@@ -58,7 +87,7 @@
       // buildAttachCommand и docs/reptyr-experiment.md.
       remote = `exec reptyr -T ${Number(row.pid)}`;
     } else if (strategy === 'resume') {
-      remote = `cd ${q(row.cwd)} && claude --resume ${q(row.id)}`;
+      remote = resumeCommand(row.cwd, row.id);
     } else if (strategy === 'takeover') {
       destructive = true;
       // SIGHUP, а не -9: агент успевает закрыть транскрипт. Ожидание — до 10
@@ -69,7 +98,7 @@
         `kill -HUP ${pid}`,
         `for i in $(seq 20); do kill -0 ${pid} 2>/dev/null || break; sleep 0.5; done`,
         `kill -0 ${pid} 2>/dev/null && { echo "ccfzf-picker: process ${pid} is still alive" >&2; exit 1; }`,
-        `cd ${q(row.cwd)} && claude --resume ${q(row.id)}`,
+        resumeCommand(row.cwd, row.id),
       ].join('; ');
     }
 
@@ -132,5 +161,5 @@
   // собрать удалённую команду (проектные хоткеи в sessions.html), обязан звать
   // именно её, а не писать replace по месту — второй экземпляр этого правила
   // рано или поздно разойдётся с первым.
-  return { q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand };
+  return { q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand };
 });

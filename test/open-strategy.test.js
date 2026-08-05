@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const {
-  q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand,
+  q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
 } = require('../frontend-src/open-strategy');
 
 const ATTACH_42 = `reptyr -T 42 || reptyr "$(pgrep -x -f 'reptyr -T 42' | head -1)"`;
@@ -118,13 +118,27 @@ test('команда reptyr забирает процесс по pid', () => {
   assert.strictEqual(cmd.argv[cmd.argv.length - 1], 'exec reptyr -T 42');
 });
 
-test('команда resume заходит в каталог сессии', () => {
+test('команда resume заходит в каталог сессии через интерактивный шелл', () => {
   const cmd = buildOpenCommand(row(), 'resume', OPTS);
   assert.strictEqual(cmd.destructive, false);
-  assert.strictEqual(
-    cmd.argv[cmd.argv.length - 1],
-    "cd '/home/user/projects/x' && claude --resume 'aaaa-bbbb'",
-  );
+  const remote = cmd.argv[cmd.argv.length - 1];
+  // `ssh host cmd` — неинтерактивный шелл, а zsh читает тогда только .zshenv:
+  // без -i не отработает ни хук chpwd, ни экспорты из .zshrc, и агент пишет
+  // телеметрию без project=. Проверено на example-host 2026-08-05.
+  assert.ok(remote.startsWith('exec $SHELL -ic '), remote);
+  // cd — внутри интерактивного шелла, после чтения rc: иначе rc, который сам
+  // куда-то переходит, уводит каталог обратно.
+  assert.ok(remote.includes("cd -- '\\''/home/user/projects/x'\\''"), remote);
+  assert.ok(remote.includes("claude --resume '\\''aaaa-bbbb'\\''"), remote);
+});
+
+test('двойные кавычки в команде запуска не появляются', () => {
+  // Внутри двойных кавычек $(…) из чужого пути выполнилось бы шеллом на той
+  // стороне. Единственная защита — одинарные, навешенные дважды.
+  const cmd = buildOpenCommand(row({ cwd: '/home/user/$(id)' }), 'resume', OPTS);
+  const remote = cmd.argv[cmd.argv.length - 1];
+  assert.ok(!remote.includes('"'), remote);
+  assert.ok(remote.includes('$(id)'), remote);
 });
 
 test('перехват помечен необратимым и убивает мягко', () => {
@@ -133,12 +147,18 @@ test('перехват помечен необратимым и убивает �
   const remote = cmd.argv[cmd.argv.length - 1];
   assert.ok(remote.startsWith('kill -HUP 42'), remote);
   assert.ok(!remote.includes('-9'), remote);
-  assert.ok(remote.includes("claude --resume 'aaaa-bbbb'"), remote);
+  // Хвост перехвата — та же команда запуска, что и у resume, а не своя копия.
+  assert.ok(remote.endsWith(resumeCommand('/home/user/projects/x', 'aaaa-bbbb')), remote);
 });
 
 test('кавычки в пути не разрывают команду', () => {
   const cmd = buildOpenCommand(row({ cwd: "/home/user/it's" }), 'resume', OPTS);
-  assert.ok(cmd.argv[cmd.argv.length - 1].includes("/home/user/it'\\''s"));
+  // Путь проходит через q дважды, поэтому и лесенка кавычек двойная: первый q
+  // даёт it'\''s, второй экранирует в нём и кавычки, и ничего не делает с
+  // бэкслешем — отсюда \'\'' в середине. String.raw, чтобы написанное здесь
+  // совпадало с тем, что уедет в ssh, знак в знак.
+  assert.ok(cmd.argv[cmd.argv.length - 1].includes(String.raw`it'\''\'\'''\''s`),
+    cmd.argv[cmd.argv.length - 1]);
 });
 
 test('незнакомая стратегия не даёт команды', () => {
