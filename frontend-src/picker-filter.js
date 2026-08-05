@@ -6,7 +6,7 @@
   else root.PickerFilter = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   // Префикс домашней директории Linux не участвует в поиске: иначе «home»
-  // совпадает с каждой сессией под /home/user/.... Сам каталог проекта
+  // совпадает с каждой сессией под /home/<user>/.... Сам каталог проекта
   // `.../home` и ярлык с именем home по-прежнему находятся.
   function searchableCwd(cwd) {
     return String(cwd ?? '').replace(/^\/home(?=\/|$)/i, '');
