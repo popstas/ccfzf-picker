@@ -591,22 +591,28 @@ def reattribute(live, procs, agents, stamps, now, ids_in=None, ttl=HOOK_LIVE_TTL
     Кандидат, уже занятый другим процессом, пропускается — иначе два процесса
     в одном каталоге сошлись бы на одном id. По той же причине занятость
     проверяется по текущему live: переезд, случившийся на предыдущем витке,
-    виден следующему.
+    виден следующему. Свежеосвобождённый id из этого же витка проверяется
+    так же: без него следующий процесс из того же cwd садился бы на id,
+    который только что освободили и с которого в этот транскрипт никто
+    больше не пишет.
 
     Старый id из live убирается: процесс на нём не работает, а лишняя живая
     строка в пикере — это ровно тот симптом, ради которого всё и затевалось.
 
-    Правит на месте и ничего не возвращает: у вызывающего это те же три
-    структуры, которые он потом отдаёт наружу.
+    Правит live/procs/agents на месте, а освобождённые id ещё и возвращает:
+    их отметка хука ещё не остыла (короче HOOK_LIVE_TTL), и live_by_hook(),
+    отработав следом, добавил бы их обратно тем же самым доводом — свежий
+    хук — и свёл бы переезд на нет.
     """
     ids_in = ids_in or session_ids_in
+    moved = set()
     for sid in list(procs):
         cwd = procs[sid].get("cwd") or ""
         if not cwd:
             continue
         best, best_at = "", stamps.get(sid, 0)
         for cand in ids_in(cwd):
-            if cand == sid or cand in live:
+            if cand == sid or cand in live or cand in moved:
                 continue
             at = stamps.get(cand, 0)
             if at > best_at:
@@ -614,24 +620,35 @@ def reattribute(live, procs, agents, stamps, now, ids_in=None, ttl=HOOK_LIVE_TTL
         if not best or now - best_at > ttl:
             continue
         live.discard(sid)
+        moved.add(sid)
         live.add(best)
         procs[best] = procs.pop(sid)
         if sid in agents:
             agents[best] = agents.pop(sid)
+    return moved
 
 
-def live_by_hook(live, stamps, now, ttl=HOOK_LIVE_TTL):
+def live_by_hook(live, stamps, now, skip=None, ttl=HOOK_LIVE_TTL):
     """Свежая отметка хука — довод о жизни сама по себе.
 
     Хук стучит на каждый вызов инструмента работающего агента, поэтому выдаёт
     сессию и там, где /proc её не выдаёт: процесс поднят обёрткой, argv не
     называет ни старого id, ни нового, соседа по каталогу не нашлось.
 
+    skip — id, которые reattribute() только что вынес из live на этом же
+    витке. Их отметка хука ещё не остыла, и без этого исключения она была бы
+    таким же доводом о жизни, как и у всех остальных — то есть id вернулся
+    бы в live тем же вызовом, что его убрал, и дублирующая строка, ради
+    ухода от которой затевался переезд, провисела бы в пикере весь HOOK_LIVE_TTL.
+
     Только добавляет, никогда не убавляет. Молчание ничего не значит: сессия,
     ждущая ответа человека, не шлёт хуков часами и при этом жива — и её
     единственный честный признак по-прежнему живой процесс.
     """
+    skip = skip or ()
     for sid, at in stamps.items():
+        if sid in skip:
+            continue
         if now - at <= ttl:
             live.add(sid)
 
@@ -722,10 +739,13 @@ def running_sessions():
     # деле, а live_by_hook раздаёт живость сессиям без процесса и тем самым
     # закрыл бы кандидатов для переезда. И только переезд умеет снимать живость
     # со сменившегося id — сам по себе он бы так и остался вторым chats-inspect
-    # в списке.
+    # в списке. Второй проход обязан знать, что освободил первый: у только что
+    # покинутого id отметка хука ещё моложе HOOK_LIVE_TTL, и live_by_hook,
+    # не зная про skip, добавил бы его обратно тем же доводом — той самой
+    # дублирующей строкой, ради ухода от которой reattribute вообще существует.
     stamps = hook_stamps()
-    reattribute(live, procs, agents, stamps, now)
-    live_by_hook(live, stamps, now)
+    moved = reattribute(live, procs, agents, stamps, now)
+    live_by_hook(live, stamps, now, skip=moved)
     return live, agents, procs
 
 
