@@ -10,6 +10,28 @@ test('сводка берётся из summary, а у работающей се�
   assert.strictEqual(sessionDescription(null), '');
 });
 
+test('вопрос агента перебивает сводку, пока сессия на нём стоит', () => {
+  const waiting = {
+    state: 'question', question: ' Какой вариант? ',
+    summary: 'Готово', lastSummary: 'старое',
+  };
+  assert.strictEqual(sessionDescription(waiting), 'Какой вариант?');
+  // Ход кончился — вопрос уже неактуален, даже если поле ещё не стёрли.
+  assert.strictEqual(sessionDescription({ ...waiting, state: 'review' }), 'Готово');
+  assert.strictEqual(sessionDescription({ ...waiting, state: 'active' }), 'Готово');
+  // Запрос разрешения: состояние то же самое, а текста вопроса нет нигде —
+  // берётся сводка, иначе строка показала бы вопрос прошлой команды.
+  assert.strictEqual(
+    sessionDescription({ state: 'question', question: '   ', summary: 'Готово' }),
+    'Готово',
+  );
+  // Вопрос есть, сводки нет вовсе — строка не пустеет.
+  assert.strictEqual(
+    sessionDescription({ state: 'question', question: 'Какой вариант?' }),
+    'Какой вариант?',
+  );
+});
+
 test('последняя активность — из отметки хука', () => {
   assert.strictEqual(lastActivityAt({ updated: 1785858452 }), 1785858452);
   assert.strictEqual(lastActivityAt({ updated: 0 }), null);

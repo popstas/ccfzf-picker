@@ -8,8 +8,19 @@
    *
    * Считается в одном месте, чтобы не расходилась: `summary` пуст, пока ход
    * не закончен, и у работающей сессии годится только `lastSummary`.
+   *
+   * У сессии, стоящей на вопросе, обе сводки перебивает сам вопрос: сводка
+   * отвечает «чем закончила», а такая сессия ничем не закончила — она ждёт, и
+   * нужно от неё ровно одно: что у неё спросили.
+   *
+   * Сверка с состоянием обязательна, и она не перестраховка. Поле `question`
+   * живёт только пока вызов AskUserQuestion не закрыт, но состояние `question`
+   * хук ставит и на запрос разрешения — а там текста вопроса нет нигде. Без
+   * сверки такая сессия показала бы вопрос, на который давно ответили.
    */
   function sessionDescription(agent) {
+    const question = typeof (agent || {}).question === 'string' ? agent.question.trim() : '';
+    if (question && (agent || {}).state === 'question') return question;
     const summary = typeof (agent || {}).summary === 'string' ? agent.summary.trim() : '';
     if (summary) return summary;
     return typeof (agent || {}).lastSummary === 'string' ? agent.lastSummary.trim() : '';
