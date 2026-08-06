@@ -148,6 +148,15 @@ WINDOWS_TTL = 120
 # килобайт. Задержка в тридцать секунд не видна: сам трекер узнаёт новую
 # сессию не быстрее (кэш индекса 15 с плюс два тика на устоявшийся заголовок).
 STATE_DUMP_MAX_AGE = 30
+# Сколько секунд отметка хука считается доводом о том, что сессия работает.
+# Хук стучит на каждый вызов инструмента, поэтому у работающего агента отметка
+# всегда моложе минуты. Две — запас на длинный вызов и на часы, разъехавшиеся
+# между машинами.
+#
+# Срок годности только добавляет живых, а не убавляет: молчащая отметка ничего
+# не доказывает — сессия, ждущая ответа человека, не шлёт хуков часами и при
+# этом жива.
+HOOK_LIVE_TTL = 120
 
 DIM, GREEN, YELLOW, CYAN, RESET = "\033[2m", "\033[32m", "\033[33m", "\033[36m", "\033[0m"
 
@@ -487,6 +496,36 @@ def proc_tty(pid):
     return target if target.startswith("/dev/") else ""
 
 
+def proc_cwd(pid):
+    """Рабочий каталог процесса, пустая строка — не прочитался."""
+    try:
+        return os.readlink("/proc/%s/cwd" % pid)
+    except OSError:
+        return ""
+
+
+def proc_started(pid):
+    """Момент запуска процесса в тиках от загрузки, 0 — не прочиталось.
+
+    Нужен против переиспользования номеров: pid, записанный хуком вчера, сегодня
+    может принадлежать чему угодно, а пара (pid, момент запуска) уникальна в
+    пределах одной загрузки.
+
+    Второе поле /proc/*/stat — comm в скобках, и в нём бывают пробелы, поэтому
+    строка режется по последней `") "`, а не по номеру поля. Дальше idx 19 —
+    это 22-е поле, starttime.
+    """
+    try:
+        with open("/proc/%s/stat" % pid) as fh:
+            rest = fh.read().rpartition(") ")[2]
+    except OSError:
+        return 0
+    try:
+        return int(rest.split()[19])
+    except (IndexError, ValueError):
+        return 0
+
+
 def proc_tmux(pid):
     """`session:window.pane`, если процесс живёт внутри tmux, иначе None.
 
@@ -516,6 +555,233 @@ def proc_tmux(pid):
         return None
     target = out.stdout.strip()
     return target or None
+
+
+def hook_stamps(path=STATUS_DIR):
+    """{id сессии: когда её хук писал в последний раз}.
+
+    Берётся mtime файла, а не поле `updated` внутри: расходятся они меньше чем
+    на секунду (замерено 2026-08-06: 0.3 с и 0.7 с), а один scandir по каталогу
+    стоит долей миллисекунды против того, чтобы открыть и разобрать каждый файл.
+    Разница в секунду здесь ни на что не влияет — отметки сравниваются между
+    собой и со сроком в две минуты.
+
+    Каталог чужой: его наполняют хуки, и в нём лежат ещё .status.json и
+    .meta.json. Всё, что не похоже на `<uuid>.state.json`, пропускается молча,
+    как и пропавший каталог: без хуков ccfzf работает как раньше.
+    """
+    out = {}
+    tail = ".state.json"
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                if not entry.name.endswith(tail):
+                    continue
+                sid = entry.name[:-len(tail)]
+                if not UUID_RE.match(sid):
+                    continue
+                try:
+                    out[sid] = entry.stat().st_mtime
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return out
+
+
+def boot_id():
+    """Идентификатор текущей загрузки, пустая строка — не прочиталось."""
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def pid_owners(path=STATUS_DIR, boot=None):
+    """{pid: (id сессии, момент запуска процесса)} — кто чем занят на самом деле.
+
+    Хук пишет `<id>.meta.json` в момент старта сессии, и смена id на ходу
+    (`/clear`, сжатие) — тоже старт: замерено 2026-08-06, у переехавшего
+    86d67681 в meta стоит `source: clear`. Значит в этих файлах лежит прямая
+    связь процесса с той сессией, которую он пишет сейчас, — не догадка по
+    соседям в каталоге и без срока годности: процесс либо жив, либо нет.
+
+    У одного pid таких файлов столько, сколько раз внутри него сменился id,
+    поэтому побеждает запись с самым поздним `started`.
+
+    Чужая загрузка отсекается по boot_id: тики starttime считаются от неё, и
+    без этой проверки вчерашняя запись совпала бы с сегодняшним процессом,
+    занявшим тот же номер в ту же секунду после загрузки. Записи без pid — это
+    файлы, написанные хуком старой версии; они просто не участвуют.
+
+    Цена: открыть все meta разом. Замерено 2026-08-06 — 1.9 мс на 69 файлов
+    вчетверо большего размера, при опросе раз в секунду это ничего не стоит.
+    """
+    boot = boot_id() if boot is None else boot
+    tail = ".meta.json"
+    best = {}
+    try:
+        with os.scandir(path) as it:
+            names = [e.name for e in it if e.name.endswith(tail)]
+    except OSError:
+        return {}
+    for name in names:
+        if not UUID_RE.match(name[:-len(tail)]):
+            continue
+        try:
+            with open(os.path.join(path, name)) as fh:
+                meta = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        pid = meta.get("pid") or 0
+        if not pid or not meta.get("boot") or meta["boot"] != boot:
+            continue
+        started = meta.get("started") or 0
+        if pid in best and best[pid][0] >= started:
+            continue
+        best[pid] = (started, name[:-len(tail)], meta.get("pidStarted") or 0)
+    return {pid: (sid, tick) for pid, (_, sid, tick) in best.items()}
+
+
+def reattribute_by_pid(live, procs, agents, owners, started_of=None):
+    """Переезд по pid — тот же перенос, что и reattribute(), но без гадания.
+
+    reattribute() ищет новый id среди соседей по каталогу и верит самой свежей
+    отметке хука, поэтому вынужден жить со сроком годности: старая отметка уже
+    ничего не доказывает. Здесь доказательство прямое — хук записал pid рядом с
+    id в момент смены, — и устареть оно не может: пока процесс жив, он пишет
+    именно эту сессию. Замерено 2026-08-06: 3049996 сутки писал 86d67681,
+    отметка его хука к моменту замера остыла до 69 минут, и по ней переезд уже
+    не срабатывал, а по pid срабатывает всегда.
+
+    Момент запуска сверяется с тем, что записал хук: номера переиспользуются, и
+    без сверки процесс, занявший освободившийся pid, унаследовал бы чужую
+    сессию. Запись без момента запуска (0) принимается как есть — так себя ведут
+    файлы от хука, который его ещё не писал.
+
+    Возвращает (освобождённые id, улаженные id). Первое нужно live_by_hook(),
+    второе — reattribute(): процесс, чью сессию уже назвали по pid, гадать по
+    каталогу больше не о чем, и подставлять его под ошибку соседа незачем.
+    """
+    started_of = started_of or proc_started
+    moved, resolved = set(), set()
+    for sid in list(procs):
+        pid = procs[sid].get("pid") or 0
+        owner = owners.get(pid)
+        if not owner:
+            continue
+        target, tick = owner
+        if tick and started_of(pid) != tick:
+            continue
+        if target == sid:
+            resolved.add(sid)
+            continue
+        if target in live:
+            continue
+        live.discard(sid)
+        moved.add(sid)
+        live.add(target)
+        procs[target] = procs.pop(sid)
+        if sid in agents:
+            agents[target] = agents.pop(sid)
+        resolved.add(target)
+    return moved, resolved
+
+
+def session_ids_in(cwd):
+    """id всех транскриптов, лежащих в каталоге проекта этого cwd."""
+    pattern = os.path.join(PROJECTS_DIR, mangle(cwd), "*.jsonl")
+    return [os.path.basename(p)[:-len(".jsonl")] for p in glob.glob(pattern)]
+
+
+def reattribute(live, procs, agents, stamps, now, ids_in=None, ttl=HOOK_LIVE_TTL,
+                skip_procs=None):
+    """Процесс, сменивший id на ходу, переезжает на тот, что пишется сейчас.
+
+    Запасной путь к reattribute_by_pid(): работает там, где pid'а в meta нет —
+    у сессий, поднятых до того, как хук научился его писать. Отсюда и догадка
+    по каталогу, и срок годности; у прямого переезда по pid ни того, ни другого
+    не нужно, поэтому улаженные им процессы сюда не попадают (skip_procs).
+
+    argv называет id, с которого сессия начиналась (`--session-id`/`--resume`),
+    а Claude Code меняет id внутри живого процесса — и после этого argv
+    указывает на транскрипт, в который больше никто не пишет. Замерено
+    2026-08-06: `claude --resume 6c6931cf` сутки как писал 86d67681. Флаг live
+    стоял на мёртвом id, работающая сессия числилась мёртвой и пряталась из
+    пикера (`onlyLive`), хотя окно терминала принадлежало именно ей.
+
+    Кандидаты — соседи по каталогу проекта: id меняется внутри процесса, а cwd
+    нет. Побеждает тот, чей хук писал позже argv-сессии, и только если он писал
+    только что: отметка старше ttl значит «когда-то работала», а не «процесс
+    сейчас на ней».
+
+    Кандидат, уже занятый другим процессом, пропускается — иначе два процесса
+    в одном каталоге сошлись бы на одном id. По той же причине занятость
+    проверяется по текущему live: переезд, случившийся на предыдущем витке,
+    виден следующему. Свежеосвобождённый id из этого же витка проверяется
+    так же: без него следующий процесс из того же cwd садился бы на id,
+    который только что освободили и с которого в этот транскрипт никто
+    больше не пишет.
+
+    Старый id из live убирается: процесс на нём не работает, а лишняя живая
+    строка в пикере — это ровно тот симптом, ради которого всё и затевалось.
+
+    Правит live/procs/agents на месте, а освобождённые id ещё и возвращает:
+    их отметка хука ещё не остыла (короче HOOK_LIVE_TTL), и live_by_hook(),
+    отработав следом, добавил бы их обратно тем же самым доводом — свежий
+    хук — и свёл бы переезд на нет.
+    """
+    ids_in = ids_in or session_ids_in
+    skip_procs = skip_procs or ()
+    moved = set()
+    for sid in list(procs):
+        if sid in skip_procs:
+            continue
+        cwd = procs[sid].get("cwd") or ""
+        if not cwd:
+            continue
+        best, best_at = "", stamps.get(sid, 0)
+        for cand in ids_in(cwd):
+            if cand == sid or cand in live or cand in moved:
+                continue
+            at = stamps.get(cand, 0)
+            if at > best_at:
+                best, best_at = cand, at
+        if not best or now - best_at > ttl:
+            continue
+        live.discard(sid)
+        moved.add(sid)
+        live.add(best)
+        procs[best] = procs.pop(sid)
+        if sid in agents:
+            agents[best] = agents.pop(sid)
+    return moved
+
+
+def live_by_hook(live, stamps, now, skip=None, ttl=HOOK_LIVE_TTL):
+    """Свежая отметка хука — довод о жизни сама по себе.
+
+    Хук стучит на каждый вызов инструмента работающего агента, поэтому выдаёт
+    сессию и там, где /proc её не выдаёт: процесс поднят обёрткой, argv не
+    называет ни старого id, ни нового, соседа по каталогу не нашлось.
+
+    skip — id, которые reattribute() только что вынес из live на этом же
+    витке. Их отметка хука ещё не остыла, и без этого исключения она была бы
+    таким же доводом о жизни, как и у всех остальных — то есть id вернулся
+    бы в live тем же вызовом, что его убрал, и дублирующая строка, ради
+    ухода от которой затевался переезд, провисела бы в пикере весь HOOK_LIVE_TTL.
+
+    Только добавляет, никогда не убавляет. Молчание ничего не значит: сессия,
+    ждущая ответа человека, не шлёт хуков часами и при этом жива — и её
+    единственный честный признак по-прежнему живой процесс.
+    """
+    skip = skip or ()
+    for sid, at in stamps.items():
+        if sid in skip:
+            continue
+        if now - at <= ttl:
+            live.add(sid)
 
 
 def running_sessions():
@@ -564,16 +830,19 @@ def running_sessions():
         sid = sid or resumed_id
 
         if not sid:
-            try:
-                fresh.append(os.readlink("/proc/%s/cwd" % pid))
-            except OSError:
-                pass
+            cwd = proc_cwd(pid)
+            if cwd:
+                fresh.append(cwd)
             continue
 
         live.add(sid)
         # Чем сессия занята: без pid её нельзя ни перехватить, ни хотя бы
         # честно показать человеку, что открытие будет не тихим resume.
-        procs[sid] = {"pid": int(pid), "tty": proc_tty(pid), "tmux": proc_tmux(pid)}
+        # cwd — не диагностика: по нему reattribute() ищет соседей по каталогу
+        # проекта, когда id сессии сменился внутри процесса. Наружу поле не
+        # уходит — режим state перечисляет то, что отдаёт, поимённо.
+        procs[sid] = {"pid": int(pid), "tty": proc_tty(pid), "tmux": proc_tmux(pid),
+                      "cwd": proc_cwd(pid)}
         # A background agent is hosted by the daemon through a pty host; that
         # ancestry is the only honest mark of one. `--fork-session` alone is
         # not: it is a normal way to branch a session by hand.
@@ -584,7 +853,8 @@ def running_sessions():
         if "bg-pty-host" in host:
             agents[sid] = {"kind": "background", "parent": parent}
 
-    cutoff = time.time() - 2 * 3600  # a fresh start writes now, not a day ago
+    now = time.time()
+    cutoff = now - 2 * 3600  # a fresh start writes now, not a day ago
     for cwd, k in Counter(fresh).items():
         files = sorted(glob.glob(os.path.join(PROJECTS_DIR, mangle(cwd), "*.jsonl")),
                        key=os.path.getmtime, reverse=True)
@@ -595,6 +865,24 @@ def running_sessions():
             if sid not in live:
                 live.add(sid)
                 k -= 1
+
+    # Порядок важен. Переезд идёт первым: ему нужно знать, кто занят на самом
+    # деле, а live_by_hook раздаёт живость сессиям без процесса и тем самым
+    # закрыл бы кандидатов для переезда. И только переезд умеет снимать живость
+    # со сменившегося id — сам по себе он бы так и остался вторым chats-inspect
+    # в списке. Второй проход обязан знать, что освободил первый: у только что
+    # покинутого id отметка хука ещё моложе HOOK_LIVE_TTL, и live_by_hook,
+    # не зная про skip, добавил бы его обратно тем же доводом — той самой
+    # дублирующей строкой, ради ухода от которой reattribute вообще существует.
+    # Переезд по pid идёт раньше переезда по отметке: он знает ответ, а не
+    # выбирает лучшего из соседей, и потому не нуждается ни в сроке годности,
+    # ни в догадке. Что он уладил, второй проход не трогает — иначе процесс,
+    # чью сессию уже назвали точно, мог бы уехать к соседу, который закрылся
+    # минуту назад и оставил после себя отметку свежее.
+    stamps = hook_stamps()
+    moved, resolved = reattribute_by_pid(live, procs, agents, pid_owners())
+    moved |= reattribute(live, procs, agents, stamps, now, skip_procs=resolved)
+    live_by_hook(live, stamps, now, skip=moved)
     return live, agents, procs
 
 
@@ -690,7 +978,9 @@ def stale_dump(path, now, max_age):
         return True
 
 
-mode = sys.argv[1]
+# Пустой режим — не ошибка: так блок выполняют тесты, которым нужны только
+# определения. Ни одна ветка ниже на пустую строку не отвечает.
+mode = sys.argv[1] if len(sys.argv) > 1 else ""
 
 if mode == "projects":
     marks = read_marks(sys.argv[2])
