@@ -76,9 +76,10 @@ mod["STATUS_DIR"] = tmp
 # <id>.meta.json, а строго по UUID_RE. Прежним sid вида "idle"/"old"/"bad" это
 # было всё равно: их meta.json никто не писал. Здесь пишем, и без формата
 # настоящего id запись прошла бы мимо фильтра и не попала бы в ответ.
-FULL, METAONLY = (
+FULL, METAONLY, OLDER = (
     "aaaaaaaa-1111-2222-3333-444444444444",
     "bbbbbbbb-1111-2222-3333-444444444444",
+    "cccccccc-1111-2222-3333-444444444444",
 )
 TURN, START = 1785958000, 1785950000
 write(FULL, ".state.json", {
@@ -87,8 +88,11 @@ write(FULL, ".state.json", {
     "message": "Claude needs your permission to use Bash",
 })
 write(FULL, ".meta.json", {"started": START})
-# Сессия старше появления полей: state.json есть, meta.json нет.
-write("older", ".state.json", {"state": "idle", "updated": IDLE})
+# Сессия старше появления полей: state.json есть, meta.json нет. Id — тоже
+# настоящий UUID, как у FULL и METAONLY: иначе «нет started» проходила бы по
+# двум причинам сразу — meta.json и правда нет, но и не-UUID имя отсеялось бы
+# фильтром meta_all ещё раньше, и проверка не отличила бы одно от другого.
+write(OLDER, ".state.json", {"state": "idle", "updated": IDLE})
 write("badturn", ".state.json", {"state": "active", "updated": NOW, "turnAt": "90"})
 write(METAONLY, ".meta.json", {"started": START})
 
@@ -101,10 +105,10 @@ check("вопрос", full["question"], "Какой вариант?")
 check("уведомление", full["message"], "Claude needs your permission to use Bash")
 
 # 6. Сессия старше появления этих полей: умолчания, а не KeyError.
-check("нет turnAt", agent_of("older")["turnAt"], 0)
-check("нет started", agent_of("older")["started"], 0)
-check("нет question", agent_of("older")["question"], "")
-check("нет message", agent_of("older")["message"], "")
+check("нет turnAt", agent_of(OLDER)["turnAt"], 0)
+check("нет started", agent_of(OLDER)["started"], 0)
+check("нет question", agent_of(OLDER)["question"], "")
+check("нет message", agent_of(OLDER)["message"], "")
 
 # 7. Испорченная отметка хода — ноль, как и у updated.
 check("строковый turnAt", agent_of("badturn")["turnAt"], 0)

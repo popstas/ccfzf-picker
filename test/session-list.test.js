@@ -90,6 +90,22 @@ test('пустой список сессий даёт пустой список 
   assert.deepStrictEqual(buildSessionList({}), []);
 });
 
+// Фоновый агент отвечает за turnAt/message/question/state — это его работа
+// показывается в строке. Но started — про саму строку, а не про того, кто в
+// ней сейчас работает: старт принадлежит сессии, и увод в форк его не меняет.
+test('agentStarted берётся у самой сессии, а не у фонового агента', () => {
+  const rows = buildSessionList({
+    sessions: [
+      state({ id: 'p', agent: { updated: 100, started: 50, turnAt: 40, summary: 'ушёл в фон' } }),
+      state({ id: 'c', kind: 'background', parent: 'p',
+              agent: { updated: 200, started: 999, turnAt: 150, summary: 'работаю' } }),
+    ],
+    seen: {},
+  });
+  assert.strictEqual(rows[0].agentStarted, 50);
+  assert.strictEqual(rows[0].agentTurnAt, 150);
+});
+
 test('поля хода, старта и уведомления доезжают до строки', () => {
   const rows = buildSessionList({
     sessions: [state({ agent: {
