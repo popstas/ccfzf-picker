@@ -41,14 +41,20 @@ function aggregatorSession(extra) {
     agent: {
       state: 'review',
       event: 'stop',
+      // Пусто у не-attention: базовая фикстура — сессия, закончившая ход.
+      message: '',
       summary: 'Готово — сборка зелёная',
       lastSummary: 'Чинил сборку',
       prompt: 'почини сборку',
+      // Пусто: вопрос живёт только пока вызов AskUserQuestion не закрыт.
+      question: '',
       branch: 'feat/x',
       pr_url: 'https://github.com/popstas/ccfzf/pull/3',
       costUsd: 3,
       contextPct: 41,
       updated: 1785870255,
+      turnAt: 1785870015,   // пять минут до NOW
+      started: 1785869115,  // двадцать минут до NOW
     },
   }, extra || {});
 }
@@ -117,9 +123,9 @@ test('строка доезжает до подсказки и до карточ
   assert.strictEqual(value('pr_url'), 'https://github.com/popstas/ccfzf/pull/3');
   assert.match(value('last activity'), /^\d{2}:\d{2} · 1m$/);
   assert.match(value('focused'), /^\d{2}:\d{2} · /);
-  // Карточка — про то, чего не видно в строке; из 18 её строк здесь ждём 15
-  // (started/message нечем заполнить, agent — не фоновая).
-  assert.strictEqual(rows.length, 15);
+  // Карточка — про то, чего не видно в строке; из 19 её строк здесь ждём 17
+  // (message пуст у сессии, закончившей ход, agent — не фоновая).
+  assert.strictEqual(rows.length, 17);
   for (const r of rows) assert.ok(!r.value.includes('undefined'), `${r.label}: ${r.value}`);
 });
 
@@ -149,24 +155,60 @@ test('сессия без записи агента рисуется пусто,
   }
 });
 
-test('поля без источника не роняют отрисовку и не печатают «undefined»', () => {
+test('единственное поле без источника не роняет отрисовку', () => {
   const row = firstRow([aggregatorSession()]);
-  // Ни одного из этих четырёх ccfzf --state не отдаёт (ни в сессии, ни в
-  // записи агента), и придумывать их нечем. Проверяем не отсутствие ради
-  // отсутствия, а то, что отрисовщики от него не портятся.
-  for (const key of ['agentStarted', 'agentTurnAt', 'agentMessage', 'hotkey']) {
+  // hotkey — понятие windows11-manager (claudeWt.projects), desktop — номер
+  // рабочего стола Windows. Источника у них здесь нет и не будет, поэтому
+  // проверяется не отсутствие ради отсутствия, а то, что отрисовка от него не
+  // портится. Остальные три имени этот тест сторожил до того, как строка
+  // начала их отдавать, — см. тест ниже.
+  for (const key of ['hotkey', 'desktop']) {
     assert.ok(!(key in row), `${key} не должен появляться из ниоткуда`);
   }
-  // hotkey: пустая колонка, а не «undefined».
   assert.strictEqual(Glyph.hotkeyHtml(row, true), '<div class="hk"></div>');
-  // agentTurnAt: возраст падает обратно на lastActivity.
-  assert.strictEqual(Glyph.ageHtml({ ...row, agentState: 'active' }, NOW),
-    '<div class="age">1m</div>');
-  // agentMessage: подсказка просто его не содержит.
   assert.ok(!Glyph.rowTitle(row).includes('undefined'));
-  // agentStarted: строки «started» в карточке нет, а сортировки по нему
-  // вырождаются в устойчивый порядок по имени и id (см. session-groups.test.js).
-  assert.ok(!buildSessionInfoRows(row, NOW).some(r => r.label === 'started'));
+});
+
+test('ход, старт и уведомление доезжают с настоящего пути до отрисовщиков', () => {
+  // Колонка возраста у работающей сессии — про текущий ход, а не про секунды
+  // с последнего вызова инструмента: их десятки в минуту.
+  const working = aggregatorSession({
+    agent: { ...aggregatorSession().agent, state: 'active' },
+  });
+  assert.strictEqual(Glyph.ageHtml(firstRow([working]), NOW), '<div class="age">5m</div>');
+  // Ход кончился — колонка снова про активность.
+  assert.strictEqual(Glyph.ageHtml(firstRow([aggregatorSession()]), NOW),
+    '<div class="age">1m</div>');
+
+  const rows = buildSessionInfoRows(firstRow([aggregatorSession()]), NOW);
+  const value = label => rows.find(r => r.label === label)?.value;
+  assert.match(value('started'), /^\d{2}:\d{2} · 20m$/);
+  assert.match(value('turn'), /^\d{2}:\d{2} · 5m$/);
+
+  // Уведомление доезжает до подсказки, а фраза про простое — гасится: она
+  // висела бы на каждой отдохнувшей сессии и вытесняла то, ради чего в
+  // подсказку и смотрят.
+  const asking = aggregatorSession({
+    agent: { ...aggregatorSession().agent, state: 'question',
+             message: 'Claude needs your permission to use Bash' },
+  });
+  assert.ok(Glyph.rowTitle(firstRow([asking])).includes('permission to use Bash'));
+  const resting = aggregatorSession({
+    agent: { ...aggregatorSession().agent, state: 'idle',
+             message: 'Claude is waiting for your input' },
+  });
+  assert.ok(!Glyph.rowTitle(firstRow([resting])).includes('waiting for your input'));
+});
+
+test('вопрос доезжает с настоящего пути и перебивает сводку', () => {
+  const waiting = aggregatorSession({
+    agent: { ...aggregatorSession().agent, state: 'question',
+             question: 'Какой вариант — A или B?' },
+  });
+  const row = firstRow([waiting]);
+  assert.strictEqual(row.agentDescription, 'Какой вариант — A или B?');
+  assert.ok(Glyph.rowTitle(row).includes('Какой вариант — A или B?'));
+  assert.ok(!Glyph.rowTitle(row).includes('Готово — сборка зелёная'));
 });
 
 test('сортировка по деньгам читает то же поле, что строка кладёт', () => {
@@ -191,9 +233,9 @@ const CONSUMERS = [
 ];
 
 // Читаются с сессии, но источника не имеют. desktop — понятие Windows,
-// которого на этом проекте нет вовсе (см. groupSessions); остальные четыре —
-// см. тест выше.
-const NO_SOURCE = new Set(['agentStarted', 'agentTurnAt', 'agentMessage', 'hotkey', 'desktop']);
+// которого на этом проекте нет вовсе (см. groupSessions); hotkey — понятие
+// windows11-manager, список claudeWt.projects живёт только в его конфиге.
+const NO_SOURCE = new Set(['hotkey', 'desktop']);
 
 function readsOfConsumers() {
   const names = new Set();

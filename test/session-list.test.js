@@ -89,3 +89,33 @@ test('пустой список сессий даёт пустой список 
   assert.deepStrictEqual(buildSessionList({ sessions: [], seen: {} }), []);
   assert.deepStrictEqual(buildSessionList({}), []);
 });
+
+test('поля хода, старта и уведомления доезжают до строки', () => {
+  const rows = buildSessionList({
+    sessions: [state({ agent: {
+      state: 'active', updated: 500, turnAt: 400, started: 100,
+      message: 'Claude needs your permission to use Bash',
+    } })],
+    seen: {},
+  });
+  assert.strictEqual(rows[0].agentTurnAt, 400);
+  assert.strictEqual(rows[0].agentStarted, 100);
+  assert.strictEqual(rows[0].agentMessage, 'Claude needs your permission to use Bash');
+});
+
+// Сессия, поднятая до появления этих полей: ноль и пустая строка значат
+// «данных нет», и каждый читатель это переживает — колонка возраста
+// откатывается на lastActivity, строки карточки просто не печатаются.
+test('без новых полей строка отдаёт умолчания, а не undefined', () => {
+  const withAgent = buildSessionList({
+    sessions: [state({ agent: { state: 'idle', updated: 500 } })], seen: {},
+  })[0];
+  assert.strictEqual(withAgent.agentTurnAt, 0);
+  assert.strictEqual(withAgent.agentStarted, 0);
+  assert.strictEqual(withAgent.agentMessage, '');
+
+  const noAgent = buildSessionList({ sessions: [state({ agent: null })], seen: {} })[0];
+  assert.strictEqual(noAgent.agentTurnAt, 0);
+  assert.strictEqual(noAgent.agentStarted, 0);
+  assert.strictEqual(noAgent.agentMessage, '');
+});

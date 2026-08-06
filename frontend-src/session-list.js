@@ -61,10 +61,19 @@
           pr_url: (agent || {}).pr_url || '',
           agentState: (agent || {}).state || '',
           agentEvent: (agent || {}).event || '',
+          // Уведомление агента. Непусто только на attention; у сессии, ждущей
+          // разрешения, это единственное, что о ней известно — текста самого
+          // вопроса там нет нигде.
+          agentMessage: (agent || {}).message || '',
           agentDescription: agentApi.sessionDescription(agent),
           agentPrompt: (agent || {}).prompt || '',
           agentCostUsd: (agent || {}).costUsd || 0,
           agentContextPct: (agent || {}).contextPct || 0,
+          // Начало текущего хода и старт всей сессии. Ноль — «сессия старше
+          // появления поля»: колонка возраста тогда откатывается на
+          // lastActivity, а строки карточки не печатаются.
+          agentTurnAt: (agent || {}).turnAt || 0,
+          agentStarted: (agent || {}).started || 0,
           lastActivity: agentApi.lastActivityAt(agent) || 0,
           // «Человек это видел», а не «не видел»: отрисовщики спрашивают именно
           // так (dotState гасит кружок по agentSeen, карточка печатает
