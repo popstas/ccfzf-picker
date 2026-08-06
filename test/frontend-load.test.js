@@ -44,6 +44,14 @@ test('порядок тегов таков, что каждый модуль н�
     1,
   );
   assert.strictEqual(ctx.ConfigShape.normalizeConfig(null).onlyLive, true);
+  // С непустым actions — иначе разбор конфига до ActionHotkey не доходит вовсе
+  // и порядок этой пары тегов остался бы непроверенным.
+  assert.strictEqual(
+    ctx.ConfigShape.normalizeConfig({
+      actions: [{ id: 'open', hotkey: 'Ctrl+Shift+E', argv: ['x', '{localPath}'] }],
+    }).actions[0].hotkey,
+    'Ctrl+Shift+E',
+  );
   assert.strictEqual(
     ctx.UiState.normalizeUiState({ sort: 'нет такой' }, { toggles: {} }).sort,
     ctx.SessionGroups.DEFAULT_SORT,

@@ -18,6 +18,8 @@ const FILES = [
   'frontend-src/ui-state.js',
   'frontend-src/session-glyph.js',
   'frontend-src/session-info.js',
+  'frontend-src/path-map.js',
+  'frontend-src/action-hotkey.js',
   'frontend-src/session-actions.js',
   'frontend-src/config-shape.js',
   'frontend-src/picker-filter.js',

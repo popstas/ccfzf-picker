@@ -251,6 +251,12 @@
      момент загрузки, и в обратном порядке ему достался бы undefined. Тесты
      этого не поймают — там require, а он от порядка тегов не зависит. -->
 <script src="open-strategy.js"></script>
+<!-- path-map до session-actions, action-hotkey до config-shape: оба берут
+     соседа из globalThis в момент загрузки, и в обратном порядке им достался бы
+     undefined. Тесты этого не поймают — там require, а он от порядка тегов не
+     зависит; ловит порядок test/frontend-load.test.js. -->
+<script src="path-map.js"></script>
+<script src="action-hotkey.js"></script>
 <script src="session-actions.js"></script>
 <script src="config-shape.js"></script>
 <script src="picker-filter.js"></script>
@@ -259,7 +265,10 @@
   let groups = [];
   let rows = [];
   let active = 0;
-  let sortMode = 'cost';
+  // Умолчание — из session-groups, а не литералом: иначе список открывался бы
+  // в одном порядке, а ui.json без сохранённой сортировки нормализовался бы в
+  // другой.
+  let sortMode = window.SessionGroups.DEFAULT_SORT;
   // Прочитанное живёт на этой машине: трекера окон здесь нет, отметку ставит
   // само открытие сессии. Читается из ~/.config/ccfzf-picker/seen.json один
   // раз за загрузку окна — см. start().
@@ -352,10 +361,9 @@
   // литералами рядом — эти две записи могли разъехаться, и меню обещало бы
   // клавишу, которая на деле не работает (или наоборот).
   //
-  // Ключи — те же три, что перечисляет availableActions. Действия `terminal`
-  // здесь больше нет: на маке открытие сессии и есть открытие терминала, оно
-  // висит на Enter и на клике, и пунктом меню было бы вторым именем того же.
-  const ACTION_KEYS = { pr: 'p', unread: 'u', attach: 'r', info: 'i' };
+  // Сама таблица переехала в action-hotkey.js: с ней сверяется разбор конфига,
+  // чтобы настроенному действию не досталась уже занятая окном комбинация.
+  const { BUILTIN_ACTION_KEYS: ACTION_KEYS, matchesHotkey } = window.ActionHotkey;
   // Обработчики сверяют e.code, а не e.key: key — это напечатанный знак, и в
   // русской раскладке ^R приходит как «к», ^K как «л». Физическая клавиша от
   // раскладки не зависит, и подпись в меню остаётся честной в любой из них.
@@ -469,6 +477,10 @@
         // пометит: спрашиваем то же availableActions, что и меню Ctrl+K.
         // Раньше здесь стоял agentState, и обещание расходилось с делом на
         // сессиях, которых человек ещё не открывал.
+        //
+        // Конфиг сюда не передаётся намеренно: спрашивают про один встроенный
+        // пункт, а настроенное действие с тем же id зажгло бы подсказку про
+        // Shift+клик там, где Shift+клик ничего не сделает.
         const markable = window.SessionActions.availableActions(session).some(a => a.id === 'unread');
         const html = `<div class="row ${session.live ? '' : 'closed'}${markable ? ' markable' : ''}" data-index="${index}"${titleAttr(session)}>` +
           statusDotHtml(session) +
@@ -765,9 +777,14 @@
       actionsEmpty.style.display = 'none';
       // Клавиша справа — из ACTION_KEYS (единая таблица, см. её объявление
       // выше): нет записи для id — ничего не рисуем, пустой элемент не нужен.
+      //
+      // У настроенных действий клавиша своя и показывается строкой из конфига
+      // как есть, а не пересобирается из разобранной комбинации: пересборка
+      // разошлась бы с тем, что человек написал в файле.
       actionsList.innerHTML = menuActions.map((action, index) => {
         const key = ACTION_KEYS[action.id];
-        const hotkey = key ? `<span class="action-hotkey">^${escapeHtml(key.toUpperCase())}</span>` : '';
+        const shown = key ? `^${key.toUpperCase()}` : (action.hotkey || '');
+        const hotkey = shown ? `<span class="action-hotkey">${escapeHtml(shown)}</span>` : '';
         return `<div class="action-row${index === 0 ? ' active' : ''}" data-index="${index}" role="menuitem">` +
           `<span class="action-label">${escapeHtml(action.label)}</span>${hotkey}</div>`;
       }).join('');
@@ -787,7 +804,7 @@
       id: session.id,
       label: session.label,
       cwd: session.cwd,
-      actions: window.SessionActions.availableActions(session),
+      actions: window.SessionActions.availableActions(session, CONFIG),
     });
   }
 
@@ -801,7 +818,21 @@
    */
   function runAction(row, id) {
     if (!row) return;
-    if (!window.SessionActions.availableActions(row).some(a => a.id === id)) return;
+    if (!window.SessionActions.availableActions(row, CONFIG).some(a => a.id === id)) return;
+    // Настроенные действия проверяются первыми: встроенных id немного, но
+    // конфиг им не подчинён, и одинаковое имя не должно молча уводить в
+    // встроенную ветку. Путь уже переведён — иначе действия не было бы в списке.
+    const configured = CONFIG.actions.find(a => a.id === id);
+    if (configured) {
+      const argv = window.PathMap.buildActionArgv(configured, {
+        localPath: window.PathMap.mapPath(row.cwd, CONFIG.pathMap),
+        remotePath: row.cwd,
+      });
+      invoke('spawn_detached', { argv })
+        .then(() => invoke('hide_picker'))
+        .catch((e) => { error = String(e); render(); });
+      return;
+    }
     if (id === 'pr') {
       // Форму ссылки уже проверил availableActions — до сюда доходит только
       // https://github.com/<owner>/<repo>/pull/<число>.
@@ -903,6 +934,15 @@
         runAction(rows[active], directActionId);
         return;
       }
+    }
+    // Настроенные действия — после встроенных: разбор конфига уже снял клавишу
+    // у того, кто целился в занятую комбинацию, но порядок проверки оставляет
+    // это правило верным и без него.
+    const configured = CONFIG.actions.find(a => matchesHotkey(e, a.parsedHotkey));
+    if (configured) {
+      e.preventDefault();
+      runAction(rows[active], configured.id);
+      return;
     }
     if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }

@@ -3,9 +3,41 @@ const assert = require('node:assert');
 const { availableActions, prNumber } = require('../frontend-src/session-actions');
 const { prBadgeHtml } = require('../frontend-src/session-glyph');
 
+// Конфиг с одним настроенным действием открытия. UNC вместо буквы диска — см.
+// комментарий в test/path-map.test.js.
+const CONFIGURED = {
+  pathMap: { remote: '/home/user', local: '\\\\nas\\home' },
+  actions: [{ id: 'explorer', label: 'Open in Explorer', hotkey: 'Ctrl+Shift+E', argv: ['x'] }],
+};
+
 test('информация о сессии есть всегда', () => {
   const ids = availableActions({ id: 'a' }).map(a => a.id);
   assert.deepStrictEqual(ids, ['info']);
+});
+
+test('без конфига список действий прежний', () => {
+  // Второй аргумент необязателен: вызов остаётся годным там, где конфига под
+  // рукой нет.
+  const row = { id: 'a', cwd: '/home/user/x' };
+  assert.deepStrictEqual(availableActions(row).map(a => a.id), ['info']);
+  assert.deepStrictEqual(availableActions(row, {}).map(a => a.id), ['info']);
+});
+
+test('настроенные действия идут первыми, когда путь переводится', () => {
+  const ids = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED).map(a => a.id);
+  assert.deepStrictEqual(ids, ['explorer', 'info']);
+});
+
+test('сессия вне общего дерева настроенных действий не получает', () => {
+  // Пункт, открывающий несуществующую папку, хуже отсутствующего.
+  const ids = availableActions({ id: 'a', cwd: '/etc/nginx' }, CONFIGURED).map(a => a.id);
+  assert.deepStrictEqual(ids, ['info']);
+});
+
+test('настроенное действие доносит до меню свою подпись и клавишу', () => {
+  const [action] = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED);
+  assert.strictEqual(action.label, 'Open in Explorer');
+  assert.strictEqual(action.hotkey, 'Ctrl+Shift+E');
 });
 
 test('переклейку предлагают только живой сессии с pid', () => {
