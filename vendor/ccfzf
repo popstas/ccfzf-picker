@@ -302,12 +302,17 @@ def usage_of(sid):
 
 
 def agent_of(sid):
-    """Склеенные <id>.state.json и <id>.status.json, или None.
+    """Склеенные <id>.state.json, <id>.status.json и <id>.meta.json, или None.
 
     Склейка живёт здесь, а не у читателя: файлы локальные, а читатель —
     на другой машине через ssh. Деньги и проценты из статуслайна перекрывают
     те, что хук успел положить в state.json: status.json пишется чаще. На время
     это правило не распространяется — см. `updated` ниже.
+
+    meta берётся после проверки на пустоту, и это не про экономию — читает её
+    всё равно общий проход meta_all. Это про смысл: одна отметка старта записи
+    агента не создаёт. «Запись есть» значит «хук хоть раз сработал», и по
+    наличию записи читатель решает, есть ли о сессии что сказать.
     """
     def load(suffix):
         try:
@@ -321,13 +326,23 @@ def agent_of(sid):
     status = load(".status.json")
     if not state and not status:
         return None
+    meta = meta_all(STATUS_DIR).get(sid) or {}
 
     out = {
         "state": state.get("state", ""),
         "event": state.get("event", ""),
+        # Уведомление агента. Непусто только на attention — на запросе
+        # разрешения это единственное, что о сессии известно: текста самого
+        # вопроса там нет нигде. В остальное время пустая строка, и это ответ,
+        # а не потеря.
+        "message": state.get("message", ""),
         "summary": state.get("summary", ""),
         "lastSummary": state.get("lastSummary", ""),
         "prompt": state.get("prompt", ""),
+        # Вопрос, на котором сессия стоит прямо сейчас. Живёт только пока вызов
+        # AskUserQuestion не закрыт. Показывать его или нет, решает читатель по
+        # состоянию: у запроса разрешения состояние такое же, а текста нет.
+        "question": state.get("question", ""),
         "branch": state.get("branch", ""),
         "pr_url": state.get("pr_url", ""),
         "costUsd": num(status.get("costUsd", state.get("costUsd", 0))),
@@ -340,6 +355,12 @@ def agent_of(sid):
         # только тогда, когда state.json нет вовсе, — у старых сессий, поднятых
         # до появления хука, других отметок времени не осталось.
         "updated": num(state.get("updated")) or num(status.get("updated")),
+        # Начало текущего хода. Тоже только из state.json, и по той же причине:
+        # своего понятия о ходе у статуслайна нет вовсе.
+        "turnAt": num(state.get("turnAt")),
+        # Старт сессии в текущем виде: meta.json хук переписывает на каждом
+        # SessionStart, а /clear, resume и сжатие — тоже старт.
+        "started": num(meta.get("started")),
     }
     return out
 
@@ -598,6 +619,50 @@ def boot_id():
         return ""
 
 
+# Прочитанные <id>.meta.json, по каталогу. Читателей у них два — pid_owners
+# (кто чем занят на самом деле) и старт сессии в --state, — а проход нужен
+# один: файлов под сотню, а --state зовут раз в секунду, пока пикер на экране.
+#
+# Память на весь срок процесса, потому что процесс живёт ровно один тик: ccfzf
+# — одноразовая команда, а не демон. Это и делает её «одним проходом», а не
+# кэшем, которому нужен срок годности.
+_METAS = {}
+
+
+def meta_all(path):
+    """{id сессии: содержимое <id>.meta.json} — один проход по каталогу.
+
+    Ключ памяти — каталог, а не «уже читали»: тесты зовут читателей на разных
+    временных каталогах внутри одного процесса, и общая память склеила бы их
+    ответы, а проверки стали бы проверять её саму.
+
+    Разбор здесь же, а не у читателя: испорченный файл и файл с чужим именем
+    отбрасываются молча один раз, а не в каждом читателе по-своему.
+    """
+    if path in _METAS:
+        return _METAS[path]
+    tail = ".meta.json"
+    out = {}
+    try:
+        with os.scandir(path) as it:
+            names = [e.name for e in it if e.name.endswith(tail)]
+    except OSError:
+        names = []
+    for name in names:
+        sid = name[:-len(tail)]
+        if not UUID_RE.match(sid):
+            continue
+        try:
+            with open(os.path.join(path, name), encoding="utf-8") as fh:
+                meta = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(meta, dict):
+            out[sid] = meta
+    _METAS[path] = out
+    return out
+
+
 def pid_owners(path=STATUS_DIR, boot=None):
     """{pid: (id сессии, момент запуска процесса)} — кто чем занят на самом деле.
 
@@ -615,32 +680,20 @@ def pid_owners(path=STATUS_DIR, boot=None):
     занявшим тот же номер в ту же секунду после загрузки. Записи без pid — это
     файлы, написанные хуком старой версии; они просто не участвуют.
 
-    Цена: открыть все meta разом. Замерено 2026-08-06 — 1.9 мс на 69 файлов
+    Файлы читает meta_all — проход по каталогу общий с --state, потому что
+    открыть их все нужно и там. Замерено 2026-08-06 — 1.9 мс на 69 файлов
     вчетверо большего размера, при опросе раз в секунду это ничего не стоит.
     """
     boot = boot_id() if boot is None else boot
-    tail = ".meta.json"
     best = {}
-    try:
-        with os.scandir(path) as it:
-            names = [e.name for e in it if e.name.endswith(tail)]
-    except OSError:
-        return {}
-    for name in names:
-        if not UUID_RE.match(name[:-len(tail)]):
-            continue
-        try:
-            with open(os.path.join(path, name)) as fh:
-                meta = json.load(fh)
-        except (OSError, ValueError):
-            continue
+    for sid, meta in meta_all(path).items():
         pid = meta.get("pid") or 0
         if not pid or not meta.get("boot") or meta["boot"] != boot:
             continue
         started = meta.get("started") or 0
         if pid in best and best[pid][0] >= started:
             continue
-        best[pid] = (started, name[:-len(tail)], meta.get("pidStarted") or 0)
+        best[pid] = (started, sid, meta.get("pidStarted") or 0)
     return {pid: (sid, tick) for pid, (_, sid, tick) in best.items()}
 
 
