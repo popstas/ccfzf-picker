@@ -33,8 +33,11 @@ def write(sid, suffix, obj):
 
 agent_of = mod["agent_of"]
 fails = []
+checks = 0
 
 def check(name, got, want):
+    global checks
+    checks += 1
     if got != want:
         fails.append("%s: got %r, want %r" % (name, got, want))
 
@@ -59,9 +62,60 @@ check("испорченный updated", agent_of("bad")["updated"], NOW)
 # 4. Нет ни того, ни другого файла.
 check("нет файлов", agent_of("missing"), None)
 
+# Дальше — проверки, которым нужна <id>.meta.json, и у них свой каталог.
+# meta_all в ccfzf запоминает проход по каталогу на весь срок процесса, и это
+# верно: агрегатор одноразовый, за свой тик каталог не меняется. Скрипт живёт
+# дольше и дописывает файлы между вызовами — в общем каталоге пустая память,
+# снятая проверкой 1, скрыла бы meta.json, положенную ниже. Поэтому каталог
+# новый, а файлы в нём кладутся все сразу, до первого вызова: ровно так их и
+# видит настоящий агрегатор.
+tmp = tempfile.mkdtemp()
+mod["STATUS_DIR"] = tmp
+
+# meta_all отбирает из каталога только файлы вида <uuid>.meta.json — не любой
+# <id>.meta.json, а строго по UUID_RE. Прежним sid вида "idle"/"old"/"bad" это
+# было всё равно: их meta.json никто не писал. Здесь пишем, и без формата
+# настоящего id запись прошла бы мимо фильтра и не попала бы в ответ.
+FULL, METAONLY = (
+    "aaaaaaaa-1111-2222-3333-444444444444",
+    "bbbbbbbb-1111-2222-3333-444444444444",
+)
+TURN, START = 1785958000, 1785950000
+write(FULL, ".state.json", {
+    "state": "question", "updated": NOW, "turnAt": TURN,
+    "question": "Какой вариант?",
+    "message": "Claude needs your permission to use Bash",
+})
+write(FULL, ".meta.json", {"started": START})
+# Сессия старше появления полей: state.json есть, meta.json нет.
+write("older", ".state.json", {"state": "idle", "updated": IDLE})
+write("badturn", ".state.json", {"state": "active", "updated": NOW, "turnAt": "90"})
+write(METAONLY, ".meta.json", {"started": START})
+
+# 5. Четыре поля, каждое из своего файла: ход, вопрос и уведомление — из
+#    state.json, старт сессии — из meta.json.
+full = agent_of(FULL)
+check("ход: turnAt", full["turnAt"], TURN)
+check("старт: started", full["started"], START)
+check("вопрос", full["question"], "Какой вариант?")
+check("уведомление", full["message"], "Claude needs your permission to use Bash")
+
+# 6. Сессия старше появления этих полей: умолчания, а не KeyError.
+check("нет turnAt", agent_of("older")["turnAt"], 0)
+check("нет started", agent_of("older")["started"], 0)
+check("нет question", agent_of("older")["question"], "")
+check("нет message", agent_of("older")["message"], "")
+
+# 7. Испорченная отметка хода — ноль, как и у updated.
+check("строковый turnAt", agent_of("badturn")["turnAt"], 0)
+
+# 8. Одна meta.json записи агента не создаёт: «запись есть» значит «хук хоть
+#    раз сработал», а старт сессии об этом не говорит.
+check("только meta.json", agent_of(METAONLY), None)
+
 if fails:
     print("FAIL")
     for f in fails:
         print("  " + f)
     sys.exit(1)
-print("OK: 4 проверки")
+print("OK, проверок: %d" % checks)
