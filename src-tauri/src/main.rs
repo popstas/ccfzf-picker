@@ -13,7 +13,6 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 mod mqtt;
 mod proc;
 mod state_source;
-mod window_source;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
 /// только что открытое окно. Тот же ограничитель стоит в соседнем пикере.
@@ -138,30 +137,18 @@ async fn fetch_state(ssh_host: String) -> Result<serde_json::Value, String> {
         .map_err(|e| format!("fetch_state task failed: {e}"))?
 }
 
-/// Спросить оконный трекер, у какой сессии открыто окно терминала.
-///
-/// `async` + `spawn_blocking` по той же причине, что и у `fetch_state`: вызов
-/// уходит по сети и тикает раз в секунду, а синхронная команда исполнялась бы
-/// в главном потоке и подвешивала окно на каждый опрос.
-#[tauri::command]
-async fn fetch_windows(url: String) -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(move || window_source::fetch(&url))
-        .await
-        .map_err(|e| format!("fetch_windows task failed: {e}"))?
-}
-
 /// Выдать процессу трекера право занять передний план.
 ///
 /// Windows позволяет вызвать `SetForegroundWindow` только процессу, который
 /// передним планом уже владеет либо получил последнее событие ввода. Демон
-/// трекера — не тот и не другой: к моменту запроса он просто отвечает на http.
+/// трекера — не тот и не другой: к моменту просьбы он просто слушает брокера.
 /// Право ему передаёт пикер, и именно сейчас: нажатие, из-за которого мы здесь,
 /// было последним событием ввода, и оно наше. Без этого `bringToTop()` на той
 /// стороне отчитается об успехе, а на экране мигнёт кнопка на таскбаре.
 ///
-/// `pid` берётся из ответа `/claude-wt/status` — трекер кладёт туда свой.
-/// Отказ не фатален: он значит ровно то же, что и отсутствие грамоты, — окно
-/// не поднимется, а пикер об этом узнает из ответа трекера.
+/// `pid` приезжает полем `windowPid` в ответе агрегатора: трекер кладёт свой pid
+/// в файл, который тот читает. Отказ не фатален и значит ровно то же, что и
+/// отсутствие грамоты, — окно не поднимется.
 #[cfg(target_os = "windows")]
 fn allow_tracker_foreground(pid: u32) {
     use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
@@ -173,32 +160,21 @@ fn allow_tracker_foreground(pid: u32) {
 #[cfg(not(target_os = "windows"))]
 fn allow_tracker_foreground(_pid: u32) {}
 
-/// Поднять окно сессии через трекер.
+/// Поднять окно сессии через MQTT.
 ///
 /// Зовётся вместо `spawn_detached` у стратегии `focus`: окно уже открыто, и
 /// заводить рядом второй процесс на том же транскрипте незачем.
+///
+/// Просьба уходит публикацией — тело и топик те, что уже слушает демон на
+/// Windows-машине. Ответа у неё нет: приёмник отчитывается в свой лог. Так
+/// вышло не от хорошей жизни — http-сервер, у которого ответ был, вешал демона
+/// на той стороне, — но цена оказалась мала: отказ («сессия неизвестна», «окна
+/// нет») человек и так увидел бы уже после того, как пикер погас.
 #[tauri::command]
-async fn focus_window(url: String, id: String, pid: u32) -> Result<serde_json::Value, String> {
-    // До запроса, а не после: право должно быть у трекера к моменту, когда он
-    // дойдёт до подъёма окна.
+async fn focus_window_mqtt(id: String, pid: u32) -> Result<(), String> {
+    // До публикации, а не после: право должно быть у трекера к моменту, когда
+    // он дойдёт до подъёма окна.
     allow_tracker_foreground(pid);
-    tauri::async_runtime::spawn_blocking(move || window_source::focus(&url, &id))
-        .await
-        .map_err(|e| format!("focus_window task failed: {e}"))?
-}
-
-/// Поднять окно сессии через MQTT.
-///
-/// Второй способ той же просьбы: тело и топик — те, что уже слушает демон на
-/// Windows-машине. Нужен там, где http до трекера не дотягивается, а брокер
-/// слышат обе машины.
-///
-/// Права на передний план здесь не выдаётся, и выдать его нечему: подъём делает
-/// процесс, о pid которого мы не спрашивали. Работает это потому же, почему
-/// работает нажатие с панели, — пикер гасит себя до публикации, и к моменту
-/// подъёма передний план не держит никто.
-#[tauri::command]
-async fn focus_window_mqtt(id: String) -> Result<(), String> {
     let raw = load_config()?;
     let broker = mqtt::broker_from_config(&raw);
     if !broker.is_configured() {
@@ -413,8 +389,7 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config,
-            copy_to_clipboard, load_ui, save_ui, fetch_windows, focus_window,
-            focus_window_mqtt
+            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из

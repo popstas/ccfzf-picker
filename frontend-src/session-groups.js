@@ -11,9 +11,6 @@
   const listApi = typeof module === 'object' && module.exports
     ? require('./session-list')
     : globalThis.SessionList;
-  const windowsApi = typeof module === 'object' && module.exports
-    ? require('./session-windows')
-    : globalThis.SessionWindows;
 
   // Сессия с неизвестным столом сортируется перед всеми настоящими.
   const DESKTOP_UNKNOWN = -1;
@@ -142,11 +139,9 @@
    * отними у него соседей заранее — живая сессия, чью работу ведёт форк,
    * осталась бы без записи агента и выглядела бы замершей.
    *
-   * `opts.windows` — справочник окон от оконного трекера, `opts.onlyWindow`
-   * оставляет одни сессии с окном. Окна приписываются до обоих отсевов: иначе
-   * фильтровать было бы не по чему. Строки, собранной без `opts.windows`, поле
-   * `window` тоже достаётся — со значением `null`: у отрисовщика не должно быть
-   * третьего случая, «поля нет вовсе».
+   * `opts.onlyWindow` оставляет одни сессии с открытым окном. Само поле
+   * `window` приезжает уже в ответе агрегатора и приписывается строке в
+   * buildSessionList — здесь остаётся только отсев.
    *
    * Pure: берёт уже полученный `res`, сама ничего не читает.
    */
@@ -154,7 +149,6 @@
     const mode = normalizeSort(sort);
     if (!res.ok) return { ok: false, reason: res.reason };
     let rows = listApi.buildSessionList({ sessions: res.sessions, seen: res.seen });
-    rows = windowsApi.withWindows(rows, opts.windows);
     if (opts.onlyLive) rows = rows.filter(r => r.live);
     if (opts.onlyWindow) rows = rows.filter(r => r.window);
     return { ok: true, groups: groupSessions(labelSessions(rows), mode), sort: mode };

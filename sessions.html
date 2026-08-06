@@ -240,8 +240,6 @@
 <script src="state-shape.js"></script>
 <script src="session-agent.js"></script>
 <script src="session-list.js"></script>
-<!-- session-windows до session-groups: тот берёт из него withWindows в момент
-     загрузки, и в обратном порядке ему достался бы undefined. -->
 <script src="session-windows.js"></script>
 <script src="session-groups.js"></script>
 <!-- ui-state после session-groups: он берёт оттуда normalizeSort в момент
@@ -532,7 +530,7 @@
   function regroup() {
     const payload = window.SessionGroups.buildSessionsPayload(
       { ok: true, sessions: lastSessions, seen }, sortMode,
-      { onlyLive: CONFIG.onlyLive, windows: trackerWindows, onlyWindow: toggles.onlyWindow },
+      { onlyLive: CONFIG.onlyLive, onlyWindow: toggles.onlyWindow },
     );
     groups = payload.groups;
     sortMode = payload.sort;
@@ -545,64 +543,27 @@
   // следующий отставал бы сильнее предыдущего.
   let inFlight = false;
 
-  // Окна от оконного трекера: `{ id сессии: { title, desktop, lastSeen } }`.
-  // Пустой справочник — рабочее состояние, а не поломка: трекер не настроен,
-  // погашен или машина спит.
-  let trackerWindows = {};
-  // pid демона трекера. Нужен, чтобы выдать ему право занять передний план
-  // перед подъёмом окна, — без него окно только мигнёт кнопкой на таскбаре.
-  // Ноль значит «трекер не отвечал или ответил без pid», и фокус тогда не
-  // предлагается вовсе: молча не сработавший Enter хуже прежнего поведения.
-  let trackerPid = 0;
-  let windowsInFlight = false;
-
-  function trackerUrl() {
-    return (CONFIG.windowTracker || {}).url || '';
-  }
+  // Хвост последнего ответа агрегатора, кроме самих сессий: на какой машине
+  // открыты окна и какому процессу они принадлежат. Пустой объект — рабочее
+  // состояние, а не поломка: оконного трекера может не быть вовсе.
+  let lastState = {};
 
   /**
    * Можно ли поднимать окно вместо открытия терминала.
    *
-   * Петлевой адрес трекера — это и есть «окна на той же машине, где пикер».
-   * На маке трекер отвечает по имени Windows-машины: пометка о её окнах
-   * полезна, а подъём окна там ничего не дал бы человеку перед экраном и
-   * отнял бы у Enter привычное открытие терминала.
+   * Решает совпадение имён машин. На маке агрегатор рассказывает про окна
+   * Windows-машины: пометка о них полезна — сессия где-то открыта, — а подъём
+   * ничего не дал бы человеку перед экраном и отнял бы у Enter привычное
+   * открытие терминала.
+   *
+   * Настроенный брокер — не второе решение, а условие выполнимости: просьба о
+   * подъёме уходит только публикацией, и без брокера её некуда отправить.
+   * Предложить ветку, у которой нет транспорта, значит подарить человеку
+   * молчащий Enter — ровно то, чего избегает и проверка pid.
    */
   function canFocusWindows() {
-    return window.SessionWindows.isLoopback(trackerUrl()) && trackerPid > 0;
-  }
-
-  /**
-   * Спросить оконный трекер.
-   *
-   * Отказ гасится молча и до конца: справочник обнуляется, ошибка не пишется.
-   * Строка ошибки в пикере одна на всё, и сообщение про спящую соседнюю
-   * машину затмевало бы отказ ssh — тот, из-за которого списка нет вовсе.
-   * Обнуление обязательно: пометка от прошлого удачного ответа пережила бы
-   * погасший трекер и обещала бы окно, которого уже нет.
-   */
-  async function refreshWindows() {
-    const url = trackerUrl();
-    if (!url || windowsInFlight) return;
-    windowsInFlight = true;
-    let next = {};
-    let pid = 0;
-    try {
-      const raw = await invoke('fetch_windows', { url });
-      next = window.SessionWindows.normalizeWindows(raw);
-      pid = Number.isFinite(raw?.pid) ? raw.pid : 0;
-    } catch {
-      // Ровно ничего: см. выше.
-    } finally {
-      windowsInFlight = false;
-    }
-    const changed = Object.keys(next).join() !== Object.keys(trackerWindows).join();
-    trackerWindows = next;
-    trackerPid = pid;
-    // Перерисовка только на смене состава окон. Ответ трекера приходит быстрее
-    // ssh, и звать regroup() на каждый тик значило бы собирать список дважды за
-    // секунду ради одних и тех же пометок.
-    if (changed && lastSessions.length) regroup();
+    return CONFIG.mqtt.configured
+      && window.SessionWindows.canFocus(lastState, CONFIG.windowHost);
   }
 
   async function refresh() {
@@ -626,6 +587,7 @@
     }
     error = '';
     lastSessions = state.sessions;
+    lastState = state;
     regroup();
   }
 
@@ -635,17 +597,9 @@
   // — скрытому окну Tauri он не приходит.
   let timer = null;
 
-  // Трекер спрашивается на том же тике, но не внутри refresh(): у него свой
-  // сторож и своё гашение отказа, и связывать их значило бы дать соседней
-  // машине задержать список.
-  function tick() {
-    refresh();
-    refreshWindows();
-  }
-
   function startPolling() {
-    tick();
-    if (timer === null) timer = setInterval(tick, 1000);
+    refresh();
+    if (timer === null) timer = setInterval(refresh, 1000);
   }
 
   function stopPolling() {
@@ -681,37 +635,23 @@
    * Ветка `focus`: терминал не запускается вовсе, окно поднимает оконный
    * трекер на своей стороне.
    *
-   * Пикер гасится **до** запроса, а не после. Windows отдаёт передний план
+   * Пикер гасится **до** просьбы, а не после. Windows отдаёт передний план
    * только владельцу либо тому, кто получил последнее событие ввода; трекеру
-   * это право выдаёт `focus_window` на стороне Rust, и выдать его надо, пока
-   * последнее нажатие ещё наше. Гасить после значило бы отбирать у окна фокус
-   * сразу после того, как оно его получило.
+   * это право выдаёт `focus_window_mqtt` на стороне Rust, и выдать его надо,
+   * пока последнее нажатие ещё наше. Гасить после значило бы отбирать у окна
+   * фокус сразу после того, как оно его получило.
    *
-   * Отказ трекера («окна нет», «сессия неизвестна») приезжает полем `ok` в
-   * обычном ответе. Показать его сразу уже некому — окно погашено, — но в
-   * строке ошибки он дождётся следующего открытия: молчащий Enter человек
-   * прочитал бы как поломку пикера.
+   * Просьба уходит публикацией в MQTT: брокер в этой установке слышат обе
+   * машины. Ответа у неё нет — приёмник отчитывается в свой лог, а не нам, — и
+   * это сознательный размен. Http-сервер, у которого ответ был, вешал демона на
+   * той стороне; отчёт о подъёме окна того не стоит.
    */
   async function focusSession(row) {
     await invoke('hide_picker');
     try {
-      // MQTT вперёд, когда брокер настроен: http до трекера дотягивается не
-      // отовсюду, а брокер в этой установке слышат обе машины. Ответа с полем
-      // `ok` у этой ветки нет — приёмник отчитывается в свой лог, а не нам.
-      if (CONFIG.mqtt.configured) {
-        await invoke('focus_window_mqtt', { id: row.id });
-        error = '';
-        await markSeen(row.id, Math.floor(Date.now() / 1000));
-        return;
-      }
-      const res = await invoke('focus_window', {
-        url: trackerUrl(), id: row.id, pid: trackerPid,
+      await invoke('focus_window_mqtt', {
+        id: row.id, pid: window.SessionWindows.focusPid(lastState),
       });
-      if (res && res.ok === false) {
-        error = `окно не поднялось: ${res.reason}`;
-        render();
-        return;
-      }
     } catch (e) {
       error = String(e);
       render();

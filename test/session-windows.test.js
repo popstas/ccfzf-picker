@@ -1,85 +1,62 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { normalizeWindows, withWindows, isLoopback } = require('../frontend-src/session-windows');
+const { canFocus, focusPid } = require('../frontend-src/session-windows');
 
-const ANSWER = {
-  running: true,
-  pid: 4242,
-  slots: [
-    { id: 'aaa', title: 'ccfzf-picker', desktop: 2, lastSeen: 1000 },
-    { id: 'bbb', title: 'shell', desktop: 0, lastSeen: 2000 },
-  ],
-};
+const STATE = { windowHost: 'desktop-box', windowPid: 4242, sessions: [] };
 
-test('ответ трекера становится справочником по id', () => {
-  assert.deepStrictEqual(normalizeWindows(ANSWER), {
-    aaa: { title: 'ccfzf-picker', desktop: 2, lastSeen: 1000 },
-    bbb: { title: 'shell', desktop: 0, lastSeen: 2000 },
-  });
+test('окна на этой же машине — окно поднимается', () => {
+  assert.strictEqual(canFocus(STATE, 'desktop-box'), true);
 });
 
-test('ответа нет или он не той формы — справочник пустой', () => {
-  // Трекер погашен, машина спит, кто-то подсунул html вместо json. Ни один из
-  // этих случаев не должен стоить списка: пикер просто рисует его без пометок.
-  for (const raw of [null, undefined, {}, 'мусор', { slots: 'мусор' }, { slots: null }]) {
-    assert.deepStrictEqual(normalizeWindows(raw), {});
+test('имя машины сверяется без оглядки на регистр и пробелы', () => {
+  // Одну сторону пишет os.hostname(), другую — человек в yaml. Регистр в именах
+  // машин Windows не значит ничего, а пробел по краям не виден вовсе.
+  assert.strictEqual(canFocus(STATE, 'Desktop-Box'), true);
+  assert.strictEqual(canFocus(STATE, '  desktop-box  '), true);
+  assert.strictEqual(canFocus({ ...STATE, windowHost: 'DESKTOP-BOX' }, 'desktop-box'), true);
+});
+
+test('окна на чужой машине — Enter остаётся открытием терминала', () => {
+  // Здесь и проходит граница. Ошибка в эту сторону отняла бы у Enter открытие
+  // терминала на маке, ничего не дав взамен: окно поднялось бы на том экране,
+  // на который человек не смотрит.
+  assert.strictEqual(canFocus(STATE, 'macbook'), false);
+});
+
+test('пустой хост в конфиге запрещает фокус', () => {
+  // Умолчание. Пикер, которому не сказали, на какой он машине, обязан вести
+  // себя как до появления всей этой затеи.
+  for (const mine of ['', '   ', undefined, null, 42]) {
+    assert.strictEqual(canFocus(STATE, mine), false, String(mine));
   }
 });
 
-test('слот без id выбрасывается целиком', () => {
-  // По id идёт вся склейка. Слот, которому нечего склеивать, не пометит ничего,
-  // зато занял бы ключ `undefined` и склеился бы с любой строкой без id.
-  const raw = { slots: [{ title: 'нет id' }, { id: 42 }, { id: '' }, { id: 'ok', title: 'x' }] };
-  assert.deepStrictEqual(normalizeWindows(raw), { ok: { title: 'x', desktop: null, lastSeen: 0 } });
-});
-
-test('нечисловые стол и отметка заменяются умолчанием', () => {
-  const raw = { slots: [{ id: 'a', title: 'x', desktop: 'два', lastSeen: 'давно' }] };
-  assert.deepStrictEqual(normalizeWindows(raw), { a: { title: 'x', desktop: null, lastSeen: 0 } });
-});
-
-test('строки получают своё окно, остальные — null', () => {
-  const rows = [{ id: 'aaa', title: 'первая' }, { id: 'zzz', title: 'вторая' }];
-  const out = withWindows(rows, normalizeWindows(ANSWER));
-  assert.deepStrictEqual(out[0].window, { title: 'ccfzf-picker', desktop: 2, lastSeen: 1000 });
-  assert.strictEqual(out[1].window, null);
-  // Исходные строки не правятся на месте: их же держит lastSessions между
-  // тиками, и пометка от прошлого ответа пережила бы погасший трекер.
-  assert.strictEqual(rows[0].window, undefined);
-});
-
-test('без справочника у всех строк окна нет', () => {
-  const rows = [{ id: 'aaa' }];
-  assert.strictEqual(withWindows(rows, {})[0].window, null);
-  assert.strictEqual(withWindows(rows, null)[0].window, null);
-  assert.deepStrictEqual(withWindows(null, {}), []);
-});
-
-test('петлевой адрес узнаётся со схемой, портом и в скобках', () => {
-  for (const url of [
-    'http://localhost:9722',
-    'http://127.0.0.1:9722',
-    'http://localhost',
-    'localhost:9722',
-    'http://[::1]:9722',
-    'http://127.0.0.1:9722/',
-  ]) {
-    assert.strictEqual(isLoopback(url), true, url);
+test('пустой хост в ответе тоже запрещает фокус', () => {
+  // Оконного трекера нет, файл просрочен или его никто не пишет. Совпадение
+  // двух пустот совпадением не считается.
+  for (const host of ['', undefined, null, 7]) {
+    assert.strictEqual(canFocus({ ...STATE, windowHost: host }, ''), false, String(host));
   }
 });
 
-test('чужая машина петлевым адресом не считается', () => {
-  // Здесь и проходит граница «поднимать окно по Enter или нет»: ошибка в эту
-  // сторону отняла бы у Enter открытие терминала на маке.
-  for (const url of [
-    'http://desktop:9722',
-    'http://192.168.1.10:9722',
-    'http://[::2]:9722',
-    'http://localhost.example.com:9722',
-    '',
-    null,
-    42,
-  ]) {
-    assert.strictEqual(isLoopback(url), false, String(url));
+test('без pid фокуса не бывает даже на своей машине', () => {
+  // Право на передний план выдаётся по pid. Без него подъём отчитался бы об
+  // успехе, а на экране мигнула бы кнопка на таскбаре: молча не сработавший
+  // Enter хуже прежнего поведения.
+  for (const pid of [0, -1, undefined, null, '4242', NaN]) {
+    assert.strictEqual(canFocus({ ...STATE, windowPid: pid }, 'desktop-box'), false, String(pid));
+  }
+});
+
+test('ответа нет вовсе — фокуса нет', () => {
+  for (const state of [null, undefined, {}, 'мусор']) {
+    assert.strictEqual(canFocus(state, 'desktop-box'), false, String(state));
+  }
+});
+
+test('focusPid отдаёт ноль всему, что не положительное число', () => {
+  assert.strictEqual(focusPid(STATE), 4242);
+  for (const state of [null, {}, { windowPid: 0 }, { windowPid: '9' }, { windowPid: -3 }]) {
+    assert.strictEqual(focusPid(state), 0, JSON.stringify(state));
   }
 });
