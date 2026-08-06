@@ -52,6 +52,11 @@
       ['pr_url', s.pr_url ?? ''],
       ['agent', s.agentBackground && s.agentSessionId ? `background · ${s.agentSessionId}` : ''],
       ['started', stamp(s.agentStarted ?? 0, nowSec)],
+      // Три отметки времени отвечают на три разных вопроса: когда сессия
+      // поднялась, сколько идёт текущий ход, когда она в последний раз
+      // дёрнулась. Без средней колонка возраста в строке необъяснима — у
+      // работающей сессии она не совпадает ни с одной строкой карточки.
+      ['turn', stamp(s.agentTurnAt ?? 0, nowSec)],
       ['last activity', stamp(s.lastActivity ?? 0, nowSec)],
       ['focused', stamp(s.focusedAt ?? 0, nowSec)],
     ];
