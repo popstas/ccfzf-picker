@@ -148,6 +148,15 @@ WINDOWS_TTL = 120
 # килобайт. Задержка в тридцать секунд не видна: сам трекер узнаёт новую
 # сессию не быстрее (кэш индекса 15 с плюс два тика на устоявшийся заголовок).
 STATE_DUMP_MAX_AGE = 30
+# Сколько секунд отметка хука считается доводом о том, что сессия работает.
+# Хук стучит на каждый вызов инструмента, поэтому у работающего агента отметка
+# всегда моложе минуты. Две — запас на длинный вызов и на часы, разъехавшиеся
+# между машинами.
+#
+# Срок годности только добавляет живых, а не убавляет: молчащая отметка ничего
+# не доказывает — сессия, ждущая ответа человека, не шлёт хуков часами и при
+# этом жива.
+HOOK_LIVE_TTL = 120
 
 DIM, GREEN, YELLOW, CYAN, RESET = "\033[2m", "\033[32m", "\033[33m", "\033[36m", "\033[0m"
 
@@ -487,6 +496,14 @@ def proc_tty(pid):
     return target if target.startswith("/dev/") else ""
 
 
+def proc_cwd(pid):
+    """Рабочий каталог процесса, пустая строка — не прочитался."""
+    try:
+        return os.readlink("/proc/%s/cwd" % pid)
+    except OSError:
+        return ""
+
+
 def proc_tmux(pid):
     """`session:window.pane`, если процесс живёт внутри tmux, иначе None.
 
@@ -516,6 +533,107 @@ def proc_tmux(pid):
         return None
     target = out.stdout.strip()
     return target or None
+
+
+def hook_stamps(path=STATUS_DIR):
+    """{id сессии: когда её хук писал в последний раз}.
+
+    Берётся mtime файла, а не поле `updated` внутри: расходятся они меньше чем
+    на секунду (замерено 2026-08-06: 0.3 с и 0.7 с), а один scandir по каталогу
+    стоит долей миллисекунды против того, чтобы открыть и разобрать каждый файл.
+    Разница в секунду здесь ни на что не влияет — отметки сравниваются между
+    собой и со сроком в две минуты.
+
+    Каталог чужой: его наполняют хуки, и в нём лежат ещё .status.json и
+    .meta.json. Всё, что не похоже на `<uuid>.state.json`, пропускается молча,
+    как и пропавший каталог: без хуков ccfzf работает как раньше.
+    """
+    out = {}
+    tail = ".state.json"
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                if not entry.name.endswith(tail):
+                    continue
+                sid = entry.name[:-len(tail)]
+                if not UUID_RE.match(sid):
+                    continue
+                try:
+                    out[sid] = entry.stat().st_mtime
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return out
+
+
+def session_ids_in(cwd):
+    """id всех транскриптов, лежащих в каталоге проекта этого cwd."""
+    pattern = os.path.join(PROJECTS_DIR, mangle(cwd), "*.jsonl")
+    return [os.path.basename(p)[:-len(".jsonl")] for p in glob.glob(pattern)]
+
+
+def reattribute(live, procs, agents, stamps, now, ids_in=None, ttl=HOOK_LIVE_TTL):
+    """Процесс, сменивший id на ходу, переезжает на тот, что пишется сейчас.
+
+    argv называет id, с которого сессия начиналась (`--session-id`/`--resume`),
+    а Claude Code меняет id внутри живого процесса — и после этого argv
+    указывает на транскрипт, в который больше никто не пишет. Замерено
+    2026-08-06: `claude --resume 6c6931cf` сутки как писал 86d67681. Флаг live
+    стоял на мёртвом id, работающая сессия числилась мёртвой и пряталась из
+    пикера (`onlyLive`), хотя окно терминала принадлежало именно ей.
+
+    Кандидаты — соседи по каталогу проекта: id меняется внутри процесса, а cwd
+    нет. Побеждает тот, чей хук писал позже argv-сессии, и только если он писал
+    только что: отметка старше ttl значит «когда-то работала», а не «процесс
+    сейчас на ней».
+
+    Кандидат, уже занятый другим процессом, пропускается — иначе два процесса
+    в одном каталоге сошлись бы на одном id. По той же причине занятость
+    проверяется по текущему live: переезд, случившийся на предыдущем витке,
+    виден следующему.
+
+    Старый id из live убирается: процесс на нём не работает, а лишняя живая
+    строка в пикере — это ровно тот симптом, ради которого всё и затевалось.
+
+    Правит на месте и ничего не возвращает: у вызывающего это те же три
+    структуры, которые он потом отдаёт наружу.
+    """
+    ids_in = ids_in or session_ids_in
+    for sid in list(procs):
+        cwd = procs[sid].get("cwd") or ""
+        if not cwd:
+            continue
+        best, best_at = "", stamps.get(sid, 0)
+        for cand in ids_in(cwd):
+            if cand == sid or cand in live:
+                continue
+            at = stamps.get(cand, 0)
+            if at > best_at:
+                best, best_at = cand, at
+        if not best or now - best_at > ttl:
+            continue
+        live.discard(sid)
+        live.add(best)
+        procs[best] = procs.pop(sid)
+        if sid in agents:
+            agents[best] = agents.pop(sid)
+
+
+def live_by_hook(live, stamps, now, ttl=HOOK_LIVE_TTL):
+    """Свежая отметка хука — довод о жизни сама по себе.
+
+    Хук стучит на каждый вызов инструмента работающего агента, поэтому выдаёт
+    сессию и там, где /proc её не выдаёт: процесс поднят обёрткой, argv не
+    называет ни старого id, ни нового, соседа по каталогу не нашлось.
+
+    Только добавляет, никогда не убавляет. Молчание ничего не значит: сессия,
+    ждущая ответа человека, не шлёт хуков часами и при этом жива — и её
+    единственный честный признак по-прежнему живой процесс.
+    """
+    for sid, at in stamps.items():
+        if now - at <= ttl:
+            live.add(sid)
 
 
 def running_sessions():
@@ -564,16 +682,19 @@ def running_sessions():
         sid = sid or resumed_id
 
         if not sid:
-            try:
-                fresh.append(os.readlink("/proc/%s/cwd" % pid))
-            except OSError:
-                pass
+            cwd = proc_cwd(pid)
+            if cwd:
+                fresh.append(cwd)
             continue
 
         live.add(sid)
         # Чем сессия занята: без pid её нельзя ни перехватить, ни хотя бы
         # честно показать человеку, что открытие будет не тихим resume.
-        procs[sid] = {"pid": int(pid), "tty": proc_tty(pid), "tmux": proc_tmux(pid)}
+        # cwd — не диагностика: по нему reattribute() ищет соседей по каталогу
+        # проекта, когда id сессии сменился внутри процесса. Наружу поле не
+        # уходит — режим state перечисляет то, что отдаёт, поимённо.
+        procs[sid] = {"pid": int(pid), "tty": proc_tty(pid), "tmux": proc_tmux(pid),
+                      "cwd": proc_cwd(pid)}
         # A background agent is hosted by the daemon through a pty host; that
         # ancestry is the only honest mark of one. `--fork-session` alone is
         # not: it is a normal way to branch a session by hand.
@@ -584,7 +705,8 @@ def running_sessions():
         if "bg-pty-host" in host:
             agents[sid] = {"kind": "background", "parent": parent}
 
-    cutoff = time.time() - 2 * 3600  # a fresh start writes now, not a day ago
+    now = time.time()
+    cutoff = now - 2 * 3600  # a fresh start writes now, not a day ago
     for cwd, k in Counter(fresh).items():
         files = sorted(glob.glob(os.path.join(PROJECTS_DIR, mangle(cwd), "*.jsonl")),
                        key=os.path.getmtime, reverse=True)
@@ -595,6 +717,15 @@ def running_sessions():
             if sid not in live:
                 live.add(sid)
                 k -= 1
+
+    # Порядок важен. Переезд идёт первым: ему нужно знать, кто занят на самом
+    # деле, а live_by_hook раздаёт живость сессиям без процесса и тем самым
+    # закрыл бы кандидатов для переезда. И только переезд умеет снимать живость
+    # со сменившегося id — сам по себе он бы так и остался вторым chats-inspect
+    # в списке.
+    stamps = hook_stamps()
+    reattribute(live, procs, agents, stamps, now)
+    live_by_hook(live, stamps, now)
     return live, agents, procs
 
 
@@ -690,7 +821,9 @@ def stale_dump(path, now, max_age):
         return True
 
 
-mode = sys.argv[1]
+# Пустой режим — не ошибка: так блок выполняют тесты, которым нужны только
+# определения. Ни одна ветка ниже на пустую строку не отвечает.
+mode = sys.argv[1] if len(sys.argv) > 1 else ""
 
 if mode == "projects":
     marks = read_marks(sys.argv[2])
