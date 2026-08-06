@@ -3,11 +3,10 @@
 ## Next tasks
 - [x] replace icon to favicon.png
 - [x] default hide events, cost from list, uncheck checkboxes
-- [x] должен быть http api для получения данных по окнам активных сессий
+- [x] данные по окнам активных сессий (http выброшен, обмен через файл — см. `.superpowers/sdd/2026-08-06-window-file-design.md`)
 - [ ] должен быть способ указать маппинг папки: local v: = remote /home/user, если указан, то добавлять опции открытия explorer, finder, cursor, vscode
 
 ## Future tasks
-- [ ] оконный трекер соседа должен предоставлять данные по окнам активных сессий
 
 ## Найдено при выполнении задач 9–14
 
