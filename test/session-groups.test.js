@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   normalizeSort, cycleSort, compareSessions, groupSessions, labelSessions, SORT_MODES,
-  buildSessionsPayload,
+  DEFAULT_SORT, buildSessionsPayload,
 } = require('../frontend-src/session-groups');
 
 // Сырые сессии — то, что отдаёт `ccfzf --state`, а не строки списка.
@@ -64,8 +64,14 @@ function order(rows, mode) {
 }
 
 test('незнакомый режим сортировки сводится к предусмотренному', () => {
-  assert.strictEqual(normalizeSort('чепуха'), 'cost');
+  assert.strictEqual(normalizeSort('чепуха'), DEFAULT_SORT);
   assert.strictEqual(normalizeSort('newest'), 'newest');
+});
+
+test('умолчание сортировки — recent', () => {
+  // Список открывают, чтобы вернуться к тому, чем занимались только что;
+  // стоимость для этого не отвечает ни на один вопрос.
+  assert.strictEqual(DEFAULT_SORT, 'recent');
 });
 
 test('перебор режимов зациклен', () => {
@@ -118,6 +124,42 @@ test('recent: свежее — выше', () => {
     row({ id: 'mid', label: 'mid', lastActivity: 500 }),
   ];
   assert.deepStrictEqual(order(rows, 'recent'), ['fresh', 'mid', 'old']);
+});
+
+test('recent: секунды внутри одной минуты порядок не двигают', () => {
+  // Ровно та гонка, из-за которой ключ и округляется: у двух работающих сессий
+  // lastActivity дёргается на каждый вызов инструмента, подача тикает раз в
+  // секунду, и на секундном ключе строки менялись местами непрерывно.
+  const at = (t) => [
+    row({ id: 'aaa', label: 'aaa', lastActivity: t.aaa }),
+    row({ id: 'bbb', label: 'bbb', lastActivity: t.bbb }),
+  ];
+  // 10:00:05 против 10:00:55 — минута одна, порядок по имени.
+  assert.deepStrictEqual(order(at({ aaa: 600, bbb: 655 }), 'recent'), ['aaa', 'bbb']);
+  // Через секунду вперёд ушла другая — порядок обязан остаться прежним.
+  assert.deepStrictEqual(order(at({ aaa: 656, bbb: 655 }), 'recent'), ['aaa', 'bbb']);
+  assert.deepStrictEqual(order(at({ aaa: 600, bbb: 659 }), 'recent'), ['aaa', 'bbb']);
+});
+
+test('recent: через границу минуты порядок всё-таки меняется', () => {
+  // Округление не должно превращаться в «порядок не меняется никогда»: минутой
+  // позже сессия обязана всплыть.
+  const rows = [
+    row({ id: 'aaa', label: 'aaa', lastActivity: 659 }),  // 10:00:59
+    row({ id: 'bbb', label: 'bbb', lastActivity: 661 }),  // 10:01:01
+  ];
+  assert.deepStrictEqual(order(rows, 'recent'), ['bbb', 'aaa']);
+});
+
+test('recent: сессия без активности остаётся внизу', () => {
+  const rows = [
+    row({ id: 'never', label: 'never', lastActivity: 0 }),
+    row({ id: 'none', label: 'none' }),                    // поля нет вовсе
+    row({ id: 'some', label: 'some', lastActivity: 30 }),  // меньше минуты — но было
+  ];
+  // Ключ 'some' округляется в ноль, но нулём быть не должен: иначе строка с
+  // активностью утонула бы к тем, у кого её не было вовсе.
+  assert.deepStrictEqual(order(rows, 'recent'), ['some', 'never', 'none']);
 });
 
 test('newest и oldest — обратные друг другу порядки по началу сессии', () => {
@@ -182,13 +224,13 @@ test('равные значения разводятся именем, а оди
   assert.strictEqual(compareSessions(twins[0], twins[1], 'cost'), 0);
 });
 
-test('незнакомый режим сортирует как cost, а не как попало', () => {
+test('незнакомый режим сортирует умолчанием, а не как попало', () => {
   const rows = [
-    row({ id: 'cheap', label: 'cheap', agentCostUsd: 1 }),
-    row({ id: 'rich', label: 'rich', agentCostUsd: 9 }),
+    row({ id: 'old', label: 'old', lastActivity: 100 }),
+    row({ id: 'fresh', label: 'fresh', lastActivity: 900 }),
   ];
-  assert.deepStrictEqual(order(rows, 'чепуха'), order(rows, 'cost'));
-  assert.deepStrictEqual(order(rows, undefined), ['rich', 'cheap']);
+  assert.deepStrictEqual(order(rows, 'чепуха'), order(rows, DEFAULT_SORT));
+  assert.deepStrictEqual(order(rows, undefined), ['fresh', 'old']);
 });
 
 test('режим сортировки действует внутри каждой группы', () => {

@@ -46,7 +46,7 @@ test('порядок тегов таков, что каждый модуль н�
   assert.strictEqual(ctx.ConfigShape.normalizeConfig(null).onlyLive, true);
   assert.strictEqual(
     ctx.UiState.normalizeUiState({ sort: 'нет такой' }, { toggles: {} }).sort,
-    'cost',
+    ctx.SessionGroups.DEFAULT_SORT,
   );
 });
 

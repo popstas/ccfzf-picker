@@ -16,7 +16,7 @@
   const DESKTOP_UNKNOWN = -1;
 
   const SORT_MODES = ['cost', 'oldest', 'newest', 'recent', 'name'];
-  const DEFAULT_SORT = 'cost';
+  const DEFAULT_SORT = 'recent';
 
   function normalizeSort(mode) {
     return SORT_MODES.includes(mode) ? mode : DEFAULT_SORT;
@@ -63,6 +63,34 @@
     return nameOf(a).localeCompare(nameOf(b)) || String(a.id).localeCompare(String(b.id));
   }
 
+  /**
+   * Ключ сортировки `recent` — минута последней активности, а не секунда.
+   *
+   * `lastActivity` двигает каждый вызов инструмента, а их десятки в минуту.
+   * Подача тикает раз в секунду, и две работающие сессии на секундном ключе
+   * менялись первым местом непрерывно — попасть по такой строке нельзя. С
+   * округлением обе попадают в одну корзину, дальше их разводит tieBreak по
+   * имени, и порядок перестаёт зависеть от того, кто дёрнулся последним.
+   *
+   * Округление до **абсолютной** минуты, а не до возраста ((now - t) / 60):
+   * ключ не зависит от часов, и функция остаётся чистой.
+   *
+   * Ноль остаётся нулём — missingLast топит такие строки вниз, и делить их с
+   * настоящей минутой было бы нечем. А вот `Math.max(1, …)` не для красоты:
+   * деление само делает ноль из всякой метки моложе минуты, и без нижней
+   * границы сессия, работавшая полминуты назад, притворилась бы строкой без
+   * активности вовсе и утонула бы к ним в конец.
+   *
+   * В строке возраст по-прежнему с секундами: округление живёт только здесь,
+   * ageHtml его не знает.
+   */
+  const MINUTE = 60;
+
+  function recentKey(s) {
+    const t = (s || {}).lastActivity ?? 0;
+    return t ? Math.max(1, Math.floor(t / MINUTE)) : 0;
+  }
+
   function compareSessions(a, b, mode) {
     const sort = normalizeSort(mode);
     let primary = 0;
@@ -73,7 +101,7 @@
     } else if (sort === 'newest') {
       primary = missingLast(a.agentStarted ?? 0, b.agentStarted ?? 0, false);
     } else if (sort === 'recent') {
-      primary = missingLast(a.lastActivity ?? 0, b.lastActivity ?? 0, false);
+      primary = missingLast(recentKey(a), recentKey(b), false);
     } else if (sort === 'name') {
       primary = nameOf(a).localeCompare(nameOf(b));
     }

@@ -3,14 +3,14 @@ const assert = require('node:assert');
 const { normalizeUiState, uiStateToSave } = require('../frontend-src/ui-state');
 
 const DEFAULTS = {
-  sort: 'cost',
+  sort: 'recent',
   toggles: { showPrompt: true, showId: false, showCost: true },
 };
 
 test('пустой файл даёт вид по умолчанию', () => {
   // Первый запуск: ui.json ещё нет, бэкенд отдаёт пустой объект.
   assert.deepStrictEqual(normalizeUiState({}, DEFAULTS), {
-    sort: 'cost',
+    sort: 'recent',
     toggles: { showPrompt: true, showId: false, showCost: true },
   });
   assert.deepStrictEqual(normalizeUiState(null, DEFAULTS), normalizeUiState({}, DEFAULTS));
@@ -25,9 +25,9 @@ test('сохранённый вид возвращается как был', () 
 test('незнакомая сортировка не доживает до списка', () => {
   // Иначе список остался бы в порядке, которого нет ни в одном режиме, а
   // подпись в статуслайне показывала бы слово, которого не понимает cycleSort.
-  assert.strictEqual(normalizeUiState({ sort: 'по-моему' }, DEFAULTS).sort, 'cost');
-  assert.strictEqual(normalizeUiState({ sort: 42 }, DEFAULTS).sort, 'cost');
-  assert.strictEqual(normalizeUiState({ sort: null }, DEFAULTS).sort, 'cost');
+  assert.strictEqual(normalizeUiState({ sort: 'по-моему' }, DEFAULTS).sort, 'recent');
+  assert.strictEqual(normalizeUiState({ sort: 42 }, DEFAULTS).sort, 'recent');
+  assert.strictEqual(normalizeUiState({ sort: null }, DEFAULTS).sort, 'recent');
 });
 
 test('набор чекбоксов задают умолчания, а не файл', () => {
@@ -55,5 +55,5 @@ test('в файл уходит ровно то, что читается обра
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
   // Мусорная сортировка не должна попасть даже в файл: перезапуск молча
   // починит её, но человек, заглянувший в ui.json, увидел бы неправду.
-  assert.strictEqual(uiStateToSave('нет такой', toggles).sort, 'cost');
+  assert.strictEqual(uiStateToSave('нет такой', toggles).sort, 'recent');
 });
