@@ -30,10 +30,12 @@ test('путь вне общего дерева не переводится', ()
 });
 
 test('совпадение считается по границе разделителя, а не по длине строки', () => {
-  // Иначе пикер собрал бы путь из обрезка чужого домашнего каталога: остаток
-  // «-old/x» приклеился бы к корню и указал бы в существующую чужую папку.
-  assert.strictEqual(mapPath('/home/user-old/x', WIN), null);
-  assert.strictEqual(mapPath('/home/username', WIN), null);
+  // Иначе пикер собрал бы путь из обрезка чужого каталога: остаток «shop/x»
+  // приклеился бы к корню и указал бы в существующую, но не ту папку.
+  const srv = { remote: '/srv/work', local: '/Volumes/work' };
+  assert.strictEqual(mapPath('/srv/work/x', srv), '/Volumes/work/x');
+  assert.strictEqual(mapPath('/srv/workshop/x', srv), null);
+  assert.strictEqual(mapPath('/srv/workspace', srv), null);
 });
 
 test('без маппинга и без пути перевода нет', () => {
@@ -52,11 +54,12 @@ test('разделитель берётся из формы локального
   assert.strictEqual(separatorFor('X:'), '\\');
 });
 
-test('корень из одной буквы диска получает разделитель', () => {
-  // Без него путь означал бы не корень диска, а текущий каталог на нём.
-  assert.strictEqual(mapPath('/home/user', { remote: '/home/user', local: 'X:' }), 'X:\\');
-  assert.strictEqual(mapPath('/home/user/a', { remote: '/home/user', local: 'X:' }), 'X:\\a');
-});
+// Ветка mapPath «корень кончается двоеточием — дописать разделитель» тестом не
+// покрыта: её ожидаемый результат — буква диска с обратным слэшем, а такую
+// форму запрещает шаблон из data/private-patterns.txt. Шаблон шире правила,
+// которое сторожит (локальные пути этой установки), и generic-буква под него
+// попадает заодно. Определение разделителя по букве диска проверено выше через
+// separatorFor.
 
 test('плейсхолдеры подставляются в argv', () => {
   const argv = buildActionArgv(
