@@ -66,6 +66,42 @@
   }
 
   /**
+   * Комбинация — в подсказку: `Ctrl+Shift+E` → `^⇧E`.
+   *
+   * Порядок символов **фиксированный**, а не тот, что в конфиге: `Shift+Ctrl+E`
+   * и `Ctrl+Shift+E` — одна комбинация, и два разных вида заставляли бы сверять
+   * её по буквам. Это отменяет прежнее правило «показывать строку из конфига
+   * как есть»; расхождение с написанием в файле выбрано сознательно, ради
+   * единого вида по всему окну.
+   *
+   * `^` для Ctrl, а не `⌃`: встроенные подсказки (`^K`, `^R`) пишутся так с
+   * самого начала, и вводить рядом второй знак того же смысла незачем.
+   *
+   * Разбор свой, а не через parseHotkey: тот принимает только буквы и цифры,
+   * а проектные хоткеи в конфиге — F11 и F12. Неразобранная строка отдаётся
+   * как есть: конфиг правит человек, и опечатка не должна стирать подсказку.
+   */
+  const MODIFIER_GLYPHS = [['meta', '⌘'], ['ctrl', '^'], ['alt', '⌥'], ['shift', '⇧']];
+
+  function formatHotkey(str) {
+    if (typeof str !== 'string' || !str.trim()) return '';
+    const raw = str.trim();
+    const parts = raw.split('+').map(s => s.trim()).filter(Boolean);
+    if (parts.length < 2) return raw;
+    const key = parts[parts.length - 1];
+    const flags = { ctrl: false, meta: false, alt: false, shift: false };
+    for (const part of parts.slice(0, -1)) {
+      const flag = MODIFIERS[part.toLowerCase()];
+      if (!flag) return raw;
+      flags[flag] = true;
+    }
+    const glyphs = MODIFIER_GLYPHS.filter(([f]) => flags[f]).map(([, g]) => g).join('');
+    // Однобуквенная клавиша поднимается в верхний регистр, `F12` остаётся как
+    // есть: у неё регистр — часть имени.
+    return glyphs + (key.length === 1 ? key.toUpperCase() : key);
+  }
+
+  /**
    * Занята ли комбинация самим окном пикера.
    *
    * Считается занятой только форма «один Ctrl или Cmd плюс буква»: именно её
@@ -96,5 +132,5 @@
       && Boolean(event.shiftKey) === parsed.shift;
   }
 
-  return { BUILTIN_ACTION_KEYS, RESERVED_CODES, parseHotkey, isReserved, matchesHotkey };
+  return { BUILTIN_ACTION_KEYS, RESERVED_CODES, parseHotkey, formatHotkey, isReserved, matchesHotkey };
 });

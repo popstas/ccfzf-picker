@@ -363,7 +363,7 @@
   //
   // Сама таблица переехала в action-hotkey.js: с ней сверяется разбор конфига,
   // чтобы настроенному действию не досталась уже занятая окном комбинация.
-  const { BUILTIN_ACTION_KEYS: ACTION_KEYS, matchesHotkey } = window.ActionHotkey;
+  const { BUILTIN_ACTION_KEYS: ACTION_KEYS, matchesHotkey, formatHotkey } = window.ActionHotkey;
   // Обработчики сверяют e.code, а не e.key: key — это напечатанный знак, и в
   // русской раскладке ^R приходит как «к», ^K как «л». Физическая клавиша от
   // раскладки не зависит, и подпись в меню остаётся честной в любой из них.
@@ -807,12 +807,13 @@
       // Клавиша справа — из ACTION_KEYS (единая таблица, см. её объявление
       // выше): нет записи для id — ничего не рисуем, пустой элемент не нужен.
       //
-      // У настроенных действий клавиша своя и показывается строкой из конфига
-      // как есть, а не пересобирается из разобранной комбинации: пересборка
-      // разошлась бы с тем, что человек написал в файле.
+      // Комбинация приводится к одному виду — formatHotkey (action-hotkey.js).
+      // Раньше настроенное действие показывало строку из конфига как есть, и в
+      // одном списке стояли `^K` и `Ctrl+Shift+E`. Встроенная клавиша идёт
+      // через тот же форматтер: `Ctrl+K` он и даёт `^K`.
       actionsList.innerHTML = menuActions.map((action, index) => {
         const key = ACTION_KEYS[action.id];
-        const shown = key ? `^${key.toUpperCase()}` : (action.hotkey || '');
+        const shown = formatHotkey(key ? `Ctrl+${key}` : (action.hotkey || ''));
         const hotkey = shown ? `<span class="action-hotkey">${escapeHtml(shown)}</span>` : '';
         return `<div class="action-row${index === 0 ? ' active' : ''}" data-index="${index}" role="menuitem">` +
           `<span class="action-label">${escapeHtml(action.label)}</span>${hotkey}</div>`;

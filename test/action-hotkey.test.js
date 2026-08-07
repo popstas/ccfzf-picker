@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const {
-  BUILTIN_ACTION_KEYS, parseHotkey, isReserved, matchesHotkey,
+  BUILTIN_ACTION_KEYS, parseHotkey, isReserved, matchesHotkey, formatHotkey,
 } = require('../frontend-src/action-hotkey');
 
 /** Событие клавиатуры в том объёме, в каком его читает matchesHotkey. */
@@ -87,4 +87,31 @@ test('лишний модификатор в событии комбинацию
 test('без разобранной комбинации не совпадает ничего', () => {
   assert.strictEqual(matchesHotkey(ev('KeyE', { ctrl: true }), null), false);
   assert.strictEqual(matchesHotkey(null, parseHotkey('Ctrl+E')), false);
+});
+
+test('комбинация показывается символами, а не словами', () => {
+  assert.strictEqual(formatHotkey('Ctrl+K'), '^K');
+  assert.strictEqual(formatHotkey('Ctrl+Shift+E'), '^⇧E');
+  assert.strictEqual(formatHotkey('Cmd+Shift+1'), '⌘⇧1');
+  assert.strictEqual(formatHotkey('Alt+Shift+Q'), '⌥⇧Q');
+});
+
+test('порядок модификаторов не зависит от того, как их написали', () => {
+  // Ctrl+Shift+E и Shift+Ctrl+E — одна и та же комбинация. Показывать её
+  // двумя способами значит заставлять читателя сверять по буквам.
+  assert.strictEqual(formatHotkey('Shift+Ctrl+E'), formatHotkey('Ctrl+Shift+E'));
+});
+
+test('функциональная клавиша доживает до подсказки', () => {
+  // parseHotkey такую комбинацию не разбирает вовсе (только буквы и цифры), а
+  // проектные хоткеи в конфиге — как раз Ctrl+F11/F12.
+  assert.strictEqual(formatHotkey('Ctrl+F12'), '^F12');
+});
+
+test('непонятную строку formatHotkey отдаёт как есть', () => {
+  // Конфиг правит человек, и опечатка не должна стирать подсказку целиком.
+  assert.strictEqual(formatHotkey('Хрен+E'), 'Хрен+E');
+  assert.strictEqual(formatHotkey('  Ctrl+  '), 'Ctrl+');
+  assert.strictEqual(formatHotkey(''), '');
+  assert.strictEqual(formatHotkey(null), '');
 });
