@@ -841,6 +841,33 @@
   }
 
   /**
+   * Поднять новую сессию в каталоге строки.
+   *
+   * Один вход на три повода: Enter на строке проекта, `^N` на любой строке и
+   * пункт меню. Разводить их значило бы завести три места, где собирается одна
+   * и та же удалённая команда, — а собирать её мимо OpenStrategy нельзя вовсе.
+   *
+   * Отметки «просмотрено» здесь нет: смотреть ещё нечего, сессия только что
+   * началась.
+   */
+  async function newSession(cwd) {
+    if (!cwd || sshHostMissing()) return;
+    const argv = [
+      CONFIG.terminal.file, ...CONFIG.terminal.args,
+      'ssh', '-t', CONFIG.sshHost,
+      window.OpenStrategy.newSessionCommand(cwd),
+    ];
+    try {
+      await invoke('spawn_detached', { argv });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    invoke('hide_picker');
+  }
+
+  /**
    * Выполнить действие над строкой.
    *
    * Применимость проверяется здесь, а не у вызывающего: пунктов меню и прямых
@@ -863,6 +890,10 @@
       invoke('spawn_detached', { argv })
         .then(() => invoke('hide_picker'))
         .catch((e) => { error = String(e); render(); });
+      return;
+    }
+    if (id === 'new') {
+      newSession(row.cwd);
       return;
     }
     if (id === 'pr') {
@@ -1087,20 +1118,12 @@
 
     // Проектный хоткей открывает новую сессию, а не продолжает старую:
     // продолжать нечего — сессии у него нет, есть только каталог.
+    //
+    // Через ту же newSession, что Enter и ^N. Раньше здесь поднимался голый
+    // `claude`, без имени: сессия проектного хоткея оставалась безымянной, и
+    // оконный трекер не мог найти её по заголовку окна.
     await listen('project-hotkey', (event) => {
-      if (sshHostMissing()) return;
-      const argv = [
-        CONFIG.terminal.file, ...CONFIG.terminal.args,
-        'ssh', '-t', CONFIG.sshHost,
-        // Через ту же обёртку, что и открытие сессии: и кавычки вокруг пути из
-        // конфига, и интерактивный шелл, без которого агент поднимается мимо
-        // .zshrc — то есть без хука chpwd и без project= в телеметрии.
-        window.OpenStrategy.inDir(event.payload, 'claude'),
-      ];
-      invoke('spawn_detached', { argv }).catch((e) => {
-        error = String(e);
-        render();
-      });
+      newSession(event.payload);
     });
 
     // Fired by Rust every time the window is shown.

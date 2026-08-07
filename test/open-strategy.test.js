@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const {
-  q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
+  q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand, newSessionCommand,
 } = require('../frontend-src/open-strategy');
 
 const ATTACH_42 = `reptyr -T 42 || reptyr "$(pgrep -x -f 'reptyr -T 42' | head -1)"`;
@@ -196,4 +196,25 @@ test('кавычки в пути не разрывают команду', () => 
 
 test('незнакомая стратегия не даёт команды', () => {
   assert.strictEqual(buildOpenCommand(row(), 'нет такой', OPTS), null);
+});
+
+test('новая сессия называется по каталогу проекта', () => {
+  // Имя не для красоты: по нему оконный трекер находит сессию в заголовке
+  // окна, не дожидаясь /rename. Форма взята у ccfzf.
+  assert.strictEqual(
+    newSessionCommand('/home/user/projects/ccfzf'),
+    `exec $SHELL -ic 'cd -- '\\''/home/user/projects/ccfzf'\\'' && claude -n '\\''ccfzf'\\'''`,
+  );
+});
+
+test('имя новой сессии берётся у последнего сегмента пути', () => {
+  const withSlash = newSessionCommand('/home/user/projects/ccfzf/');
+  assert.match(withSlash, /claude -n '\\''ccfzf'\\''/);
+});
+
+test('кавычка в имени каталога не разваливает команду', () => {
+  // Единственный барьер между придуманным человеком путём и чужим шеллом — q.
+  const cmd = newSessionCommand("/home/user/pro'ject");
+  assert.ok(!cmd.includes(";"), 'точка с запятой ломает Windows Terminal');
+  assert.match(cmd, /claude -n /);
 });

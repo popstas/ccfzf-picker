@@ -44,6 +44,18 @@
   function availableActions(row, config) {
     const actions = [];
     const cfg = config || {};
+    // Строка проекта — это каталог, и всё, что держится за сессию, ей не
+    // подходит: у неё нет ни записи агента, ни pid, ни истории. Ветка стоит
+    // до всего остального, чтобы это правило было видно одним куском.
+    if ((row || {}).kind === 'project') {
+      const forProject = [{ id: 'new', label: 'New session' }];
+      if (pathApi.mapPath(row.cwd, cfg.pathMap) !== null) {
+        for (const a of cfg.actions || []) {
+          forProject.push({ id: a.id, label: a.label, hotkey: a.hotkey });
+        }
+      }
+      return forProject;
+    }
     if (pathApi.mapPath((row || {}).cwd, cfg.pathMap) !== null) {
       for (const a of cfg.actions || []) actions.push({ id: a.id, label: a.label, hotkey: a.hotkey });
     }
@@ -56,6 +68,11 @@
     if (row && row.live && openApi.buildAttachCommand(row)) {
       actions.push({ id: 'attach', label: 'Copy reptyr command' });
     }
+    // Новая сессия в том же каталоге: «начать заново рядом» — обычный ход,
+    // когда в текущей сессии кончился контекст. Только там, где каталог
+    // известен: пункт, который ничего не сделает, хуже отсутствующего — то же
+    // правило, что и у действий папки выше.
+    if (row && row.cwd) actions.push({ id: 'new', label: 'New session' });
     actions.push({ id: 'info', label: 'Session info' });
     return actions;
   }

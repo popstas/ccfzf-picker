@@ -19,19 +19,19 @@ test('без конфига список действий прежний', () =>
   // Второй аргумент необязателен: вызов остаётся годным там, где конфига под
   // рукой нет.
   const row = { id: 'a', cwd: '/home/user/x' };
-  assert.deepStrictEqual(availableActions(row).map(a => a.id), ['info']);
-  assert.deepStrictEqual(availableActions(row, {}).map(a => a.id), ['info']);
+  assert.deepStrictEqual(availableActions(row).map(a => a.id), ['new', 'info']);
+  assert.deepStrictEqual(availableActions(row, {}).map(a => a.id), ['new', 'info']);
 });
 
 test('настроенные действия идут первыми, когда путь переводится', () => {
   const ids = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED).map(a => a.id);
-  assert.deepStrictEqual(ids, ['explorer', 'info']);
+  assert.deepStrictEqual(ids, ['explorer', 'new', 'info']);
 });
 
 test('сессия вне общего дерева настроенных действий не получает', () => {
   // Пункт, открывающий несуществующую папку, хуже отсутствующего.
   const ids = availableActions({ id: 'a', cwd: '/etc/nginx' }, CONFIGURED).map(a => a.id);
-  assert.deepStrictEqual(ids, ['info']);
+  assert.deepStrictEqual(ids, ['new', 'info']);
 });
 
 test('настроенное действие доносит до меню свою подпись и клавишу', () => {
@@ -87,4 +87,34 @@ test('пункт меню и бейдж PR судят по ссылке один
     assert.strictEqual(inMenu, inRow, `расходятся на ${pr_url || '(пусто)'}`);
     assert.strictEqual(inMenu, prNumber(pr_url) !== '');
   }
+});
+
+test('новая сессия предлагается и сессии, и проекту', () => {
+  const forSession = availableActions({ id: 'a', cwd: '/p', live: true, pid: 42 })
+    .map(a => a.id);
+  assert.ok(forSession.includes('new'), forSession);
+
+  const forProject = availableActions({ kind: 'project', id: '/p', cwd: '/p' })
+    .map(a => a.id);
+  assert.deepStrictEqual(forProject, ['new']);
+});
+
+test('строке проекта не предлагают того, чему нужна сессия', () => {
+  // PR, «прочитано» и reptyr держатся за запись агента и за pid — у каталога
+  // нет ни того, ни другого. Карточка сессии у проекта тоже пуста.
+  const ids = availableActions({
+    kind: 'project', id: '/p', cwd: '/p',
+    pr_url: 'https://github.com/o/r/pull/3', live: true, pid: 42,
+    lastActivity: 1, agentSeen: true,
+  }).map(a => a.id);
+  assert.deepStrictEqual(ids, ['new']);
+});
+
+test('у проекта есть действия папки, когда путь переводится', () => {
+  const ids = availableActions(
+    { kind: 'project', id: '/remote/p', cwd: '/remote/p' },
+    { pathMap: { remote: '/remote', local: '/local' },
+      actions: [{ id: 'explorer', label: 'Open in Explorer', hotkey: 'Ctrl+Shift+E' }] },
+  ).map(a => a.id);
+  assert.deepStrictEqual(ids, ['new', 'explorer']);
 });

@@ -13,7 +13,7 @@
    * Действия `terminal` здесь нет намеренно: на маке открытие сессии и есть
    * открытие терминала, оно висит на Enter и на клике.
    */
-  const BUILTIN_ACTION_KEYS = { pr: 'p', unread: 'u', attach: 'r', info: 'i' };
+  const BUILTIN_ACTION_KEYS = { new: 'n', pr: 'p', unread: 'u', attach: 'r', info: 'i' };
 
   /**
    * Буквы, занятые окном пикера при одном Ctrl или Cmd. Меню (^K) — не
@@ -22,6 +22,10 @@
   const RESERVED_CODES = [
     ...Object.values(BUILTIN_ACTION_KEYS).map(k => `Key${k.toUpperCase()}`),
     'KeyK',
+    // Не действие, а ярлык: ставит `/a ` в начало строки поиска. Клавишу он
+    // всё равно занимает, и настроенному действию её отдавать нельзя. Цена
+    // известна: `^A` в поле поиска перестал быть «выделить всё».
+    'KeyA',
   ];
 
   const MODIFIERS = {

@@ -73,6 +73,24 @@
   }
 
   /**
+   * Поднять в каталоге нового агента, названного по каталогу.
+   *
+   * Имя ставится сразу, а не оставляется на `/rename`: по заголовку окна
+   * оконный трекер привязывает сессию к слоту, и безымянная в его индексе не
+   * находится вовсе. Форма взята у ccfzf — там `claude -n $(basename "$dir")`
+   * ровно по этой причине.
+   *
+   * Через inDir, как и resume: `ssh host cmd` даёт неинтерактивный шелл, zsh
+   * читает только `.zshenv`, и хук `chpwd` не ставит `project=` в
+   * OTEL_RESOURCE_ATTRIBUTES — телеметрия уходит без имени проекта.
+   */
+  function newSessionCommand(cwd) {
+    const path = String(cwd == null ? '' : cwd).replace(/\/+$/, '');
+    const name = path.split('/').pop() || path;
+    return inDir(path, `claude -n ${q(name)}`);
+  }
+
+  /**
    * argv для запуска терминала. Ввод-вывод делает вызывающий.
    *
    * `destructive` поднимается только у перехвата: это единственная ветка, где
@@ -174,5 +192,8 @@
   // собрать удалённую команду (проектные хоткеи в sessions.html), обязан звать
   // именно её, а не писать replace по месту — второй экземпляр этого правила
   // рано или поздно разойдётся с первым.
-  return { q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand };
+  return {
+    q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
+    newSessionCommand,
+  };
 });
