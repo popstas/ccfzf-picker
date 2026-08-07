@@ -185,6 +185,28 @@ async fn focus_window_mqtt(id: String, pid: u32) -> Result<(), String> {
         .map_err(|e| format!("focus_window_mqtt task failed: {e}"))?
 }
 
+/// Вернуть сессию в непрочитанное у оконного трекера.
+///
+/// Отметок о просмотре две: своя, в `seen.json`, и трекерная — она приезжает
+/// полем `focusedAt` внутри `window` и в списке побеждает по максимуму. Отмотать
+/// только свою бесполезно: у сессии с открытым окном трекерная почти всегда
+/// свежее и вернула бы кружок в «просмотрено» на следующем же опросе.
+///
+/// Права на передний план здесь не выдаётся: окно никто не поднимает. Пикер по
+/// этой команде не гаснет — список перерисовывается раз в секунду, и кружок
+/// оранжевеет на глазах.
+#[tauri::command]
+async fn unread_session_mqtt(id: String) -> Result<(), String> {
+    let raw = load_config()?;
+    let broker = mqtt::broker_from_config(&raw);
+    if !broker.is_configured() {
+        return Err("mqtt не настроен: нужны host и base в config.yaml".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || mqtt::unread(&broker, &id))
+        .await
+        .map_err(|e| format!("unread_session_mqtt task failed: {e}"))?
+}
+
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
 /// тесты. Отсутствующий файл — не ошибка: умолчания рассчитаны на работу без
 /// него.
@@ -389,7 +411,7 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config,
-            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt
+            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из

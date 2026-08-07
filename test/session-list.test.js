@@ -63,6 +63,36 @@ test('отметка открытия попадает в строку', () => {
   assert.strictEqual(buildSessionList({ sessions, seen: {} })[0].focusedAt, 0);
 });
 
+// Отметок о просмотре две, и обе настоящие: своя ставится открытием сессии из
+// списка, чужая приезжает от оконного трекера — он видит, что на окно перевели
+// взгляд, а пикер про это не знает никак. Побеждает поздняя: «посмотрел» верно
+// с той секунды, когда посмотрели, чем бы это ни было — щелчком в списке или
+// переходом к окну руками.
+test('отметка трекера и своя складываются по максимуму', () => {
+  const win = focusedAt => ({ title: 'wt', desktop: 1, lastSeen: 900, focusedAt });
+  const sessions = [state({ id: 'a', agent: { updated: 500 }, window: win(700) })];
+  assert.strictEqual(buildSessionList({ sessions, seen: {} })[0].focusedAt, 700);
+  assert.strictEqual(buildSessionList({ sessions, seen: { a: 400 } })[0].focusedAt, 700);
+  assert.strictEqual(buildSessionList({ sessions, seen: { a: 900 } })[0].focusedAt, 900);
+
+  // И то же самое там, где смотрят на кружок.
+  const older = [state({ id: 'a', agent: { updated: 500 }, window: win(499) })];
+  const newer = [state({ id: 'a', agent: { updated: 500 }, window: win(500) })];
+  assert.strictEqual(buildSessionList({ sessions: older, seen: {} })[0].agentSeen, false);
+  assert.strictEqual(buildSessionList({ sessions: newer, seen: {} })[0].agentSeen, true);
+});
+
+// Трекера может не быть вовсе (на маке его нет), а прежний трекер поля не
+// писал. Строка при этом обязана остаться такой же, как до всей этой затеи.
+test('без окна и без отметки трекера считается только своя', () => {
+  const sessions = [state({ id: 'a', agent: { updated: 500 }, window: null })];
+  assert.strictEqual(buildSessionList({ sessions, seen: { a: 700 } })[0].focusedAt, 700);
+  const old = [state({ id: 'a', agent: { updated: 500 },
+                       window: { title: 'wt', desktop: null, lastSeen: 900 } })];
+  assert.strictEqual(buildSessionList({ sessions: old, seen: { a: 700 } })[0].focusedAt, 700);
+  assert.strictEqual(buildSessionList({ sessions: old, seen: {} })[0].focusedAt, 0);
+});
+
 // Записи агента нет — сессия не считается ни просмотренной, ни зовущей: звать
 // нечему, потому что и кружок, и текст статуса завязаны на пустой agentState
 // (это проверяет test/row-contract.test.js на настоящих отрисовщиках).

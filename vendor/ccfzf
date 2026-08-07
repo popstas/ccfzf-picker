@@ -26,7 +26,8 @@
 #                                    (default ~/.ccfzf.projects.json, empty — off)
 #   CCFZF_WINDOWS_FILE               optional file *written by* a window tracker
 #                                    elsewhere; --state uses it to say which
-#                                    session has a terminal window open
+#                                    session has a terminal window open and when
+#                                    its window was last looked at
 #                                    (default ~/.ccfzf.sessions.claude-wt.json)
 #
 # Data comes straight from ~/.claude/projects: the first jsonl line carries cwd,
@@ -400,6 +401,12 @@ def read_windows(path, now):
             "title": w.get("title") if isinstance(w.get("title"), str) else "",
             "desktop": desktop if ok_desktop else None,
             "lastSeen": num(w.get("lastSeen")),
+            # Когда на окно этой сессии в последний раз перевели взгляд. Ни
+            # здесь, ни у читателя такого знания нет: окна видит только трекер,
+            # а читатель по этой отметке гасит зов «посмотри результат». Мусор и
+            # отсутствие поля дают ноль — «не смотрели», — и пометки об окне не
+            # стоят: она дороже.
+            "focusedAt": num(w.get("focusedAt")),
         }
     host = o.get("host") if isinstance(o.get("host"), str) else ""
     pid = int(num(o.get("pid")))

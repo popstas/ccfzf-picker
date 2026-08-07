@@ -1,9 +1,10 @@
-//! Второй способ попросить о подъёме окна — публикация в MQTT.
+//! Просьбы к оконному трекеру — публикацией в MQTT.
 //!
 //! Прямой http до трекера есть не отовсюду, а брокер в этой установке слушают
-//! обе машины. Топик и формат тела не наши: их уже слушает демон на
-//! Windows-машине (`<base>/windows/claude-focus` с `{"id": …}`), и придумывать
-//! рядом второй значило бы заводить приёмник, которого нет.
+//! обе машины. Топики и формат тела не наши: их уже слушает демон на
+//! Windows-машине (`<base>/windows/claude-focus` и
+//! `<base>/windows/claude-session-unread`, оба с `{"id": …}`), и придумывать
+//! рядом свои значило бы заводить приёмник, которого нет.
 //!
 //! Настройки брокера читаются здесь, из того же `config.yaml`, а не приходят
 //! из фронтенда: иначе пароль ездил бы через мост в webview на каждое нажатие.
@@ -17,9 +18,10 @@ use rumqttc::{Client, ConnectionError, Event, MqttOptions, Packet, QoS, RecvTime
 /// окна, и лучше сказать «не вышло», чем молчать.
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Хвост топика. `base` из конфига — общий префикс установки; всё, что после
+/// Хвосты топиков. `base` из конфига — общий префикс установки; всё, что после
 /// него, задано приёмником и меняться отсюда не может.
 const FOCUS_TOPIC: &str = "/windows/claude-focus";
+const UNREAD_TOPIC: &str = "/windows/claude-session-unread";
 
 pub struct Broker {
     pub host: String,
@@ -66,11 +68,35 @@ pub fn broker_from_config(raw: &serde_json::Value) -> Broker {
 }
 
 /// Попросить о подъёме окна сессии.
+pub fn focus(broker: &Broker, id: &str) -> Result<(), String> {
+    publish(broker, FOCUS_TOPIC, id)
+}
+
+/// Вернуть сессию в непрочитанное — у трекера, а не у себя.
+///
+/// Отметка о просмотре живёт в двух местах, и местная здесь не помогает: у
+/// сессии с открытым окном отметка трекера почти всегда свежее и на следующем
+/// же опросе вернула бы кружок в «просмотрено». Отматывать надо ту, что
+/// перебивает, — это делает `markSessionUnread()` на стороне демона.
+///
+/// Шлётся независимо от того, своя ли это машина: `windowHost` отвечает на
+/// вопрос «поднимать ли окно», а отметка о просмотре приезжает в список на
+/// любой машине.
+pub fn unread(broker: &Broker, id: &str) -> Result<(), String> {
+    publish(broker, UNREAD_TOPIC, id)
+}
+
+/// Полный топик: префикс установки плюс заданный приёмником хвост.
+fn topic_of(broker: &Broker, tail: &str) -> String {
+    format!("{}{}", broker.base, tail)
+}
+
+/// Опубликовать `{"id": …}` в топик установки и дождаться подтверждения.
 ///
 /// Ждём именно `PubAck`, а не просто отправки: без него «опубликовано» значит
 /// лишь «сложено в очередь клиента», и брокер, до которого не дотянулись, был
 /// бы неотличим от сработавшего.
-pub fn focus(broker: &Broker, id: &str) -> Result<(), String> {
+fn publish(broker: &Broker, tail: &str, id: &str) -> Result<(), String> {
     let mut options = MqttOptions::new(
         // Идентификатор с pid: два пикера этой установки (на маке и на Windows)
         // с одинаковым id выбивали бы друг друга из брокера.
@@ -83,7 +109,7 @@ pub fn focus(broker: &Broker, id: &str) -> Result<(), String> {
         options.set_credentials(&broker.user, &broker.password);
     }
 
-    let topic = format!("{}{}", broker.base, FOCUS_TOPIC);
+    let topic = topic_of(broker, tail);
     let payload = serde_json::json!({ "id": id }).to_string();
 
     let (client, mut connection) = Client::new(options, 10);
@@ -120,7 +146,22 @@ pub fn focus(broker: &Broker, id: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::broker_from_config;
+    use super::{broker_from_config, topic_of, FOCUS_TOPIC, UNREAD_TOPIC};
+
+    // Хвосты заданы приёмником — демоном на Windows-машине. Опечатка здесь
+    // ничего не ломает на глаз: публикация проходит, PubAck приходит, а окно не
+    // поднимается и отметка не отматывается, потому что никто не слушает.
+    #[test]
+    fn topics_are_the_ones_the_daemon_listens_to() {
+        let broker = broker_from_config(&serde_json::json!({
+            "mqtt": { "host": "broker", "base": "home/room/pc/" }
+        }));
+        assert_eq!(topic_of(&broker, FOCUS_TOPIC), "home/room/pc/windows/claude-focus");
+        assert_eq!(
+            topic_of(&broker, UNREAD_TOPIC),
+            "home/room/pc/windows/claude-session-unread"
+        );
+    }
 
     #[test]
     fn missing_block_disables_the_broker() {
