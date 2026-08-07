@@ -46,8 +46,10 @@
       ['seen', s.agentState ? (s.agentSeen ? 'yes' : 'no') : ''],
       ['prompt', s.agentPrompt ?? ''],
       ['summary', s.agentDescription ?? ''],
-      ['cost', s.agentCostUsd ? `$${s.agentCostUsd}` : ''],
-      ['context', s.agentContextPct ? `${s.agentContextPct}%` : ''],
+      // Ноль печатается, как и в строке списка (usageHtml в session-glyph.js):
+      // пустая клетка там читалась как поломка, а не как «данных нет».
+      ['cost', `$${s.agentCostUsd || 0}`],
+      ['context', `${s.agentContextPct || 0}%`],
       ['branch', s.branch ?? ''],
       ['pr_url', s.pr_url ?? ''],
       ['agent', s.agentBackground && s.agentSessionId ? `background · ${s.agentSessionId}` : ''],

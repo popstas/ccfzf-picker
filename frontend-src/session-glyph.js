@@ -206,9 +206,11 @@
    * заставлял бы перечитывать. Подсвечены только проценты: по ним решают, не
    * пора ли начинать заново, а стоимость — справка.
    *
-   * Ноль означает «данных нет», а не «ничего не потратила»: перехват
-   * статуслайна стоит не у каждой сессии (см. claude-wt-statusline.sh). Такая
-   * часть просто не показывается.
+   * Ноль показывается как ноль. Раньше он значил «данных нет» — перехват
+   * статуслайна стоит не у каждой сессии (см. claude-wt-statusline.sh), — и
+   * такая часть просто не рисовалась. На глаз это читалось не как «неизвестно»,
+   * а как поломка отрисовки: у соседних строк цифры есть, у этой пусто.
+   * Различать два случая всё равно нечем, и «0%» честнее пустоты.
    */
   function usageHtml(session, { showCost = true, showContext = true } = {}) {
     // Обе величины выключены — колонки нет вовсе; см. stateHtml о том, почему
@@ -218,8 +220,8 @@
     const cost = Number.isFinite(session?.agentCostUsd) ? session.agentCostUsd : 0;
     const parts = [];
     const level = contextLevel(pct);
-    if (showCost && cost > 0) parts.push(`<span class="cost">$${cost}</span>`);
-    if (showContext && pct > 0) parts.push(`<span class="ctx${level ? ` ${level}` : ''}">${pct}%</span>`);
+    if (showCost) parts.push(`<span class="cost">$${cost}</span>`);
+    if (showContext) parts.push(`<span class="ctx${level ? ` ${level}` : ''}">${pct}%</span>`);
     // Разделитель тот же, что у stateText: это две независимые величины, а не
     // одно число из двух частей, и пробела для такого мало.
     //

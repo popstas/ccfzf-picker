@@ -302,13 +302,37 @@ test('usageHtml puts the cost before the highlighted context', () => {
   assert.ok(usageHtml({ agentContextPct: 47, agentCostUsd: 2 }).includes('class="ctx hot"'));
 });
 
-test('usageHtml leaves out what nobody measured, but keeps the column', () => {
-  // Ноль — это «данных нет»: перехват статуслайна стоит не у каждой сессии, и
-  // «$0» утверждало бы, что она обошлась бесплатно.
+test('usageHtml печатает ноль, а не прячет его', () => {
+  // Раньше ноль значил «данных нет» и колонка у такой сессии пустовала. На
+  // глаз это читалось как поломка отрисовки: у соседей цифры есть, тут пусто.
+  // Различить «ноль» и «неизвестно» всё равно нечем, и «0%» честнее пустоты.
   assert.strictEqual(usageHtml({ agentContextPct: 0, agentCostUsd: 2 }),
-    '<div class="usage"><span class="cost">$2</span></div>');
-  assert.strictEqual(usageHtml({}), '<div class="usage"></div>');
-  assert.strictEqual(usageHtml(undefined), '<div class="usage"></div>');
+    '<div class="usage"><span class="cost">$2</span> · <span class="ctx">0%</span></div>');
+  assert.strictEqual(usageHtml({}),
+    '<div class="usage"><span class="cost">$0</span> · <span class="ctx">0%</span></div>');
+  assert.strictEqual(usageHtml(undefined),
+    '<div class="usage"><span class="cost">$0</span> · <span class="ctx">0%</span></div>');
+});
+
+test('нули показываются, а не прячутся', () => {
+  // Раньше ноль значил «данных нет»: перехват статуслайна стоит не у каждой
+  // сессии, и колонка у такой строки была пуста. Решение поменялось — ноль
+  // это ноль, а пустая колонка выглядела как поломка отрисовки.
+  const html = usageHtml({ agentCostUsd: 0, agentContextPct: 0 });
+  assert.match(html, /\$0/);
+  assert.match(html, /0%/);
+});
+
+test('нулевой контекст не подсвечивается', () => {
+  const html = usageHtml({ agentCostUsd: 0, agentContextPct: 0 });
+  assert.doesNotMatch(html, /ctx warn|ctx hot/);
+});
+
+test('выключенный чекбокс по-прежнему убирает свою величину', () => {
+  const noCost = usageHtml({ agentCostUsd: 0, agentContextPct: 0 }, { showCost: false });
+  assert.doesNotMatch(noCost, /\$/);
+  assert.match(noCost, /0%/);
+  assert.strictEqual(usageHtml({}, { showCost: false, showContext: false }), '');
 });
 
 test('stateText shows the state and the event that produced it', () => {

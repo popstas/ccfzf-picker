@@ -146,7 +146,7 @@ test('сессия без записи агента рисуется пусто,
   assert.strictEqual(Glyph.stateText(row), '');
   assert.strictEqual(Glyph.stateHtml(row, true), '<div class="state"></div>');
   assert.strictEqual(Glyph.usageHtml(row, { showCost: true, showContext: true }),
-    '<div class="usage"></div>');
+    '<div class="usage"><span class="cost">$0</span> · <span class="ctx">0%</span></div>');
   assert.strictEqual(Glyph.ageHtml(row, NOW), '<div class="age"></div>');
   assert.strictEqual(Glyph.prBadgeHtml(row), '');
   assert.strictEqual(Glyph.rowTitle(row), '~/projects/expertizeme/cup-dashboard');
