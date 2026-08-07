@@ -21,5 +21,20 @@
       .filter(g => g.sessions.length > 0);
   }
 
-  return { filterSessions, searchableCwd };
+  /**
+   * Отбор проектов. Тот же searchableCwd, что и у сессий: `/home` из пути
+   * выброшен, иначе «home» совпадает со всем сразу.
+   *
+   * Плоский список, а не группы: у проектов группировки нет — их порядок задаёт
+   * агрегатор (свежие сверху), и переставлять его здесь незачем.
+   */
+  function filterProjects(rows, query) {
+    const list = Array.isArray(rows) ? rows : [];
+    const q = String(query ?? '').trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(r =>
+      `${r.label} ${searchableCwd(r.cwd)}`.toLowerCase().includes(q));
+  }
+
+  return { filterSessions, filterProjects, searchableCwd };
 });

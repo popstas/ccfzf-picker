@@ -24,6 +24,7 @@ const FILES = [
   'frontend-src/config-shape.js',
   'frontend-src/picker-filter.js',
   'frontend-src/picker-mode.js',
+  'frontend-src/project-list.js',
   'frontend-src/picker-list-sync.js',
   'frontend-src/open-strategy.js',
 ];
