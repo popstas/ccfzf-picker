@@ -17,7 +17,7 @@
 
 ## Global Constraints
 
-- **Рабочий каталог — `/home/popstas/projects/js/ccfzf-picker`.**
+- **Рабочий каталог — `~/projects/js/ccfzf-picker`.**
 - **Зависит от плана агрегатора.** `docs/superpowers/plans/2026-08-08-ccfzf-state-projects-and-liveness.md`
   должен быть выполнен: без поля `projects` в `ccfzf --state` режим `/a` покажет
   пустой список. Задачи 1–6 от него не зависят и делаются в любом порядке.
@@ -1359,7 +1359,7 @@ grep -rn "vendor" CLAUDE.md README.md docs/
 после таблицы «Типичные пути в живой конфигурации» добавить:
 
 ```markdown
-Где лежит код связки на pc-virt:
+Где лежит код связки на машине с сессиями:
 
 | Что | Путь |
 |---|---|
@@ -1378,7 +1378,7 @@ grep -rn "vendor" CLAUDE.md README.md docs/
 
 ```markdown
 **`vendor/ccfzf` в репозитории — снимок, не оригинал.** Агрегатор реально
-живёт на pc-virt (`~/bin/ccfzf`); править нужно его, а копию в `vendor/ccfzf`
+живёт на машине с сессиями (`~/bin/ccfzf`); править нужно его, а копию в `vendor/ccfzf`
 — только обновлять с оригинала.
 ```
 
