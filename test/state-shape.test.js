@@ -45,3 +45,31 @@ test('agent проверяется только когда он не null', () =
   withAgent.sessions[0].agent = { updated: 'вчера' };
   assert.ok(validateState(withAgent).some(m => m.includes('agent.updated')));
 });
+
+test('проекты проверяются, когда они есть', () => {
+  const bad = validateState({
+    generated: 1, sessions: [],
+    projects: [{ path: '/p', name: 'p', sessions: '3', live: 0, mtime: 0 }],
+  });
+  assert.deepStrictEqual(bad, ['projects[0].sessions is not a number']);
+
+  const ok = validateState({
+    generated: 1, sessions: [],
+    projects: [{ path: '/p', name: 'p', sessions: 3, live: 1, mtime: 100 }],
+  });
+  assert.deepStrictEqual(ok, []);
+});
+
+test('ответ без проектов — рабочее состояние, а не поломка', () => {
+  // Агрегатор живёт на другой машине и обновляется отдельно от пикера. Старый
+  // ответ без projects обязан открывать список сессий как ни в чём не бывало:
+  // уронить его значило бы лишить человека пикера из-за не приехавшей фичи.
+  assert.deepStrictEqual(validateState({ generated: 1, sessions: [] }), []);
+});
+
+test('проекты не массивом — это поломка', () => {
+  assert.deepStrictEqual(
+    validateState({ generated: 1, sessions: [], projects: {} }),
+    ['projects is not an array'],
+  );
+});

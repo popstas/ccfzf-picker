@@ -16,6 +16,16 @@
     ['kind', 'string'],
   ];
 
+  // Проекты. Поля те же, что отдаёт project_rows на стороне агрегатора; `age`
+  // среди них нет намеренно — возраст в строке считает пикер.
+  const PROJECT_FIELDS = [
+    ['path', 'string'],
+    ['name', 'string'],
+    ['sessions', 'number'],
+    ['live', 'number'],
+    ['mtime', 'number'],
+  ];
+
   function validateState(obj) {
     const out = [];
     if (!obj || !Array.isArray(obj.sessions)) return ['sessions is not an array'];
@@ -31,6 +41,20 @@
         out.push(`sessions[${i}].agent.updated is not a number`);
       }
     });
+    // Поля может не быть вовсе, и это не ошибка: агрегатор стоит на другой
+    // машине и обновляется отдельно. Старый ответ без projects значит «режим
+    // /a ничего не найдёт» — честный ответ, а не повод гасить весь список.
+    if (obj.projects !== undefined) {
+      if (!Array.isArray(obj.projects)) {
+        out.push('projects is not an array');
+      } else {
+        obj.projects.forEach((p, i) => {
+          for (const [key, type] of PROJECT_FIELDS) {
+            if (typeof (p || {})[key] !== type) out.push(`projects[${i}].${key} is not a ${type}`);
+          }
+        });
+      }
+    }
     return out;
   }
 
