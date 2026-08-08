@@ -484,7 +484,10 @@
       // Зелёная точка у проекта, где кто-то работает прямо сейчас: тот же
       // словарь цветов, что и у сессии, и та же ширина левой колонки.
       const dot = project.liveCount ? 'active' : 'closed';
-      const html = `<div class="row project" data-index="${index}" title="${escapeHtml(project.cwd)}">` +
+      // Подсказка — через тот же titleAttr, что у сессий: иначе в ней висел бы
+      // полный путь, а строкой ниже, в теле строки, — тот же путь через
+      // shortPath, и одна строка показывала бы каталог двумя разными видами.
+      const html = `<div class="row project" data-index="${index}"${titleAttr(project)}>` +
         `<div class="dot ${dot}"></div>` +
         `<div class="text"><div class="name">` +
         (project.mark ? '<span class="mark">★</span> ' : '') +
