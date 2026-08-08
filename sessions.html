@@ -936,10 +936,19 @@
    */
   async function newSession(cwd) {
     if (!cwd || sshHostMissing()) return;
+    // Пустая команда — отказ OpenStrategy, а не поломка: путь с `;` Windows
+    // Terminal порежет на панели ещё до шелла. Сказать об этом обязательно —
+    // иначе кнопка молча ничего не делает.
+    const remote = window.OpenStrategy.newSessionCommand(cwd);
+    if (!remote) {
+      error = `В пути есть «;», такой каталог открыть нечем: ${cwd}`;
+      render();
+      return;
+    }
     const argv = [
       CONFIG.terminal.file, ...CONFIG.terminal.args,
       'ssh', '-t', CONFIG.sshHost,
-      window.OpenStrategy.newSessionCommand(cwd),
+      remote,
     ];
     try {
       await invoke('spawn_detached', { argv });

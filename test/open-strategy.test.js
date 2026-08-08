@@ -215,6 +215,18 @@ test('имя новой сессии берётся у последнего се
 test('кавычка в имени каталога не разваливает команду', () => {
   // Единственный барьер между придуманным человеком путём и чужим шеллом — q.
   const cmd = newSessionCommand("/home/user/pro'ject");
-  assert.ok(!cmd.includes(";"), 'точка с запятой ломает Windows Terminal');
   assert.match(cmd, /claude -n /);
+});
+
+test('точка с запятой в пути — отказ, а не команда', () => {
+  // Проверка гоняется на пути, в котором `;` действительно есть: для шелла он
+  // безопасен (q отработала), но Windows Terminal режет по нему свою
+  // командную строку на панели ещё до всякого шелла. Вызывающий на пустую
+  // строку показывает отказ — молча открыть сессию в чужом каталоге хуже.
+  assert.strictEqual(newSessionCommand('/home/user/a;b'), '');
+  assert.strictEqual(newSessionCommand('/home/user/a;b/'), '');
+  assert.strictEqual(newSessionCommand(';'), '');
+  // Соседний путь по-прежнему собирается, и `;` в готовой команде не заводится.
+  const ok = newSessionCommand('/home/user/projects/ccfzf');
+  assert.ok(ok && !ok.includes(';'), ok);
 });
