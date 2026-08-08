@@ -1095,15 +1095,15 @@
    * не от самой строки, и availableActions его не видит. Общая функция для
    * openMenu и runAction: список меню и то, что runAction готов выполнить,
    * должны быть одним и тем же списком, а не двумя похожими.
+   *
+   * Применимость пункта решает canOpenRemote (open-transport.js) — не здесь:
+   * она проверена тестами на каждый вид строки и все четыре состояния
+   * трекера, а инлайновая проверка в этом файле такой проверки не имеет
+   * вовсе.
    */
   function actionsFor(row) {
     const actions = window.SessionActions.availableActions(row, CONFIG);
-    // Трекер существует, но он на другой машине: отсюда можно попросить его
-    // поднять сессию у себя. На своём хосте пункт лишний — там это делает
-    // обычный Enter (openViaManager). У строки проекта сессии ещё нет, и
-    // просить открыть её на трекере нечего.
-    if (row && row.kind !== 'project' && lastState && lastState.windowHost
-        && window.OpenTransport.chooseOpenTransport(lastState, CONFIG.windowHost) === 'local') {
+    if (window.OpenTransport.canOpenRemote(row, lastState, CONFIG.windowHost)) {
       actions.push({
         id: 'open-remote',
         label: `Open on ${lastState.windowHost}`,
