@@ -224,6 +224,25 @@ async fn restore_snapshot_mqtt(id: String, session_ids: Vec<String>) -> Result<(
         .map_err(|e| format!("restore_snapshot_mqtt task failed: {e}"))?
 }
 
+/// Попросить трекер открыть сессию у себя.
+///
+/// Зовётся с машины, которая не является трекером: пункт меню «Open on
+/// <host>» появляется только там, где `chooseOpenTransport` отдал `local`, а
+/// windowHost при этом не пуст — свою же машину так не просят, там это делает
+/// Enter через `openViaManager` (http). Ответа у просьбы нет по той же причине,
+/// что и у фокуса: приёмник отчитывается в свой лог, а не нам.
+#[tauri::command]
+async fn open_session_mqtt(id: String) -> Result<(), String> {
+    let raw = load_config()?;
+    let broker = mqtt::broker_from_config(&raw);
+    if !broker.is_configured() {
+        return Err("mqtt не настроен: нужны host и base в config.yaml".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &id))
+        .await
+        .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
+}
+
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
 /// тесты. Отсутствующий файл — не ошибка: умолчания рассчитаны на работу без
 /// него.
@@ -429,7 +448,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
-            restore_snapshot_mqtt
+            restore_snapshot_mqtt, open_session_mqtt
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из

@@ -968,6 +968,33 @@
     invoke('hide_picker');
   }
 
+  /**
+   * Попросить трекер открыть сессию у себя — с чужой машины.
+   *
+   * Дополняет openViaManager, а не заменяет его: тот бьёт по http на своей же
+   * машине, когда Enter решил, что трекер — это мы. Здесь машина трекера
+   * другая, http до неё не всегда есть, и просьба уходит в MQTT — тот же
+   * топик и то же тело, что уже слушает демон на Windows-машине. Пункт меню, а
+   * не ветка Enter: chooseOpenTransport на своём хосте выбирает 'local' и без
+   * этой строки, и подменять готовое решение здесь не за чем — открыть на
+   * трекере просят явно.
+   */
+  async function openRemote(row) {
+    try {
+      await invoke('open_session_mqtt', { id: row.id });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    error = '';
+    // Та же пара, что и у местного открытия и у openViaManager: отметка
+    // «посмотрел» и гашение пикера, после ответа — иначе ошибка недоступного
+    // трекера осталась бы за уже закрытым окном.
+    await markSeen(row.id, Math.floor(Date.now() / 1000));
+    invoke('hide_picker');
+  }
+
   function choose() {
     const row = rows[active];
     if (!row) return;
@@ -1062,6 +1089,29 @@
     search.blur();
   }
 
+  /**
+   * Действия для строки: availableActions плюс пункт, который availableActions
+   * дать не может — «открыть на трекере» зависит от lastState.windowHost, а
+   * не от самой строки, и availableActions его не видит. Общая функция для
+   * openMenu и runAction: список меню и то, что runAction готов выполнить,
+   * должны быть одним и тем же списком, а не двумя похожими.
+   */
+  function actionsFor(row) {
+    const actions = window.SessionActions.availableActions(row, CONFIG);
+    // Трекер существует, но он на другой машине: отсюда можно попросить его
+    // поднять сессию у себя. На своём хосте пункт лишний — там это делает
+    // обычный Enter (openViaManager). У строки проекта сессии ещё нет, и
+    // просить открыть её на трекере нечего.
+    if (row && row.kind !== 'project' && lastState && lastState.windowHost
+        && window.OpenTransport.chooseOpenTransport(lastState, CONFIG.windowHost) === 'local') {
+      actions.push({
+        id: 'open-remote',
+        label: `Open on ${lastState.windowHost}`,
+      });
+    }
+    return actions;
+  }
+
   function openMenu() {
     const session = rows[active];
     if (!session) return;
@@ -1071,7 +1121,7 @@
       id: session.id,
       label: session.label,
       cwd: session.cwd,
-      actions: window.SessionActions.availableActions(session, CONFIG),
+      actions: actionsFor(session),
     });
   }
 
@@ -1121,7 +1171,7 @@
    */
   function runAction(row, id) {
     if (!row) return;
-    if (!window.SessionActions.availableActions(row, CONFIG).some(a => a.id === id)) return;
+    if (!actionsFor(row).some(a => a.id === id)) return;
     // Настроенные действия проверяются первыми: встроенных id немного, но
     // конфиг им не подчинён, и одинаковое имя не должно молча уводить в
     // встроенную ветку. Путь уже переведён — иначе действия не было бы в списке.
@@ -1149,6 +1199,10 @@
     }
     if (id === 'unread') {
       markUnread(row);
+      return;
+    }
+    if (id === 'open-remote') {
+      openRemote(row);
       return;
     }
     if (id === 'attach') {

@@ -3,10 +3,11 @@
 //! Прямой http до трекера есть не отовсюду, а брокер в этой установке слушают
 //! обе машины. Топики и формат тела не наши: их уже слушает демон на
 //! Windows-машине (`<base>/windows/claude-focus` и
-//! `<base>/windows/claude-session-unread`, оба с `{"id": …}`, и
+//! `<base>/windows/claude-session-unread`, оба с `{"id": …}`,
 //! `<base>/windows/claude-snapshot-restore` с телом `{"id": …}` и
-//! необязательным `sessionIds`), и придумывать рядом свои значило бы заводить
-//! приёмник, которого нет.
+//! необязательным `sessionIds`, и `<base>/windows/claude-session-open` с телом
+//! `{"id": …, "action": "terminal"}`), и придумывать рядом свои значило бы
+//! заводить приёмник, которого нет.
 //!
 //! Настройки брокера читаются здесь, из того же `config.yaml`, а не приходят
 //! из фронтенда: иначе пароль ездил бы через мост в webview на каждое нажатие.
@@ -25,6 +26,10 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 const FOCUS_TOPIC: &str = "/windows/claude-focus";
 const UNREAD_TOPIC: &str = "/windows/claude-session-unread";
 const RESTORE_TOPIC: &str = "/windows/claude-snapshot-restore";
+/// Просьба к windows11-manager открыть сессию у себя. Отличается от
+/// `FOCUS_TOPIC` тем, что окна может не быть вовсе: менеджер тогда поднимет
+/// терминал с нужным профилем.
+const OPEN_TOPIC: &str = "/windows/claude-session-open";
 
 pub struct Broker {
     pub host: String,
@@ -87,6 +92,21 @@ pub fn focus(broker: &Broker, id: &str) -> Result<(), String> {
 /// любой машине.
 pub fn unread(broker: &Broker, id: &str) -> Result<(), String> {
     publish(broker, UNREAD_TOPIC, &serde_json::json!({ "id": id }).to_string())
+}
+
+/// Попросить открыть сессию на машине трекера.
+///
+/// Со своей же машины этого не просят: там Enter поднимает сессию через http
+/// у windows11-manager напрямую (`openViaManager` в sessions.html), а этот
+/// топик существует ровно для случая, когда трекер — не мы. Поддержано одно
+/// действие, `terminal`: остальные (cursor, explorer, pr) осмысленны только
+/// там, где стоит человек, а не там, где висит окно.
+pub fn open(broker: &Broker, id: &str) -> Result<(), String> {
+    publish(
+        broker,
+        OPEN_TOPIC,
+        &serde_json::json!({ "id": id, "action": "terminal" }).to_string(),
+    )
 }
 
 /// Тело просьбы о восстановлении.
@@ -170,7 +190,10 @@ fn publish(broker: &Broker, tail: &str, payload: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{broker_from_config, restore_payload, topic_of, FOCUS_TOPIC, RESTORE_TOPIC, UNREAD_TOPIC};
+    use super::{
+        broker_from_config, restore_payload, topic_of, FOCUS_TOPIC, OPEN_TOPIC, RESTORE_TOPIC,
+        UNREAD_TOPIC,
+    };
 
     // Хвосты заданы приёмником — демоном на Windows-машине. Опечатка здесь
     // ничего не ломает на глаз: публикация проходит, PubAck приходит, а окно не
@@ -218,6 +241,20 @@ mod tests {
         assert_eq!(broker.host, "");
         assert_eq!(broker.port, 1883);
         assert!(!broker.is_configured());
+    }
+
+    // Хвост задан приёмником — подпиской в windows11-manager (Task 4). Опечатка
+    // здесь ничего не ломает на глаз: публикация проходит, PubAck приходит, а
+    // сессия не открывается, потому что никто не слушает.
+    #[test]
+    fn open_topic_is_under_windows() {
+        let broker = broker_from_config(&serde_json::json!({
+            "mqtt": { "host": "broker", "base": "home/room/pc/" }
+        }));
+        assert_eq!(
+            topic_of(&broker, OPEN_TOPIC),
+            "home/room/pc/windows/claude-session-open"
+        );
     }
 
     // Хвост задан приёмником — подпиской в windows-mqtt. Опечатка здесь ничего
