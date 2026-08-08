@@ -908,10 +908,25 @@
    */
   async function openSession(row) {
     if (!row) return;
-    if (window.OpenTransport.chooseOpenTransport(lastState, CONFIG.windowHost) === 'manager') {
+    if (window.OpenTransport.chooseOpenTransport(lastState, CONFIG.windowHost, CONFIG.mqtt.configured) === 'manager') {
       // Менеджер знает профиль Windows Terminal для этого проекта; собранная
-      // здесь команда его теряет.
-      await openViaManager(row.id);
+      // здесь команда его теряет. Просьба уходит тем же MQTT-транспортом, что
+      // и пункт меню «Open on <host>» с чужой машины (openRemote ниже) — на
+      // своей же машине это работает так же: публикация до брокера и обратно
+      // до демона, а не HTTP-запрос из webview, который CORS всё равно режет.
+      try {
+        await invoke('open_session_mqtt', { id: row.id });
+      } catch (e) {
+        error = String(e);
+        render();
+        return;
+      }
+      error = '';
+      // Та же пара, что и у местного открытия: отметка «посмотрел» и гашение
+      // пикера, после ответа — иначе ошибка недоступного трекера осталась бы
+      // за уже закрытым окном.
+      await markSeen(row.id, Math.floor(Date.now() / 1000));
+      invoke('hide_picker');
       return;
     }
     const strategy = window.OpenStrategy.chooseOpenStrategy(
@@ -943,41 +958,15 @@
     invoke('hide_picker');
   }
 
-  /** Просьба к windows11-manager открыть сессию у себя. Порт из config.yaml,
-   *  умолчание — 9722, как у команды `node src/index.js http-server`. */
-  async function openViaManager(id) {
-    const port = CONFIG.managerPort || 9722;
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/claude-wt/session-open`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action: 'terminal' }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      // Менеджер мог быть выключен: не молчим — иначе Enter выглядит нажатым
-      // впустую, ровно как публикация в топик, у которого не было подписчика.
-      error = `windows11-manager не ответил: ${e.message}`;
-      render();
-      return;
-    }
-    // Та же пара, что и у местного открытия (openSession выше): отметка
-    // «посмотрел» и гашение пикера. После ответа, а не до него — иначе
-    // ошибка недоступного менеджера осталась бы за уже закрытым окном.
-    await markSeen(id, Math.floor(Date.now() / 1000));
-    invoke('hide_picker');
-  }
-
   /**
    * Попросить трекер открыть сессию у себя — с чужой машины.
    *
-   * Дополняет openViaManager, а не заменяет его: тот бьёт по http на своей же
-   * машине, когда Enter решил, что трекер — это мы. Здесь машина трекера
-   * другая, http до неё не всегда есть, и просьба уходит в MQTT — тот же
-   * топик и то же тело, что уже слушает демон на Windows-машине. Пункт меню, а
-   * не ветка Enter: chooseOpenTransport на своём хосте выбирает 'local' и без
-   * этой строки, и подменять готовое решение здесь не за чем — открыть на
-   * трекере просят явно.
+   * Тот же вызов, что делает и Enter на своей же машине (ветка `manager` в
+   * openSession выше): publish в MQTT дойдёт до демона одинаково независимо
+   * от того, откуда он отправлен. Отдельная функция всё же нужна — это пункт
+   * меню, а не ветка Enter: chooseOpenTransport на своём хосте выбирает
+   * 'local' и без этой строки, и подменять готовое решение здесь незачем —
+   * открыть на трекере просят явно, через canOpenRemote (open-transport.js).
    */
   async function openRemote(row) {
     try {
@@ -988,9 +977,9 @@
       return;
     }
     error = '';
-    // Та же пара, что и у местного открытия и у openViaManager: отметка
-    // «посмотрел» и гашение пикера, после ответа — иначе ошибка недоступного
-    // трекера осталась бы за уже закрытым окном.
+    // Та же пара, что и у местного открытия: отметка «посмотрел» и гашение
+    // пикера, после ответа — иначе ошибка недоступного трекера осталась бы
+    // за уже закрытым окном.
     await markSeen(row.id, Math.floor(Date.now() / 1000));
     invoke('hide_picker');
   }

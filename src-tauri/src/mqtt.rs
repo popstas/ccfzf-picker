@@ -96,9 +96,11 @@ pub fn unread(broker: &Broker, id: &str) -> Result<(), String> {
 
 /// Попросить открыть сессию на машине трекера.
 ///
-/// Со своей же машины этого не просят: там Enter поднимает сессию через http
-/// у windows11-manager напрямую (`openViaManager` в sessions.html), а этот
-/// топик существует ровно для случая, когда трекер — не мы. Поддержано одно
+/// Зовётся и с чужой машины (пункт меню «Open on <host>»), и со своей же —
+/// там Enter вызывает ту же команду `open_session_mqtt` напрямую, когда
+/// `chooseOpenTransport` отдал `manager`. Отдельного HTTP-пути к
+/// windows11-manager на своей машине не было и быть не могло: webview Tauri
+/// режет такой запрос как cross-origin ещё до отправки. Поддержано одно
 /// действие, `terminal`: остальные (cursor, explorer, pr) осмысленны только
 /// там, где стоит человек, а не там, где висит окно.
 pub fn open(broker: &Broker, id: &str) -> Result<(), String> {

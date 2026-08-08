@@ -42,11 +42,6 @@
     // Умолчания нет по той же причине, что и у sshHost: любое значение здесь
     // было бы чужим именем машины. Пусто — фокуса не бывает.
     windowHost: '',
-    // Порт HTTP-сервера windows11-manager на своей же машине — им пользуется
-    // openViaManager() в sessions.html, когда chooseOpenTransport() решил
-    // открывать сессию через менеджер, а не локально. Тот же порт, что у
-    // `node src/index.js http-server` по умолчанию.
-    managerPort: 9722,
     // Брокер MQTT — второй способ попросить о подъёме окна: тот же топик, что
     // уже слушает демон на Windows-машине. Здесь остался один признак «настроен
     // или нет»: сами настройки читает Rust из того же файла, чтобы пароль не
@@ -150,9 +145,6 @@
       windowHost: typeof src.windowHost === 'string'
         ? src.windowHost.trim()
         : DEFAULTS.windowHost,
-      managerPort: typeof src.managerPort === 'number' && Number.isFinite(src.managerPort) && src.managerPort > 0
-        ? src.managerPort
-        : DEFAULTS.managerPort,
       // Те же два условия, что и в Rust (`Broker::is_configured`): без адреса
       // публиковать нечем, без префикса топиков — некуда, а угадывать чужой
       // префикс нельзя. Разойтись им не дадут заметно: фронтенд предложил бы
