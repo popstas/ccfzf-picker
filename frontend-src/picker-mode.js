@@ -20,22 +20,41 @@
    * уже стоящий префикс и приписывала бы второй, а `parseQuery` на той же
    * строке оставалась бы в сессиях.
    */
-  const PREFIX = /^\s*\/(all|a)(\s+|$)/i;
-  const PREFIX_TEXT = '/a ';
+  const PROJECT_PREFIX = /^\s*\/(all|a)(\s+|$)/i;
+  const PROJECT_PREFIX_TEXT = '/a ';
+
+  /**
+   * Снимки — третий режим той же строки поиска.
+   *
+   * `/session` и `/src` префиксом не считаются по той же причине, по которой
+   * им не считается `/api`: хвост `(\s+|$)` требует, чтобы после `/s` строка
+   * кончилась или пошёл пробел.
+   */
+  const SNAPSHOT_PREFIX = /^\s*\/(snapshots|s)(\s+|$)/i;
+  const SNAPSHOT_PREFIX_TEXT = '/s ';
 
   function parseQuery(raw) {
     const text = String(raw == null ? '' : raw);
-    const m = text.match(PREFIX);
-    if (!m) return { mode: 'sessions', query: text.trim() };
-    return { mode: 'projects', query: text.slice(m[0].length).trim() };
+    const project = text.match(PROJECT_PREFIX);
+    if (project) return { mode: 'projects', query: text.slice(project[0].length).trim() };
+    const snapshot = text.match(SNAPSHOT_PREFIX);
+    if (snapshot) return { mode: 'snapshots', query: text.slice(snapshot[0].length).trim() };
+    return { mode: 'sessions', query: text.trim() };
   }
 
   /** Строка поиска с префиксом впереди — то, что делает `^A`. */
   function withProjectPrefix(raw) {
     const text = String(raw == null ? '' : raw);
-    if (PREFIX.test(text)) return text;
-    return PREFIX_TEXT + text.replace(/^\s+/, '');
+    if (PROJECT_PREFIX.test(text)) return text;
+    return PROJECT_PREFIX_TEXT + text.replace(/^\s+/, '');
   }
 
-  return { parseQuery, withProjectPrefix, PREFIX_TEXT };
+  /** Строка поиска с префиксом снимков впереди. */
+  function withSnapshotPrefix(raw) {
+    const text = String(raw == null ? '' : raw);
+    if (SNAPSHOT_PREFIX.test(text)) return text;
+    return SNAPSHOT_PREFIX_TEXT + text.replace(/^\s+/, '');
+  }
+
+  return { parseQuery, withProjectPrefix, withSnapshotPrefix, PREFIX_TEXT: PROJECT_PREFIX_TEXT, SNAPSHOT_PREFIX_TEXT };
 });

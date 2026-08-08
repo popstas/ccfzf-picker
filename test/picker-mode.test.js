@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { parseQuery, withProjectPrefix } = require('../frontend-src/picker-mode');
+const { parseQuery, withProjectPrefix, withSnapshotPrefix } = require('../frontend-src/picker-mode');
 
 test('без префикса это поиск по сессиям', () => {
   assert.deepStrictEqual(parseQuery('ccfzf'), { mode: 'sessions', query: 'ccfzf' });
@@ -38,4 +38,27 @@ test('пробел перед префиксом ничего не меняет'
   assert.strictEqual(withProjectPrefix(' /a ccfzf'), ' /a ccfzf');
   assert.deepStrictEqual(parseQuery(' /a ccfzf'), { mode: 'projects', query: 'ccfzf' });
   assert.deepStrictEqual(parseQuery('  /all'), { mode: 'projects', query: '' });
+});
+
+test('/s и /snapshots уводят в режим снимков', () => {
+  assert.deepEqual(parseQuery('/s'), { mode: 'snapshots', query: '' });
+  assert.deepEqual(parseQuery('/snapshots picker'), { mode: 'snapshots', query: 'picker' });
+  assert.deepEqual(parseQuery('  /s  picker '), { mode: 'snapshots', query: 'picker' });
+});
+
+test('/src и /session режимом не считаются', () => {
+  // Человек, ищущий сессию со словом /src в пути, не должен молча оказаться
+  // в другом списке. То же правило, что уберегло /a от /api.
+  assert.deepEqual(parseQuery('/src'), { mode: 'sessions', query: '/src' });
+  assert.deepEqual(parseQuery('/session'), { mode: 'sessions', query: '/session' });
+});
+
+test('/a по-прежнему уводит в проекты', () => {
+  assert.deepEqual(parseQuery('/a picker'), { mode: 'projects', query: 'picker' });
+});
+
+test('withSnapshotPrefix ставит префикс и не удваивает его', () => {
+  assert.equal(withSnapshotPrefix('picker'), '/s picker');
+  assert.equal(withSnapshotPrefix('/s picker'), '/s picker');
+  assert.equal(withSnapshotPrefix(''), '/s ');
 });
