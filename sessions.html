@@ -1049,12 +1049,18 @@
       else if (!(e.ctrlKey || e.metaKey || e.altKey)) { e.preventDefault(); }
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyK') {
+    // Shift и Alt исключены во всех трёх встроенных ветках ниже: isReserved в
+    // action-hotkey.js занимает за окном только форму «один Ctrl или Cmd плюс
+    // буква», то есть `Ctrl+Shift+A` человек вправе назначить своему действию.
+    // Без этой оговорки встроенная ветка съедала бы событие первой, и
+    // настроенный хоткей молча не работал бы.
+    const plainCtrl = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
+    if (plainCtrl && e.code === 'KeyK') {
       e.preventDefault();
       openMenu();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') {
+    if (plainCtrl && e.code === 'KeyA') {
       // Ставит `/a ` в начало строки поиска. Не режим и не переключатель:
       // состояние живёт в самом тексте, и стирание префикса возвращает к
       // сессиям. Цена — `^A` больше не «выделить всё» в поле поиска.
@@ -1067,7 +1073,7 @@
     }
     // ^P/^U/^I — те же три действия, что и в меню. preventDefault здесь
     // обязателен: иначе Ctrl+P в webview уйдёт в печать.
-    if (e.ctrlKey || e.metaKey) {
+    if (plainCtrl) {
       const directActionId = CODE_TO_ACTION[e.code];
       if (directActionId) {
         e.preventDefault();
