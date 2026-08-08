@@ -30,3 +30,12 @@ test('вставка префикса не задваивает его', () => {
   assert.strictEqual(withProjectPrefix('/a ccfzf'), '/a ccfzf');
   assert.strictEqual(withProjectPrefix('/all ccfzf'), '/all ccfzf');
 });
+
+test('пробел перед префиксом ничего не меняет', () => {
+  // `^A` отдаёт сюда строку поиска как есть, вместе с пробелом, который человек
+  // успел набрать. Раньше такая строка получала второй префикс — `/a /a ccfzf`,
+  // — и список проектов искал по слову `/a`.
+  assert.strictEqual(withProjectPrefix(' /a ccfzf'), ' /a ccfzf');
+  assert.deepStrictEqual(parseQuery(' /a ccfzf'), { mode: 'projects', query: 'ccfzf' });
+  assert.deepStrictEqual(parseQuery('  /all'), { mode: 'projects', query: '' });
+});

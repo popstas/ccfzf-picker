@@ -150,6 +150,14 @@
             flex: 0 0 auto; padding-left: 10px; min-width: 34px; text-align: right;
             font-size: 11px; color: #7d838c; font-variant-numeric: tabular-nums;
         }
+        /* Сколько у проекта сессий и сколько из них живых. Рядом с возрастом,
+           поэтому цифры моноширинные — колонки не должны разъезжаться. */
+        .count {
+            flex: 0 0 auto; padding-left: 10px; min-width: 48px; text-align: right;
+            font-size: 11px; color: #7d838c; font-variant-numeric: tabular-nums;
+        }
+        /* Отметка проекта в ccfzf (★ в его собственном списке). */
+        .mark { color: #d29922; }
         #message { padding: 24px 18px; color: #868c95; font-size: 13px; flex: 0 0 auto; }
         /* Ctrl+K actions overlay — sits above the session list, same palette. */
         #actions-backdrop {
@@ -219,7 +227,7 @@
 <div id="message">Loading…</div>
 <div id="statusline">
   <span id="sort-control" title="Click to change sort"><span class="icon">⇅</span><span id="sort-label">cost</span></span>
-  <span id="menu-hint">^K - Session menu, ^R - copy reptyr command</span>
+  <span id="menu-hint">^K - Session menu, ^N - new session, ^A - all projects</span>
   <!-- Наполняется из TOGGLE_CHECKS: разметка и обработчики не должны
        расходиться в именах ключей. -->
   <span class="status-checks" id="status-checks"></span>
@@ -283,6 +291,9 @@
   // же сессии, а не ждёт следующего опроса: ждать пришлось бы до секунды, и
   // клик выглядел бы не сработавшим.
   let lastSessions = [];
+  // Проекты последнего ответа, уже разложенные в строки. Отдельно от сессий:
+  // они не группируются, не сортируются здесь и не фильтруются по onlyLive.
+  let projectRows = [];
   // Текст отказа: не смогли спросить удалённый хост или ответ пришёл не той формы.
   // Держится до первого удачного опроса, а не до следующей отрисовки, — иначе
   // он мигал бы раз в секунду.
@@ -459,12 +470,40 @@
     rendered = { keys: plan.keys, html: plan.html };
   }
 
-  function render() {
-    const nowSec = Math.floor(Date.now() / 1000);
-    rows = [];
-    const items = [];
+  /**
+   * Строки проектов.
+   *
+   * Ни групп, ни сортировки: порядок задаёт агрегатор (свежие сверху), а
+   * переключатель sort — про сессии. Правые колонки (usage, window, id, hk)
+   * пусты не по недосмотру: у каталога нет ни записи агента, ни окна.
+   */
+  function renderProjects(query, items, nowSec) {
+    for (const project of window.PickerFilter.filterProjects(projectRows, query)) {
+      const index = rows.length;
+      rows.push(project);
+      // Зелёная точка у проекта, где кто-то работает прямо сейчас: тот же
+      // словарь цветов, что и у сессии, и та же ширина левой колонки.
+      const dot = project.liveCount ? 'active' : 'closed';
+      const html = `<div class="row project" data-index="${index}" title="${escapeHtml(project.cwd)}">` +
+        `<div class="dot ${dot}"></div>` +
+        `<div class="text"><div class="name">` +
+        (project.mark ? '<span class="mark">★</span> ' : '') +
+        `${escapeHtml(project.label)}</div>` +
+        (toggles.showPaths
+          ? `<div class="cwd">${escapeHtml(shortPath(project.cwd))}</div>` : '') +
+        `</div>` +
+        `<div class="meta">` +
+        `<div class="count">${project.sessionCount}` +
+        (project.liveCount ? ` · ${project.liveCount}●` : '') +
+        `</div>` +
+        ageHtml(project, nowSec) +
+        `</div></div>`;
+      items.push({ key: `p:${project.id}`, html });
+    }
+  }
 
-    const visible = window.PickerFilter.filterSessions(groups, search.value);
+  function renderSessions(query, items, nowSec) {
+    const visible = window.PickerFilter.filterSessions(groups, query);
     // Одна отметка времени на всю отрисовку: иначе строки одного и того же
     // списка считали бы возраст от чуть разных «сейчас».
     for (const group of visible) {
@@ -514,6 +553,16 @@
         items.push({ key: `s:${session.id}`, html });
       }
     }
+  }
+
+  function render() {
+    const nowSec = Math.floor(Date.now() / 1000);
+    rows = [];
+    const items = [];
+    // Режим живёт в строке поиска, а не отдельным флагом: см. picker-mode.js.
+    const { mode, query } = window.PickerMode.parseQuery(search.value);
+    if (mode === 'projects') renderProjects(query, items, nowSec);
+    else renderSessions(query, items, nowSec);
     syncList(items);
     // Отказ показывается и поверх непустого списка: строки в нём с прошлого
     // удачного опроса, и молчать о том, что свежих больше не приходит, нельзя.
@@ -527,7 +576,14 @@
       message.textContent = error;
     } else {
       message.style.display = rows.length ? 'none' : 'block';
-      if (!rows.length) message.textContent = groups.length ? 'Nothing matches.' : 'No claude sessions yet.';
+      if (!rows.length) {
+        message.textContent = mode === 'projects'
+          // Пустой список проектов почти всегда значит «агрегатор на той
+          // стороне ещё не отдаёт projects», и молчать об этом нельзя: на вид
+          // это не отличить от «ничего не нашлось».
+          ? (projectRows.length ? 'Nothing matches.' : 'No projects — is ccfzf on the host up to date?')
+          : (groups.length ? 'Nothing matches.' : 'No claude sessions yet.');
+      }
     }
     if (active >= rows.length) active = Math.max(0, rows.length - 1);
     paint();
@@ -601,6 +657,9 @@
     }
     error = '';
     lastSessions = state.sessions;
+    // Поля может не быть — старый агрегатор на той стороне. Тогда режим /a
+    // покажет пустой список, и это честный ответ, а не поломка.
+    projectRows = window.ProjectList.buildProjectList(state);
     lastState = state;
     regroup();
   }
@@ -746,7 +805,12 @@
   }
 
   function choose() {
-    return openSession(rows[active]);
+    const row = rows[active];
+    if (!row) return;
+    // У строки проекта продолжать нечего — есть только каталог. Enter значит
+    // здесь то же, что и на строке сессии: «открой мне терминал с агентом».
+    if (row.kind === 'project') return newSession(row.cwd);
+    return openSession(row);
   }
 
   function onSearchInput() {
@@ -983,6 +1047,17 @@
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyK') {
       e.preventDefault();
       openMenu();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') {
+      // Ставит `/a ` в начало строки поиска. Не режим и не переключатель:
+      // состояние живёт в самом тексте, и стирание префикса возвращает к
+      // сессиям. Цена — `^A` больше не «выделить всё» в поле поиска.
+      e.preventDefault();
+      search.value = window.PickerMode.withProjectPrefix(search.value);
+      search.focus();
+      search.setSelectionRange(search.value.length, search.value.length);
+      onSearchInput();
       return;
     }
     // ^P/^U/^I — те же три действия, что и в меню. preventDefault здесь
