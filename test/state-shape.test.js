@@ -1,6 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { validateState } = require('../frontend-src/state-shape');
+const { validateState, projectProblems } = require('../frontend-src/state-shape');
+const { buildProjectList } = require('../frontend-src/project-list');
+const { buildSessionsPayload } = require('../frontend-src/session-groups');
 
 const good = {
   generated: 1785858452.9,
@@ -46,18 +48,48 @@ test('agent проверяется только когда он не null', () =
   assert.ok(validateState(withAgent).some(m => m.includes('agent.updated')));
 });
 
-test('проекты проверяются, когда они есть', () => {
-  const bad = validateState({
+test('записи проектов проверяются отдельным списком', () => {
+  const state = {
     generated: 1, sessions: [],
     projects: [{ path: '/p', name: 'p', sessions: '3', live: 0, mtime: 0 }],
-  });
-  assert.deepStrictEqual(bad, ['projects[0].sessions is not a number']);
+  };
+  // Претензия к записи проекта — не претензия к ответу: опрос принимается.
+  assert.deepStrictEqual(validateState(state), []);
+  assert.deepStrictEqual(projectProblems(state), ['projects[0].sessions is not a number']);
 
-  const ok = validateState({
+  const ok = {
     generated: 1, sessions: [],
     projects: [{ path: '/p', name: 'p', sessions: 3, live: 1, mtime: 100 }],
-  });
-  assert.deepStrictEqual(ok, []);
+  };
+  assert.deepStrictEqual(validateState(ok), []);
+  assert.deepStrictEqual(projectProblems(ok), []);
+});
+
+test('порченый проект не отбирает у человека список сессий', () => {
+  // Суть правки: агрегатор — отдельная программа на отдельной машине, и
+  // переименованное там поле проекта не должно замораживать сессии. Здесь
+  // повторён тот же порядок, что и в refresh(): сначала ворота validateState,
+  // потом сборка обоих списков.
+  const state = {
+    generated: 1,
+    sessions: [{
+      id: 'a', cwd: '/home/user/projects/x', title: 'x',
+      mtime: 100, live: false, kind: 'interactive',
+    }],
+    projects: [
+      { path: 42, name: 'без пути' },
+      { path: '/home/user/projects/x', name: 'x', sessions: 1, live: 0, mtime: 100 },
+    ],
+  };
+  assert.deepStrictEqual(validateState(state), []);
+  // Молча терять строки нельзя: о выброшенной записи есть что показать.
+  assert.ok(projectProblems(state).some(m => m.includes('projects[0].path')));
+  // Уцелевшие проекты собираются, а сессии из того же ответа доезжают до
+  // читателя целиком.
+  assert.deepStrictEqual(buildProjectList(state).map(p => p.id), ['/home/user/projects/x']);
+  const payload = buildSessionsPayload({ ok: true, sessions: state.sessions, seen: {} }, 'name');
+  assert.strictEqual(payload.ok, true);
+  assert.deepStrictEqual(payload.groups.flatMap(g => g.sessions).map(s => s.id), ['a']);
 });
 
 test('ответ без проектов — рабочее состояние, а не поломка', () => {
