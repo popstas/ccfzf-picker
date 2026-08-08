@@ -1,16 +1,21 @@
 // Loaded twice: as a <script> in sessions.html and as a module in the tests.
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(
-    typeof require === 'function' ? require('./picker-filter.js') : root.PickerFilter,
-  );
-  else root.PickerSnapshots = factory(root.PickerFilter);
-})(typeof self !== 'undefined' ? self : this, function (PickerFilter) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.PickerSnapshots = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  // globalThis, а не `root`: тот виден только внешней функции шима, а внутрь
+  // factory не передаётся.
+  const filterApi = typeof module === 'object' && module.exports
+    ? require('./picker-filter')
+    : globalThis.PickerFilter;
+
   /**
    * Строки режима снимков — плоским списком, без механики сворачивания.
    *
    * Заголовок снимка и его сессии идут одним потоком: группы в списке уже
-   * есть (`g:`), и заводить рядом раскрытие значило бы объяснять человеку
-   * второй способ навигации там, где хватает стрелок.
+   * есть (ключ заголовка вида `g:snap:<id>`), и заводить рядом раскрытие
+   * значило бы объяснять человеку второй способ навигации там, где хватает
+   * стрелок.
    */
 
   /** Имя строки: каталог проекта, а не полный путь. */
@@ -63,9 +68,6 @@
   function buildSnapshotRows(snapshots, openIds, query) {
     const open = openIds instanceof Set ? openIds : new Set(openIds ?? []);
     const q = String(query ?? '').trim().toLowerCase();
-    const searchable = PickerFilter && PickerFilter.searchableCwd
-      ? PickerFilter.searchableCwd
-      : (cwd => String(cwd ?? ''));
     const out = [];
     for (const snap of snapshots ?? []) {
       const all = snap?.sessions ?? [];
@@ -79,7 +81,10 @@
           label: projectBasename(s),
           open: open.has(s.id),
         }))
-        .filter(r => !q || `${r.label} ${searchable(r.cwd)}`.toLowerCase().includes(q));
+        // Сосед обязателен, без запасной ветки: подмена заглушкой молча
+        // теряет обрезку `/home`-префикса и не даёт неверному порядку
+        // тегов упасть — а именно на этом падении держится сторож порядка.
+        .filter(r => !q || `${r.label} ${filterApi.searchableCwd(r.cwd)}`.toLowerCase().includes(q));
       // Снимок без сессий — ни строки: восстанавливать в нём нечего, а
       // заголовок обещал бы обратное.
       if (!rows.length) continue;
