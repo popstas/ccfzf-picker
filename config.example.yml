@@ -46,6 +46,13 @@ hideOnBlur: true
 # Enter открывает терминал, как раньше: поднимать окно на чужом экране незачем.
 # windowHost: your-windows-box
 
+# Порт HTTP-сервера windows11-manager на машине трекера. Совпал windowHost —
+# Enter на сессии шлёт просьбу открыть терминал туда, а не собирает команду
+# здесь: маппинг проекта на профиль Windows Terminal (claudeWt.projects)
+# знает только менеджер. Умолчание то же, что у `node src/index.js
+# http-server`.
+# managerPort: 9722
+
 # Брокер MQTT — через него уходят просьбы к оконному трекеру: подъём окна
 # публикуется в `<base>/windows/claude-focus`, возврат сессии в непрочитанное —
 # в `<base>/windows/claude-session-unread`. Оба топика уже слушает демон на

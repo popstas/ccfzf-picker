@@ -265,6 +265,7 @@
 <script src="session-agent.js"></script>
 <script src="session-list.js"></script>
 <script src="session-windows.js"></script>
+<script src="open-transport.js"></script>
 <script src="session-groups.js"></script>
 <!-- ui-state после session-groups: он берёт оттуда normalizeSort в момент
      загрузки, и в обратном порядке ему достался бы undefined. -->
@@ -907,6 +908,12 @@
    */
   async function openSession(row) {
     if (!row) return;
+    if (window.OpenTransport.chooseOpenTransport(lastState, CONFIG.windowHost) === 'manager') {
+      // Менеджер знает профиль Windows Terminal для этого проекта; собранная
+      // здесь команда его теряет.
+      await openViaManager(row.id);
+      return;
+    }
     const strategy = window.OpenStrategy.chooseOpenStrategy(
       row, CONFIG.caps, { canFocus: canFocusWindows() },
     );
@@ -934,6 +941,25 @@
     // Отметка «посмотрел» ставится здесь: другого повода на маке нет.
     await markSeen(row.id, Math.floor(Date.now() / 1000));
     invoke('hide_picker');
+  }
+
+  /** Просьба к windows11-manager открыть сессию у себя. Порт из config.yaml,
+   *  умолчание — 9722, как у команды `node src/index.js http-server`. */
+  async function openViaManager(id) {
+    const port = CONFIG.managerPort || 9722;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/claude-wt/session-open`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'terminal' }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      // Менеджер мог быть выключен: не молчим — иначе Enter выглядит нажатым
+      // впустую, ровно как публикация в топик, у которого не было подписчика.
+      error = `windows11-manager не ответил: ${e.message}`;
+      render();
+    }
   }
 
   function choose() {

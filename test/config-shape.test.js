@@ -23,6 +23,8 @@ test('пустой конфиг даёт рабочие значения по у
   // Пустое имя машины — фокуса не бывает. Умолчания у него нет по той же
   // причине, что и у sshHost: любое значение было бы чужим именем машины.
   assert.strictEqual(c.windowHost, '');
+  // Тот же порт, что и у `node src/index.js http-server` по умолчанию.
+  assert.strictEqual(c.managerPort, 9722);
   assert.deepStrictEqual(c.mqtt, { configured: false });
   // Умолчания у маппинга нет по той же причине: примонтировано у всех
   // по-своему, а угаданный корень увёл бы действия открытия не туда молча.
@@ -123,6 +125,13 @@ test('имя машины чистится от пробелов, мусор в�
   assert.strictEqual(normalizeConfig({ windowHost: '  desktop-box ' }).windowHost, 'desktop-box');
   for (const windowHost of [42, {}, null, ['desktop-box']]) {
     assert.strictEqual(normalizeConfig({ windowHost }).windowHost, '', String(windowHost));
+  }
+});
+
+test('managerPort валиден только положительным числом, иначе умолчание 9722', () => {
+  assert.strictEqual(normalizeConfig({ managerPort: 8080 }).managerPort, 8080);
+  for (const managerPort of [0, -1, '9722', {}, null, NaN, Infinity]) {
+    assert.strictEqual(normalizeConfig({ managerPort }).managerPort, 9722, String(managerPort));
   }
 });
 
