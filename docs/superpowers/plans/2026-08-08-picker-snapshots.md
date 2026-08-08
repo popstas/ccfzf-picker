@@ -25,10 +25,10 @@
 
 | Репозиторий | Путь |
 |---|---|
-| ccfzf-picker | `/home/popstas/projects/js/ccfzf-picker` |
-| windows11-manager | `/home/popstas/projects/js/windows11-manager` |
-| ccfzf | `/home/popstas/projects/shell/ccfzf` |
-| windows-mqtt | `/home/popstas/projects/js/windows-mqtt` |
+| ccfzf-picker | `~/projects/js/ccfzf-picker` |
+| windows11-manager | `~/projects/js/windows11-manager` |
+| ccfzf | `~/projects/shell/ccfzf` |
+| windows-mqtt | `~/projects/js/windows-mqtt` |
 
 ---
 
@@ -106,7 +106,7 @@ describe('currentSnapshots', () => {
 
 - [ ] **Step 2: Прогнать — тест должен упасть**
 
-Run: `cd /home/popstas/projects/js/windows11-manager && npm test -- snapshot-helpers`
+Run: `cd ~/projects/js/windows11-manager && npm test -- snapshot-helpers`
 Expected: FAIL — `currentSnapshots` не экспортируется из `./snapshotter.js`.
 
 - [ ] **Step 3: Добавить `currentSnapshots()` в `snapshotter.js`**
@@ -136,7 +136,7 @@ export { snapshotTick, resetSnapshotter, listSnapshots, snapshotId, currentSnaps
 
 - [ ] **Step 4: Прогнать — тест должен пройти**
 
-Run: `cd /home/popstas/projects/js/windows11-manager && npm test -- snapshot-helpers`
+Run: `cd ~/projects/js/windows11-manager && npm test -- snapshot-helpers`
 Expected: PASS
 
 - [ ] **Step 5: Написать падающие тесты на файл трекера**
@@ -209,7 +209,7 @@ describe('windowsFingerprint — снимки', () => {
 
 - [ ] **Step 6: Прогнать — тесты должны упасть**
 
-Run: `cd /home/popstas/projects/js/windows11-manager && npm test -- windows-file-helpers`
+Run: `cd ~/projects/js/windows11-manager && npm test -- windows-file-helpers`
 Expected: FAIL — `out.snapshots` равно `undefined`.
 
 - [ ] **Step 7: Научить `windows-file-helpers.js`**
@@ -252,21 +252,21 @@ function buildWindowsFile({ windows, slots, host, pid, nowMs, snapshots }) {
 ```javascript
 function windowsFingerprint(windows, snapshots) {
   const win = Object.entries(windows ?? {})
-    .map(([id, w]) => `${id} ${w.desktop} ${w.title} ${w.focusedAt}`)
+    .map(([id, w]) => `${id}\x00${w.desktop}\x00${w.title}\x00${w.focusedAt}`)
     .sort()
-    .join('');
+    .join('\x01');
   // Состав, не содержимое: снимок неизменяем, кроме последнего, которому тик
   // правит координаты, — а координаты в файл трекера не едут вовсе.
   const snaps = (snapshots ?? [])
-    .map(s => `${s?.id} ${s?.created}`)
-    .join('');
-  return `${win}${snaps}`;
+    .map(s => `${s?.id}\x00${s?.created}`)
+    .join('\x01');
+  return `${win}\x02${snaps}`;
 }
 ```
 
 - [ ] **Step 8: Прогнать — тесты должны пройти**
 
-Run: `cd /home/popstas/projects/js/windows11-manager && npm test -- windows-file-helpers`
+Run: `cd ~/projects/js/windows11-manager && npm test -- windows-file-helpers`
 Expected: PASS
 
 - [ ] **Step 9: Связать в `publishWindows`**
@@ -290,13 +290,13 @@ function publishWindows(cfg, windows, slots) {
 
 - [ ] **Step 10: Прогнать весь набор**
 
-Run: `cd /home/popstas/projects/js/windows11-manager && npm test`
+Run: `cd ~/projects/js/windows11-manager && npm test`
 Expected: PASS, ни один прежний тест не сломан.
 
 - [ ] **Step 11: Коммит**
 
 ```bash
-cd /home/popstas/projects/js/windows11-manager
+cd ~/projects/js/windows11-manager
 git add src/claude-wt/snapshotter.js src/claude-wt/windows-file-helpers.js \
         src/claude-wt/index.js src/claude-wt/windows-file-helpers.test.js \
         src/claude-wt/snapshot-helpers.test.js
@@ -388,7 +388,7 @@ def test_stale_file_gives_no_snapshots_either():
 
 - [ ] **Step 2: Прогнать — тесты должны упасть**
 
-Run: `cd /home/popstas/projects/shell/ccfzf && python3 tests/test_windows_file.py`
+Run: `cd ~/projects/shell/ccfzf && python3 tests/test_windows_file.py`
 Expected: FAIL — распаковка трёх значений в четыре.
 
 - [ ] **Step 3: Научить `read_windows`**
@@ -467,18 +467,18 @@ windows, _, _, _ = read_windows(windows_path, now)
 
 - [ ] **Step 6: Прогнать тесты агрегатора**
 
-Run: `cd /home/popstas/projects/shell/ccfzf && for t in tests/test_*.py; do python3 "$t" || exit 1; done`
+Run: `cd ~/projects/shell/ccfzf && for t in tests/test_*.py; do python3 "$t" || exit 1; done`
 Expected: все PASS — `read_windows` зовут и другие тесты.
 
 - [ ] **Step 7: Проверить на живом ответе**
 
-Run: `cd /home/popstas/projects/shell/ccfzf && ./ccfzf --state | python3 -c "import json,sys; o=json.load(sys.stdin); print('snapshots:', len(o.get('snapshots', [])))"`
+Run: `cd ~/projects/shell/ccfzf && ./ccfzf --state | python3 -c "import json,sys; o=json.load(sys.stdin); print('snapshots:', len(o.get('snapshots', [])))"`
 Expected: строка `snapshots: N`. Ноль — тоже успех: на этой машине трекера нет, важно, что ключ на месте и разбор не упал.
 
 - [ ] **Step 8: Коммит**
 
 ```bash
-cd /home/popstas/projects/shell/ccfzf
+cd ~/projects/shell/ccfzf
 git add ccfzf tests/test_windows_file.py
 git commit -m "feat(state): снимки раскладки из файла оконного трекера
 
@@ -550,7 +550,7 @@ const { validateState, projectProblems, snapshotProblems } = require('../fronten
 
 - [ ] **Step 2: Прогнать — тесты должны упасть**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker && npm test`
+Run: `cd ~/projects/js/ccfzf-picker && npm test`
 Expected: FAIL — `snapshotProblems is not a function`.
 
 - [ ] **Step 3: Научить `state-shape.js`**
@@ -618,13 +618,13 @@ Expected: FAIL — `snapshotProblems is not a function`.
 
 - [ ] **Step 4: Прогнать — тесты должны пройти**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker && npm test`
+Run: `cd ~/projects/js/ccfzf-picker && npm test`
 Expected: PASS
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-cd /home/popstas/projects/js/ccfzf-picker
+cd ~/projects/js/ccfzf-picker
 git add frontend-src/state-shape.js test/state-shape.test.js
 git commit -m "feat(picker): форма ответа со снимками раскладки
 
@@ -679,7 +679,7 @@ test('withSnapshotPrefix ставит префикс и не удваивает 
 
 - [ ] **Step 2: Прогнать — тесты должны упасть**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker && npm test`
+Run: `cd ~/projects/js/ccfzf-picker && npm test`
 Expected: FAIL — `/s` разбирается как режим `sessions`.
 
 - [ ] **Step 3: Научить `picker-mode.js`**
@@ -732,13 +732,13 @@ Expected: FAIL — `/s` разбирается как режим `sessions`.
 
 - [ ] **Step 4: Прогнать — тесты должны пройти**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker && npm test`
+Run: `cd ~/projects/js/ccfzf-picker && npm test`
 Expected: PASS
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-cd /home/popstas/projects/js/ccfzf-picker
+cd ~/projects/js/ccfzf-picker
 git add frontend-src/picker-mode.js test/picker-mode.test.js
 git commit -m "feat(picker): режим снимков в строке поиска
 
@@ -866,7 +866,7 @@ test('снимок без времени показывает id вместо д
 
 - [ ] **Step 2: Прогнать — тесты должны упасть**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker && npm test`
+Run: `cd ~/projects/js/ccfzf-picker && npm test`
 Expected: FAIL — `Cannot find module '../frontend-src/picker-snapshots.js'`.
 
 - [ ] **Step 3: Написать `frontend-src/picker-snapshots.js`**
@@ -883,8 +883,9 @@ Expected: FAIL — `Cannot find module '../frontend-src/picker-snapshots.js'`.
    * Строки режима снимков — плоским списком, без механики сворачивания.
    *
    * Заголовок снимка и его сессии идут одним потоком: группы в списке уже
-   * есть (`g:`), и заводить рядом раскрытие значило бы объяснять человеку
-   * второй способ навигации там, где хватает стрелок.
+   * есть (ключ заголовка вида `g:snap:<id>`), и заводить рядом раскрытие
+   * значило бы объяснять человеку второй способ навигации там, где хватает
+   * стрелок.
    */
 
   /** Имя строки: каталог проекта, а не полный путь. */
@@ -976,7 +977,7 @@ Expected: FAIL — `Cannot find module '../frontend-src/picker-snapshots.js'`.
 
 - [ ] **Step 4: Прогнать — тесты должны пройти**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker && npm test`
+Run: `cd ~/projects/js/ccfzf-picker && npm test`
 Expected: PASS
 
 - [ ] **Step 5: Записать файл в оба списка**
@@ -999,13 +1000,13 @@ Expected: PASS
 
 - [ ] **Step 6: Прогнать — порядок загрузки должен сойтись**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker && npm test`
+Run: `cd ~/projects/js/ccfzf-picker && npm test`
 Expected: PASS, включая `test/frontend-load.test.js` — он и сторожит порядок тегов.
 
 - [ ] **Step 7: Коммит**
 
 ```bash
-cd /home/popstas/projects/js/ccfzf-picker
+cd ~/projects/js/ccfzf-picker
 git add frontend-src/picker-snapshots.js test/picker-snapshots.test.js \
         sessions.html scripts/prepare-frontend.js
 git commit -m "feat(picker): строки режима снимков
@@ -1069,7 +1070,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 - [ ] **Step 2: Прогнать — тесты должны упасть**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker/src-tauri && cargo test`
+Run: `cd ~/projects/js/ccfzf-picker/src-tauri && cargo test`
 Expected: FAIL — `restore_payload` и `RESTORE_TOPIC` не найдены.
 
 - [ ] **Step 3: Обобщить `publish` и добавить `restore`**
@@ -1121,7 +1122,7 @@ pub fn restore(broker: &Broker, id: &str, session_ids: &[String]) -> Result<(), 
 
 - [ ] **Step 4: Прогнать — тесты должны пройти**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker/src-tauri && cargo test`
+Run: `cd ~/projects/js/ccfzf-picker/src-tauri && cargo test`
 Expected: PASS
 
 - [ ] **Step 5: Добавить команду в `main.rs`**
@@ -1158,13 +1159,13 @@ async fn restore_snapshot_mqtt(id: String, session_ids: Vec<String>) -> Result<(
 
 - [ ] **Step 6: Собрать и прогнать**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker/src-tauri && cargo test && cargo check`
+Run: `cd ~/projects/js/ccfzf-picker/src-tauri && cargo test && cargo check`
 Expected: PASS, без предупреждений о неиспользуемом коде.
 
 - [ ] **Step 7: Коммит**
 
 ```bash
-cd /home/popstas/projects/js/ccfzf-picker
+cd ~/projects/js/ccfzf-picker
 git add src-tauri/src/mqtt.rs src-tauri/src/main.rs
 git commit -m "feat(picker): просьба о восстановлении раскладки по MQTT
 
@@ -1238,7 +1239,7 @@ test('мусор в sessionIds отбрасывается, а снимок по�
 
 - [ ] **Step 2: Прогнать — тесты должны упасть**
 
-Run: `cd /home/popstas/projects/js/windows-mqtt && node --test test/restore-payload.test.js`
+Run: `cd ~/projects/js/windows-mqtt && node --test test/restore-payload.test.js`
 Expected: FAIL — `Cannot find module '../src/picker/restore-payload'`.
 
 - [ ] **Step 3: Написать `src/picker/restore-payload.js`**
@@ -1281,7 +1282,7 @@ module.exports = {parseRestorePayload};
 
 - [ ] **Step 4: Прогнать — тесты должны пройти**
 
-Run: `cd /home/popstas/projects/js/windows-mqtt && node --test test/restore-payload.test.js`
+Run: `cd ~/projects/js/windows-mqtt && node --test test/restore-payload.test.js`
 Expected: PASS
 
 - [ ] **Step 5: Связать в `windows.js`**
@@ -1313,13 +1314,13 @@ const {parseRestorePayload} = require('../picker/restore-payload');
 
 - [ ] **Step 6: Прогнать весь набор**
 
-Run: `cd /home/popstas/projects/js/windows-mqtt && npm test`
+Run: `cd ~/projects/js/windows-mqtt && npm test`
 Expected: PASS, ни один прежний тест не сломан.
 
 - [ ] **Step 7: Коммит**
 
 ```bash
-cd /home/popstas/projects/js/windows-mqtt
+cd ~/projects/js/windows-mqtt
 git add src/picker/restore-payload.js src/modules/windows.js test/restore-payload.test.js
 git commit -m "fix(windows): разбирать JSON в просьбе о восстановлении
 
@@ -1557,12 +1558,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 - [ ] **Step 8: Прогнать всё**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker && npm test && (cd src-tauri && cargo test)`
+Run: `cd ~/projects/js/ccfzf-picker && npm test && (cd src-tauri && cargo test)`
 Expected: PASS. `test/frontend-load.test.js` и `test/row-contract.test.js` должны остаться зелёными.
 
 - [ ] **Step 9: Проверить глазами**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker && cargo tauri dev` (или `npm run dev`, если он заведён)
+Run: `cd ~/projects/js/ccfzf-picker && cargo tauri dev` (или `npm run dev`, если он заведён)
 
 Проверить:
 1. `^S` (или `/s` руками) — список снимков, у заголовка счёт «не открыты».
@@ -1574,7 +1575,7 @@ Run: `cd /home/popstas/projects/js/ccfzf-picker && cargo tauri dev` (или `npm
 - [ ] **Step 10: Коммит**
 
 ```bash
-cd /home/popstas/projects/js/ccfzf-picker
+cd ~/projects/js/ccfzf-picker
 git add sessions.html frontend-src/action-hotkey.js test/action-hotkey.test.js
 git commit -m "feat(picker): режим снимков на экране
 
@@ -1641,13 +1642,13 @@ Enter на заголовке поднимает раскладку целико
 
 - [ ] **Step 5: Прогнать проверку на приватные данные**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker && npm test`
+Run: `cd ~/projects/js/ccfzf-picker && npm test`
 Expected: PASS, включая `test/no-private-data.test.js`.
 
 - [ ] **Step 6: Коммит**
 
 ```bash
-cd /home/popstas/projects/js/ccfzf-picker
+cd ~/projects/js/ccfzf-picker
 git add README.md CLAUDE.md docs/TODO.md
 git commit -m "docs: режим снимков раскладки
 
@@ -1661,20 +1662,20 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 Правки в windows11-manager и windows-mqtt едут в живое приложение (см. скилл `/claude-wt`):
 
 ```bash
-cd /home/popstas/projects/js/windows-mqtt && npm run deploy-fast
+cd ~/projects/js/windows-mqtt && npm run deploy-fast
 ```
 
-Помнить про две молчащие ловушки `deploy-fast` через `ssh popstas-pc`: джанкшен `node_modules\windows11-manager` сетевой логон не проходит (обход — `xcopy` напрямую), и `cmd /c start` в конце скрипта до рабочего стола не доходит (поднимать через временную задачу `schtasks`). Проверка — `tasklist /FI "IMAGENAME eq windows-mqtt.exe" /FO CSV` показывает `Console`, сессию 1.
+Помнить про две молчащие ловушки `deploy-fast` через `ssh` на Windows-машину: джанкшен `node_modules\windows11-manager` сетевой логон не проходит (обход — `xcopy` напрямую), и `cmd /c start` в конце скрипта до рабочего стола не доходит (поднимать через временную задачу `schtasks`). Проверка — `tasklist /FI "IMAGENAME eq windows-mqtt.exe" /FO CSV` показывает `Console`, сессию 1.
 
-Агрегатор на pc-virt обновляется своим репозиторием. Пикер — скриптами из `data/scripts/`.
+Агрегатор на своей машине обновляется своим репозиторием. Пикер — скриптами из `data/scripts/`.
 
 ## Общая проверка после всех задач
 
-- [ ] `cd /home/popstas/projects/js/ccfzf-picker && npm test` — зелено
-- [ ] `cd /home/popstas/projects/js/ccfzf-picker/src-tauri && cargo test` — зелено
-- [ ] `cd /home/popstas/projects/js/windows11-manager && npm test` — зелено
-- [ ] `cd /home/popstas/projects/js/windows-mqtt && npm test` — зелено
-- [ ] `cd /home/popstas/projects/shell/ccfzf && for t in tests/test_*.py; do python3 "$t"; done` — зелено
+- [ ] `cd ~/projects/js/ccfzf-picker && npm test` — зелено
+- [ ] `cd ~/projects/js/ccfzf-picker/src-tauri && cargo test` — зелено
+- [ ] `cd ~/projects/js/windows11-manager && npm test` — зелено
+- [ ] `cd ~/projects/js/windows-mqtt && npm test` — зелено
+- [ ] `cd ~/projects/shell/ccfzf && for t in tests/test_*.py; do python3 "$t"; done` — зелено
 - [ ] `ccfzf --state | node scripts/check-state.js` на живом ответе — без претензий
 - [ ] Полный путь на Windows-машине: `^S` → Enter на заголовке → окна раскладки поднялись
 - [ ] Полный путь на Windows-машине: `^S` → Enter на закрытой сессии → поднялось одно окно

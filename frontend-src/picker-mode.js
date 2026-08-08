@@ -42,18 +42,34 @@
     return { mode: 'sessions', query: text.trim() };
   }
 
+  /**
+   * Снять префикс любого из режимов, оставив сам запрос.
+   *
+   * Режимов стало два, и хоткеи их переключают: `^S` после `^A` обязан
+   * сменить префикс, а не приписать второй. Без этого `/a picker` под `^S`
+   * превращался в `/s /a picker` — режим снимков с запросом, которому ничем
+   * не соответствовать, то есть пустой список без единого слова о причине.
+   */
+  function stripPrefix(text) {
+    const project = text.match(PROJECT_PREFIX);
+    if (project) return text.slice(project[0].length);
+    const snapshot = text.match(SNAPSHOT_PREFIX);
+    if (snapshot) return text.slice(snapshot[0].length);
+    return text;
+  }
+
   /** Строка поиска с префиксом впереди — то, что делает `^A`. */
   function withProjectPrefix(raw) {
     const text = String(raw == null ? '' : raw);
     if (PROJECT_PREFIX.test(text)) return text;
-    return PROJECT_PREFIX_TEXT + text.replace(/^\s+/, '');
+    return PROJECT_PREFIX_TEXT + stripPrefix(text).replace(/^\s+/, '');
   }
 
   /** Строка поиска с префиксом снимков впереди. */
   function withSnapshotPrefix(raw) {
     const text = String(raw == null ? '' : raw);
     if (SNAPSHOT_PREFIX.test(text)) return text;
-    return SNAPSHOT_PREFIX_TEXT + text.replace(/^\s+/, '');
+    return SNAPSHOT_PREFIX_TEXT + stripPrefix(text).replace(/^\s+/, '');
   }
 
   return { parseQuery, withProjectPrefix, withSnapshotPrefix, PREFIX_TEXT: PROJECT_PREFIX_TEXT, SNAPSHOT_PREFIX_TEXT };

@@ -87,7 +87,11 @@
             background: transparent;
             box-shadow: inset 0 0 0 2px #db6d28;
         }
-        .row.closed .name { color: #a8adb5; }
+        /* Тусклое имя — там, где строка есть, а дела до неё сейчас нет:
+           закрытая сессия и сессия снимка, чьё окно уже на экране (её
+           восстановление пропустит). Случая два, цвет один — правило одно. */
+        .row.closed .name,
+        .row.snapshot-session.on-screen .name { color: #a8adb5; }
         /* Заголовок раскладки. Не group-label: у него есть своё действие —
            Enter поднимает снимок целиком, — поэтому это строка, а не подпись.
            Отличается от строки сессии разрядкой и цветом подписи, как группа. */
@@ -95,9 +99,6 @@
             font-size: 11px; letter-spacing: .06em; color: #9aa0a8;
         }
         .row.snapshot .dot { background: #4d525a; }
-        /* Сессия, чьё окно уже открыто: восстановление её пропустит. Тусклая
-           тем же способом, что и закрытая сессия в списке. */
-        .row.snapshot-session.closed .name { color: #a8adb5; }
         .text { min-width: 0; }
         .name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .cwd { font-size: 11px; color: #868c95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -562,10 +563,12 @@
         continue;
       }
       // Открытая сессия — тусклая: восстановление её всё равно пропустит, а
-      // Enter на ней поднимет уже существующее окно.
+      // Enter на ней поднимет уже существующее окно. Класс `on-screen`, а не
+      // `closed`: в этом файле `closed` значит «сессии больше нет», а здесь
+      // всё наоборот — окно есть, и именно поэтому строка тусклая.
       items.push({
         key: row.key,
-        html: `<div class="row snapshot-session${row.open ? ' closed' : ''}" data-index="${index}"` +
+        html: `<div class="row snapshot-session${row.open ? ' on-screen' : ''}" data-index="${index}"` +
           ` title="${escapeHtml(row.cwd)}">` +
           `<div class="dot${row.open ? ' active' : ''}"></div>` +
           `<div class="text"><div class="name">${escapeHtml(row.label)}</div>` +

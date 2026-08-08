@@ -62,3 +62,21 @@ test('withSnapshotPrefix ставит префикс и не удваивает 
   assert.equal(withSnapshotPrefix('/s picker'), '/s picker');
   assert.equal(withSnapshotPrefix(''), '/s ');
 });
+
+test('хоткей одного режима стирает префикс другого, а не приписывается к нему', () => {
+  // Пока режим был один, случая не было. Теперь `^A` и `^S` подряд — обычное
+  // дело, и без снятия чужого префикса получалось `/s /a picker`: режим тот,
+  // запрос — «/a picker», совпадений ноль и ни слова о причине.
+  assert.equal(withSnapshotPrefix('/a picker'), '/s picker');
+  assert.equal(withSnapshotPrefix('/all picker'), '/s picker');
+  assert.equal(withProjectPrefix('/s picker'), '/a picker');
+  assert.equal(withProjectPrefix('/snapshots picker'), '/a picker');
+  // И режим после подмены — тот, чей хоткей нажали последним.
+  assert.deepStrictEqual(parseQuery(withSnapshotPrefix('/a picker')),
+    { mode: 'snapshots', query: 'picker' });
+  assert.deepStrictEqual(parseQuery(withProjectPrefix('/s picker')),
+    { mode: 'projects', query: 'picker' });
+  // Голый чужой префикс без запроса — тоже подмена, а не склейка.
+  assert.equal(withSnapshotPrefix('/a'), '/s ');
+  assert.equal(withProjectPrefix('/s'), '/a ');
+});

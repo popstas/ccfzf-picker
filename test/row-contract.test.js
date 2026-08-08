@@ -473,7 +473,10 @@ test('строка снимка доезжает с настоящего пут�
   assert.match(items[0].html, /<div class="name">\d{2}:\d{2} · \d{4}-\d{2}-\d{2}<\/div>/);
 
   // Открытая сессия — тусклая и с пометкой; восстановление её пропустит.
-  assert.ok(items[1].html.includes('class="row snapshot-session closed"'), items[1].html);
+  // Класс именно `on-screen`: `closed` в этом файле значит обратное — «сессии
+  // нет», — и строка снимка носила бы его ровно в тех случаях, когда окно есть.
+  assert.ok(items[1].html.includes('class="row snapshot-session on-screen"'), items[1].html);
+  assert.ok(!items[1].html.includes('closed'), items[1].html);
   assert.ok(items[1].html.includes('<div class="dot active"></div>'), items[1].html);
   assert.ok(items[1].html.includes('▣ открыта'), items[1].html);
   // Закрытая — обычная, и колонка пуста, а не «undefined».
@@ -518,4 +521,54 @@ test('выключенный чекбокс путей убирает путь �
   assert.ok(!items[1].html.includes('class="cwd"'), items[1].html);
   // Подсказка остаётся: она и заведена для того, чего в строке не видно.
   assert.ok(items[1].html.includes('title="/home/user/projects/ccfzf"'), items[1].html);
+});
+
+// ── Куда Enter уводит строку снимка ──────────────────────────────────────────
+//
+// Единственное место, которое различает три исхода — поднять всю раскладку,
+// поднять из неё одну сессию, показать уже открытое окно, — и единственное,
+// которое обязано взять с сессионной строки `snapshotId`, а не `id`: у неё
+// есть оба. Ошибка здесь не краснеет нигде: пикер опубликует тело правильной
+// формы с несуществующим id, приёмник запишет «нет такого снимка» себе в лог и
+// вернёт пустой ответ, а пикер к тому времени погашен и ответа не ждёт.
+// Поэтому строки берутся настоящие — из renderSnapshots выше, — а сам choose
+// вычитывается из страницы и выполняется в vm.
+function chooseWith(rows, active) {
+  const source = SESSIONS_HTML.match(/\n {2}function choose\(\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(source, 'choose не найден в sessions.html — тест сторожит не то');
+  const calls = [];
+  const ctx = {
+    rows,
+    active,
+    // Array.from — не украшение: массив, собранный внутри vm, приходит с
+    // прототипом другого realm, и deepStrictEqual сравнивает в том числе его.
+    restoreSnapshot: (id, sessionIds) => calls.push(['restoreSnapshot', id, Array.from(sessionIds)]),
+    focusSession: row => calls.push(['focusSession', row.id]),
+    newSession: cwd => calls.push(['newSession', cwd]),
+    openSession: row => calls.push(['openSession', row.id]),
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${source[0]}\nchoose();`, ctx, { filename: 'sessions.html' });
+  return calls;
+}
+
+test('Enter на строке снимка уходит по трём разным веткам', () => {
+  // Настоящие строки: заголовок, открытая сессия (aaa), закрытая (bbb).
+  const { rows } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '', { open: ['aaa'] });
+  assert.deepStrictEqual(rows.map(r => r.kind),
+    ['snapshot', 'snapshot-session', 'snapshot-session']);
+
+  // Заголовок — вся раскладка. Пустой список сессий здесь значит «все», и
+  // непустой на его месте поднял бы часть вместо целого.
+  assert.deepStrictEqual(chooseWith(rows, 0), [['restoreSnapshot', 'snap-1', []]]);
+
+  // Открытая сессия — окно уже есть, Enter показывает его, а не заводит второе.
+  assert.deepStrictEqual(chooseWith(rows, 1), [['focusSession', 'aaa']]);
+
+  // Закрытая — просьба на один id, и адресована она снимку. `snapshotId` и
+  // `id` здесь заведомо разные: подстановка одного вместо другого роняет
+  // именно это сравнение.
+  assert.strictEqual(rows[2].id, 'bbb');
+  assert.strictEqual(rows[2].snapshotId, 'snap-1');
+  assert.deepStrictEqual(chooseWith(rows, 2), [['restoreSnapshot', 'snap-1', ['bbb']]]);
 });
