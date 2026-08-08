@@ -6,8 +6,8 @@
 //! `<base>/windows/claude-session-unread`, оба с `{"id": …}`,
 //! `<base>/windows/claude-snapshot-restore` с телом `{"id": …}` и
 //! необязательным `sessionIds`, и `<base>/windows/claude-session-open` с телом
-//! `{"id": …, "action": "terminal"}`), и придумывать рядом свои значило бы
-//! заводить приёмник, которого нет.
+//! `{"id": …, "action": "terminal"}` и необязательным `cwd`), и придумывать
+//! рядом свои значило бы заводить приёмник, которого нет.
 //!
 //! Настройки брокера читаются здесь, из того же `config.yaml`, а не приходят
 //! из фронтенда: иначе пароль ездил бы через мост в webview на каждое нажатие.
@@ -27,8 +27,8 @@ const FOCUS_TOPIC: &str = "/windows/claude-focus";
 const UNREAD_TOPIC: &str = "/windows/claude-session-unread";
 const RESTORE_TOPIC: &str = "/windows/claude-snapshot-restore";
 /// Просьба к windows11-manager открыть сессию у себя. Отличается от
-/// `FOCUS_TOPIC` тем, что окна может не быть вовсе: менеджер тогда поднимет
-/// терминал с нужным профилем.
+/// `FOCUS_TOPIC` тем, что ни окна, ни самой сессии у трекера может не быть
+/// вовсе: по каталогу проекта менеджер поднимет терминал с нужным профилем.
 const OPEN_TOPIC: &str = "/windows/claude-session-open";
 
 pub struct Broker {
@@ -103,12 +103,26 @@ pub fn unread(broker: &Broker, id: &str) -> Result<(), String> {
 /// режет такой запрос как cross-origin ещё до отправки. Поддержано одно
 /// действие, `terminal`: остальные (cursor, explorer, pr) осмысленны только
 /// там, где стоит человек, а не там, где висит окно.
-pub fn open(broker: &Broker, id: &str) -> Result<(), String> {
-    publish(
-        broker,
-        OPEN_TOPIC,
-        &serde_json::json!({ "id": id, "action": "terminal" }).to_string(),
-    )
+pub fn open(broker: &Broker, id: &str, cwd: &str) -> Result<(), String> {
+    publish(broker, OPEN_TOPIC, &open_payload(id, cwd))
+}
+
+/// Тело просьбы об открытии.
+///
+/// `cwd` — каталог проекта, и он тут не украшение: id менеджер ищет среди
+/// своих слотов, а список пикера приезжает от ccfzf с ssh-хоста и знает
+/// сессии, которых на Windows не открывали ни разу. По каталогу менеджер
+/// поднимает терминал с профилем из `claudeWt.projects` — то, чего собранная
+/// в пикере команда `wt.exe` не умеет.
+///
+/// Пустого ключа в теле нет вовсе: приёмник читает пустую строку как «каталога
+/// не знаем», а отсутствие ключа говорит то же самое честнее — то же правило,
+/// что у `restore_payload`.
+fn open_payload(id: &str, cwd: &str) -> String {
+    if cwd.is_empty() {
+        return serde_json::json!({ "id": id, "action": "terminal" }).to_string();
+    }
+    serde_json::json!({ "id": id, "action": "terminal", "cwd": cwd }).to_string()
 }
 
 /// Тело просьбы о восстановлении.
@@ -193,8 +207,8 @@ fn publish(broker: &Broker, tail: &str, payload: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        broker_from_config, restore_payload, topic_of, FOCUS_TOPIC, OPEN_TOPIC, RESTORE_TOPIC,
-        UNREAD_TOPIC,
+        broker_from_config, open_payload, restore_payload, topic_of, FOCUS_TOPIC, OPEN_TOPIC,
+        RESTORE_TOPIC, UNREAD_TOPIC,
     };
 
     // Хвосты заданы приёмником — демоном на Windows-машине. Опечатка здесь
@@ -257,6 +271,25 @@ mod tests {
             topic_of(&broker, OPEN_TOPIC),
             "home/room/pc/windows/claude-session-open"
         );
+    }
+
+    // Имена ключей заданы приёмником: claude-commands.js менеджера читает
+    // `id`, `action` и `cwd`. Опечатка в любом из них не видна на глаз —
+    // публикация проходит, PubAck приходит, а терминал не открывается.
+    #[test]
+    fn open_body_carries_the_project_dir() {
+        assert_eq!(
+            open_payload("s1", "/p/site"),
+            r#"{"action":"terminal","cwd":"/p/site","id":"s1"}"#
+        );
+    }
+
+    // Каталога может не быть: у сессии, чей транскрипт не прочитался, поле
+    // пустое. Тогда ключа в теле нет вовсе — приёмник ищет сессию по id, а
+    // отсутствие каталога отличает от «каталог — пустая строка».
+    #[test]
+    fn open_body_without_a_dir_carries_no_key() {
+        assert_eq!(open_payload("s1", ""), r#"{"action":"terminal","id":"s1"}"#);
     }
 
     // Хвост задан приёмником — подпиской в windows-mqtt. Опечатка здесь ничего

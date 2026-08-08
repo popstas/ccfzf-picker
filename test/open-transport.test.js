@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chooseOpenTransport, canOpenRemote, chooseEnterAction } = require('../frontend-src/open-transport');
+const {
+  chooseOpenTransport, canOpenRemote, chooseEnterAction, rowProjectDir,
+} = require('../frontend-src/open-transport');
 
 test('свой хост, брокер настроен — открываем через менеджер', () => {
   assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'pc-win', true), 'manager');
@@ -124,8 +126,13 @@ test('строки нет вовсе — нет', () => {
 // сессиям, которые трекер видит на экране.
 const WINDOWED = { kind: 'interactive', id: 's1', window: { title: 'proj', desktop: 1 } };
 // Той же сессии окна нет — значит, и в файле трекера её нет, и слота у неё
-// может не быть вовсе.
+// может не быть вовсе. Каталога проекта здесь тоже нет: строка без обоих
+// признаков — единственная, о которой менеджера просить не о чем.
 const WINDOWLESS = { kind: 'interactive', id: 's1' };
+// Окна нет, но каталог известен — по нему менеджер откроет терминал с
+// профилем проекта, ничего про саму сессию не зная. `ccfzf --state` кладёт
+// каталог в поле `cwd`, строка списка несёт его как есть.
+const WINDOWLESS_WITH_CWD = { kind: 'interactive', id: 's1', cwd: '/p/site' };
 
 // Fix 1: подъём уже открытого окна обязан идти прежней дорогой. Только она
 // гасит пикер до публикации и выдаёт трекеру право на передний план; ветка
@@ -148,9 +155,12 @@ test('окно открыто, но трекер на чужой машине �
 });
 
 // Fix 2: список пикера — надмножество того, что знает трекер: ccfzf отдаёт все
-// сессии ssh-хоста, а менеджер ищет их среди своих слотов. Незнакомой сессии
-// он ответит `unknown session` в свой лог, и Enter окажется нажатым впустую.
-test('трекер не знает сессию (окна нет) — открываем локально, как до этой ветки', () => {
+// сессии ssh-хоста, а менеджер ищет их среди своих слотов. Просить его можно
+// по одному из двух признаков: id, который он найдёт (о нём говорит `window`),
+// либо каталог проекта, по которому он откроет терминал. Нет ни того, ни
+// другого — просьба умерла бы в его логе молча, и Enter окажется нажатым
+// впустую.
+test('ни окна, ни каталога — открываем локально, как до этой ветки', () => {
   assert.equal(
     chooseEnterAction(WINDOWLESS, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
     'local',
@@ -159,6 +169,67 @@ test('трекер не знает сессию (окна нет) — откры
     chooseEnterAction({ ...WINDOWLESS, window: null }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
     'local',
   );
+});
+
+// Ради этого случая ветка менеджера и заведена: терминал закрыт, сессию трекер
+// не помнит, и открыть её с нужным профилем Windows Terminal умеет только
+// менеджер — по каталогу проекта (`claudeWt.projects` → `profileForCwd`).
+// Собранная в пикере команда `wt.exe` профиль теряет.
+test('окна нет, но каталог проекта известен — просим менеджер', () => {
+  assert.equal(
+    chooseEnterAction(WINDOWLESS_WITH_CWD, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    'manager',
+  );
+});
+
+test('пустой или пробельный каталог — то же, что его нет вовсе', () => {
+  assert.equal(
+    chooseEnterAction({ ...WINDOWLESS, cwd: '' }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    'local',
+  );
+  assert.equal(
+    chooseEnterAction({ ...WINDOWLESS, cwd: '   ' }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    'local',
+  );
+  assert.equal(
+    chooseEnterAction({ ...WINDOWLESS, cwd: 42 }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    'local',
+  );
+});
+
+test('каталог не отменяет ни чужого хоста, ни отсутствия брокера', () => {
+  // Обе проверки стоят раньше и остаются на месте: на маке менеджера не
+  // существует, а без брокера просьбе некуда уйти.
+  assert.equal(
+    chooseEnterAction(WINDOWLESS_WITH_CWD, 'resume', OTHER_HOST_STATE, CONFIG_HOST, true),
+    'local',
+  );
+  assert.equal(
+    chooseEnterAction(WINDOWLESS_WITH_CWD, 'resume', THIS_HOST_STATE, CONFIG_HOST, false),
+    'local',
+  );
+});
+
+test('каталог не открывает ветку менеджера строке не-сессии', () => {
+  // У строки проекта в `id` лежит путь каталога, а `cwd` есть и у неё —
+  // позитивный список видов строк должен стоять раньше каталога.
+  for (const kind of NON_SESSION_ROW_KINDS) {
+    assert.equal(
+      chooseEnterAction({ ...WINDOWLESS_WITH_CWD, kind }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+      'local',
+      kind,
+    );
+  }
+});
+
+test('rowProjectDir отдаёт каталог строки и пустоту вместо мусора', () => {
+  // То же поле, что уезжает в теле просьбы (openViaManager в sessions.html):
+  // разойдись оно с проверкой — Enter уходил бы менеджеру без каталога.
+  assert.equal(rowProjectDir(WINDOWLESS_WITH_CWD), '/p/site');
+  assert.equal(rowProjectDir({ cwd: ' /p/home ' }), '/p/home');
+  assert.equal(rowProjectDir({}), '');
+  assert.equal(rowProjectDir(null), '');
+  assert.equal(rowProjectDir({ cwd: null }), '');
 });
 
 test('трекер знает сессию, но поднять окно пикер не может — просим менеджер', () => {

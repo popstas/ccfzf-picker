@@ -964,10 +964,19 @@
    * focusSession, который право и выдаёт (chooseEnterAction в
    * open-transport.js). Остаётся ровно один случай с открытым окном: ответ
    * агрегатора без `windowPid`, то есть выдавать право некому и нечему.
+   *
+   * Каталог проекта едет рядом с id, и без него просьба часто не сработала бы
+   * вовсе: менеджер ищет сессию среди своих слотов, а список пикера приезжает
+   * от ccfzf с ssh-хоста и знает сессии, которых на Windows не открывали ни
+   * разу. По каталогу менеджер открывает терминал с профилем из
+   * `claudeWt.projects` — ровно то, чего собранная здесь команда `wt.exe` не
+   * умеет.
    */
   async function openViaManager(row) {
     try {
-      await invoke('open_session_mqtt', { id: row.id });
+      await invoke('open_session_mqtt', {
+        id: row.id, cwd: window.OpenTransport.rowProjectDir(row),
+      });
     } catch (e) {
       error = String(e);
       render();

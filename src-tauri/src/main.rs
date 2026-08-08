@@ -239,14 +239,22 @@ async fn restore_snapshot_mqtt(id: String, session_ids: Vec<String>) -> Result<(
 /// окна ей не поручают: без `AllowSetForegroundWindow` трекер отчитается об
 /// успехе, а на экране мигнёт кнопка на таскбаре. Разводит эти два случая
 /// `chooseEnterAction` во фронтенде.
+///
+/// `cwd` — каталог проекта строки, и он необязателен только по форме: без него
+/// менеджер умеет открыть лишь сессию, которую сам же и помнит слотом, а
+/// список пикера приезжает от ccfzf с ssh-хоста и знает сессии, которых на
+/// Windows не открывали ни разу. `Option` — чтобы непереданный ключ значил
+/// «каталога нет», а не рушил вызов на мосту: у `String` его отсутствие стало
+/// бы ошибкой разбора, и Enter отчитался бы человеку про аргументы команды.
 #[tauri::command]
-async fn open_session_mqtt(id: String) -> Result<(), String> {
+async fn open_session_mqtt(id: String, cwd: Option<String>) -> Result<(), String> {
     let raw = load_config()?;
     let broker = mqtt::broker_from_config(&raw);
     if !broker.is_configured() {
         return Err("mqtt не настроен: нужны host и base в config.yaml".to_string());
     }
-    tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &id))
+    let cwd = cwd.unwrap_or_default().trim().to_string();
+    tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &id, &cwd))
         .await
         .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
 }
