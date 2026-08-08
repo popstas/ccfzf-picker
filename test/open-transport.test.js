@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chooseOpenTransport, canOpenRemote } = require('../frontend-src/open-transport');
+const { chooseOpenTransport, canOpenRemote, chooseEnterAction } = require('../frontend-src/open-transport');
 
 test('свой хост, брокер настроен — открываем через менеджер', () => {
   assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'pc-win', true), 'manager');
@@ -114,4 +114,110 @@ test('lastState ещё {} (ответ агрегатора не пришёл) �
 test('строки нет вовсе — нет', () => {
   assert.equal(canOpenRemote(null, OTHER_HOST_STATE, CONFIG_HOST, true), false);
   assert.equal(canOpenRemote(undefined, OTHER_HOST_STATE, CONFIG_HOST, true), false);
+});
+
+// chooseEnterAction: что делает Enter на строке сессии. Раньше эти условия
+// стояли прямо в sessions.html, и проверить их было нечем — отсюда все три
+// поломки ниже.
+
+// Окно у сессии открыто: агрегатор приписывает поле `window` ровно тем
+// сессиям, которые трекер видит на экране.
+const WINDOWED = { kind: 'interactive', id: 's1', window: { title: 'proj', desktop: 1 } };
+// Той же сессии окна нет — значит, и в файле трекера её нет, и слота у неё
+// может не быть вовсе.
+const WINDOWLESS = { kind: 'interactive', id: 's1' };
+
+// Fix 1: подъём уже открытого окна обязан идти прежней дорогой. Только она
+// гасит пикер до публикации и выдаёт трекеру право на передний план; ветка
+// менеджера не делает ни того, ни другого, и подъём отчитался бы об успехе
+// при мигнувшей кнопке на таскбаре.
+test('окно открыто и пикер умеет его поднять — фокус, а не менеджер', () => {
+  assert.equal(
+    chooseEnterAction(WINDOWED, 'focus', THIS_HOST_STATE, CONFIG_HOST, true),
+    'focus',
+  );
+});
+
+test('окно открыто, но трекер на чужой машине — фокус решает стратегия, транспорт не вмешивается', () => {
+  // На маке стратегия до 'focus' не доходит (canFocus ложен), и Enter обязан
+  // открыть терминал сам, как и раньше.
+  assert.equal(
+    chooseEnterAction(WINDOWED, 'resume', OTHER_HOST_STATE, CONFIG_HOST, true),
+    'local',
+  );
+});
+
+// Fix 2: список пикера — надмножество того, что знает трекер: ccfzf отдаёт все
+// сессии ssh-хоста, а менеджер ищет их среди своих слотов. Незнакомой сессии
+// он ответит `unknown session` в свой лог, и Enter окажется нажатым впустую.
+test('трекер не знает сессию (окна нет) — открываем локально, как до этой ветки', () => {
+  assert.equal(
+    chooseEnterAction(WINDOWLESS, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    'local',
+  );
+  assert.equal(
+    chooseEnterAction({ ...WINDOWLESS, window: null }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    'local',
+  );
+});
+
+test('трекер знает сессию, но поднять окно пикер не может — просим менеджер', () => {
+  // Стратегия не 'focus' (например, у ответа агрегатора нет windowPid, и
+  // право на передний план выдать некому) — поднимать окно самим нечем, а
+  // менеджер умеет и открыть терминал с профилем проекта.
+  assert.equal(
+    chooseEnterAction(WINDOWED, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    'manager',
+  );
+});
+
+test('свой хост, но брокера нет — локально: просьбе некуда уйти', () => {
+  assert.equal(
+    chooseEnterAction(WINDOWED, 'resume', THIS_HOST_STATE, CONFIG_HOST, false),
+    'local',
+  );
+});
+
+// Fix 3: тот же позитивный список, что и у пункта меню. Сегодня строки других
+// видов до openSession не доходят — их разводит choose(), — но список затем и
+// позитивный, чтобы следующий вид строки не уехал в claude-session-open с
+// чужим id.
+test('строка не сессии — локально, даже с полем window и на своём хосте', () => {
+  for (const kind of NON_SESSION_ROW_KINDS) {
+    assert.equal(
+      chooseEnterAction({ ...WINDOWED, kind }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+      'local',
+      kind,
+    );
+  }
+});
+
+test('незнакомый вид строки (или вовсе без kind) — локально', () => {
+  assert.equal(
+    chooseEnterAction({ ...WINDOWED, kind: 'something-new' }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    'local',
+  );
+  assert.equal(
+    chooseEnterAction({ id: 's1', window: {} }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    'local',
+  );
+});
+
+test('сессия из снимка с открытым окном — тот же вид строки, что и обычная', () => {
+  assert.equal(
+    chooseEnterAction({ ...WINDOWED, kind: 'snapshot-session' }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    'manager',
+  );
+});
+
+test('строки нет вовсе — локально', () => {
+  assert.equal(chooseEnterAction(null, 'resume', THIS_HOST_STATE, CONFIG_HOST, true), 'local');
+  // 'focus' до строки не добирается: стратегию посчитали по ней же, и без
+  // строки её не бывает.
+  assert.equal(chooseEnterAction(undefined, 'resume', THIS_HOST_STATE, CONFIG_HOST, true), 'local');
+});
+
+test('трекера нет вовсе — локально', () => {
+  assert.equal(chooseEnterAction(WINDOWED, 'resume', {}, CONFIG_HOST, true), 'local');
+  assert.equal(chooseEnterAction(WINDOWED, 'resume', null, CONFIG_HOST, true), 'local');
 });

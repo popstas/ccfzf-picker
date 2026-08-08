@@ -908,31 +908,23 @@
    */
   async function openSession(row) {
     if (!row) return;
-    if (window.OpenTransport.chooseOpenTransport(lastState, CONFIG.windowHost, CONFIG.mqtt.configured) === 'manager') {
-      // Менеджер знает профиль Windows Terminal для этого проекта; собранная
-      // здесь команда его теряет. Просьба уходит тем же MQTT-транспортом, что
-      // и пункт меню «Open on <host>» с чужой машины (openRemote ниже) — на
-      // своей же машине это работает так же: публикация до брокера и обратно
-      // до демона, а не HTTP-запрос из webview, который CORS всё равно режет.
-      try {
-        await invoke('open_session_mqtt', { id: row.id });
-      } catch (e) {
-        error = String(e);
-        render();
-        return;
-      }
-      error = '';
-      // Та же пара, что и у местного открытия: отметка «посмотрел» и гашение
-      // пикера, после ответа — иначе ошибка недоступного трекера осталась бы
-      // за уже закрытым окном.
-      await markSeen(row.id, Math.floor(Date.now() / 1000));
-      invoke('hide_picker');
-      return;
-    }
     const strategy = window.OpenStrategy.chooseOpenStrategy(
       row, CONFIG.caps, { canFocus: canFocusWindows() },
     );
-    if (strategy === 'focus') return focusSession(row);
+    // Развилку целиком решает chooseEnterAction (open-transport.js), а не
+    // условия по месту: у неё есть тесты на каждый вид строки и на все
+    // состояния трекера, а у пары if-ов в этом файле их не было — отсюда и
+    // взялись подъём окна мимо права на передний план и Enter, не сделавший
+    // ничего у незнакомой трекеру сессии.
+    const action = window.OpenTransport.chooseEnterAction(
+      row, strategy, lastState, CONFIG.windowHost, CONFIG.mqtt.configured,
+    );
+    // Окно уже открыто, и поднять его умеет только эта дорога: она гасит пикер
+    // до публикации и выдаёт трекеру право на передний план.
+    if (action === 'focus') return focusSession(row);
+    // Менеджер знает профиль Windows Terminal для этого проекта; собранная
+    // здесь команда его теряет.
+    if (action === 'manager') return openViaManager(row);
     if (sshHostMissing()) return;
     const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, {
       sshHost: CONFIG.sshHost, terminal: CONFIG.terminal,
@@ -959,16 +951,21 @@
   }
 
   /**
-   * Попросить трекер открыть сессию у себя — с чужой машины.
+   * Попросить трекер открыть сессию у себя.
    *
-   * Тот же вызов, что делает и Enter на своей же машине (ветка `manager` в
-   * openSession выше): publish в MQTT дойдёт до демона одинаково независимо
-   * от того, откуда он отправлен. Отдельная функция всё же нужна — это пункт
-   * меню, а не ветка Enter: chooseOpenTransport на своём хосте выбирает
-   * 'local' и без этой строки, и подменять готовое решение здесь незачем —
-   * открыть на трекере просят явно, через canOpenRemote (open-transport.js).
+   * Один вход на два повода: Enter на машине самого трекера (ветка `manager`
+   * в openSession выше) и пункт меню «Open on <host>» с чужой машины. Publish
+   * в MQTT дойдёт до демона одинаково независимо от того, откуда он
+   * отправлен, и тело просьбы у обоих одно — разводить их значило бы завести
+   * два места, где отметка «посмотрел» и гашение пикера ставятся по-разному.
+   *
+   * Права на передний план здесь не выдаётся, и это не упущение. Сессию,
+   * чьё окно пикер может поднять сам, Enter сюда не приводит — её забирает
+   * focusSession, который право и выдаёт (chooseEnterAction в
+   * open-transport.js). Остаётся ровно один случай с открытым окном: ответ
+   * агрегатора без `windowPid`, то есть выдавать право некому и нечему.
    */
-  async function openRemote(row) {
+  async function openViaManager(row) {
     try {
       await invoke('open_session_mqtt', { id: row.id });
     } catch (e) {
@@ -1191,7 +1188,7 @@
       return;
     }
     if (id === 'open-remote') {
-      openRemote(row);
+      openViaManager(row);
       return;
     }
     if (id === 'attach') {
