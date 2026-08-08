@@ -120,6 +120,11 @@ id — эта ветка не меняется. Ограничитель на п
 `snapshots`. Хвост `(\s+|$)` уже на месте: `/src` в режим не проваливается.
 Стирание префикса возвращает к сессиям само собой, отдельного выхода нет.
 
+`^S` ставит `/s ` в начало строки — ровно то же, что `^A` делает с `/a `.
+Клавишу приходится занять в `RESERVED_CODES` (`action-hotkey.js`): без этого
+настроенное действие вправе её забрать, и тогда `^S` уводил бы в действие, а
+режим оставался бы доступен только набором руками.
+
 **Строки** — плоский список, без механики сворачивания:
 
 ```
@@ -195,8 +200,8 @@ Enter на открытой сессии уходит в существующу�
 |---|---|
 | `windows11-manager` | `currentSnapshots()`, `buildWindowsFile`, `windowsFingerprint` |
 | `ccfzf` (`~/projects/shell/ccfzf`) | `read_windows`, вывод `--state` |
-| `ccfzf-picker` | `picker-mode.js`, `picker-snapshots.js`, `state-shape.js`, `sessions.html`, `mqtt.rs`, `main.rs` |
-| `windows-mqtt` | разбор JSON в `claudeSnapshotRestore` |
+| `ccfzf-picker` | `picker-mode.js`, `picker-snapshots.js`, `state-shape.js`, `action-hotkey.js`, `sessions.html`, `mqtt.rs`, `main.rs` |
+| `windows-mqtt` | `src/picker/restore-payload.js` (новый), вызов в `claudeSnapshotRestore` |
 
 Деплой: windows11-manager и windows-mqtt едут через `npm run deploy-fast` из
 `windows-mqtt` (см. скилл `/claude-wt` — про джанкшен и про подъём приложения
