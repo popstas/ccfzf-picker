@@ -7,7 +7,7 @@
 ## Установка
 
 Нужен Rust, Node 22+, `tauri-cli` (`cargo install tauri-cli`) и терминал на
-локальной машине; на удалённой — `ccfzf` (снимок лежит в `vendor/ccfzf`).
+локальной машине; на удалённой — `ccfzf`.
 Без `tauri-cli` `cargo tauri build` упадёт с `no such subcommand: tauri`.
 
 ```
@@ -48,17 +48,11 @@ cargo tauri build             # сборка
 - `scripts/make-icons.py` — иконки приложения из иконки трея:
   `python3 scripts/make-icons.py`. Руками рисуется только
   `src-tauri/icons/favicon.png`, остальное в `src-tauri/icons/` — вывод скрипта.
-- `scripts/check-agent-of.py` — проверка склейки `state.json`, `status.json` и
-  `meta.json` внутри агрегатора, 16 проверок: `python3
-  scripts/check-agent-of.py vendor/ccfzf`. Тесты проекта туда не достают — они
-  про фронтенд, — а «последняя активность» уже один раз сломалась именно там.
-- `vendor/ccfzf` — снимок агрегатора. Сам он живёт на удалённой машине и
-  правится там, а не здесь.
 
 Тесты — только `node --test`, без зависимостей. Запускать `npm test`;
-`node --test test/` на этих версиях Node не работает. Питон внутри снимка
-агрегатора этим не покрыт — для него есть `scripts/check-agent-of.py`,
-он стоит отдельно и требует только стандартной библиотеки.
+`node --test test/` на этих версиях Node не работает. Агрегатор здесь не
+лежит и не проверяется: он живёт своим репозиторием со своими тестами, пути
+выписаны в скилле `/claude-wt`.
 
 ## Документы
 
