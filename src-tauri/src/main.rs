@@ -207,6 +207,23 @@ async fn unread_session_mqtt(id: String) -> Result<(), String> {
         .map_err(|e| format!("unread_session_mqtt task failed: {e}"))?
 }
 
+/// Попросить поднять раскладку снимка.
+///
+/// Пустой `session_ids` значит «весь снимок». Права на передний план здесь не
+/// выдаётся: восстановление открывает новые окна, а не поднимает существующее,
+/// и `AllowSetForegroundWindow` тут не при чём.
+#[tauri::command]
+async fn restore_snapshot_mqtt(id: String, session_ids: Vec<String>) -> Result<(), String> {
+    let raw = load_config()?;
+    let broker = mqtt::broker_from_config(&raw);
+    if !broker.is_configured() {
+        return Err("mqtt не настроен: нужны host и base в config.yaml".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || mqtt::restore(&broker, &id, &session_ids))
+        .await
+        .map_err(|e| format!("restore_snapshot_mqtt task failed: {e}"))?
+}
+
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
 /// тесты. Отсутствующий файл — не ошибка: умолчания рассчитаны на работу без
 /// него.
@@ -411,7 +428,8 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config,
-            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt
+            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
+            restore_snapshot_mqtt
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
