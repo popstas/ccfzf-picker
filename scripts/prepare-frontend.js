@@ -23,6 +23,7 @@ const FILES = [
   'frontend-src/session-actions.js',
   'frontend-src/config-shape.js',
   'frontend-src/picker-filter.js',
+  'frontend-src/picker-snapshots.js',
   'frontend-src/picker-mode.js',
   'frontend-src/project-list.js',
   'frontend-src/picker-list-sync.js',
