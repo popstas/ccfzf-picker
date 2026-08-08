@@ -2,30 +2,39 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { chooseOpenTransport, canOpenRemote } = require('../frontend-src/open-transport');
 
-test('свой хост — открываем через менеджер', () => {
-  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'pc-win'), 'manager');
+test('свой хост, брокер настроен — открываем через менеджер', () => {
+  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'pc-win', true), 'manager');
+});
+
+test('свой хост, брокер НЕ настроен — открываем локально', () => {
+  // Без брокера просьбе некуда уйти: 'manager' здесь означает публикацию в
+  // MQTT, и на машине без mqtt: в конфиге Enter обязан остаться прежним —
+  // wt.exe, а не ошибка «mqtt не настроен» там, где раньше всё работало.
+  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'pc-win', false), 'local');
+  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'pc-win', undefined), 'local');
 });
 
 test('регистр и пробелы не мешают', () => {
-  assert.equal(chooseOpenTransport({ windowHost: ' pc-win ' }, 'PC-Win'), 'manager');
+  assert.equal(chooseOpenTransport({ windowHost: ' pc-win ' }, 'PC-Win', true), 'manager');
 });
 
-test('чужой хост — открываем локально', () => {
-  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'macbook'), 'local');
+test('чужой хост — открываем локально независимо от брокера', () => {
+  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'macbook', true), 'local');
+  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'macbook', false), 'local');
 });
 
 test('пустой windowHost в конфиге — локально', () => {
-  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, ''), 'local');
-  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, undefined), 'local');
+  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, '', true), 'local');
+  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, undefined, true), 'local');
 });
 
 test('нет ответа агрегатора — локально', () => {
-  assert.equal(chooseOpenTransport(null, 'pc-win'), 'local');
-  assert.equal(chooseOpenTransport({}, 'pc-win'), 'local');
+  assert.equal(chooseOpenTransport(null, 'pc-win', true), 'local');
+  assert.equal(chooseOpenTransport({}, 'pc-win', true), 'local');
 });
 
 test('pid трекера на выбор не влияет', () => {
-  assert.equal(chooseOpenTransport({ windowHost: 'pc-win', windowPid: 0 }, 'pc-win'), 'manager');
+  assert.equal(chooseOpenTransport({ windowHost: 'pc-win', windowPid: 0 }, 'pc-win', true), 'manager');
 });
 
 // canOpenRemote: применимость пункта «Open on <host>» — на каждый вид

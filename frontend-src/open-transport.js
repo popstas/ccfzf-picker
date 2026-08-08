@@ -12,18 +12,25 @@
    *
    * На машине оконного трекера — он: маппинг проекта на профиль Windows
    * Terminal (`claudeWt.projects`) знает только windows11-manager, и собранная
-   * здесь команда `wt.exe` этот профиль теряет.
+   * здесь команда `wt.exe` этот профиль теряет. Просьба уходит публикацией в
+   * MQTT (`open_session_mqtt`) — тот же транспорт, что уже работает на этой
+   * машине для фокуса окна и пометки непрочитанным.
    *
    * Где трекера нет — открываем сами, как раньше: на macOS менеджера не
    * существует, и просьба уехала бы открывать окно на чужой машине.
    *
+   * Без брокера MQTT ветка `manager` вела бы Enter в ошибку там, где раньше
+   * он открывал терминал локально — регрессия на машине, которой MQTT никогда
+   * не был нужен. Поэтому совпадения имени хоста недостаточно: нужен ещё и
+   * настроенный брокер, иначе просьбе некуда уйти и остаётся `local`.
+   *
    * `windowPid` здесь, в отличие от `canFocus`, не смотрим: право переднего
    * плана нужно для подъёма окна, а не для запуска терминала.
    */
-  function chooseOpenTransport(state, configHost) {
+  function chooseOpenTransport(state, configHost, mqttConfigured) {
     const host = normHost((state || {}).windowHost);
     const mine = normHost(configHost);
-    return host && host === mine ? 'manager' : 'local';
+    return host && host === mine && mqttConfigured ? 'manager' : 'local';
   }
 
   /**
