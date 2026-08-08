@@ -36,6 +36,19 @@
   };
 
   /**
+   * Имя модификатора — во флаг, либо пустая строка.
+   *
+   * Через hasOwnProperty, а не простым `MODIFIERS[name]`: иначе `constructor+E`
+   * находит функцию в цепочке прототипов, разбирается как настоящая
+   * комбинация — и остаётся хоткеем без единого модификатора, то есть голой
+   * буквой, которая должна была уйти в строку поиска.
+   */
+  function modifierFlag(part) {
+    const name = String(part).toLowerCase();
+    return Object.prototype.hasOwnProperty.call(MODIFIERS, name) ? MODIFIERS[name] : '';
+  }
+
+  /**
    * `Ctrl+Shift+E` — в то, с чем можно сверить событие клавиатуры.
    *
    * Непонятная строка даёт `null`, а не исключение: конфиг правит человек, и
@@ -57,7 +70,7 @@
     const key = parts[parts.length - 1];
     const out = { code: '', ctrl: false, meta: false, alt: false, shift: false };
     for (const part of parts.slice(0, -1)) {
-      const flag = MODIFIERS[part.toLowerCase()];
+      const flag = modifierFlag(part);
       if (!flag) return null;
       out[flag] = true;
     }
@@ -95,7 +108,7 @@
     const key = parts[parts.length - 1];
     const flags = { ctrl: false, meta: false, alt: false, shift: false };
     for (const part of parts.slice(0, -1)) {
-      const flag = MODIFIERS[part.toLowerCase()];
+      const flag = modifierFlag(part);
       if (!flag) return raw;
       flags[flag] = true;
     }

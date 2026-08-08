@@ -155,6 +155,10 @@
         .count {
             flex: 0 0 auto; padding-left: 10px; min-width: 48px; text-align: right;
             font-size: 11px; color: #7d838c; font-variant-numeric: tabular-nums;
+            /* nowrap, как у соседних колонок: `123 · 45●` шире min-width, а `●`
+               под tabular-nums не попадает — на WebView2 метрики этого знака
+               наименее предсказуемы, и без запрета строка переносилась бы. */
+            white-space: nowrap;
         }
         /* Отметка проекта в ccfzf (★ в его собственном списке). */
         .mark { color: #d29922; }
@@ -482,13 +486,16 @@
       const index = rows.length;
       rows.push(project);
       // Зелёная точка у проекта, где кто-то работает прямо сейчас: тот же
-      // словарь цветов, что и у сессии, и та же ширина левой колонки.
-      const dot = project.liveCount ? 'active' : 'closed';
+      // словарь цветов, что и у сессии, и та же ширина левой колонки. Без
+      // живых — обычная серая точка, а не `closed`: прозрачная задумана для
+      // закрытой сессии, чтобы место осталось пустым, а у проекта «сейчас
+      // никто не работает» — обычное состояние, а не отсутствие строки.
+      const dotClass = project.liveCount ? 'dot active' : 'dot';
       // Подсказка — через тот же titleAttr, что у сессий: иначе в ней висел бы
       // полный путь, а строкой ниже, в теле строки, — тот же путь через
       // shortPath, и одна строка показывала бы каталог двумя разными видами.
       const html = `<div class="row project" data-index="${index}"${titleAttr(project)}>` +
-        `<div class="dot ${dot}"></div>` +
+        `<div class="${dotClass}"></div>` +
         `<div class="text"><div class="name">` +
         (project.mark ? '<span class="mark">★</span> ' : '') +
         `${escapeHtml(project.label)}</div>` +

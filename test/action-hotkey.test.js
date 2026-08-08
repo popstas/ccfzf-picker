@@ -49,6 +49,12 @@ test('голая буква без модификатора не комбина�
   // Фокус в окне всегда стоит в поле поиска — такая клавиша ушла бы в фильтр.
   assert.strictEqual(parseHotkey('E'), null);
   assert.strictEqual(parseHotkey('Ctrl'), null);
+  // Имя из цепочки прототипов — не модификатор. Иначе `constructor+E`
+  // разбирался бы в комбинацию без единого флага, то есть в ту самую голую
+  // букву, и срабатывал бы на набранное в поиске «E».
+  assert.strictEqual(parseHotkey('constructor+E'), null);
+  assert.strictEqual(parseHotkey('toString+E'), null);
+  assert.strictEqual(formatHotkey('constructor+E'), 'constructor+E');
 });
 
 test('занятыми считаются встроенные клавиши окна и только они', () => {
@@ -58,6 +64,10 @@ test('занятыми считаются встроенные клавиши о
   }
   // Меню — не действие, но клавишу занимает.
   assert.strictEqual(isReserved(parseHotkey('Ctrl+K')), true);
+  // И `^A` — тоже не действие, а ярлык `/a ` в строке поиска; отдавать эту
+  // букву настроенному действию нельзя, встроенная ветка перехватит первой.
+  assert.strictEqual(isReserved(parseHotkey('Ctrl+A')), true);
+  assert.strictEqual(isReserved(parseHotkey('Cmd+A')), true);
   // Та же буква с добавленным модификатором свободна.
   assert.strictEqual(isReserved(parseHotkey('Ctrl+Shift+K')), false);
   assert.strictEqual(isReserved(parseHotkey('Ctrl+Alt+P')), false);
