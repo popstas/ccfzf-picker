@@ -580,8 +580,13 @@
         message.textContent = mode === 'projects'
           // Пустой список проектов почти всегда значит «агрегатор на той
           // стороне ещё не отдаёт projects», и молчать об этом нельзя: на вид
-          // это не отличить от «ничего не нашлось».
-          ? (projectRows.length ? 'Nothing matches.' : 'No projects — is ccfzf on the host up to date?')
+          // это не отличить от «ничего не нашлось». Но на холодном окне и
+          // после неудачного опроса projectRows пуст просто потому, что ответа
+          // ещё не было, — винить хост, который не успел ответить, нечестно.
+          // Признак ответа тот же, что и у окон: непустой lastState.
+          ? (projectRows.length ? 'Nothing matches.'
+            : lastState.sessions ? 'No projects — is ccfzf on the host up to date?'
+              : 'Loading…')
           : (groups.length ? 'Nothing matches.' : 'No claude sessions yet.');
       }
     }
