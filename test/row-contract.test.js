@@ -411,3 +411,111 @@ test('выключенный чекбокс путей убирает путь �
   // Подсказка остаётся: она и заведена для того, чего в строке не видно.
   assert.ok(items[0].html.includes('title="~/projects/ccfzf"'), items[0].html);
 });
+
+// ── Тот же шов у строк снимков ───────────────────────────────────────────────
+//
+// Здесь швов два: buildSnapshotRows называет поля строки, а renderSnapshots в
+// sessions.html их читает — разъехавшись, они дадут «undefined» в разметке при
+// зелёном picker-snapshots.test.js. Функция так же вычитывается из страницы и
+// выполняется в vm: копия отрисовщика в тесте разошлась бы с настоящим молча.
+const { buildSnapshotRows, openIdsFromState } = require('../frontend-src/picker-snapshots');
+
+// Форма — с живого ответа `ccfzf --state`, поле `snapshots`.
+const AGGREGATOR_SNAPSHOTS = [{
+  id: 'snap-1',
+  created: 1786045860,
+  sessions: [
+    { id: 'aaa', cwd: '/home/user/projects/ccfzf', title: 'ccfzf' },
+    { id: 'bbb', cwd: '/home/user/projects/empty', title: 'empty' },
+  ],
+}];
+
+/** Пропустить снимки настоящим путём: buildSnapshotRows → renderSnapshots. */
+function renderSnapshotRows(snapshots, query, options) {
+  const source = SESSIONS_HTML.match(/\n {2}function renderSnapshots\(query, items, nowSec\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(source, 'renderSnapshots не найден в sessions.html — тест сторожит не то');
+  const opts = options || {};
+  const ctx = {
+    // Ровно то, чем renderSnapshots пользуется снаружи себя.
+    window: { PickerSnapshots: { buildSnapshotRows, openIdsFromState } },
+    snapshotRows: snapshots,
+    // Открытые окна приезжают тем же ответом, что и весь список.
+    lastState: { sessions: (opts.open || []).map(id => ({ id, window: { hwnd: 1 } })) },
+    rows: [],
+    items: [],
+    toggles: opts.toggles || { showPaths: true },
+    escapeHtml: Glyph.escapeHtml,
+    shortPath: Glyph.shortPath,
+    query: query || '',
+    nowSec: PROJECTS_NOW,
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${source[0]}\nrenderSnapshots(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
+  return { items: ctx.items, rows: ctx.rows };
+}
+
+test('строка снимка доезжает с настоящего пути до разметки списка', () => {
+  const { items, rows } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '', { open: ['aaa'] });
+  // Заголовок и две сессии одним потоком, все три — строки rows: у заголовка
+  // своё действие, и Enter на нём поднимает раскладку целиком.
+  assert.deepStrictEqual(rows.map(r => r.kind),
+    ['snapshot', 'snapshot-session', 'snapshot-session']);
+  assert.deepStrictEqual(items.map(i => i.key),
+    ['g:snap:snap-1', 'snap:snap-1:aaa', 'snap:snap-1:bbb']);
+  for (let i = 0; i < items.length; i += 1) {
+    assert.ok(items[i].html.includes(`data-index="${i}"`), items[i].html);
+    assert.ok(!items[i].html.includes('undefined'), items[i].html);
+  }
+
+  // Счёт в заголовке: сколько сессий всего и сколько из них ещё не на экране.
+  // Имена total и missing — тот самый промах, который тест обязан ловить.
+  assert.ok(items[0].html.includes('<div class="count">2 · 1 не открыты</div>'), items[0].html);
+  assert.match(items[0].html, /<div class="name">\d{2}:\d{2} · \d{4}-\d{2}-\d{2}<\/div>/);
+
+  // Открытая сессия — тусклая и с пометкой; восстановление её пропустит.
+  assert.ok(items[1].html.includes('class="row snapshot-session closed"'), items[1].html);
+  assert.ok(items[1].html.includes('<div class="dot active"></div>'), items[1].html);
+  assert.ok(items[1].html.includes('▣ открыта'), items[1].html);
+  // Закрытая — обычная, и колонка пуста, а не «undefined».
+  assert.ok(items[2].html.includes('class="row snapshot-session"'), items[2].html);
+  assert.ok(items[2].html.includes('<div class="dot"></div>'), items[2].html);
+  assert.ok(items[2].html.includes('<div class="count"></div>'), items[2].html);
+
+  // Имя строки — каталог проекта, путь — тот же shortPath, что у сессий.
+  assert.ok(items[2].html.includes('<div class="name">empty</div>'), items[2].html);
+  assert.ok(items[2].html.includes('<div class="cwd">~/projects/empty</div>'), items[2].html);
+  assert.ok(items[2].html.includes('title="/home/user/projects/empty"'), items[2].html);
+});
+
+test('все окна на экране — заголовок говорит об этом, а не молчит', () => {
+  const { items } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '', { open: ['aaa', 'bbb'] });
+  assert.ok(items[0].html.includes('<div class="count">2 · все на экране</div>'), items[0].html);
+});
+
+test('отбор снимков и порядок строк — тот же, что видит человек', () => {
+  // Снимок без подошедших сессий уходит с заголовком, а data-index
+  // пересчитывается от нуля: иначе после набора Enter поднимал бы не ту строку.
+  const { items, rows } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, 'empty');
+  assert.strictEqual(items.length, 2);
+  assert.deepStrictEqual(rows.map(r => r.id), ['snap-1', 'bbb']);
+  assert.ok(items[1].html.includes('data-index="1"'), items[1].html);
+  assert.deepStrictEqual(renderSnapshotRows(AGGREGATOR_SNAPSHOTS, 'нет такого').items, []);
+});
+
+test('имя и путь снимка в разметку экранируются', () => {
+  const { items } = renderSnapshotRows([{
+    id: 'snap-2', created: 1786045860,
+    sessions: [{ id: 'ccc', cwd: '/home/user/projects/<b>"x"', title: 'x' }],
+  }]);
+  // Путь идёт и в подсказку, и в тело строки — обе через escapeHtml.
+  assert.ok(!items[1].html.includes('<b>'), items[1].html);
+  assert.ok(!items[1].html.includes('"x"'), items[1].html);
+  assert.ok(items[1].html.includes('&lt;b&gt;&quot;x&quot;'), items[1].html);
+});
+
+test('выключенный чекбокс путей убирает путь из строки снимка', () => {
+  const { items } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '', { toggles: { showPaths: false } });
+  assert.ok(!items[1].html.includes('class="cwd"'), items[1].html);
+  // Подсказка остаётся: она и заведена для того, чего в строке не видно.
+  assert.ok(items[1].html.includes('title="/home/user/projects/ccfzf"'), items[1].html);
+});

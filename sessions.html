@@ -88,6 +88,16 @@
             box-shadow: inset 0 0 0 2px #db6d28;
         }
         .row.closed .name { color: #a8adb5; }
+        /* Заголовок раскладки. Не group-label: у него есть своё действие —
+           Enter поднимает снимок целиком, — поэтому это строка, а не подпись.
+           Отличается от строки сессии разрядкой и цветом подписи, как группа. */
+        .row.snapshot .name {
+            font-size: 11px; letter-spacing: .06em; color: #9aa0a8;
+        }
+        .row.snapshot .dot { background: #4d525a; }
+        /* Сессия, чьё окно уже открыто: восстановление её пропустит. Тусклая
+           тем же способом, что и закрытая сессия в списке. */
+        .row.snapshot-session.closed .name { color: #a8adb5; }
         .text { min-width: 0; }
         .name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .cwd { font-size: 11px; color: #868c95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -231,7 +241,8 @@
 <div id="message">Loading…</div>
 <div id="statusline">
   <span id="sort-control" title="Click to change sort"><span class="icon">⇅</span><span id="sort-label">cost</span></span>
-  <span id="menu-hint">^K - Session menu, ^N - new session, ^A - all projects</span>
+  <!-- Пусто: текст ставит paintToggles — хвост про `^S` зависит от ответа. -->
+  <span id="menu-hint"></span>
   <!-- Наполняется из TOGGLE_CHECKS: разметка и обработчики не должны
        расходиться в именах ключей. -->
   <span class="status-checks" id="status-checks"></span>
@@ -299,6 +310,10 @@
   // Проекты последнего ответа, уже разложенные в строки. Отдельно от сессий:
   // они не группируются, не сортируются здесь и не фильтруются по onlyLive.
   let projectRows = [];
+  // Снимки раскладки окон из последнего ответа, как приехали. В строки их
+  // раскладывает buildSnapshotRows на каждой отрисовке: отбор запросом и
+  // пометка «окно открыто» считаются по свежему ответу, а не по прошлому.
+  let snapshotRows = [];
   // Текст отказа: не смогли спросить удалённый хост или ответ пришёл не той формы.
   // Держится до первого удачного опроса, а не до следующей отрисовки, — иначе
   // он мигал бы раз в секунду.
@@ -396,6 +411,7 @@
   const sortControl = document.getElementById('sort-control');
   const sortLabel = document.getElementById('sort-label');
   const statusChecks = document.getElementById('status-checks');
+  const menuHint = document.getElementById('menu-hint');
   const actionsBackdrop = document.getElementById('actions-backdrop');
   const actionsTitle = document.getElementById('actions-title');
   const actionsList = document.getElementById('actions-list');
@@ -442,6 +458,10 @@
 
   function paintToggles() {
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
+    // Про `/s` рассказываем только там, где он работает: подсказка о режиме,
+    // которого нет, обманывает ровно так же, как молчащий Enter.
+    menuHint.textContent = '^K - Session menu, ^N - new session, ^A - all projects'
+      + (canFocusWindows() ? ', ^S - snapshots' : '');
   }
 
   /**
@@ -513,6 +533,51 @@
     }
   }
 
+  /**
+   * Строки снимков: заголовок раскладки и её сессии одним потоком.
+   *
+   * Заголовок в `rows` не кладётся вместе с сессиями по одному правилу с
+   * группами сессий — но здесь кладётся: у него есть своё действие, Enter
+   * поднимает раскладку целиком. Поэтому и класс `row`, а не `group-label`.
+   */
+  // `nowSec` в сигнатуре — ради единообразия с соседями: строки снимков
+  // возраста не показывают, и считать его здесь не из чего.
+  function renderSnapshots(query, items, nowSec) {
+    const open = window.PickerSnapshots.openIdsFromState(lastState);
+    for (const row of window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query)) {
+      const index = rows.length;
+      rows.push(row);
+      if (row.kind === 'snapshot') {
+        const missing = row.missing
+          ? `${row.missing} не открыты`
+          : 'все на экране';
+        items.push({
+          key: row.key,
+          html: `<div class="row snapshot" data-index="${index}">` +
+            `<div class="dot"></div>` +
+            `<div class="text"><div class="name">${escapeHtml(row.label)}</div></div>` +
+            `<div class="meta"><div class="count">${row.total} · ${escapeHtml(missing)}</div>` +
+            `</div></div>`,
+        });
+        continue;
+      }
+      // Открытая сессия — тусклая: восстановление её всё равно пропустит, а
+      // Enter на ней поднимет уже существующее окно.
+      items.push({
+        key: row.key,
+        html: `<div class="row snapshot-session${row.open ? ' closed' : ''}" data-index="${index}"` +
+          ` title="${escapeHtml(row.cwd)}">` +
+          `<div class="dot${row.open ? ' active' : ''}"></div>` +
+          `<div class="text"><div class="name">${escapeHtml(row.label)}</div>` +
+          (toggles.showPaths
+            ? `<div class="cwd">${escapeHtml(shortPath(row.cwd))}</div>` : '') +
+          `</div>` +
+          `<div class="meta"><div class="count">${row.open ? '▣ открыта' : ''}</div>` +
+          `</div></div>`,
+      });
+    }
+  }
+
   function renderSessions(query, items, nowSec) {
     const visible = window.PickerFilter.filterSessions(groups, query);
     // Одна отметка времени на всю отрисовку: иначе строки одного и того же
@@ -572,8 +637,13 @@
     const items = [];
     // Режим живёт в строке поиска, а не отдельным флагом: см. picker-mode.js.
     const { mode, query } = window.PickerMode.parseQuery(search.value);
+    // Режим снимков предлагается только там, где восстановление выполнимо:
+    // те же условия, что у ветки focus. Не выполнены — `/s` остаётся обычным
+    // поиском по сессиям, и Enter делает привычное, а не молчит.
+    const snapshotsMode = mode === 'snapshots' && canFocusWindows();
     if (mode === 'projects') renderProjects(query, items, nowSec);
-    else renderSessions(query, items, nowSec);
+    else if (snapshotsMode) renderSnapshots(query, items, nowSec);
+    else renderSessions(mode === 'snapshots' ? search.value.trim() : query, items, nowSec);
     syncList(items);
     // Отказ показывается и поверх непустого списка: строки в нём с прошлого
     // удачного опроса, и молчать о том, что свежих больше не приходит, нельзя.
@@ -598,7 +668,14 @@
           ? (projectRows.length ? 'Nothing matches.'
             : lastState.sessions ? 'No projects — is ccfzf on the host up to date?'
               : 'Loading…')
-          : (groups.length ? 'Nothing matches.' : 'No claude sessions yet.');
+          : snapshotsMode
+            ? (snapshotRows.length ? 'Nothing matches.'
+              // Пустой список снимков почти всегда значит «трекер на той
+              // стороне ещё не научился их публиковать» — на вид это не
+              // отличить от «раскладок ещё не запоминали».
+              : lastState.sessions ? 'No snapshots — is the window tracker up to date?'
+                : 'Loading…')
+            : (groups.length ? 'Nothing matches.' : 'No claude sessions yet.');
       }
     }
     if (active >= rows.length) active = Math.max(0, rows.length - 1);
@@ -621,6 +698,10 @@
     groups = payload.groups;
     sortMode = payload.sort;
     paintSort();
+    // Подсказка зависит от ответа (canFocusWindows), а красится не на каждый
+    // опрос: без этого вызова хвост про `^S` появлялся бы только после клика
+    // по чекбоксу.
+    paintToggles();
     render();
   }
 
@@ -676,11 +757,17 @@
     // сессий, к проектам отношения не имеющий. Кривые записи выбросит
     // buildProjectList, а человек узнаёт о потере из той же строки отказа, что
     // и обо всём остальном, — она показывается и поверх непустого списка.
-    error = window.StateShape.projectProblems(state)[0] || '';
+    //
+    // Претензии к записям снимков — по той же причине и в ту же строку. Первая
+    // непустая строка отказа побеждает: показывается всё равно одна.
+    error = window.StateShape.projectProblems(state)[0]
+      || window.StateShape.snapshotProblems(state)[0] || '';
     lastSessions = state.sessions;
     // Поля может не быть — старый агрегатор на той стороне. Тогда режим /a
     // покажет пустой список, и это честный ответ, а не поломка.
     projectRows = window.ProjectList.buildProjectList(state);
+    // То же самое про снимки и режим /s.
+    snapshotRows = Array.isArray(state.snapshots) ? state.snapshots : [];
     lastState = state;
     regroup();
   }
@@ -786,6 +873,27 @@
   }
 
   /**
+   * Попросить поднять раскладку снимка.
+   *
+   * Пикер гасится до просьбы, как и на фокусе: окна поднимутся на том же
+   * экране, и держать поверх них список незачем. Итог не показывается —
+   * ответа у просьбы нет по замыслу, а не сработавшее видно на экране.
+   *
+   * Пустой `sessionIds` значит «весь снимок»: так просит заголовок раскладки.
+   */
+  async function restoreSnapshot(snapshotId, sessionIds) {
+    await invoke('hide_picker');
+    try {
+      await invoke('restore_snapshot_mqtt', { id: snapshotId, sessionIds });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    error = '';
+  }
+
+  /**
    * Открыть сессию в новом окне kitty.
    *
    * Стратегию выбирает эта же сторона по строке списка. Строка старше
@@ -828,6 +936,13 @@
   function choose() {
     const row = rows[active];
     if (!row) return;
+    // Заголовок снимка: поднять раскладку целиком.
+    if (row.kind === 'snapshot') return restoreSnapshot(row.id, []);
+    // Сессия из снимка: у открытой окно уже есть, и Enter должен поднять его,
+    // а не заводить второе — восстановление её всё равно пропустило бы.
+    if (row.kind === 'snapshot-session') {
+      return row.open ? focusSession(row) : restoreSnapshot(row.snapshotId, [row.id]);
+    }
     // У строки проекта продолжать нечего — есть только каталог. Enter значит
     // здесь то же, что и на строке сессии: «открой мне терминал с агентом».
     if (row.kind === 'project') return newSession(row.cwd);
@@ -1091,6 +1206,20 @@
       // сессиям. Цена — `^A` больше не «выделить всё» в поле поиска.
       e.preventDefault();
       search.value = window.PickerMode.withProjectPrefix(search.value);
+      search.focus();
+      search.setSelectionRange(search.value.length, search.value.length);
+      onSearchInput();
+      return;
+    }
+    if (plainCtrl && e.code === 'KeyS') {
+      // Ставит `/s ` в начало строки поиска — как `^A` ставит `/a `. Режим
+      // живёт в самом тексте, стирание префикса возвращает к сессиям.
+      //
+      // Молча ничего не делает там, где восстановление невыполнимо: тот же
+      // отказ, что и у подсказки, и лучше молчащего режима с молчащим Enter.
+      e.preventDefault();
+      if (!canFocusWindows()) return;
+      search.value = window.PickerMode.withSnapshotPrefix(search.value);
       search.focus();
       search.setSelectionRange(search.value.length, search.value.length);
       onSearchInput();

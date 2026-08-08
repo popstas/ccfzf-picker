@@ -56,6 +56,17 @@ test('порядок тегов таков, что каждый модуль н�
     ctx.UiState.normalizeUiState({ sort: 'нет такой' }, { toggles: {} }).sort,
     ctx.SessionGroups.DEFAULT_SORT,
   );
+  // С непустым запросом — иначе отбор коротит на `!q` и до соседа не доходит.
+  // Сосед у picker-snapshots обязателен: searchableCwd срезает `/home` из
+  // пути, и без него отбор по снимкам молча начал бы находить каждую строку
+  // по слову «home».
+  assert.deepStrictEqual(
+    [...ctx.PickerSnapshots.buildSnapshotRows(
+      [{ id: 's1', created: 1, sessions: [{ id: 'a', cwd: '/home/user/projects/ccfzf', title: 'ccfzf' }] }],
+      [], 'projects/ccfzf',
+    ).map(r => r.kind)],
+    ['snapshot', 'snapshot-session'],
+  );
 });
 
 test('обратный порядок ломается — то есть тест и правда сторожит', () => {
@@ -70,6 +81,17 @@ test('обратный порядок ломается — то есть тес�
   late.push('session-groups.js');
   const ctx2 = loadAsBrowser(late);
   assert.throws(() => ctx2.UiState.normalizeUiState({}, { toggles: {} }));
+
+  // И третья: picker-snapshots берёт searchableCwd у picker-filter на
+  // загрузке. Отбор с непустым запросом — единственное место, где недостача
+  // видна: с пустым он коротит и до соседа не доходит.
+  const filterLast = TAGS.filter(f => f !== 'picker-filter.js');
+  filterLast.push('picker-filter.js');
+  const ctx3 = loadAsBrowser(filterLast);
+  assert.throws(() => ctx3.PickerSnapshots.buildSnapshotRows(
+    [{ id: 's1', created: 1, sessions: [{ id: 'a', cwd: '/home/user/x', title: 'x' }] }],
+    [], 'x',
+  ));
 });
 
 // Буквенные хоткеи сверяются по физической клавише. `e.key` — это

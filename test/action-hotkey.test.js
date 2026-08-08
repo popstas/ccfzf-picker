@@ -68,6 +68,10 @@ test('занятыми считаются встроенные клавиши о
   // букву настроенному действию нельзя, встроенная ветка перехватит первой.
   assert.strictEqual(isReserved(parseHotkey('Ctrl+A')), true);
   assert.strictEqual(isReserved(parseHotkey('Cmd+A')), true);
+  // ^S — ярлык режима снимков, не действие. Отдать его настроенному действию
+  // значило бы увести `^S` в действие, а режим оставить только набором руками.
+  assert.strictEqual(isReserved(parseHotkey('Ctrl+S')), true);
+  assert.strictEqual(isReserved(parseHotkey('Cmd+S')), true);
   // Та же буква с добавленным модификатором свободна.
   assert.strictEqual(isReserved(parseHotkey('Ctrl+Shift+K')), false);
   assert.strictEqual(isReserved(parseHotkey('Ctrl+Alt+P')), false);
