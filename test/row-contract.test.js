@@ -11,12 +11,14 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const { buildSessionsPayload } = require('../frontend-src/session-groups');
 const Groups = require('../frontend-src/session-groups');
 const Glyph = require('../frontend-src/session-glyph');
 const { buildSessionInfoRows } = require('../frontend-src/session-info');
-const { filterSessions } = require('../frontend-src/picker-filter');
+const { filterSessions, filterProjects } = require('../frontend-src/picker-filter');
+const { buildProjectList } = require('../frontend-src/project-list');
 
 // Форма — с живого ответа `ccfzf --state` (см. scripts/check-state.js), поля
 // в том же порядке и с теми же именами.
@@ -289,4 +291,123 @@ test('ошибочный ответ агрегатора не доходит д�
     Groups.buildSessionsPayload({ ok: false, reason: 'ccfzf: not found' }, 'cost'),
     { ok: false, reason: 'ccfzf: not found' },
   );
+});
+
+// ── Тот же шов у строк проектов ──────────────────────────────────────────────
+//
+// Разница одна: у сессии строку собирают отрисовщики из session-glyph.js, а у
+// проекта — renderProjects прямо в sessions.html, и требовать его через require
+// неоткуда. Поэтому функция вычитывается из страницы и выполняется в vm — так
+// же, как frontend-load.test.js грузит модули тегами. Проверяется настоящий
+// писатель в DOM, а не его копия в тесте: копия разъехалась бы молча.
+const SESSIONS_HTML = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+
+// Форма — с живого ответа `ccfzf --state`, поля те же, что у project_rows.
+const AGGREGATOR_PROJECTS = [
+  { path: '/home/user/projects/ccfzf', name: 'ccfzf', mark: true,
+    sessions: 12, live: 2, mtime: 1786045860 },
+  // Проект без единой сессии — ровно то, ради чего режим и заведён. mtime 0
+  // значит «активности не было», а не «1970 год».
+  { path: '/home/user/projects/empty', name: 'empty', mark: false,
+    sessions: 0, live: 0, mtime: 0 },
+];
+
+const PROJECTS_NOW = 1786045920; // минута после mtime первого
+
+/** Пропустить проекты настоящим путём: buildProjectList → filterProjects → renderProjects. */
+function renderProjectRows(projects, query, toggles) {
+  const source = SESSIONS_HTML.match(/\n {2}function renderProjects\(query, items, nowSec\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(source, 'renderProjects не найден в sessions.html — тест сторожит не то');
+  const ctx = {
+    // Ровно то, чем renderProjects пользуется снаружи себя.
+    window: { PickerFilter: { filterProjects } },
+    projectRows: buildProjectList({ projects }),
+    rows: [],
+    items: [],
+    toggles: toggles || { showPaths: true },
+    escapeHtml: Glyph.escapeHtml,
+    shortPath: Glyph.shortPath,
+    ageHtml: Glyph.ageHtml,
+    titleAttr: Glyph.titleAttr,
+    query: query || '',
+    nowSec: PROJECTS_NOW,
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${source[0]}\nrenderProjects(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
+  return { items: ctx.items, rows: ctx.rows };
+}
+
+test('строка проекта доезжает с настоящего пути до разметки списка', () => {
+  const { items, rows } = renderProjectRows(AGGREGATOR_PROJECTS);
+  assert.strictEqual(items.length, 2);
+  // Ключ строки — проектный префикс плюс путь: по нему picker-list-sync
+  // находит, что в DOM менять, и разъехавшийся ключ перерисовывал бы список
+  // целиком, роняя скролл и hover.
+  assert.deepStrictEqual(items.map(i => i.key),
+    AGGREGATOR_PROJECTS.map(p => `p:${p.path}`));
+
+  // Счётчики. Имена sessionCount и liveCount — тот самый промах, который этот
+  // тест обязан ловить: переименуй их в project-list.js, и здесь появится
+  // «undefined», а в окне — пустая колонка.
+  assert.ok(items[0].html.includes('<div class="count">12 · 2●</div>'), items[0].html);
+  assert.ok(items[1].html.includes('<div class="count">0</div>'), items[1].html);
+
+  // Точка: зелёная там, где кто-то работает, обычная серая — где никого.
+  // `closed` (прозрачная) у проекта не появляется: она про закрытую сессию.
+  assert.ok(items[0].html.includes('<div class="dot active"></div>'), items[0].html);
+  assert.ok(items[1].html.includes('<div class="dot"></div>'), items[1].html);
+  assert.ok(!items[1].html.includes('closed'), items[1].html);
+
+  // Путь в подсказке и в теле строки — одного вида, через shortPath.
+  assert.ok(items[0].html.includes('title="~/projects/ccfzf"'), items[0].html);
+  assert.ok(items[0].html.includes('<div class="cwd">~/projects/ccfzf</div>'), items[0].html);
+
+  // Возраст: минута у свежего, пусто у проекта с mtime 0. «1970» здесь взяться
+  // неоткуда — но взялось бы, если возраст начнут считать без проверки нуля.
+  assert.ok(items[0].html.includes('<div class="age">1m</div>'), items[0].html);
+  assert.ok(items[1].html.includes('<div class="age"></div>'), items[1].html);
+  assert.ok(!items[1].html.includes('d</div>'), items[1].html);
+
+  // Отметка ccfzf — только у отмеченного проекта.
+  assert.ok(items[0].html.includes('<span class="mark">★</span>'), items[0].html);
+  assert.ok(!items[1].html.includes('mark'), items[1].html);
+
+  // data-index — это индекс в rows, по нему меню и клик находят строку.
+  for (let i = 0; i < items.length; i += 1) {
+    assert.ok(items[i].html.includes(`data-index="${i}"`), items[i].html);
+    assert.strictEqual(rows[i].id, AGGREGATOR_PROJECTS[i].path);
+    assert.strictEqual(rows[i].kind, 'project');
+  }
+  assert.strictEqual(rows.length, items.length);
+});
+
+test('имя проекта в разметку экранируется', () => {
+  const { items } = renderProjectRows([{
+    path: '/home/user/projects/<b>"x"', name: '<b>"amp & co"</b>',
+    mark: false, sessions: 1, live: 0, mtime: 1786045860,
+  }]);
+  assert.ok(items[0].html.includes('&lt;b&gt;&quot;amp &amp; co&quot;&lt;/b&gt;'), items[0].html);
+  assert.ok(!items[0].html.includes('<b>'), items[0].html);
+  // И путь — в подсказке и в теле строки.
+  assert.ok(!items[0].html.includes('"x"'), items[0].html);
+});
+
+test('отбор проектов и порядок строк — тот же, что видит человек', () => {
+  // Поиск идёт по имени и по пути, а data-index пересчитывается от нуля: иначе
+  // после набора в строке поиска клик открывал бы соседний проект.
+  const { items, rows } = renderProjectRows(AGGREGATOR_PROJECTS, 'empty');
+  assert.strictEqual(items.length, 1);
+  assert.ok(items[0].html.includes('data-index="0"'), items[0].html);
+  assert.strictEqual(rows[0].id, '/home/user/projects/empty');
+
+  const byPath = renderProjectRows(AGGREGATOR_PROJECTS, 'projects/ccfzf');
+  assert.deepStrictEqual(byPath.rows.map(r => r.id), ['/home/user/projects/ccfzf']);
+  assert.deepStrictEqual(renderProjectRows(AGGREGATOR_PROJECTS, 'нет такого').items, []);
+});
+
+test('выключенный чекбокс путей убирает путь только из тела строки', () => {
+  const { items } = renderProjectRows(AGGREGATOR_PROJECTS, '', { showPaths: false });
+  assert.ok(!items[0].html.includes('class="cwd"'), items[0].html);
+  // Подсказка остаётся: она и заведена для того, чего в строке не видно.
+  assert.ok(items[0].html.includes('title="~/projects/ccfzf"'), items[0].html);
 });
