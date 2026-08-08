@@ -61,18 +61,21 @@
   /**
    * Можно ли предложить строке пункт «Open on <host>».
    *
-   * Совмещает два независимых условия: строка несёт настоящий id сессии (иначе
+   * Совмещает три независимых условия: строка несёт настоящий id сессии (иначе
    * приёмник ответит `unknown session` в свой лог, а пикер этого не увидит —
-   * PubAck подтверждает публикацию, а не то, что менеджер нашёл сессию), и
-   * трекер существует, но стоит не на этой машине. Пустой `windowHost`
-   * проверяется отдельно от `chooseOpenTransport`: та возвращает `'local'` и
-   * при пустом хосте (трекера нет вовсе), и пункт в этом случае предлагать
-   * тоже нечего — открывать «у себя», когда себя не существует.
+   * PubAck подтверждает публикацию, а не то, что менеджер нашёл сессию),
+   * трекер существует, но стоит не на этой машине, и брокер MQTT настроен —
+   * без него просьбе некуда уйти, и пункт меню выполнил бы `open_session_mqtt`
+   * прямиком в «mqtt не настроен» (main.rs). Пустой `windowHost` проверяется
+   * отдельно от `chooseOpenTransport`: та возвращает `'local'` и при пустом
+   * хосте (трекера нет вовсе), и пункт в этом случае предлагать тоже нечего —
+   * открывать «у себя», когда себя не существует.
    */
-  function canOpenRemote(row, state, configHost) {
+  function canOpenRemote(row, state, configHost, mqttConfigured) {
     if (!row || !SESSION_ID_ROW_KINDS.has(row.kind)) return false;
     if (!(state || {}).windowHost) return false;
-    return chooseOpenTransport(state, configHost) === 'local';
+    if (!mqttConfigured) return false;
+    return chooseOpenTransport(state, configHost, mqttConfigured) === 'local';
   }
 
   return { chooseOpenTransport, canOpenRemote };

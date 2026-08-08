@@ -1092,7 +1092,7 @@
    */
   function actionsFor(row) {
     const actions = window.SessionActions.availableActions(row, CONFIG);
-    if (window.OpenTransport.canOpenRemote(row, lastState, CONFIG.windowHost)) {
+    if (window.OpenTransport.canOpenRemote(row, lastState, CONFIG.windowHost, CONFIG.mqtt.configured)) {
       actions.push({
         id: 'open-remote',
         label: `Open on ${lastState.windowHost}`,

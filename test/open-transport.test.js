@@ -51,11 +51,24 @@ const SESSION_ROW_KINDS = ['interactive', 'snapshot-session'];
 // Виды строк, у которых id — что-то другое (путь проекта, id снимка).
 const NON_SESSION_ROW_KINDS = ['project', 'snapshot'];
 
-test('обычная сессия и сессия из снимка — трекер на чужой машине — да', () => {
+test('обычная сессия и сессия из снимка — трекер на чужой машине, брокер настроен — да', () => {
   for (const kind of SESSION_ROW_KINDS) {
     assert.equal(
-      canOpenRemote({ kind, id: 's1' }, OTHER_HOST_STATE, CONFIG_HOST),
+      canOpenRemote({ kind, id: 's1' }, OTHER_HOST_STATE, CONFIG_HOST, true),
       true,
+      kind,
+    );
+  }
+});
+
+// Fix 3: без брокера пункт меню вёл бы прямиком в «mqtt не настроен» из
+// main.rs — тот же случай, что и с Enter на своей машине без mqtt: строка
+// глазами выглядит как рабочее действие, а срабатывает отказом.
+test('брокер НЕ настроен — нет, даже на чужой машине с настоящей сессией', () => {
+  for (const kind of SESSION_ROW_KINDS) {
+    assert.equal(
+      canOpenRemote({ kind, id: 's1' }, OTHER_HOST_STATE, CONFIG_HOST, false),
+      false,
       kind,
     );
   }
@@ -66,7 +79,7 @@ test('заголовок снимка и строка проекта — тре�
   // у заголовка снимка `id` — id снимка, findSession на приёме его не найдёт.
   for (const kind of NON_SESSION_ROW_KINDS) {
     assert.equal(
-      canOpenRemote({ kind, id: 'snap-or-path' }, OTHER_HOST_STATE, CONFIG_HOST),
+      canOpenRemote({ kind, id: 'snap-or-path' }, OTHER_HOST_STATE, CONFIG_HOST, true),
       false,
       kind,
     );
@@ -77,28 +90,28 @@ test('незнакомый вид строки (или вовсе без kind) �
   // Позитивный список: новый вид строки, про который эта функция не знает,
   // остаётся без пункта меню сам по себе, а не только пока кто-то помнит его
   // сюда дописать.
-  assert.equal(canOpenRemote({ kind: 'something-new', id: 's1' }, OTHER_HOST_STATE, CONFIG_HOST), false);
-  assert.equal(canOpenRemote({ id: 's1' }, OTHER_HOST_STATE, CONFIG_HOST), false);
+  assert.equal(canOpenRemote({ kind: 'something-new', id: 's1' }, OTHER_HOST_STATE, CONFIG_HOST, true), false);
+  assert.equal(canOpenRemote({ id: 's1' }, OTHER_HOST_STATE, CONFIG_HOST, true), false);
 });
 
 test('трекера нет вовсе — нет, ни для одного вида строки', () => {
   for (const kind of SESSION_ROW_KINDS) {
-    assert.equal(canOpenRemote({ kind, id: 's1' }, {}, CONFIG_HOST), false, kind);
-    assert.equal(canOpenRemote({ kind, id: 's1' }, null, CONFIG_HOST), false, kind);
+    assert.equal(canOpenRemote({ kind, id: 's1' }, {}, CONFIG_HOST, true), false, kind);
+    assert.equal(canOpenRemote({ kind, id: 's1' }, null, CONFIG_HOST, true), false, kind);
   }
 });
 
-test('трекер на этой же машине — нет, это делает Enter через openViaManager', () => {
+test('трекер на этой же машине — нет, это делает Enter напрямую', () => {
   for (const kind of SESSION_ROW_KINDS) {
-    assert.equal(canOpenRemote({ kind, id: 's1' }, THIS_HOST_STATE, CONFIG_HOST), false, kind);
+    assert.equal(canOpenRemote({ kind, id: 's1' }, THIS_HOST_STATE, CONFIG_HOST, true), false, kind);
   }
 });
 
 test('lastState ещё {} (ответ агрегатора не пришёл) — нет', () => {
-  assert.equal(canOpenRemote({ kind: 'interactive', id: 's1' }, {}, CONFIG_HOST), false);
+  assert.equal(canOpenRemote({ kind: 'interactive', id: 's1' }, {}, CONFIG_HOST, true), false);
 });
 
 test('строки нет вовсе — нет', () => {
-  assert.equal(canOpenRemote(null, OTHER_HOST_STATE, CONFIG_HOST), false);
-  assert.equal(canOpenRemote(undefined, OTHER_HOST_STATE, CONFIG_HOST), false);
+  assert.equal(canOpenRemote(null, OTHER_HOST_STATE, CONFIG_HOST, true), false);
+  assert.equal(canOpenRemote(undefined, OTHER_HOST_STATE, CONFIG_HOST, true), false);
 });
