@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { validateState, projectProblems } = require('../frontend-src/state-shape');
+const { validateState, projectProblems, snapshotProblems } = require('../frontend-src/state-shape');
 const { buildProjectList } = require('../frontend-src/project-list');
 const { buildSessionsPayload } = require('../frontend-src/session-groups');
 
@@ -104,4 +104,39 @@ test('проекты не массивом — это поломка', () => {
     validateState({ generated: 1, sessions: [], projects: {} }),
     ['projects is not an array'],
   );
+});
+
+test('ответ без snapshots — не поломка', () => {
+  // Агрегатор стоит на другой машине и обновляется отдельно. Старый ответ без
+  // поля значит «режим /s ничего не покажет» — честный ответ, а не повод
+  // гасить список сессий.
+  assert.deepEqual(validateState({ generated: 1, sessions: [] }), []);
+});
+
+test('snapshots не массив — поломка', () => {
+  // Случай дешёвый и однозначный, а перебирать такое поле нечем.
+  const problems = validateState({ generated: 1, sessions: [], snapshots: 'нет' });
+  assert.ok(problems.includes('snapshots is not an array'), problems);
+});
+
+test('кривая запись снимка — претензия, а не отказ опроса', () => {
+  // Тот же размен, что у projects: переименованное на той стороне поле не
+  // должно замораживать список сессий, к снимкам отношения не имеющий.
+  const state = { generated: 1, sessions: [], snapshots: [{ id: 42, created: 'вчера' }] };
+  assert.deepEqual(validateState(state), []);
+  const problems = snapshotProblems(state);
+  assert.ok(problems.some(p => p.includes('snapshots[0].id')), problems);
+});
+
+test('снимок без sessions — претензия', () => {
+  const problems = snapshotProblems({
+    snapshots: [{ id: 'snap-1', created: 10 }],
+  });
+  assert.ok(problems.some(p => p.includes('snapshots[0].sessions')), problems);
+});
+
+test('целый снимок претензий не вызывает', () => {
+  assert.deepEqual(snapshotProblems({
+    snapshots: [{ id: 'snap-1', created: 10, sessions: [{ id: 'a', cwd: '/p', title: 't' }] }],
+  }), []);
 });

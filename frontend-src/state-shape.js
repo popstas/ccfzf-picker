@@ -26,6 +26,19 @@
     ['mtime', 'number'],
   ];
 
+  // Снимки раскладки. Приезжают из файла оконного трекера через агрегатор;
+  // геометрии среди полей нет намеренно — она осталась на той машине.
+  const SNAPSHOT_FIELDS = [
+    ['id', 'string'],
+    ['created', 'number'],
+  ];
+
+  const SNAPSHOT_SESSION_FIELDS = [
+    ['id', 'string'],
+    ['cwd', 'string'],
+    ['title', 'string'],
+  ];
+
   function validateState(obj) {
     const out = [];
     if (!obj || !Array.isArray(obj.sessions)) return ['sessions is not an array'];
@@ -51,6 +64,12 @@
     if (obj.projects !== undefined && !Array.isArray(obj.projects)) {
       out.push('projects is not an array');
     }
+    // То же правило, что у projects: поля может не быть вовсе (старый
+    // агрегатор), и это значит «режим /s пуст», а не поломка. Не массив —
+    // всё же поломка: перебирать такое нечем.
+    if (obj.snapshots !== undefined && !Array.isArray(obj.snapshots)) {
+      out.push('snapshots is not an array');
+    }
     return out;
   }
 
@@ -75,5 +94,32 @@
     return out;
   }
 
-  return { validateState, projectProblems };
+  /**
+   * Претензии к отдельным записям `snapshots` — отдельным списком, как у
+   * проектов и по той же причине: агрегатор обновляется сам по себе, и
+   * переименованное там поле снимка не должно морозить список сессий.
+   */
+  function snapshotProblems(obj) {
+    if (!obj || !Array.isArray(obj.snapshots)) return [];
+    const out = [];
+    obj.snapshots.forEach((s, i) => {
+      for (const [key, type] of SNAPSHOT_FIELDS) {
+        if (typeof (s || {})[key] !== type) out.push(`snapshots[${i}].${key} is not a ${type}`);
+      }
+      if (!Array.isArray((s || {}).sessions)) {
+        out.push(`snapshots[${i}].sessions is not an array`);
+        return;
+      }
+      s.sessions.forEach((m, j) => {
+        for (const [key, type] of SNAPSHOT_SESSION_FIELDS) {
+          if (typeof (m || {})[key] !== type) {
+            out.push(`snapshots[${i}].sessions[${j}].${key} is not a ${type}`);
+          }
+        }
+      });
+    });
+    return out;
+  }
+
+  return { validateState, projectProblems, snapshotProblems };
 });
