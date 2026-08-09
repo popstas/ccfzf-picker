@@ -900,8 +900,14 @@ fn main() {
             // же подпись и акселератор после сохранения настроек — без
             // пересборки всего меню на каждое сохранение.
             app.manage(ShowMenuItem(show_item.clone()));
+            // Настройки — второй пункт, между показом и выходом. Из трея они
+            // достижимы и тогда, когда до шестерёнки в статуслайне не добраться:
+            // хоткей не встал, а пикер не открывается по той самой настройке,
+            // которую надо и поправить.
+            let settings_item =
+                MenuItem::with_id(app, "settings", "Настройки…", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &settings_item, &quit_item])?;
             TrayIconBuilder::new()
                 .icon(tray_icon())
                 // Иконка одноцветная и просвечивает фоном: система сама красит
@@ -915,6 +921,20 @@ fn main() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => toggle_picker(app),
+                    // Через spawn, а не вызовом на месте: обработчик меню
+                    // крутится в потоке цикла событий, а webview на Windows
+                    // дозревает через этот же цикл. Занятый цикл — то самое
+                    // окно настроек, которое появляется белым прямоугольником и
+                    // не загружает страницу никогда; ровно ради этого
+                    // `open_settings` и сделан `async`.
+                    "settings" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = open_settings(app).await {
+                                eprintln!("ccfzf-picker: {e}");
+                            }
+                        });
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -1146,6 +1166,28 @@ mod tests {
     fn tray_label_tells_when_hotkey_is_taken() {
         assert_eq!(show_item_label(true), "Показать список");
         assert_ne!(show_item_label(false), show_item_label(true));
+    }
+
+    /// Пункт «Настройки…» из трея не открывает окно в потоке цикла событий.
+    ///
+    /// `on_menu_event` вызывается из этого потока, а webview на Windows
+    /// дозревает через него же: вызов `open_settings` на месте вернул бы белый
+    /// прямоугольник без страницы — ровно ту поломку, ради которой команда и
+    /// сделана `async`. Поведением это не поймать: окно есть только на Windows
+    /// и только в настоящем цикле событий, а `build()` в обоих случаях
+    /// отвечает `Ok`. Поэтому сторожится форма — как у `hidden_command` ниже.
+    #[test]
+    fn tray_opens_settings_off_the_event_loop() {
+        let src = include_str!("main.rs");
+        let handler = src
+            .split_once("\"settings\" => {")
+            .expect("пункт settings пропал из меню трея — тест сторожит не то")
+            .1;
+        let (handler, _) = handler.split_once("\"quit\" =>").expect("обработчик settings не закрыт");
+        assert!(
+            handler.contains("async_runtime::spawn"),
+            "открытие настроек из трея должно уходить в пул, а не в цикл событий"
+        );
     }
 
     /// Опрос агрегатора не поднимает процессов мимо `proc::hidden_command`.
