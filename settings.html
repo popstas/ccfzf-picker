@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Настройки ccfzf-picker</title>
+<title>ccfzf-picker Settings</title>
 <style>
   :root { color-scheme: dark; }
   body {
@@ -116,7 +116,7 @@
     if (field.type === 'projects') {
       const rows = (value || []).concat([{ path: '', hotkey: '' }]).map((p, i) =>
         `<div class="field"><input type="text" data-project="${i}" data-part="path" `
-        + `placeholder="/путь/на/удалённом/хосте" value="${esc(p.path)}">`
+        + `placeholder="/path/on/the/remote/host" value="${esc(p.path)}">`
         + `<input type="text" data-project="${i}" data-part="hotkey" `
         + `placeholder="Cmd+Shift+1" value="${esc(p.hotkey)}"></div>`).join('');
       return `<div class="field"><label>${esc(field.label)}</label>${rows}${hint}</div>`;
@@ -132,14 +132,14 @@
         ui.toggles[key].statusline ? ' checked' : ''}></td>`
       + `<td><input type="checkbox" data-axis="list" data-key="${key}"${
         ui.toggles[key].list ? ' checked' : ''}></td></tr>`;
-    return '<table class="axes"><tr><th>Колонка</th><th>statusline</th><th>list</th></tr>'
+    return '<table class="axes"><tr><th>Column</th><th>statusline</th><th>list</th></tr>'
       + Object.entries(TOGGLE_LABELS).map(([k, l]) => row(k, l)).join('')
       + '</table>'
-      + '<div class="field"><label>Фильтры</label><table class="axes">'
-      + '<tr><th></th><th>statusline</th><th>включён</th></tr>'
+      + '<div class="field"><label>Filters</label><table class="axes">'
+      + '<tr><th></th><th>statusline</th><th>enabled</th></tr>'
       + Object.entries(FILTER_LABELS).map(([k, l]) => row(k, l)).join('')
-      + '</table><div class="hint">Фильтр решает, какие строки попадут в список, '
-      + 'а не какие колонки видны.</div></div>';
+      + '</table><div class="hint">A filter decides which rows make it into the list, '
+      + 'not which columns are visible.</div></div>';
   }
 
   function actionsListHtml() {
@@ -147,9 +147,9 @@
     if (!actions.length) return '';
     // Только на чтение: редактор argv с плейсхолдерами — отдельная работа, а
     // форма, которая делает вид, что правит их, врала бы.
-    return '<div class="field"><label>Действия открытия папки</label><ul>'
+    return '<div class="field"><label>Folder-opening actions</label><ul>'
       + actions.map(a => `<li>${esc(a && a.id)} — <code>${esc(JSON.stringify(a && a.argv))}</code></li>`).join('')
-      + '</ul><div class="hint">Правятся в config.yaml — окно их только показывает.</div></div>';
+      + '</ul><div class="hint">Edited in config.yaml — the window only shows them.</div></div>';
   }
 
   function renderPage() {
@@ -158,7 +158,7 @@
       ? axesTableHtml()
       : def.fields.map(fieldHtml).join('') + (current === 'integrations' ? actionsListHtml() : '');
     page.innerHTML = body
-      + '<div id="bar"><button id="save">Сохранить</button><span id="status"></span></div>';
+      + '<div id="bar"><button id="save">Save</button><span id="status"></span></div>';
 
     for (const input of page.querySelectorAll('[data-field]')) {
       input.addEventListener('input', () => {
@@ -192,7 +192,7 @@
   async function save() {
     const status = document.getElementById('status');
     status.className = '';
-    status.textContent = 'сохраняю…';
+    status.textContent = 'saving…';
     try {
       if (current === 'ui') {
         // Файл перечитывается прямо сейчас, а не берётся из снимка загрузки:
@@ -217,7 +217,7 @@
         ui = fresh;
         dirtyAxes.clear();
         renderPage();
-        document.getElementById('status').textContent = 'сохранено';
+        document.getElementById('status').textContent = 'saved';
       } else {
         // Проверка до записи: сохранённый пустой sshHost оставил бы человека
         // с пикером, который не работает и не говорит почему.
@@ -236,10 +236,10 @@
         // нельзя: человек будет думать, что хоткей сменился, а тот мёртв.
         if (result && result.hotkeyRegistered === false) {
           status.className = 'bad';
-          status.textContent = `сохранено, но хоткей ${result.hotkeyAccelerator} не встал — занят системой или другим приложением`;
+          status.textContent = `saved, but hotkey ${result.hotkeyAccelerator} did not take — it is held by the system or another application`;
           return;
         }
-        status.textContent = 'сохранено';
+        status.textContent = 'saved';
       }
     } catch (e) {
       status.className = 'bad';

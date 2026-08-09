@@ -469,7 +469,7 @@ test('строка снимка доезжает с настоящего пут�
 
   // Счёт в заголовке: сколько сессий всего и сколько из них ещё не на экране.
   // Имена total и missing — тот самый промах, который тест обязан ловить.
-  assert.ok(items[0].html.includes('<div class="count">2 · 1 не открыты</div>'), items[0].html);
+  assert.ok(items[0].html.includes('<div class="count">2 · 1 not open</div>'), items[0].html);
   assert.match(items[0].html, /<div class="name">\d{2}:\d{2} · \d{4}-\d{2}-\d{2}<\/div>/);
 
   // Открытая сессия — тусклая и с пометкой; восстановление её пропустит.
@@ -478,7 +478,7 @@ test('строка снимка доезжает с настоящего пут�
   assert.ok(items[1].html.includes('class="row snapshot-session on-screen"'), items[1].html);
   assert.ok(!items[1].html.includes('closed'), items[1].html);
   assert.ok(items[1].html.includes('<div class="dot active"></div>'), items[1].html);
-  assert.ok(items[1].html.includes('▣ открыта'), items[1].html);
+  assert.ok(items[1].html.includes('▣ open'), items[1].html);
   // Закрытая — обычная, и колонка пуста, а не «undefined».
   assert.ok(items[2].html.includes('class="row snapshot-session"'), items[2].html);
   assert.ok(items[2].html.includes('<div class="dot"></div>'), items[2].html);
@@ -492,7 +492,7 @@ test('строка снимка доезжает с настоящего пут�
 
 test('все окна на экране — заголовок говорит об этом, а не молчит', () => {
   const { items } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '', { open: ['aaa', 'bbb'] });
-  assert.ok(items[0].html.includes('<div class="count">2 · все на экране</div>'), items[0].html);
+  assert.ok(items[0].html.includes('<div class="count">2 · all on screen</div>'), items[0].html);
 });
 
 test('отбор снимков и порядок строк — тот же, что видит человек', () => {

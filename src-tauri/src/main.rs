@@ -149,7 +149,7 @@ fn hide_picker(app: tauri::AppHandle) {
 /// пропадала бы в собранном приложении.
 fn tray_icon() -> tauri::image::Image<'static> {
     tauri::image::Image::from_bytes(include_bytes!("../icons/favicon.png"))
-        .expect("icons/favicon.png не разбирается как изображение")
+        .expect("icons/favicon.png does not parse as an image")
 }
 
 /// Хост берётся из конфига, а не зашит: список и открытие сессии обязаны
@@ -159,7 +159,7 @@ fn tray_icon() -> tauri::image::Image<'static> {
 fn check_ssh_host(ssh_host: &str) -> Result<(), String> {
     if ssh_host.trim().is_empty() {
         return Err(
-            "sshHost не задан: скопируйте config.example.yml в ~/.config/ccfzf-picker/config.yaml"
+            "sshHost is not set: copy config.example.yml to ~/.config/ccfzf-picker/config.yaml"
                 .to_string(),
         );
     }
@@ -218,7 +218,7 @@ async fn focus_window_mqtt(id: String, pid: u32) -> Result<(), String> {
     let raw = load_config()?;
     let broker = mqtt::broker_from_config(&raw);
     if !broker.is_configured() {
-        return Err("mqtt не настроен: нужны host и base в config.yaml".to_string());
+        return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
     }
     tauri::async_runtime::spawn_blocking(move || mqtt::focus(&broker, &id))
         .await
@@ -240,7 +240,7 @@ async fn unread_session_mqtt(id: String) -> Result<(), String> {
     let raw = load_config()?;
     let broker = mqtt::broker_from_config(&raw);
     if !broker.is_configured() {
-        return Err("mqtt не настроен: нужны host и base в config.yaml".to_string());
+        return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
     }
     tauri::async_runtime::spawn_blocking(move || mqtt::unread(&broker, &id))
         .await
@@ -257,7 +257,7 @@ async fn restore_snapshot_mqtt(id: String, session_ids: Vec<String>) -> Result<(
     let raw = load_config()?;
     let broker = mqtt::broker_from_config(&raw);
     if !broker.is_configured() {
-        return Err("mqtt не настроен: нужны host и base в config.yaml".to_string());
+        return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
     }
     tauri::async_runtime::spawn_blocking(move || mqtt::restore(&broker, &id, &session_ids))
         .await
@@ -291,7 +291,7 @@ async fn open_session_mqtt(id: String, cwd: Option<String>) -> Result<(), String
     let raw = load_config()?;
     let broker = mqtt::broker_from_config(&raw);
     if !broker.is_configured() {
-        return Err("mqtt не настроен: нужны host и base в config.yaml".to_string());
+        return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
     }
     let cwd = cwd.unwrap_or_default().trim().to_string();
     tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &id, &cwd))
@@ -353,7 +353,7 @@ fn reject_null_values(patch: &serde_json::Value) -> Result<(), String> {
         for (key, value) in fields {
             if value.is_null() {
                 return Err(format!(
-                    "патч не может обнулять ключ {key}: null заменил бы блок целиком и стёр бы то, чего форма не прислала (например, mqtt.password)"
+                    "patch cannot null out key {key}: null would replace the whole block and wipe what the form did not send (mqtt.password, for one)"
                 ));
             }
             reject_null_values(value)?;
@@ -585,7 +585,7 @@ async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
         "settings",
         tauri::WebviewUrl::App("settings.html".into()),
     )
-    .title("Настройки ccfzf-picker")
+    .title("ccfzf-picker Settings")
     .inner_size(820.0, 600.0)
     .center()
     .resizable(true)
@@ -754,9 +754,9 @@ fn picker_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
 /// сработала, а не только то, что что-то не сработало.
 fn show_item_label(hotkey_registered: bool) -> &'static str {
     if hotkey_registered {
-        "Показать список"
+        "Show sessions"
     } else {
-        "Хоткей занят, жмите сюда"
+        "Hotkey is taken, click here"
     }
 }
 
@@ -905,8 +905,8 @@ fn main() {
             // хоткей не встал, а пикер не открывается по той самой настройке,
             // которую надо и поправить.
             let settings_item =
-                MenuItem::with_id(app, "settings", "Настройки…", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
+                MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&show_item, &settings_item, &quit_item])?;
             TrayIconBuilder::new()
                 .icon(tray_icon())
@@ -1164,7 +1164,7 @@ mod tests {
     /// Про занятый хоткей меню говорит подписью, и подписи эти разные.
     #[test]
     fn tray_label_tells_when_hotkey_is_taken() {
-        assert_eq!(show_item_label(true), "Показать список");
+        assert_eq!(show_item_label(true), "Show sessions");
         assert_ne!(show_item_label(false), show_item_label(true));
     }
 

@@ -8,9 +8,10 @@
 /// лежит прежний файл. Сама шапка — комментарий, разбор её выбрасывает, и на
 /// следующем сохранении она не удваивается.
 pub const HEADER: &str = "\
-# Этот файл ведёт окно настроек ccfzf-picker: при сохранении он переписывается
-# целиком, и комментарии в нём не сохраняются. Прежний файл лежит рядом —
-# config.yaml.bak. Описание всех ключей — в config.example.yml репозитория.
+# This file is managed by the ccfzf-picker settings window: saving rewrites it
+# whole, and comments in it are not preserved. The previous file is next to it,
+# as config.yaml.bak. All keys are documented in the repository's
+# config.example.yml.
 ";
 
 /// Влить патч в документ.
@@ -22,13 +23,13 @@ pub const HEADER: &str = "\
 /// «дописать» — не то, чего хочет человек, убравший строку из формы.
 pub fn merge_patch(doc: &mut serde_yaml::Value, patch: &serde_json::Value) -> Result<(), String> {
     let Some(fields) = patch.as_object() else {
-        return Err("настройки пришли не объектом".into());
+        return Err("settings did not arrive as an object".into());
     };
     if doc.is_null() {
         *doc = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
     }
     let Some(map) = doc.as_mapping_mut() else {
-        return Err("config.yaml — не отображение, править его нечем".into());
+        return Err("config.yaml is not a mapping, there is nothing to edit in it".into());
     };
     for (key, value) in fields {
         let key = serde_yaml::Value::String(key.clone());
@@ -41,7 +42,7 @@ pub fn merge_patch(doc: &mut serde_yaml::Value, patch: &serde_json::Value) -> Re
             merge_patch(map.get_mut(&key).unwrap(), value)?;
         } else {
             let incoming: serde_yaml::Value =
-                serde_yaml::to_value(value).map_err(|e| format!("не перевести значение: {e}"))?;
+                serde_yaml::to_value(value).map_err(|e| format!("cannot convert value: {e}"))?;
             map.insert(key, incoming);
         }
     }
@@ -50,7 +51,7 @@ pub fn merge_patch(doc: &mut serde_yaml::Value, patch: &serde_json::Value) -> Re
 
 /// Документ в текст, без шапки: её ставит вызывающий.
 pub fn render(doc: &serde_yaml::Value) -> Result<String, String> {
-    serde_yaml::to_string(doc).map_err(|e| format!("не собрать yaml: {e}"))
+    serde_yaml::to_string(doc).map_err(|e| format!("cannot render yaml: {e}"))
 }
 
 #[cfg(test)]
@@ -125,6 +126,9 @@ mod tests {
         let once = format!("{HEADER}sshHost: host\n");
         let parsed: serde_yaml::Value = serde_yaml::from_str(&once).unwrap();
         let twice = format!("{HEADER}{}", render(&parsed).unwrap());
-        assert_eq!(twice.matches("окно настроек").count(), HEADER.matches("окно настроек").count());
+        assert_eq!(
+            twice.matches("settings window").count(),
+            HEADER.matches("settings window").count()
+        );
     }
 }

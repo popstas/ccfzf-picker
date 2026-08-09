@@ -28,18 +28,18 @@
       id: 'general',
       title: 'General',
       fields: [
-        { id: 'sshHost', label: 'Хост с сессиями', type: 'text',
-          hint: 'Любая форма, понятная ssh. Без него список брать неоткуда.' },
-        { id: 'terminal.file', label: 'Терминал', type: 'text' },
-        { id: 'terminal.args', label: 'Аргументы терминала', type: 'lines',
-          hint: 'По одному на строку — запятая встречается в самих аргументах.' },
-        { id: 'onlyLive', label: 'Только работающие сессии', type: 'bool', default: true },
-        { id: 'hideOnBlur', label: 'Гасить окно при потере фокуса', type: 'bool', default: true },
-        { id: 'backgroundRefresh', label: 'Опрашивать при закрытом окне', type: 'bool',
+        { id: 'sshHost', label: 'Host with sessions', type: 'text',
+          hint: 'Any form ssh understands. Without it there is nowhere to get the list from.' },
+        { id: 'terminal.file', label: 'Terminal', type: 'text' },
+        { id: 'terminal.args', label: 'Terminal arguments', type: 'lines',
+          hint: 'One per line — a comma occurs inside the arguments themselves.' },
+        { id: 'onlyLive', label: 'Only running sessions', type: 'bool', default: true },
+        { id: 'hideOnBlur', label: 'Hide the window when it loses focus', type: 'bool', default: true },
+        { id: 'backgroundRefresh', label: 'Keep polling while the window is closed', type: 'bool',
           default: true,
-          hint: 'Держит свежим дамп агрегатора: с него живёт панель openHASP.' },
-        { id: 'caps.reptyr', label: 'Разрешить перенос процесса (reptyr)', type: 'bool' },
-        { id: 'caps.takeover', label: 'Разрешить перехват сессии', type: 'bool' },
+          hint: 'Keeps the aggregator dump fresh: the openHASP panel lives off it.' },
+        { id: 'caps.reptyr', label: 'Allow moving the process (reptyr)', type: 'bool' },
+        { id: 'caps.takeover', label: 'Allow taking a session over', type: 'bool' },
       ],
     },
     { id: 'ui', title: 'UI', fields: [] },
@@ -47,25 +47,25 @@
       id: 'hotkeys',
       title: 'Hotkeys',
       fields: [
-        { id: 'hotkey', label: 'Показать пикер', type: 'text',
-          hint: 'SUPER — это Cmd на маке и Win на Windows.' },
-        { id: 'projects', label: 'Проектные хоткеи', type: 'projects' },
+        { id: 'hotkey', label: 'Show the picker', type: 'text',
+          hint: 'SUPER is Cmd on a Mac and Win on Windows.' },
+        { id: 'projects', label: 'Project hotkeys', type: 'projects' },
       ],
     },
     {
       id: 'integrations',
       title: 'Integrations',
       fields: [
-        { id: 'windowHost', label: 'Имя этой машины', type: 'text',
-          hint: 'Совпало с windowHost из ответа — Enter поднимает окно.' },
-        { id: 'mqtt.host', label: 'Брокер MQTT', type: 'text' },
-        { id: 'mqtt.port', label: 'Порт брокера', type: 'number' },
-        { id: 'mqtt.user', label: 'Пользователь', type: 'text' },
-        { id: 'mqtt.password', label: 'Пароль', type: 'password',
-          hint: 'Пусто — оставить прежний.' },
-        { id: 'mqtt.base', label: 'Префикс топиков', type: 'text' },
-        { id: 'pathMap.remote', label: 'Каталог на удалённом хосте', type: 'text' },
-        { id: 'pathMap.local', label: 'Он же здесь', type: 'text' },
+        { id: 'windowHost', label: 'Name of this machine', type: 'text',
+          hint: 'Matches windowHost from the reply — Enter raises the window.' },
+        { id: 'mqtt.host', label: 'MQTT broker', type: 'text' },
+        { id: 'mqtt.port', label: 'Broker port', type: 'number' },
+        { id: 'mqtt.user', label: 'User', type: 'text' },
+        { id: 'mqtt.password', label: 'Password', type: 'password',
+          hint: 'Empty means keep the current one.' },
+        { id: 'mqtt.base', label: 'Topic prefix', type: 'text' },
+        { id: 'pathMap.remote', label: 'Directory on the remote host', type: 'text' },
+        { id: 'pathMap.local', label: 'The same one here', type: 'text' },
       ],
     },
   ];
@@ -204,18 +204,18 @@
   function validate(fields) {
     const problems = [];
     if (!String(fields.sshHost || '').trim()) {
-      problems.push('sshHost не задан: список брать неоткуда');
+      problems.push('sshHost is not set: there is nowhere to get the list from');
     }
     const hotkey = String(fields.hotkey || '').trim();
     // isReserved, а не свой разбор строки: комбинации, которые окно пикера
     // забирает себе, перечислены там, и второй список разошёлся бы с первым.
     if (hotkey && hotkeyApi.isReserved(hotkeyApi.parseHotkey(hotkey))) {
-      problems.push(`${hotkey} занята самим окном пикера — внутри него она не отзовётся`);
+      problems.push(`${hotkey} is taken by the picker window itself — inside it, it will not respond`);
     }
     for (const project of (Array.isArray(fields.projects) ? fields.projects : [])) {
       const path = String((project || {}).path || '');
       if (path.includes(';')) {
-        problems.push(`в пути ${path} есть «;» — Windows Terminal порежет команду на панели`);
+        problems.push(`path ${path} contains ";" — Windows Terminal will split the command into panes`);
       }
     }
     return problems;
