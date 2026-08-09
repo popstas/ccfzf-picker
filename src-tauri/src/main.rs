@@ -61,6 +61,9 @@ fn hide_window(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<LastHidden>() {
         *state.0.lock().unwrap() = Some(Instant::now());
     }
+    if let Some(poller) = app.try_state::<poller::Poller>() {
+        poller.hidden();
+    }
 }
 
 fn toggle_picker(app: &tauri::AppHandle) {
@@ -87,6 +90,9 @@ fn toggle_picker(app: &tauri::AppHandle) {
         // Список обновляется на показе: между открытиями он устаревает, а
         // опрашивать закрытый пикер незачем.
         let _ = app.emit("picker-shown", ());
+        if let Some(poller) = app.try_state::<poller::Poller>() {
+            poller.shown();
+        }
     } else {
         hide_window(app);
     }
@@ -136,6 +142,17 @@ async fn fetch_state(ssh_host: String) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || state_source::fetch(&ssh_host))
         .await
         .map_err(|e| format!("fetch_state task failed: {e}"))?
+}
+
+/// Отдать фронтенду то, что уже известно, и подтолкнуть опрос.
+///
+/// Зовётся один раз, сразу после подписки на событие `state`: поток мог
+/// ответить раньше, чем фронтенд успел подписаться, и без этого толчка первый
+/// кадр ждал бы целого такта.
+#[tauri::command]
+fn poll_now(poller: tauri::State<poller::Poller>) -> serde_json::Value {
+    poller.nudge();
+    poller.snapshot()
 }
 
 /// Выдать процессу трекера право занять передний план.
@@ -463,7 +480,7 @@ fn main() {
         // шлёт событие, и перепутать их нечем.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config,
+            hide_picker, fetch_state, poll_now, spawn_detached, load_seen, save_seen, load_config,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, open_session_mqtt
         ])
@@ -481,6 +498,21 @@ fn main() {
             // самой поломке фронтенд скажет отдельно — он читает тот же файл
             // и печатает ошибку в статуслайн.
             let config = load_config().unwrap_or(serde_json::Value::Null);
+
+            // Опросом владеет Rust, а не страница: у скрытого окна webview
+            // тормозит таймеры, а WebView2 у свёрнутого умеет усыплять
+            // страницу целиком. Фон на setInterval замолчал бы, и узнать об
+            // этом было бы неоткуда — панель просто перестала бы обновляться.
+            let ssh_host = config
+                .get("sshHost")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let background = config
+                .get("backgroundRefresh")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            app.manage(poller::Poller::start(app.handle().clone(), ssh_host, background));
 
             // Клик мимо окна закрывает пикер. Окно безрамочное и всегда
             // поверх: не закрывшись само, оно осталось бы висеть над той

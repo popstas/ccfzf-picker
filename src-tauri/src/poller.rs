@@ -50,6 +50,158 @@ pub fn fingerprint(state: &serde_json::Value) -> String {
     copy.to_string()
 }
 
+use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use tauri::Emitter;
+
+/// Что поток узнаёт извне.
+enum Signal {
+    /// Окно показано: отдать кэш немедленно и перейти на секундный такт.
+    Shown,
+    /// Окно скрыто: вернуться на минутный такт, а не на накопленный бэкофф —
+    /// человек только что смотрел на список, и первый фоновый опрос должен
+    /// быть скорым.
+    Hidden,
+    /// Опросить сейчас (первая подписка фронтенда, смена настроек).
+    Nudge,
+}
+
+/// Последнее, что известно об агрегаторе.
+///
+/// Отказ хранится рядом с ответом, а не вместо него: оборвавшийся ssh в
+/// закрытом окне сообщать некому, а выбрасывать из-за него уже показанный
+/// список — значит гасить работающий пикер из-за чужой сети.
+#[derive(Default)]
+struct Cache {
+    state: Option<serde_json::Value>,
+    error: String,
+}
+
+/// Отправитель под мьютексом, а не голый.
+///
+/// `tauri::State` требует `Send + Sync`, а `Sender` стал `Sync` только в
+/// Rust 1.72 — на более раннем тулчейне сборка падала бы с непонятной
+/// ошибкой о трейте. Мьютекс здесь ничего не стоит: отправка идёт на нажатие
+/// клавиши, а не в цикле.
+pub struct Poller {
+    tx: Mutex<Sender<Signal>>,
+    cache: Arc<Mutex<Cache>>,
+    settings: Arc<Mutex<(String, bool)>>,
+}
+
+fn payload(cache: &Cache) -> serde_json::Value {
+    serde_json::json!({
+        "state": cache.state.clone(),
+        "error": cache.error.clone(),
+    })
+}
+
+impl Poller {
+    /// Поднять поток опроса. Окно на старте скрыто.
+    pub fn start(app: tauri::AppHandle, ssh_host: String, background: bool) -> Poller {
+        let (tx, rx) = channel::<Signal>();
+        let cache = Arc::new(Mutex::new(Cache::default()));
+        let settings = Arc::new(Mutex::new((ssh_host, background)));
+
+        let thread_cache = Arc::clone(&cache);
+        let thread_settings = Arc::clone(&settings);
+        std::thread::spawn(move || {
+            let mut visible = false;
+            let mut delay = BACKGROUND_MIN;
+            let mut prev_fingerprint: Option<String> = None;
+
+            loop {
+                let (host, background) = thread_settings.lock().unwrap().clone();
+
+                // Спрашивать нечего и некого: без хоста ssh не собрать, а
+                // выключенный фон при скрытом окне означает «стоим до показа».
+                let idle = host.trim().is_empty() || (!visible && !background);
+                if !idle {
+                    let changed = match crate::state_source::fetch(&host) {
+                        Ok(state) => {
+                            let fp = fingerprint(&state);
+                            let changed = prev_fingerprint.as_deref() != Some(fp.as_str());
+                            prev_fingerprint = Some(fp);
+                            let mut cache = thread_cache.lock().unwrap();
+                            cache.state = Some(state);
+                            cache.error.clear();
+                            let _ = app.emit("state", payload(&cache));
+                            changed
+                        }
+                        Err(e) => {
+                            let mut cache = thread_cache.lock().unwrap();
+                            cache.error = e;
+                            // Показанному окну об отказе говорим сразу;
+                            // скрытому — некому, и оно узнает при показе.
+                            if visible {
+                                let _ = app.emit("state", payload(&cache));
+                            }
+                            // Отказ — это «не изменилось»: сеть, лежащая
+                            // десять минут, не повод десять минут долбить ssh.
+                            false
+                        }
+                    };
+                    delay = next_delay(visible, changed, delay);
+                }
+
+                // Спящий поток ждёт либо срока, либо сигнала. `recv_timeout`
+                // на закрытом канале выходит из цикла: приложение кончилось.
+                let wait = if idle { Duration::from_secs(3600) } else { delay };
+                match rx.recv_timeout(wait) {
+                    Ok(Signal::Shown) => {
+                        visible = true;
+                        delay = VISIBLE_TICK;
+                        // Кэш отдаётся до опроса: ради этого фон и заведён —
+                        // список рисуется, не дожидаясь ssh.
+                        let cache = thread_cache.lock().unwrap();
+                        let _ = app.emit("state", payload(&cache));
+                    }
+                    Ok(Signal::Hidden) => {
+                        visible = false;
+                        delay = BACKGROUND_MIN;
+                    }
+                    Ok(Signal::Nudge) => {
+                        let cache = thread_cache.lock().unwrap();
+                        let _ = app.emit("state", payload(&cache));
+                    }
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            }
+        });
+
+        Poller { tx: Mutex::new(tx), cache, settings }
+    }
+
+    fn signal(&self, signal: Signal) {
+        let _ = self.tx.lock().unwrap().send(signal);
+    }
+
+    pub fn shown(&self) {
+        self.signal(Signal::Shown);
+    }
+
+    pub fn hidden(&self) {
+        self.signal(Signal::Hidden);
+    }
+
+    pub fn nudge(&self) {
+        self.signal(Signal::Nudge);
+    }
+
+    /// Новые настройки подхватываются следующим тактом: рвать текущий ssh
+    /// незачем, он всё равно вот-вот кончится.
+    pub fn set_config(&self, ssh_host: String, background: bool) {
+        *self.settings.lock().unwrap() = (ssh_host, background);
+        self.signal(Signal::Nudge);
+    }
+
+    /// Что известно прямо сейчас — для команды `poll_now`.
+    pub fn snapshot(&self) -> serde_json::Value {
+        payload(&self.cache.lock().unwrap())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
