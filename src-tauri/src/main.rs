@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -24,6 +25,16 @@ struct LastToggle(Mutex<Option<Instant>>);
 
 /// Когда окно погасло в последний раз. См. `picker_toggle`.
 struct LastHidden(Mutex<Option<Instant>>);
+
+/// Гасить ли пикер по потере фокуса — текущее значение `hideOnBlur`.
+///
+/// Живёт в разделяемом состоянии, а не в замыкании обработчика, потому что
+/// снять уже зарегистрированный `on_window_event` в Tauri нечем. Обработчик
+/// ставится один раз и навсегда, а решение принимает по этому флагу, который
+/// переставляет `apply_config`. Регистрируй его по условию — и переключатель в
+/// окне настроек молчал бы до перезапуска: выключение не сняло бы уже
+/// поставленный обработчик, включение не добавило бы недостающий.
+struct HideOnBlur(AtomicBool);
 
 /// Показывать ли окно по нажатию.
 ///
@@ -52,6 +63,23 @@ fn picker_toggle(visible: bool, just_hidden: bool) -> bool {
 /// Уже скрытое окно не гасится повторно: иначе Esc даёт две посылки
 /// `picker-hidden` — сначала от явного скрытия, потом от потери фокуса, которая
 /// заходит сюда же.
+/// `hideOnBlur` из конфига. Умолчание — «гасить»: так пикер вёл себя всегда, и
+/// отсутствие ключа не должно оставлять окно висеть поверх чужой работы.
+fn hide_on_blur(config: &serde_json::Value) -> bool {
+    config
+        .get("hideOnBlur")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+/// То же значение, но действующее прямо сейчас. Состояния может не быть только
+/// до конца `setup`; тогда действует то же умолчание.
+fn hide_on_blur_now(app: &tauri::AppHandle) -> bool {
+    app.try_state::<HideOnBlur>()
+        .map(|s| s.0.load(Ordering::Relaxed))
+        .unwrap_or(true)
+}
+
 fn hide_window(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("picker") else { return };
     if !window.is_visible().unwrap_or(false) {
@@ -128,21 +156,6 @@ fn check_ssh_host(ssh_host: &str) -> Result<(), String> {
         );
     }
     Ok(())
-}
-
-/// Спросить агрегатор.
-///
-/// `async` и `spawn_blocking` здесь не украшение. Синхронную команду Tauri
-/// исполняет в главном потоке, а внутри — ssh на другую машину секунд на
-/// полсекунды: окно замирало на это время каждый опрос, то есть раз в секунду.
-/// `async` уводит вызов в рантайм, `spawn_blocking` — на поток для блокирующей
-/// работы, чтобы не занимать им рабочий поток рантайма.
-#[tauri::command]
-async fn fetch_state(ssh_host: String) -> Result<serde_json::Value, String> {
-    check_ssh_host(&ssh_host)?;
-    tauri::async_runtime::spawn_blocking(move || state_source::fetch(&ssh_host))
-        .await
-        .map_err(|e| format!("fetch_state task failed: {e}"))?
 }
 
 /// Отдать фронтенду то, что уже известно, и подтолкнуть опрос.
@@ -316,14 +329,18 @@ fn load_config() -> Result<serde_json::Value, String> {
     serde_yaml::from_str(&text).map_err(|e| format!("bad yaml in {}: {e}", path.display()))
 }
 
-/// Патч, обнуляющий ключ верхнего уровня, отклоняется явно.
+/// Патч, обнуляющий ключ, отклоняется явно — на любой глубине.
 ///
 /// `merge_patch` вложенные отображения сливает по ключам, а `null` считает
 /// «не отображением» и подменяет блок целиком — так пропал бы `mqtt.password`,
 /// которого форма настроек никогда не загружает и не присылает обратно.
 /// Сегодняшняя форма такого патча не пришлёт, но если пришлёт когда-нибудь —
 /// лучше внятный отказ здесь, чем молча стёртый пароль.
-fn reject_null_top_level(patch: &serde_json::Value) -> Result<(), String> {
+///
+/// Проверка рекурсивная именно из-за пароля: страшен не столько `mqtt: null`
+/// на верхнем уровне, сколько `{"mqtt": {"password": null}}` — тот стирает
+/// ровно тот ключ, ради которого всё слияние и написано.
+fn reject_null_values(patch: &serde_json::Value) -> Result<(), String> {
     if let Some(fields) = patch.as_object() {
         for (key, value) in fields {
             if value.is_null() {
@@ -331,10 +348,31 @@ fn reject_null_top_level(patch: &serde_json::Value) -> Result<(), String> {
                     "патч не может обнулять ключ {key}: null заменил бы блок целиком и стёр бы то, чего форма не прислала (например, mqtt.password)"
                 ));
             }
+            reject_null_values(value)?;
         }
     }
     Ok(())
 }
+
+/// Закрыть файл от всех, кроме владельца.
+///
+/// В конфиге лежит `mqtt.password`, а заводит файл теперь не человек своими
+/// руками, а окно настроек: с обычным umask пароль оказался бы читаем всей
+/// машине. Отказ не фатален — сохранить настройки важнее, чем выставить
+/// режим, — но и молчать о нём нельзя.
+///
+/// На Windows этого API нет, и права там устроены иначе: файл лежит в профиле
+/// пользователя, куда посторонний и так не ходит.
+#[cfg(unix)]
+fn restrict_permissions(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+        eprintln!("ccfzf-picker: cannot restrict {}: {e}", path.display());
+    }
+}
+
+#[cfg(not(unix))]
+fn restrict_permissions(_path: &std::path::Path) {}
 
 /// Слить патч в config.yaml на диске.
 ///
@@ -345,7 +383,7 @@ fn reject_null_top_level(patch: &serde_json::Value) -> Result<(), String> {
 /// после неё не восстановить ничем, а класть `.bak` на каждое сохранение
 /// значило бы затирать его же вчерашним состоянием.
 fn write_config(path: &std::path::Path, patch: &serde_json::Value) -> Result<(), String> {
-    reject_null_top_level(patch)?;
+    reject_null_values(patch)?;
 
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
@@ -370,6 +408,7 @@ fn write_config(path: &std::path::Path, patch: &serde_json::Value) -> Result<(),
     if !existing.trim().is_empty() && !backup.exists() {
         std::fs::write(&backup, &existing)
             .map_err(|e| format!("cannot write {}: {e}", backup.display()))?;
+        restrict_permissions(&backup);
     }
 
     // Через временный файл и переименование, как save_json: читатель никогда
@@ -377,6 +416,9 @@ fn write_config(path: &std::path::Path, patch: &serde_json::Value) -> Result<(),
     let text = format!("{}{}", config_file::HEADER, config_file::render(&doc)?);
     let tmp = path.with_extension("yaml.tmp");
     std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+    // До переименования, а не после: иначе у конфига был бы промежуток, в
+    // который пароль уже на месте, а права ещё общие.
+    restrict_permissions(&tmp);
     if let Err(e) = std::fs::rename(&tmp, path) {
         // Rename не удался — не оставлять временный файл валяться на диске.
         let _ = std::fs::remove_file(&tmp);
@@ -478,6 +520,12 @@ fn apply_config(app: &tauri::AppHandle) -> (bool, String) {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
         poller.set_config(ssh_host, background);
+    }
+
+    // Гашение по потере фокуса — тоже без перезапуска: обработчик стоит всегда
+    // и смотрит на этот флаг (см. `HideOnBlur`).
+    if let Some(state) = app.try_state::<HideOnBlur>() {
+        state.0.store(hide_on_blur(&config), Ordering::Relaxed);
     }
 
     let _ = app.global_shortcut().unregister_all();
@@ -729,7 +777,7 @@ fn main() {
         // шлёт событие, и перепутать их нечем.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            hide_picker, fetch_state, poll_now, spawn_detached, load_seen, save_seen, load_config,
+            hide_picker, poll_now, spawn_detached, load_seen, save_seen, load_config,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, open_session_mqtt, save_config, open_settings
         ])
@@ -768,19 +816,18 @@ fn main() {
             // работой, ради которой его и открывали. Ключ в конфиге на случай,
             // когда список нужен рядом с терминалом — например, чтобы читать
             // из него pid, пока набираешь команду в другом окне.
-            let hide_on_blur = config
-                .get("hideOnBlur")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-            if hide_on_blur {
-                if let Some(window) = app.get_webview_window("picker") {
-                    let handle = app.handle().clone();
-                    window.on_window_event(move |event| {
-                        if let tauri::WindowEvent::Focused(false) = event {
+            //
+            // Обработчик ставится всегда, а решает по флагу: см. `HideOnBlur`.
+            app.manage(HideOnBlur(AtomicBool::new(hide_on_blur(&config))));
+            if let Some(window) = app.get_webview_window("picker") {
+                let handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(false) = event {
+                        if hide_on_blur_now(&handle) {
                             hide_window(&handle);
                         }
-                    });
-                }
+                    }
+                });
             }
 
             // Хоткей пикера ставится общей с `apply_config` функцией: раньше
@@ -954,6 +1001,41 @@ mod tests {
         assert!(text.contains("secret"), "{text}");
     }
 
+    /// `null` во вложенном ключе отклоняется так же, как в верхнем.
+    ///
+    /// Проверка верхнего уровня пропускала `{"mqtt": {"password": null}}` —
+    /// патч, который стирает ровно тот ключ, ради которого написано слияние по
+    /// ключам. Сегодняшняя форма такого не собирает, но цена ошибки — пароль.
+    #[test]
+    fn write_config_rejects_null_at_any_depth() {
+        let path = temp_config_path("null-nested");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "mqtt:\n  host: broker\n  password: secret\n").unwrap();
+        let err = write_config(&path, &serde_json::json!({"mqtt": {"password": null}})).unwrap_err();
+        assert!(err.contains("password"), "{err}");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("secret"), "пароль пережил отказ: {text}");
+    }
+
+    /// Конфиг и его бэкап читает только владелец: в файле лежит
+    /// `mqtt.password`, а заводит файл теперь окно настроек, а не человек.
+    #[cfg(unix)]
+    #[test]
+    fn write_config_keeps_files_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = temp_config_path("permissions");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // Права нарочно шире нужных: сохранение обязано их сузить, а не
+        // унаследовать.
+        std::fs::write(&path, "mqtt:\n  password: secret\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_config(&path, &serde_json::json!({"sshHost": "host"})).unwrap();
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600, "config.yaml");
+        assert_eq!(mode(&path.with_extension("yaml.bak")), 0o600, "config.yaml.bak");
+    }
+
     /// Клик по иконке в трее гасит пикер, а не мигает им.
     ///
     /// Порядок событий на этом клике: сначала окно теряет фокус и гаснет по
@@ -969,6 +1051,21 @@ mod tests {
         // Видимое окно, погасшее «только что», — состояние противоречивое
         // (гашение отмечается уже после hide), но решение то же: не показывать.
         assert!(!picker_toggle(true, true));
+    }
+
+    /// `hideOnBlur` читается одной функцией — той же на старте и в
+    /// `apply_config`.
+    ///
+    /// Раньше значение читалось только в `setup`, и переключатель в окне
+    /// настроек молчал до перезапуска. Теперь его читают дважды, и разойтись
+    /// эти чтения не должны: умолчание «гасить», а не «оставить окно висеть».
+    #[test]
+    fn hide_on_blur_defaults_to_hiding() {
+        assert!(hide_on_blur(&serde_json::json!({})));
+        assert!(hide_on_blur(&serde_json::Value::Null));
+        assert!(hide_on_blur(&serde_json::json!({"hideOnBlur": "нет"})));
+        assert!(hide_on_blur(&serde_json::json!({"hideOnBlur": true})));
+        assert!(!hide_on_blur(&serde_json::json!({"hideOnBlur": false})));
     }
 
     /// Хоткеи из конфига разбираются той же строкой, какой их пишет человек.
