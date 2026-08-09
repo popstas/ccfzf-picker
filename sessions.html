@@ -369,33 +369,32 @@
     { key: 'showWindow', label: 'window', side: 'right' },
     { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
   ];
-  // Умолчания. Выключены те колонки, что отвечают на вопрос «как эта сессия
-  // дошла до жизни такой», а не «стоит ли в неё заходить»: событие и цена
-  // интересны разбирательству постфактум, а в списке они каждую строку
-  // удлиняют. Включаются чекбоксом, и выбор переживает перезапуск (ui.json).
-  let toggles = {
-    showPrompt: true,
-    showAnswer: true,
-    showPaths: true,
-    showHotkey: true,
-    showEvent: false,
-    showId: false,
-    showCost: false,
-    showContext: true,
-    showWindow: true,
+  // Умолчания. Ось `list` — как было: выключены те колонки, что отвечают на
+  // вопрос «как эта сессия дошла до жизни такой», а не «стоит ли в неё
+  // заходить». Ось `statusline` решает, попадёт ли галка в строку внизу; там
+  // место кончилось, и по умолчанию вынесены только пять самых частых.
+  // Остальные правятся в окне настроек.
+  //
+  // Это достоверное состояние — то, что уходит в `save_ui` и приходит из
+  // `load_ui`.
+  let uiToggles = {
+    showPrompt: { list: true, statusline: true },
+    showAnswer: { list: true, statusline: true },
+    showPaths: { list: true, statusline: true },
+    showHotkey: { list: true, statusline: false },
+    showEvent: { list: false, statusline: false },
+    showId: { list: false, statusline: true },
+    showCost: { list: false, statusline: false },
+    showContext: { list: true, statusline: true },
+    showWindow: { list: true, statusline: false },
     // Выключен: список без трекера и так весь без окон, и включённый фильтр
     // показал бы пустоту вместо сессий — с виду неотличимо от сломанного ssh.
-    onlyWindow: false,
+    onlyWindow: { list: false, statusline: false },
   };
-  // Достоверное состояние галок в двухосной форме (`{list, statusline}` на
-  // ключ) — то, что уходит в `save_ui` и приходит из `load_ui`. `toggles`
-  // выше остаётся плоской картой для рисования и для чекбоксов статуслайна
-  // (C2 их ещё не различает); если писать в файл саму `toggles`, ось
-  // `statusline` при каждом сохранении схлопывалась бы в умолчание — этот
-  // объект и существует, чтобы было что сохранять вместо неё.
-  let uiToggles = Object.fromEntries(
-    Object.entries(toggles).map(([key, list]) => [key, { list, statusline: false }]),
-  );
+  // Плоская карта «показывать ли колонку»: её читают рисовальщики строк и
+  // чекбоксы статуслайна. Пересчитывается из uiToggles одной функцией, чтобы
+  // две формы не разъехались.
+  let toggles = window.UiState.listColumns(uiToggles);
   let menuOpen = false;
   let menuActions = [];
   let menuActive = 0;
@@ -450,29 +449,39 @@
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
   // чекбоксу не должен всплывать до statusline: там висит смена сортировки.
+  //
+  // Строится функцией, а не один раз при загрузке: набор вынесенных галок
+  // меняется из окна настроек, и разметка обязана перестраиваться на месте —
+  // иначе новая галка появлялась бы только после перезапуска.
   const toggleInputs = new Map();
-  // Отбивка между группами — на первом чекбоксе каждой следующей: отдельный
-  // пустой элемент-разделитель пришлось бы ещё и прятать, когда группа пуста.
-  statusChecks.innerHTML = TOGGLE_CHECKS.map(({ key, label, side }, i) => {
-    const gap = i > 0 && TOGGLE_CHECKS[i - 1].side !== side ? ' gap' : '';
-    return `<label class="status-check${gap}"><input type="checkbox" data-toggle="${key}"> ${escapeHtml(label)}</label>`;
-  }).join('');
-  for (const input of statusChecks.querySelectorAll('input[data-toggle]')) {
-    const key = input.dataset.toggle;
-    toggleInputs.set(key, input);
-    input.addEventListener('click', (e) => {
-      e.stopPropagation();
-    });
-    input.addEventListener('change', () => {
-      toggles[key] = input.checked;
-      // И в достоверный объект — той же осью `list`. Без этого пары ключей
-      // с сохранённой на диске `statusline: true` теряли бы её от одного
-      // клика по совсем другому чекбоксу: saveUi() пишет uiToggles целиком.
-      uiToggles[key] = { ...(uiToggles[key] || { statusline: false }), list: input.checked };
-      render();
-      saveUi();
-    });
+
+  function renderChecks() {
+    toggleInputs.clear();
+    const shown = TOGGLE_CHECKS.filter(({ key }) => (uiToggles[key] || {}).statusline);
+    // Отбивка между группами — на первом чекбоксе каждой следующей: отдельный
+    // пустой элемент-разделитель пришлось бы ещё и прятать, когда группа пуста.
+    statusChecks.innerHTML = shown.map(({ key, label, side }, i) => {
+      const gap = i > 0 && shown[i - 1].side !== side ? ' gap' : '';
+      return `<label class="status-check${gap}"><input type="checkbox" data-toggle="${key}"> ${escapeHtml(label)}</label>`;
+    }).join('');
+    for (const input of statusChecks.querySelectorAll('input[data-toggle]')) {
+      const key = input.dataset.toggle;
+      toggleInputs.set(key, input);
+      input.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+      input.addEventListener('change', () => {
+        // Галка в статуслайне правит ось list: она и значит «показывать
+        // колонку». Второй осью распоряжается только окно настроек.
+        uiToggles[key] = { ...uiToggles[key], list: input.checked };
+        toggles = window.UiState.listColumns(uiToggles);
+        render();
+        saveUi();
+      });
+    }
   }
+
+  renderChecks();
 
   function paintToggles() {
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
@@ -1483,11 +1492,13 @@
       });
       sortMode = ui.sort;
       uiToggles = ui.toggles;
-      // Рисование и чекбоксы статуслайна знают только «показывать колонку или
-      // нет» (ось list) — рисование по обеим осям делает задача C2. toggles
-      // тут производная, а не источник: источник — uiToggles, и именно его,
-      // а не эту плоскую карту, пишет saveUi().
+      // toggles тут производная, а не источник: источник — uiToggles, и
+      // именно его, а не эту плоскую карту, пишет saveUi().
       toggles = window.UiState.listColumns(uiToggles);
+      // Набор вынесенных в статуслайн галок мог прийти из файла другим, чем
+      // при первой отрисовке разметки (до загрузки uiToggles ещё нет) —
+      // разметку чекбоксов надо пересобрать под то, что реально загружено.
+      renderChecks();
     } catch (e) {
       error = String(e);
     }

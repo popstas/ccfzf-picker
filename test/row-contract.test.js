@@ -612,3 +612,120 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
     },
   });
 });
+
+// ── renderChecks рисует только галки с осью statusline (C2) ─────────────────
+//
+// До C2 статуслайн строился один раз при загрузке из TOGGLE_CHECKS целиком —
+// ось statusline на разметку никак не влияла. Тест вычитывает настоящие
+// TOGGLE_CHECKS и renderChecks из страницы (тем же приёмом, что saveUi выше) и
+// проверяет, что в DOM попадают только вынесенные галки, а клик по
+// нарисованному чекбоксу по-прежнему правит ось list в uiToggles.
+//
+// statusChecks — не настоящий DOM, а его минимальная имитация: innerHTML
+// парсится регуляркой на data-toggle, querySelectorAll отдаёт получившиеся
+// фейковые input'ы. Полноценный jsdom здесь избыточен — renderChecks
+// пользуется только этими двумя методами элемента.
+function fakeStatusChecks() {
+  let html = '';
+  let inputs = [];
+  return {
+    get innerHTML() { return html; },
+    set innerHTML(value) {
+      html = value;
+      inputs = [...value.matchAll(/data-toggle="([^"]+)"/g)].map(([, key]) => ({
+        dataset: { toggle: key },
+        checked: false,
+        listeners: {},
+        addEventListener(type, fn) { this.listeners[type] = fn; },
+      }));
+    },
+    querySelectorAll() { return inputs; },
+  };
+}
+
+function renderChecksWith(uiToggles) {
+  const checksSource = SESSIONS_HTML.match(/\n {2}const TOGGLE_CHECKS = \[[\s\S]*?\n {2}\];\n/);
+  assert.ok(checksSource, 'TOGGLE_CHECKS не найден в sessions.html — тест сторожит не то');
+  const renderSource = SESSIONS_HTML.match(
+    /\n {2}const toggleInputs = new Map\(\);\n\n {2}function renderChecks\(\) \{[\s\S]*?\n {2}\}\n/,
+  );
+  assert.ok(renderSource, 'renderChecks не найден в sessions.html — тест сторожит не то');
+  const calls = { render: 0, saveUi: 0 };
+  const ctx = {
+    window: { UiState: require('../frontend-src/ui-state') },
+    escapeHtml: Glyph.escapeHtml,
+    statusChecks: fakeStatusChecks(),
+    uiToggles,
+    toggles: {},
+    render: () => { calls.render += 1; },
+    saveUi: () => { calls.saveUi += 1; },
+  };
+  vm.createContext(ctx);
+  // `toggleInputs` объявлен внутри вычитанного исходника через const — такие
+  // объявления не становятся свойствами контекста (в отличие от var), и без
+  // явного экспорта ctx.toggleInputs остался бы undefined.
+  vm.runInContext(
+    `${checksSource[0]}\n${renderSource[0]}\nrenderChecks();\nvar toggleInputsExport = toggleInputs;`,
+    ctx, { filename: 'sessions.html' },
+  );
+  return { statusChecks: ctx.statusChecks, toggleInputs: ctx.toggleInputsExport, ctx, calls };
+}
+
+test('ни одна галка не вынесена — статуслайн пуст', () => {
+  const { statusChecks, toggleInputs } = renderChecksWith({
+    showPrompt: { list: true, statusline: false },
+    showId: { list: false, statusline: false },
+  });
+  assert.strictEqual(statusChecks.innerHTML, '');
+  assert.strictEqual(toggleInputs.size, 0);
+});
+
+test('все галки вынесены — статуслайн рисует все', () => {
+  const { toggleInputs } = renderChecksWith({
+    showPrompt: { list: true, statusline: true },
+    showAnswer: { list: true, statusline: true },
+    showPaths: { list: true, statusline: true },
+    showHotkey: { list: true, statusline: true },
+    showEvent: { list: false, statusline: true },
+    showId: { list: false, statusline: true },
+    showCost: { list: false, statusline: true },
+    showContext: { list: true, statusline: true },
+    showWindow: { list: true, statusline: true },
+    onlyWindow: { list: false, statusline: true },
+  });
+  assert.strictEqual(toggleInputs.size, 10);
+});
+
+test('вынесена часть — статуслайн рисует ровно её, в порядке TOGGLE_CHECKS', () => {
+  const { statusChecks, toggleInputs } = renderChecksWith({
+    showPrompt: { list: true, statusline: true },
+    showAnswer: { list: true, statusline: false },
+    showId: { list: false, statusline: true },
+    showCost: { list: false, statusline: false },
+  });
+  assert.deepStrictEqual([...toggleInputs.keys()], ['showPrompt', 'showId']);
+  // Отбивка между группами (left → right) стоит на первом чекбоксе новой
+  // группы — showId идёт вторым и сразу после showPrompt (left), сам group 'right'.
+  assert.ok(statusChecks.innerHTML.includes('class="status-check gap"'), statusChecks.innerHTML);
+});
+
+test('клик по нарисованному чекбоксу правит ось list, не трогая statusline', () => {
+  const uiToggles = {
+    showPrompt: { list: true, statusline: true },
+    showId: { list: false, statusline: true },
+  };
+  const { toggleInputs, ctx, calls } = renderChecksWith(uiToggles);
+  const input = toggleInputs.get('showId');
+  input.checked = true;
+  input.listeners.change();
+  // Не deepStrictEqual: объект собран внутри vm своим `{...spread}`, и его
+  // прототип — из другого реалма (см. комментарий в frontend-load.test.js про
+  // ту же ловушку). Сверяются только значения полей.
+  assert.strictEqual(uiToggles.showId.list, true);
+  assert.strictEqual(uiToggles.showId.statusline, true);
+  // toggles — производная, её тоже обязаны пересчитать тем же тиком, иначе
+  // отрисовка строк ещё один кадр рисовала бы колонку по старому значению.
+  assert.strictEqual(ctx.toggles.showId, true);
+  assert.strictEqual(calls.render, 1);
+  assert.strictEqual(calls.saveUi, 1);
+});
