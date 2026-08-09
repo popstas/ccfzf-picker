@@ -272,6 +272,9 @@
 <script src="ui-state.js"></script>
 <script src="session-glyph.js"></script>
 <script src="session-info.js"></script>
+<!-- session-name до open-strategy: тот берёт из него uniqueSessionName в
+     момент загрузки, и в обратном порядке ему достался бы undefined. -->
+<script src="session-name.js"></script>
 <!-- open-strategy до session-actions: тот берёт из него buildAttachCommand в
      момент загрузки, и в обратном порядке ему достался бы undefined. Тесты
      этого не поймают — там require, а он от порядка тегов не зависит. -->

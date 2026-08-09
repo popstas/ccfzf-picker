@@ -2,6 +2,12 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.OpenStrategy = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
+  // globalThis, а не `root`: тот виден только внешней функции шима, а внутрь
+  // factory не передаётся.
+  const nameApi = typeof module === 'object' && module.exports
+    ? require('./session-name')
+    : globalThis.SessionName;
+
   /** Одинарные кавычки в POSIX-строке: закрыть, экранировать, открыть заново. */
   function q(s) {
     return `'${String(s == null ? '' : s).replace(/'/g, `'\\''`)}'`;
@@ -91,11 +97,22 @@
    * закладок человека, так что случай не выдуманный. Вычистить знак нельзя:
    * получилась бы сессия в чужом каталоге, и молча. Вызывающий на пустую
    * строку показывает отказ — как и при незаданном ssh-хосте.
+   *
+   * Тёзки различаются суффиксом: имя занятой живой сессии получает `-2`,
+   * следующее `-3`. Занятые приходят аргументом — знать, что сейчас живо,
+   * может только вызывающий.
    */
-  function newSessionCommand(cwd) {
+  function newSessionName(cwd, taken) {
     const path = String(cwd == null ? '' : cwd).replace(/\/+$/, '');
     if (path.includes(';')) return '';
-    const name = path.split('/').pop() || path;
+    const base = path.split('/').pop() || path;
+    return nameApi.uniqueSessionName(base, taken);
+  }
+
+  function newSessionCommand(cwd, taken) {
+    const path = String(cwd == null ? '' : cwd).replace(/\/+$/, '');
+    if (path.includes(';')) return '';
+    const name = newSessionName(path, taken);
     return inDir(path, `claude -n ${q(name)}`);
   }
 
@@ -203,6 +220,6 @@
   // рано или поздно разойдётся с первым.
   return {
     q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
-    newSessionCommand,
+    newSessionCommand, newSessionName,
   };
 });

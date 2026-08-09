@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand, newSessionCommand,
+  newSessionName,
 } = require('../frontend-src/open-strategy');
 
 const ATTACH_42 = `reptyr -T 42 || reptyr "$(pgrep -x -f 'reptyr -T 42' | head -1)"`;
@@ -229,4 +230,38 @@ test('точка с запятой в пути — отказ, а не кома�
   // Соседний путь по-прежнему собирается, и `;` в готовой команде не заводится.
   const ok = newSessionCommand('/home/user/projects/ccfzf');
   assert.ok(ok && !ok.includes(';'), ok);
+});
+
+test('новая сессия в занятом имени получает суффикс', () => {
+  // Кавычки навешиваются дважды (см. inDir), поэтому и в готовой команде имя
+  // ищем в экранированном виде — как в соседних тестах этого файла.
+  const cmd = newSessionCommand('/home/user/projects/api', ['api']);
+  assert.match(cmd, /claude -n '\\''api-2'\\''/);
+});
+
+test('свободное имя остаётся без суффикса', () => {
+  const cmd = newSessionCommand('/home/user/projects/api', ['другая']);
+  assert.match(cmd, /claude -n '\\''api'\\''/);
+});
+
+test('без списка занятых поведение прежнее', () => {
+  // Аргумент необязателен: вызов без него не должен ломаться — так зовут из
+  // тестов соседних функций и из старого кода.
+  assert.match(newSessionCommand('/home/user/projects/api'), /claude -n '\\''api'\\''/);
+});
+
+test('newSessionName отдаёт то же имя, что попадает в команду', () => {
+  // Имя нужно вызывающему отдельно: он помнит выданные имена, чтобы два ^N
+  // подряд не дали тёзок. Разойтись этим двум нельзя.
+  const taken = ['api'];
+  const name = newSessionName('/home/user/projects/api', taken);
+  assert.strictEqual(name, 'api-2');
+  assert.ok(newSessionCommand('/home/user/projects/api', taken).includes(`-n '\\''${name}'\\'''`));
+});
+
+test('путь с точкой с запятой отказывает и по имени тоже', () => {
+  // Отказ остаётся первым: Windows Terminal порежет такую команду на панели
+  // ещё до шелла, и никакое имя этого не спасает.
+  assert.strictEqual(newSessionCommand('/home/user/a;b', ['a;b']), '');
+  assert.strictEqual(newSessionName('/home/user/a;b', []), '');
 });
