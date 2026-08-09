@@ -290,12 +290,24 @@ fn home_dir() -> Option<std::ffi::OsString> {
     std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
 }
 
+/// Путь к config.yaml.
+///
+/// Общий для чтения (`load_config`) и записи (`save_config`/`write_config`):
+/// разойдись они в построении пути двумя копиями, один читал бы не тот файл,
+/// что другой пишет.
+fn config_path() -> Result<std::path::PathBuf, String> {
+    let home = home_dir().ok_or("neither HOME nor USERPROFILE is set")?;
+    Ok(std::path::Path::new(&home).join(".config/ccfzf-picker/config.yaml"))
+}
+
 #[tauri::command]
 fn load_config() -> Result<serde_json::Value, String> {
-    let Some(home) = home_dir() else {
+    // Нет ни HOME, ни USERPROFILE — не ошибка, а работа на умолчаниях, как и
+    // раньше: без этого предохранителя пикер на такой системе не поднялся бы
+    // вовсе.
+    let Ok(path) = config_path() else {
         return Ok(serde_json::Value::Null);
     };
-    let path = std::path::Path::new(&home).join(".config/ccfzf-picker/config.yaml");
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(serde_json::Value::Null),
@@ -304,27 +316,41 @@ fn load_config() -> Result<serde_json::Value, String> {
     serde_yaml::from_str(&text).map_err(|e| format!("bad yaml in {}: {e}", path.display()))
 }
 
-fn config_path() -> Result<std::path::PathBuf, String> {
-    let home = home_dir().ok_or("neither HOME nor USERPROFILE is set")?;
-    Ok(std::path::Path::new(&home).join(".config/ccfzf-picker/config.yaml"))
+/// Патч, обнуляющий ключ верхнего уровня, отклоняется явно.
+///
+/// `merge_patch` вложенные отображения сливает по ключам, а `null` считает
+/// «не отображением» и подменяет блок целиком — так пропал бы `mqtt.password`,
+/// которого форма настроек никогда не загружает и не присылает обратно.
+/// Сегодняшняя форма такого патча не пришлёт, но если пришлёт когда-нибудь —
+/// лучше внятный отказ здесь, чем молча стёртый пароль.
+fn reject_null_top_level(patch: &serde_json::Value) -> Result<(), String> {
+    if let Some(fields) = patch.as_object() {
+        for (key, value) in fields {
+            if value.is_null() {
+                return Err(format!(
+                    "патч не может обнулять ключ {key}: null заменил бы блок целиком и стёр бы то, чего форма не прислала (например, mqtt.password)"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
-/// Сохранить настройки, присланные окном настроек.
+/// Слить патч в config.yaml на диске.
 ///
-/// Патч, а не файл целиком: окно знает не про все ключи (`actions` оно только
-/// показывает), и перезапись целиком стёрла бы остальное. Слияние — в
-/// `config_file::merge_patch`.
+/// Отдельно от `save_config`: чистая файловая операция без `AppHandle`, её
+/// можно накрыть тестами во временном каталоге, не поднимая Tauri.
 ///
 /// Бэкап кладётся один раз, перед первой перезаписью: комментарии человека
 /// после неё не восстановить ничем, а класть `.bak` на каждое сохранение
 /// значило бы затирать его же вчерашним состоянием.
-#[tauri::command]
-fn save_config(app: tauri::AppHandle, patch: serde_json::Value) -> Result<(), String> {
-    let path = config_path()?;
+fn write_config(path: &std::path::Path, patch: &serde_json::Value) -> Result<(), String> {
+    reject_null_top_level(patch)?;
+
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     }
-    let existing = match std::fs::read_to_string(&path) {
+    let existing = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
@@ -335,10 +361,13 @@ fn save_config(app: tauri::AppHandle, patch: serde_json::Value) -> Result<(), St
     } else {
         serde_yaml::from_str(&existing).map_err(|e| format!("bad yaml in {}: {e}", path.display()))?
     };
-    config_file::merge_patch(&mut doc, &patch)?;
+    config_file::merge_patch(&mut doc, patch)?;
 
+    // Тем же условием, что и разбор чуть выше: файл из одних пробелов и
+    // переводов строки тоже «был пустым», и бэкапить в нём нечего — иначе он
+    // занял бы единственный слот `.bak` навсегда.
     let backup = path.with_extension("yaml.bak");
-    if !existing.is_empty() && !backup.exists() {
+    if !existing.trim().is_empty() && !backup.exists() {
         std::fs::write(&backup, &existing)
             .map_err(|e| format!("cannot write {}: {e}", backup.display()))?;
     }
@@ -348,11 +377,72 @@ fn save_config(app: tauri::AppHandle, patch: serde_json::Value) -> Result<(), St
     let text = format!("{}{}", config_file::HEADER, config_file::render(&doc)?);
     let tmp = path.with_extension("yaml.tmp");
     std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &path)
-        .map_err(|e| format!("cannot rename onto {}: {e}", path.display()))?;
-
-    apply_config(&app);
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        // Rename не удался — не оставлять временный файл валяться на диске.
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("cannot rename onto {}: {e}", path.display()));
+    }
     Ok(())
+}
+
+/// Сохранить настройки, присланные окном настроек.
+///
+/// Патч, а не файл целиком: окно знает не про все ключи (`actions` оно только
+/// показывает), и перезапись целиком стёрла бы остальное. Слияние — в
+/// `config_file::merge_patch`, файловая часть — в `write_config`.
+///
+/// Возвращает, встал ли хоткей пикера после применения и на какой
+/// комбинации: форма настроек (задача C6) обязана показать отказ на месте,
+/// если новую комбинацию уже занял кто-то другой. Событие `config-changed`
+/// этот факт нарочно не несёт — на его прежнее тело рассчитывает задача C7.
+#[tauri::command]
+fn save_config(app: tauri::AppHandle, patch: serde_json::Value) -> Result<serde_json::Value, String> {
+    let path = config_path()?;
+    write_config(&path, &patch)?;
+    let (hotkey_registered, hotkey_accelerator) = apply_config(&app);
+    Ok(serde_json::json!({
+        "hotkeyRegistered": hotkey_registered,
+        "hotkeyAccelerator": hotkey_accelerator,
+    }))
+}
+
+/// Поставить хоткей пикера из конфига.
+///
+/// Общая для старта (`setup`) и для сохранения настроек (`apply_config`):
+/// раньше это были две независимые копии с разной обработкой отказа, и
+/// правка одной не факт что дошла бы до другой.
+fn register_picker_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) -> (bool, String) {
+    let (picker_shortcut, accelerator) = picker_hotkey(config);
+    let registered = match app.global_shortcut().on_shortcut(picker_shortcut, |app, _sc, event| {
+        if event.state() == ShortcutState::Pressed {
+            toggle_picker(app);
+        }
+    }) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("ccfzf-picker: cannot register picker hotkey: {e}");
+            false
+        }
+    };
+    (registered, accelerator)
+}
+
+/// Пункт трея «показать»: хранится в состоянии приложения, чтобы
+/// `apply_config` мог поправить его подпись и акселератор после смены
+/// хоткея из окна настроек. Без этого трей продолжал бы обещать комбинацию,
+/// которая уже не слушается.
+struct ShowMenuItem(MenuItem<tauri::Wry>);
+
+/// Подпись и акселератор пункта трея — по тому же правилу, что и на старте:
+/// акселератор — украшение и показывается всегда, а работает ли клавиша на
+/// самом деле, говорит подпись (`show_item_label`).
+fn update_show_item(item: &MenuItem<tauri::Wry>, registered: bool, accelerator: &str) {
+    if let Err(e) = item.set_text(show_item_label(registered)) {
+        eprintln!("ccfzf-picker: cannot update tray label: {e}");
+    }
+    if let Err(e) = item.set_accelerator(Some(accelerator)) {
+        eprintln!("ccfzf-picker: cannot show hotkey {accelerator} in tray menu: {e}");
+    }
 }
 
 /// Что делает свежий конфиг действующим прямо сейчас.
@@ -360,8 +450,22 @@ fn save_config(app: tauri::AppHandle, patch: serde_json::Value) -> Result<(), St
 /// Перезапуск ради настройки — плохая цена, а хоткеи и хост опроса меняются
 /// без него. Хоткеи снимаются все разом: следить, какой именно из них поменял
 /// человек, значило бы держать вторую копию списка рядом с конфигом.
-fn apply_config(app: &tauri::AppHandle) {
-    let config = load_config().unwrap_or(serde_json::Value::Null);
+///
+/// Возвращает то же, что и `register_picker_hotkey`: встал ли хоткей пикера
+/// и на какой комбинации — этим отчитывается `save_config` перед формой
+/// настроек.
+fn apply_config(app: &tauri::AppHandle) -> (bool, String) {
+    let config = match load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            // Прежде здесь молча подставлялся Null: пустой sshHost уводит
+            // поток опроса в простой, а хоткеи откатываются на умолчания —
+            // и без этой строки узнать о причине можно было бы только по
+            // внезапно замолчавшему списку.
+            eprintln!("ccfzf-picker: bad config.yaml, falling back to defaults: {e}");
+            serde_json::Value::Null
+        }
+    };
 
     if let Some(poller) = app.try_state::<poller::Poller>() {
         let ssh_host = config
@@ -377,17 +481,15 @@ fn apply_config(app: &tauri::AppHandle) {
     }
 
     let _ = app.global_shortcut().unregister_all();
-    let (picker_shortcut, _) = picker_hotkey(&config);
-    if let Err(e) = app.global_shortcut().on_shortcut(picker_shortcut, |app, _sc, event| {
-        if event.state() == ShortcutState::Pressed {
-            toggle_picker(app);
-        }
-    }) {
-        eprintln!("ccfzf-picker: cannot re-register picker hotkey: {e}");
-    }
+    let (registered, accelerator) = register_picker_hotkey(app, &config);
     register_project_hotkeys(app, &config);
 
+    if let Some(item) = app.try_state::<ShowMenuItem>() {
+        update_show_item(&item.0, registered, &accelerator);
+    }
+
     let _ = app.emit("config-changed", ());
+    (registered, accelerator)
 }
 
 /// Открыть окно настроек.
@@ -399,6 +501,9 @@ fn apply_config(app: &tauri::AppHandle) {
 #[tauri::command]
 fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
+        // Свёрнутое окно один `show()` с `set_focus()` на Windows не
+        // поднимает — надо явно снять минимизацию.
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
         return Ok(());
@@ -678,7 +783,11 @@ fn main() {
                 }
             }
 
-            let (picker_shortcut, hotkey_accelerator) = picker_hotkey(&config);
+            // Хоткей пикера ставится общей с `apply_config` функцией: раньше
+            // здесь была вторая копия того же кода со своей обработкой
+            // отказа, и любая будущая правка регистрации требовала бы двух
+            // правок.
+            //
             // Занятый хоткей — не повод не запуститься. Клавишу мог отобрать и
             // сосед по системе, и сама система (так Windows держит за собой
             // `Win+Shift+T`, прежнее умолчание пикера), а
@@ -689,21 +798,8 @@ fn main() {
             // или окно осталось только на иконке. Сообщение в stderr эту
             // разницу тоже пишет, но stderr у приложения из Finder не читает
             // никто.
-            let hotkey_registered = match app
-                .global_shortcut()
-                .on_shortcut(picker_shortcut, |app, _sc, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        toggle_picker(app);
-                    }
-                }) {
-                Ok(()) => true,
-                Err(e) => {
-                    eprintln!(
-                        "ccfzf-picker: cannot register picker hotkey: {e}; окно поднимается из трея"
-                    );
-                    false
-                }
-            };
+            let (hotkey_registered, hotkey_accelerator) =
+                register_picker_hotkey(app.handle(), &config);
 
             // Меню трея строится здесь, а не в начале setup: ему нужны и
             // хоткей, и то, чем кончилась его регистрация.
@@ -729,6 +825,10 @@ fn main() {
                     MenuItem::with_id(app, "show", label, true, None::<&str>)?
                 }
             };
+            // Сохраняется в состоянии, чтобы `apply_config` мог поправить эту
+            // же подпись и акселератор после сохранения настроек — без
+            // пересборки всего меню на каждое сохранение.
+            app.manage(ShowMenuItem(show_item.clone()));
             let quit_item = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
             TrayIconBuilder::new()
@@ -769,6 +869,90 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Свой каталог во временной директории на каждый тест: `write_config`
+    /// трогает реальную файловую систему, и тесты не должны видеть файлы друг
+    /// друга при параллельном запуске.
+    fn temp_config_path(tag: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir()
+            .join(format!("ccfzf-picker-test-{}-{tag}-{n}", std::process::id()))
+            .join("config.yaml")
+    }
+
+    /// Конфига нет вовсе — `write_config` создаёт и каталог, и файл, а не
+    /// падает на отсутствующем `.config/ccfzf-picker`.
+    #[test]
+    fn write_config_creates_missing_directory_and_file() {
+        let path = temp_config_path("missing-dir");
+        assert!(!path.parent().unwrap().exists());
+        write_config(&path, &serde_json::json!({"sshHost": "host"})).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("host"), "{text}");
+    }
+
+    /// Нетронутое (в том числе `actions`, для которого редактора ещё нет)
+    /// переживает запись через `write_config` — не только через голый
+    /// `merge_patch`, который тестирует C3.
+    #[test]
+    fn write_config_keeps_untouched_keys() {
+        let path = temp_config_path("untouched");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "sshHost: old\nactions:\n  - id: finder\n    argv: ['open']\n").unwrap();
+        write_config(&path, &serde_json::json!({"sshHost": "new"})).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("new"), "{text}");
+        assert!(!text.contains("old"), "{text}");
+        assert!(text.contains("finder"), "чужой ключ пережил запись: {text}");
+    }
+
+    /// Бэкап кладётся один раз и не затирается вторым сохранением: иначе
+    /// второе сохранение стёрло бы единственную копию исходного файла
+    /// собственным, уже применённым, состоянием.
+    #[test]
+    fn write_config_backs_up_once() {
+        let path = temp_config_path("backup-once");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "sshHost: original\n").unwrap();
+
+        write_config(&path, &serde_json::json!({"sshHost": "first"})).unwrap();
+        let backup = path.with_extension("yaml.bak");
+        let backup_text = std::fs::read_to_string(&backup).unwrap();
+        assert!(backup_text.contains("original"), "{backup_text}");
+
+        write_config(&path, &serde_json::json!({"sshHost": "second"})).unwrap();
+        let backup_text = std::fs::read_to_string(&backup).unwrap();
+        assert!(
+            backup_text.contains("original"),
+            "второе сохранение не должно тронуть бэкап: {backup_text}"
+        );
+    }
+
+    /// Файл из одних пробелов — тоже «был пустым»: бэкап ему не полагается,
+    /// как и файлу, которого нет вовсе.
+    #[test]
+    fn write_config_does_not_back_up_whitespace_only_file() {
+        let path = temp_config_path("whitespace-only");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "   \n\n").unwrap();
+        write_config(&path, &serde_json::json!({"sshHost": "host"})).unwrap();
+        assert!(!path.with_extension("yaml.bak").exists());
+    }
+
+    /// `mqtt: null` в патче отклоняется, а не подменяет блок целиком — иначе
+    /// `merge_patch` стёр бы `mqtt.password` молча.
+    #[test]
+    fn write_config_rejects_null_top_level_value() {
+        let path = temp_config_path("null-patch");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "mqtt:\n  host: broker\n  password: secret\n").unwrap();
+        let err = write_config(&path, &serde_json::json!({"mqtt": null})).unwrap_err();
+        assert!(err.contains("mqtt"), "{err}");
+        // Файл не тронут отказавшимся патчем — пароль на месте.
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("secret"), "{text}");
+    }
 
     /// Клик по иконке в трее гасит пикер, а не мигает им.
     ///
