@@ -52,6 +52,31 @@ fn picker_toggle(visible: bool, just_hidden: bool) -> bool {
     !visible && !just_hidden
 }
 
+/// `hideOnBlur` из конфига. Умолчание — «гасить»: так пикер вёл себя всегда, и
+/// отсутствие ключа не должно оставлять окно висеть поверх чужой работы.
+fn hide_on_blur(config: &serde_json::Value) -> bool {
+    config
+        .get("hideOnBlur")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+/// То же значение, но действующее прямо сейчас.
+///
+/// Спрашивается в обработчике потери фокуса, а не при его регистрации, потому
+/// что снять уже поставленный `on_window_event` в Tauri нечем: решай при
+/// регистрации — и переключатель в окне настроек молчал бы до перезапуска.
+/// Обработчик поэтому стоит всегда и на каждое событие смотрит на флаг, который
+/// переставляет `apply_config` (см. `HideOnBlur`).
+///
+/// Состояния может не быть только до конца `setup`; тогда действует то же
+/// умолчание, что и у конфига, — «гасить».
+fn hide_on_blur_now(app: &tauri::AppHandle) -> bool {
+    app.try_state::<HideOnBlur>()
+        .map(|s| s.0.load(Ordering::Relaxed))
+        .unwrap_or(true)
+}
+
 /// Окно скрыто — сказать об этом фронтенду.
 ///
 /// Опрос `ccfzf --state` идёт по ssh на другую машину и должен прекращаться
@@ -63,23 +88,6 @@ fn picker_toggle(visible: bool, just_hidden: bool) -> bool {
 /// Уже скрытое окно не гасится повторно: иначе Esc даёт две посылки
 /// `picker-hidden` — сначала от явного скрытия, потом от потери фокуса, которая
 /// заходит сюда же.
-/// `hideOnBlur` из конфига. Умолчание — «гасить»: так пикер вёл себя всегда, и
-/// отсутствие ключа не должно оставлять окно висеть поверх чужой работы.
-fn hide_on_blur(config: &serde_json::Value) -> bool {
-    config
-        .get("hideOnBlur")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true)
-}
-
-/// То же значение, но действующее прямо сейчас. Состояния может не быть только
-/// до конца `setup`; тогда действует то же умолчание.
-fn hide_on_blur_now(app: &tauri::AppHandle) -> bool {
-    app.try_state::<HideOnBlur>()
-        .map(|s| s.0.load(Ordering::Relaxed))
-        .unwrap_or(true)
-}
-
 fn hide_window(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("picker") else { return };
     if !window.is_visible().unwrap_or(false) {
