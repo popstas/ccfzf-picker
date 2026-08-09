@@ -1462,7 +1462,12 @@
         sort: sortMode, toggles,
       });
       sortMode = ui.sort;
-      toggles = ui.toggles;
+      // normalizeUiState теперь отдаёт две оси на галку (C1); эта строка ещё
+      // рисует список по-старому, одной галкой на колонку, и знает только про
+      // ось list. Рисование по обеим осям — задача C2, здесь же держим
+      // потребителя рабочим: без listColumns каждая колонка получила бы
+      // truthy-объект вместо булева значения и показывалась бы всегда.
+      toggles = window.UiState.listColumns(ui.toggles);
     } catch (e) {
       error = String(e);
     }
