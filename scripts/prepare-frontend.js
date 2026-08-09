@@ -29,6 +29,7 @@ const FILES = [
   'frontend-src/project-list.js',
   'frontend-src/picker-list-sync.js',
   'frontend-src/open-strategy.js',
+  'frontend-src/session-name.js',
 ];
 
 fs.mkdirSync(OUT, { recursive: true });
