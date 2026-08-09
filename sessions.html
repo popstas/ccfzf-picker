@@ -1115,6 +1115,33 @@
   }
 
   /**
+   * Имена, которые сейчас нельзя занимать.
+   *
+   * Две части. Первая — заголовки живых сессий из последнего ответа: имя
+   * сессии и есть заголовок её окна, по нему оконный трекер привязывает
+   * сессию к слоту, и мешают друг другу именно живые тёзки.
+   *
+   * Вторая — имена, которые пикер выдал сам за последнюю минуту. Без неё два
+   * `^N` подряд, быстрее опроса, дали бы одно имя дважды: ответ агрегатора
+   * ещё не знает о первой сессии. Минута взята по верхнему такту фонового
+   * опроса — за это время сессия попадает в ответ при любом раскладе.
+   */
+  const issuedNames = new Map();
+  const ISSUED_TTL_MS = 60_000;
+
+  function takenSessionNames() {
+    const now = Date.now();
+    for (const [name, at] of issuedNames) {
+      if (now - at > ISSUED_TTL_MS) issuedNames.delete(name);
+    }
+    const live = lastSessions
+      .filter(s => s && s.live)
+      .map(s => s && s.title)
+      .filter(t => typeof t === 'string' && t);
+    return live.concat(Array.from(issuedNames.keys()));
+  }
+
+  /**
    * Поднять новую сессию в каталоге строки.
    *
    * Один вход на три повода: Enter на строке проекта, `^N` на любой строке и
@@ -1126,10 +1153,11 @@
    */
   async function newSession(cwd) {
     if (!cwd || sshHostMissing()) return;
+    const taken = takenSessionNames();
     // Пустая команда — отказ OpenStrategy, а не поломка: путь с `;` Windows
     // Terminal порежет на панели ещё до шелла. Сказать об этом обязательно —
     // иначе кнопка молча ничего не делает.
-    const remote = window.OpenStrategy.newSessionCommand(cwd);
+    const remote = window.OpenStrategy.newSessionCommand(cwd, taken);
     if (!remote) {
       error = `В пути есть «;», такой каталог открыть нечем: ${cwd}`;
       render();
@@ -1147,6 +1175,10 @@
       render();
       return;
     }
+    // Имя запоминается только после удачного запуска: занять его на отказе
+    // значило бы отдать следующей сессии `-2` без всякой первой.
+    const name = window.OpenStrategy.newSessionName(cwd, taken);
+    if (name) issuedNames.set(name, Date.now());
     invoke('hide_picker');
   }
 
