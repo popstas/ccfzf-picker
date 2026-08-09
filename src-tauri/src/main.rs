@@ -11,6 +11,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod mqtt;
+mod poller;
 mod proc;
 mod state_source;
 
