@@ -87,6 +87,25 @@ test('нелогические оси заменяются умолчаниям�
   assert.deepStrictEqual(ui.toggles.showPrompt, { list: true, statusline: true });
 });
 
+test('смешанный toggles разбирается по ключам независимо', () => {
+  // В одном файле встречаются сразу все формы: старая плоская галка (файл не
+  // трогали со времён миграции), уже поднятая пара (файл переписан свежим
+  // пикером) и мусор от неудачной ручной правки. normalizeToggle решает
+  // каждый ключ отдельно, и одна форма не должна ломать разбор соседней.
+  const ui = normalizeUiState({
+    toggles: {
+      showPrompt: true, // старая плоская форма
+      showId: { list: true, statusline: false }, // уже двухосная
+      showCost: 'да', // мусор — ни булево, ни объект
+    },
+  }, DEFAULTS);
+  assert.deepStrictEqual(ui.toggles, {
+    showPrompt: { list: true, statusline: true },
+    showId: { list: true, statusline: false },
+    showCost: { list: true, statusline: false },
+  });
+});
+
 test('listColumns отдаёт плоскую карту для отрисовки', () => {
   // Рисовальщики строк (session-glyph) знают только «показывать колонку или
   // нет» и не должны узнавать про статуслайн: у них другая забота.

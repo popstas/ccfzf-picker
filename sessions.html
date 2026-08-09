@@ -387,6 +387,15 @@
     // показал бы пустоту вместо сессий — с виду неотличимо от сломанного ssh.
     onlyWindow: false,
   };
+  // Достоверное состояние галок в двухосной форме (`{list, statusline}` на
+  // ключ) — то, что уходит в `save_ui` и приходит из `load_ui`. `toggles`
+  // выше остаётся плоской картой для рисования и для чекбоксов статуслайна
+  // (C2 их ещё не различает); если писать в файл саму `toggles`, ось
+  // `statusline` при каждом сохранении схлопывалась бы в умолчание — этот
+  // объект и существует, чтобы было что сохранять вместо неё.
+  let uiToggles = Object.fromEntries(
+    Object.entries(toggles).map(([key, list]) => [key, { list, statusline: false }]),
+  );
   let menuOpen = false;
   let menuActions = [];
   let menuActive = 0;
@@ -456,6 +465,10 @@
     });
     input.addEventListener('change', () => {
       toggles[key] = input.checked;
+      // И в достоверный объект — той же осью `list`. Без этого пары ключей
+      // с сохранённой на диске `statusline: true` теряли бы её от одного
+      // клика по совсем другому чекбоксу: saveUi() пишет uiToggles целиком.
+      uiToggles[key] = { ...(uiToggles[key] || { statusline: false }), list: input.checked };
       render();
       saveUi();
     });
@@ -478,7 +491,10 @@
    * решил бы, что вид запомнен, и удивился бы после перезапуска.
    */
   function saveUi() {
-    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, toggles) })
+    // uiToggles, не toggles: тот плоский и не помнит ось statusline — запись
+    // плоской картой обнулила бы её при первом же save_ui, включая тот, что
+    // зовётся сменой сортировки (ниже, не только из чекбокса).
+    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles) })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -1458,16 +1474,20 @@
     // Вид списка — до первой отрисовки: иначе первый показ рисуется чужой
     // сортировкой и перекладывается на глазах.
     try {
+      // Умолчания — из uiToggles, не из плоской toggles: иначе normalizeUiState
+      // увидела бы булевы умолчания вместо {list, statusline}, и уже сама
+      // считала бы, что statusline у всех ключей по умолчанию false (что
+      // сегодня и так верно, но с сохранением объекта, а не булевой карты).
       const ui = window.UiState.normalizeUiState(await invoke('load_ui'), {
-        sort: sortMode, toggles,
+        sort: sortMode, toggles: uiToggles,
       });
       sortMode = ui.sort;
-      // normalizeUiState теперь отдаёт две оси на галку (C1); эта строка ещё
-      // рисует список по-старому, одной галкой на колонку, и знает только про
-      // ось list. Рисование по обеим осям — задача C2, здесь же держим
-      // потребителя рабочим: без listColumns каждая колонка получила бы
-      // truthy-объект вместо булева значения и показывалась бы всегда.
-      toggles = window.UiState.listColumns(ui.toggles);
+      uiToggles = ui.toggles;
+      // Рисование и чекбоксы статуслайна знают только «показывать колонку или
+      // нет» (ось list) — рисование по обеим осям делает задача C2. toggles
+      // тут производная, а не источник: источник — uiToggles, и именно его,
+      // а не эту плоскую карту, пишет saveUi().
+      toggles = window.UiState.listColumns(uiToggles);
     } catch (e) {
       error = String(e);
     }

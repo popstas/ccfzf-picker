@@ -572,3 +572,43 @@ test('Enter на строке снимка уходит по трём разны
   assert.strictEqual(rows[2].snapshotId, 'snap-1');
   assert.deepStrictEqual(chooseWith(rows, 2), [['restoreSnapshot', 'snap-1', ['bbb']]]);
 });
+
+// ── saveUi сохраняет достоверный uiToggles, а не плоскую toggles (C1, round 1 fix) ──
+//
+// Ревью нашло: если saveUi() отправляет в save_ui плоскую карту вместо
+// двухосного uiToggles, ось statusline у любого ключа схлопывается в
+// умолчание при первом же сохранении — не только по клику своего чекбокса,
+// но и по смене сортировки. Тест вычитывает настоящий saveUi из страницы (тем
+// же приёмом, что renderProjects и choose выше) и проверяет, что сохранённый
+// объект правда двухосный и ось statusline из uiToggles никуда не делась.
+function saveUiWith(uiToggles) {
+  const source = SESSIONS_HTML.match(/\n {2}function saveUi\(\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(source, 'saveUi не найден в sessions.html — тест сторожит не то');
+  const calls = [];
+  const ctx = {
+    window: { UiState: require('../frontend-src/ui-state') },
+    invoke: (cmd, args) => { calls.push(args); return Promise.resolve(); },
+    error: null,
+    render: () => {},
+    sortMode: 'name',
+    uiToggles,
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${source[0]}\nsaveUi();`, ctx, { filename: 'sessions.html' });
+  return calls;
+}
+
+test('saveUi пишет двухосный uiToggles, ось statusline не теряется', () => {
+  const calls = saveUiWith({
+    showPrompt: { list: true, statusline: true },
+    showId: { list: false, statusline: false },
+  });
+  assert.strictEqual(calls.length, 1);
+  assert.deepStrictEqual(calls[0].ui, {
+    sort: 'name',
+    toggles: {
+      showPrompt: { list: true, statusline: true },
+      showId: { list: false, statusline: false },
+    },
+  });
+});
