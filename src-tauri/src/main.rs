@@ -304,6 +304,119 @@ fn load_config() -> Result<serde_json::Value, String> {
     serde_yaml::from_str(&text).map_err(|e| format!("bad yaml in {}: {e}", path.display()))
 }
 
+fn config_path() -> Result<std::path::PathBuf, String> {
+    let home = home_dir().ok_or("neither HOME nor USERPROFILE is set")?;
+    Ok(std::path::Path::new(&home).join(".config/ccfzf-picker/config.yaml"))
+}
+
+/// Сохранить настройки, присланные окном настроек.
+///
+/// Патч, а не файл целиком: окно знает не про все ключи (`actions` оно только
+/// показывает), и перезапись целиком стёрла бы остальное. Слияние — в
+/// `config_file::merge_patch`.
+///
+/// Бэкап кладётся один раз, перед первой перезаписью: комментарии человека
+/// после неё не восстановить ничем, а класть `.bak` на каждое сохранение
+/// значило бы затирать его же вчерашним состоянием.
+#[tauri::command]
+fn save_config(app: tauri::AppHandle, patch: serde_json::Value) -> Result<(), String> {
+    let path = config_path()?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+
+    let mut doc: serde_yaml::Value = if existing.trim().is_empty() {
+        serde_yaml::Value::Null
+    } else {
+        serde_yaml::from_str(&existing).map_err(|e| format!("bad yaml in {}: {e}", path.display()))?
+    };
+    config_file::merge_patch(&mut doc, &patch)?;
+
+    let backup = path.with_extension("yaml.bak");
+    if !existing.is_empty() && !backup.exists() {
+        std::fs::write(&backup, &existing)
+            .map_err(|e| format!("cannot write {}: {e}", backup.display()))?;
+    }
+
+    // Через временный файл и переименование, как save_json: читатель никогда
+    // не видит половину файла.
+    let text = format!("{}{}", config_file::HEADER, config_file::render(&doc)?);
+    let tmp = path.with_extension("yaml.tmp");
+    std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &path)
+        .map_err(|e| format!("cannot rename onto {}: {e}", path.display()))?;
+
+    apply_config(&app);
+    Ok(())
+}
+
+/// Что делает свежий конфиг действующим прямо сейчас.
+///
+/// Перезапуск ради настройки — плохая цена, а хоткеи и хост опроса меняются
+/// без него. Хоткеи снимаются все разом: следить, какой именно из них поменял
+/// человек, значило бы держать вторую копию списка рядом с конфигом.
+fn apply_config(app: &tauri::AppHandle) {
+    let config = load_config().unwrap_or(serde_json::Value::Null);
+
+    if let Some(poller) = app.try_state::<poller::Poller>() {
+        let ssh_host = config
+            .get("sshHost")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let background = config
+            .get("backgroundRefresh")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        poller.set_config(ssh_host, background);
+    }
+
+    let _ = app.global_shortcut().unregister_all();
+    let (picker_shortcut, _) = picker_hotkey(&config);
+    if let Err(e) = app.global_shortcut().on_shortcut(picker_shortcut, |app, _sc, event| {
+        if event.state() == ShortcutState::Pressed {
+            toggle_picker(app);
+        }
+    }) {
+        eprintln!("ccfzf-picker: cannot re-register picker hotkey: {e}");
+    }
+    register_project_hotkeys(app, &config);
+
+    let _ = app.emit("config-changed", ());
+}
+
+/// Открыть окно настроек.
+///
+/// Создаётся лениво: второй webview на старте стоил бы памяти каждому, кто в
+/// настройки не заходит. `hideOnBlur` к нему не привязан намеренно — в
+/// настройках переключаются между окнами, и гаснущая форма теряла бы
+/// незаписанное.
+#[tauri::command]
+fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "settings",
+        tauri::WebviewUrl::App("settings.html".into()),
+    )
+    .title("Настройки ccfzf-picker")
+    .inner_size(820.0, 600.0)
+    .center()
+    .resizable(true)
+    .build()
+    .map_err(|e| format!("cannot open settings window: {e}"))?;
+    Ok(())
+}
+
 /// Запуск терминала. Открепляется сразу: пикер не ждёт, пока человек
 /// закончит работать в сессии, и не держит его вывод.
 ///
@@ -470,6 +583,36 @@ fn show_item_label(hotkey_registered: bool) -> &'static str {
     }
 }
 
+/// Проектный хоткей открывает новую сессию мимо списка, поэтому окно пикера не
+/// поднимается: наружу уходит только событие.
+fn register_project_hotkeys(app: &tauri::AppHandle, config: &serde_json::Value) {
+    let projects = config
+        .get("projects")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for item in projects {
+        let (Some(path), Some(hotkey)) = (
+            item.get("path").and_then(|v| v.as_str()),
+            item.get("hotkey").and_then(|v| v.as_str()),
+        ) else { continue };
+        if hotkey.is_empty() { continue }
+        let Ok(sc) = hotkey.parse::<Shortcut>() else {
+            eprintln!("ccfzf-picker: cannot parse hotkey {hotkey}");
+            continue;
+        };
+        let handle = app.clone();
+        let path = path.to_string();
+        if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
+            if event.state() == ShortcutState::Pressed {
+                let _ = handle.emit("project-hotkey", path.clone());
+            }
+        }) {
+            eprintln!("ccfzf-picker: cannot register hotkey {hotkey}: {e}");
+        }
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(LastToggle(Mutex::new(None)))
@@ -483,7 +626,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             hide_picker, fetch_state, poll_now, spawn_detached, load_seen, save_seen, load_config,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
-            restore_snapshot_mqtt, open_session_mqtt
+            restore_snapshot_mqtt, open_session_mqtt, save_config, open_settings
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
@@ -616,33 +759,7 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Проектный хоткей открывает новую сессию мимо списка, поэтому
-            // окно пикера не поднимается: наружу уходит только событие.
-            let projects = config
-                .get("projects")
-                .and_then(|p| p.as_array())
-                .cloned()
-                .unwrap_or_default();
-            for item in projects {
-                let (Some(path), Some(hotkey)) = (
-                    item.get("path").and_then(|v| v.as_str()),
-                    item.get("hotkey").and_then(|v| v.as_str()),
-                ) else { continue };
-                if hotkey.is_empty() { continue }
-                let Ok(sc) = hotkey.parse::<Shortcut>() else {
-                    eprintln!("ccfzf-picker: cannot parse hotkey {hotkey}");
-                    continue;
-                };
-                let handle = app.handle().clone();
-                let path = path.to_string();
-                if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        let _ = handle.emit("project-hotkey", path.clone());
-                    }
-                }) {
-                    eprintln!("ccfzf-picker: cannot register hotkey {hotkey}: {e}");
-                }
-            }
+            register_project_hotkeys(app.handle(), &config);
             Ok(())
         })
         .run(tauri::generate_context!())
