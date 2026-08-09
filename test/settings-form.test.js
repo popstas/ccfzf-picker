@@ -29,6 +29,34 @@ test('конфиг раскладывается по полям формы', () 
   assert.strictEqual(fields['mqtt.password'], '');
 });
 
+test('галка без ключа в конфиге показывает своё умолчание, а не false', () => {
+  // onlyLive, hideOnBlur и backgroundRefresh при отсутствии ключа считаются
+  // включёнными — так их читают и DEFAULTS в config-shape.js, и Rust через
+  // unwrap_or(true). Пустая галка показывала бы выключенным то, что работает
+  // включённым, и проверить это можно было бы только по поведению пикера.
+  const fields = configToFields({ sshHost: 'host' });
+  for (const id of ['onlyLive', 'hideOnBlur', 'backgroundRefresh']) {
+    assert.strictEqual(fields[id], true, id);
+  }
+  // А те, у кого умолчание false, остаются пустыми: незнание про ту сторону
+  // ведёт к resume, а не к перехвату чужого процесса под сигналом.
+  assert.strictEqual(fields['caps.reptyr'], false);
+  assert.strictEqual(fields['caps.takeover'], false);
+});
+
+test('умолчание галки не уезжает в патч само по себе', () => {
+  // Иначе первое же сохранение вписало бы человеку в config.yaml три ключа,
+  // которых он не трогал, — а файл этот ведёт окно и комментарии в нём при
+  // перезаписи теряются. Снятая галка при этом обязана дойти.
+  const original = { sshHost: 'host' };
+  const fields = configToFields(original);
+  assert.deepStrictEqual(fieldsToPatch(fields, original), {});
+  assert.deepStrictEqual(
+    fieldsToPatch({ ...fields, hideOnBlur: false }, original),
+    { hideOnBlur: false },
+  );
+});
+
 test('в патч уходит только изменённое', () => {
   const original = { sshHost: 'host', onlyLive: true };
   const fields = configToFields(original);

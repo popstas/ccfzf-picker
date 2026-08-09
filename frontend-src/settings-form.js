@@ -33,9 +33,10 @@
         { id: 'terminal.file', label: 'Терминал', type: 'text' },
         { id: 'terminal.args', label: 'Аргументы терминала', type: 'lines',
           hint: 'По одному на строку — запятая встречается в самих аргументах.' },
-        { id: 'onlyLive', label: 'Только работающие сессии', type: 'bool' },
-        { id: 'hideOnBlur', label: 'Гасить окно при потере фокуса', type: 'bool' },
+        { id: 'onlyLive', label: 'Только работающие сессии', type: 'bool', default: true },
+        { id: 'hideOnBlur', label: 'Гасить окно при потере фокуса', type: 'bool', default: true },
         { id: 'backgroundRefresh', label: 'Опрашивать при закрытом окне', type: 'bool',
+          default: true,
           hint: 'Держит свежим дамп агрегатора: с него живёт панель openHASP.' },
         { id: 'caps.reptyr', label: 'Разрешить перенос процесса (reptyr)', type: 'bool' },
         { id: 'caps.takeover', label: 'Разрешить перехват сессии', type: 'bool' },
@@ -85,10 +86,23 @@
     node[keys[keys.length - 1]] = value;
   }
 
-  function emptyFor(type) {
-    if (type === 'bool') return false;
-    if (type === 'number') return '';
-    if (type === 'projects') return [];
+  /**
+   * Чем поле заполняется, когда ключа в конфиге нет.
+   *
+   * У `bool` это `field.default`, а не `false`: `onlyLive`, `hideOnBlur` и
+   * `backgroundRefresh` при отсутствии ключа считаются включёнными — так их
+   * читают и `DEFAULTS` в config-shape.js, и Rust через `unwrap_or(true)`.
+   * Пустая галка показывала бы выключенным то, что работает включённым, и
+   * проверить это можно было бы только по поведению пикера.
+   *
+   * Умолчание объявлено здесь, а не взято из `normalizeConfig`: та подставила
+   * бы заодно и остальные — писанные под macOS (`terminal.file` — kitty), — и
+   * первое же сохранение вписало бы их человеку в config.yaml.
+   */
+  function emptyFor(field) {
+    if (field.type === 'bool') return Boolean(field.default);
+    if (field.type === 'number') return '';
+    if (field.type === 'projects') return [];
     return '';
   }
 
@@ -98,7 +112,7 @@
     // каждое открытие настроек, а показывать его незачем. Пустое поле значит
     // «оставить прежний» — так и написано в подсказке.
     if (field.type === 'password') return '';
-    if (value === undefined || value === null) return emptyFor(field.type);
+    if (value === undefined || value === null) return emptyFor(field);
     if (field.type === 'bool') return Boolean(value);
     if (field.type === 'lines') return (Array.isArray(value) ? value : []).join('\n');
     if (field.type === 'projects') {
