@@ -42,6 +42,7 @@
         .status-checks {
             display: flex; align-items: center; gap: 12px; margin-left: auto;
         }
+        #settings-button { margin-left: auto; cursor: pointer; padding: 0 2px; }
         .status-check {
             display: flex; align-items: center; gap: 6px;
             cursor: pointer; color: #7d838c;
@@ -247,6 +248,8 @@
   <!-- Наполняется из TOGGLE_CHECKS: разметка и обработчики не должны
        расходиться в именах ключей. -->
   <span class="status-checks" id="status-checks"></span>
+  <!-- Справа и последним: это не часть ряда галок, а выход в другое окно. -->
+  <span id="settings-button" title="Настройки (Ctrl+,)"><span class="icon">⚙</span></span>
 </div>
 <div id="actions-backdrop" aria-hidden="true">
   <div id="actions-menu" role="menu">
@@ -424,6 +427,7 @@
   const sortControl = document.getElementById('sort-control');
   const sortLabel = document.getElementById('sort-label');
   const statusChecks = document.getElementById('status-checks');
+  const settingsButton = document.getElementById('settings-button');
   const menuHint = document.getElementById('menu-hint');
   const actionsBackdrop = document.getElementById('actions-backdrop');
   const actionsTitle = document.getElementById('actions-title');
@@ -482,6 +486,13 @@
   }
 
   renderChecks();
+
+  // Клик по шестерёнке не должен всплывать до statusline: там висит смена
+  // сортировки, и открытие настроек заодно крутило бы её.
+  settingsButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    invoke('open_settings').catch((err) => { error = String(err); render(); });
+  });
 
   function paintToggles() {
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
@@ -1324,6 +1335,14 @@
       else if (!(e.ctrlKey || e.metaKey || e.altKey)) { e.preventDefault(); }
       return;
     }
+    // `,` вместе с Ctrl или Cmd — общесистемная привычка открывать настройки.
+    // Сверяется e.code: в русской раскладке на этой клавише «б», и e.key
+    // пришёл бы им.
+    if ((e.ctrlKey || e.metaKey) && e.code === 'Comma') {
+      e.preventDefault();
+      invoke('open_settings').catch((err) => { error = String(err); render(); });
+      return;
+    }
     // Shift и Alt исключены во всех трёх встроенных ветках ниже: isReserved в
     // action-hotkey.js занимает за окном только форму «один Ctrl или Cmd плюс
     // буква», то есть `Ctrl+Shift+A` человек вправе назначить своему действию.
@@ -1515,6 +1534,38 @@
 
     // Ответ агрегатора приезжает событием: опросом распоряжается Rust.
     await listen('state', (event) => applyState(event.payload));
+
+    // Настройки правит другое окно, и своего ui.json пикер сам не перечитает.
+    await listen('ui-changed', async () => {
+      try {
+        // Умолчания — из uiToggles, а не из плоской toggles: та же причина,
+        // что и при первой загрузке — иначе ось statusline у нетронутых
+        // человеком ключей молча обнулилась бы при следующем saveUi().
+        const ui = window.UiState.normalizeUiState(await invoke('load_ui'), {
+          sort: sortMode, toggles: uiToggles,
+        });
+        sortMode = ui.sort;
+        uiToggles = ui.toggles;
+        toggles = window.UiState.listColumns(uiToggles);
+      } catch (e) {
+        error = String(e);
+      }
+      // Набор вынесенных в статуслайн галок мог измениться — разметку чекбоксов
+      // надо собрать заново, а не просто проставить отметки.
+      renderChecks();
+      regroup();
+    });
+
+    // Хоткеи и хост опроса Rust уже переставил сам; здесь остаётся то, что
+    // читает страница, — терминал, пути, действия, caps.
+    await listen('config-changed', async () => {
+      try {
+        CONFIG = window.ConfigShape.normalizeConfig(await invoke('load_config'));
+      } catch (e) {
+        error = String(e);
+      }
+      regroup();
+    });
 
     // Fired by Rust every time the window is shown.
     await listen('picker-shown', beginShow);
