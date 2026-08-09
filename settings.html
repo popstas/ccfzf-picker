@@ -74,6 +74,17 @@
   let config = {};
   let fields = {};
   let ui = UI_DEFAULTS;
+  // Что человек правил именно в этом окне: ключ галки -> набор осей.
+  //
+  // Нужно потому, что ui.json пишут двое. Окно настроек читает файл один раз
+  // при загрузке, а `open_settings` переиспользует уже созданное окно и
+  // страницу не перезагружает — снимок в `ui` стареет ровно настолько, надолго
+  // ли окно осталось открытым. Пикер тем временем пишет тот же файл своим
+  // `saveUi()` (галка в статуслайне, смена сортировки) и настройкам об этом не
+  // сообщает: событие `ui-changed` идёт только отсюда к нему. Сохранять
+  // снимок целиком значило бы откатывать чужую правку, да ещё и рассылать
+  // пикеру приказ перечитать этот откат.
+  const dirtyAxes = new Map();
   let current = 'general';
   const tabs = document.getElementById('tabs');
   const page = document.getElementById('page');
@@ -168,7 +179,10 @@
     for (const input of page.querySelectorAll('[data-axis]')) {
       input.addEventListener('change', () => {
         const key = input.dataset.key;
-        ui.toggles[key] = { ...ui.toggles[key], [input.dataset.axis]: input.checked };
+        const axis = input.dataset.axis;
+        ui.toggles[key] = { ...ui.toggles[key], [axis]: input.checked };
+        if (!dirtyAxes.has(key)) dirtyAxes.set(key, new Set());
+        dirtyAxes.get(key).add(axis);
       });
     }
     document.getElementById('save').addEventListener('click', save);
@@ -180,11 +194,29 @@
     status.textContent = 'сохраняю…';
     try {
       if (current === 'ui') {
-        await invoke('save_ui', { ui: window.UiState.uiStateToSave(ui.sort, ui.toggles) });
+        // Файл перечитывается прямо сейчас, а не берётся из снимка загрузки:
+        // пикер мог написать в него своё, пока окно было открыто (см.
+        // `dirtyAxes`). Поверх свежего кладутся только те оси, что правили
+        // здесь; `sort` не кладётся вовсе — сортировкой окно настроек не
+        // распоряжается, ею крутит пикер.
+        const fresh = window.UiState.normalizeUiState(await invoke('load_ui'), UI_DEFAULTS);
+        for (const [key, axes] of dirtyAxes) {
+          for (const axis of axes) {
+            fresh.toggles[key] = { ...fresh.toggles[key], [axis]: ui.toggles[key][axis] };
+          }
+        }
+        await invoke('save_ui', { ui: window.UiState.uiStateToSave(fresh.sort, fresh.toggles) });
         // Пикер — другое окно, своего ui.json он не перечитает. Событие
         // рассылается всем окнам, и подписан на него только он.
         if (window.__TAURI__) await window.__TAURI__.event.emit('ui-changed');
-        status.textContent = 'сохранено';
+        // Записанное и есть новый снимок: правки учтены, чужие пережили, и
+        // следующее сохранение начинает счёт заново. Таблица перерисовывается
+        // из него же — иначе на экране остались бы отметки, которых в файле
+        // уже нет.
+        ui = fresh;
+        dirtyAxes.clear();
+        renderPage();
+        document.getElementById('status').textContent = 'сохранено';
       } else {
         // Проверка до записи: сохранённый пустой sshHost оставил бы человека
         // с пикером, который не работает и не говорит почему.
