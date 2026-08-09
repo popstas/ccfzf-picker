@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { PAGES, configToFields, fieldsToPatch } = require('../frontend-src/settings-form');
+const { PAGES, configToFields, fieldsToPatch, validate } = require('../frontend-src/settings-form');
 
 test('страницы перечисляют поля без повторов', () => {
   // Одно поле на двух страницах означало бы два источника правды для одного
@@ -61,4 +61,29 @@ test('проекты редактируются списком', () => {
   assert.deepStrictEqual(fields.projects, [{ path: '/a', hotkey: 'Cmd+Shift+1' }]);
   const patch = fieldsToPatch({ ...fields, projects: [{ path: '/b', hotkey: '' }] }, original);
   assert.deepStrictEqual(patch, { projects: [{ path: '/b', hotkey: '' }] });
+});
+
+test('пустой хост — отказ, а не пустой список', () => {
+  // Без sshHost список брать неоткуда, и сохранить такое молча значит отдать
+  // человеку пикер, который не работает и не говорит почему.
+  const problems = validate({ ...configToFields({}), sshHost: '  ' });
+  assert.ok(problems.some(p => p.includes('sshHost')), problems.join('; '));
+});
+
+test('комбинация, занятая самим окном пикера, не проходит', () => {
+  // Ctrl+K — меню сессии внутри окна. Настроенный на неё глобальный хоткей
+  // молча не сработал бы: окно забирает нажатие себе.
+  const problems = validate({ ...configToFields({ sshHost: 'h' }), hotkey: 'Ctrl+K' });
+  assert.ok(problems.some(p => p.includes('Ctrl+K')), problems.join('; '));
+});
+
+test('точка с запятой в пути проекта не проходит', () => {
+  // Windows Terminal режет свою командную строку по `;` до всякого шелла:
+  // сессия в таком каталоге развалилась бы на панели вместо запуска.
+  const fields = { ...configToFields({ sshHost: 'h' }), projects: [{ path: '/a;b', hotkey: '' }] };
+  assert.ok(validate(fields).some(p => p.includes('/a;b')));
+});
+
+test('исправная форма претензий не вызывает', () => {
+  assert.deepStrictEqual(validate(configToFields({ sshHost: 'host' })), []);
 });

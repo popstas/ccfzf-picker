@@ -3,6 +3,12 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.SettingsForm = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
+  // globalThis, а не `root`: тот виден только внешней функции шима, а внутрь
+  // factory не передаётся.
+  const hotkeyApi = typeof module === 'object' && module.exports
+    ? require('./action-hotkey')
+    : globalThis.ActionHotkey;
+
   /**
    * Страницы настроек и поля на них.
    *
@@ -156,5 +162,34 @@
     return patch;
   }
 
-  return { PAGES, configToFields, fieldsToPatch };
+  /**
+   * Что не даст сохранить.
+   *
+   * Проверки те же, что уже стоят на пути конфига, и переписывать их здесь
+   * нельзя: разойдясь, форма разрешила бы то, что пикер потом молча выбросит.
+   * Отсюда и список — три случая, каждый из которых иначе виден только
+   * пальцами: неработающий список, неотзывающаяся клавиша, команда,
+   * развалившаяся на панели Windows Terminal.
+   */
+  function validate(fields) {
+    const problems = [];
+    if (!String(fields.sshHost || '').trim()) {
+      problems.push('sshHost не задан: список брать неоткуда');
+    }
+    const hotkey = String(fields.hotkey || '').trim();
+    // isReserved, а не свой разбор строки: комбинации, которые окно пикера
+    // забирает себе, перечислены там, и второй список разошёлся бы с первым.
+    if (hotkey && hotkeyApi.isReserved(hotkeyApi.parseHotkey(hotkey))) {
+      problems.push(`${hotkey} занята самим окном пикера — внутри него она не отзовётся`);
+    }
+    for (const project of (Array.isArray(fields.projects) ? fields.projects : [])) {
+      const path = String((project || {}).path || '');
+      if (path.includes(';')) {
+        problems.push(`в пути ${path} есть «;» — Windows Terminal порежет команду на панели`);
+      }
+    }
+    return problems;
+  }
+
+  return { PAGES, configToFields, fieldsToPatch, validate };
 });
