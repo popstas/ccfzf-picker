@@ -114,3 +114,22 @@ test('каждый тег из sessions.html копируется в frontend/',
     assert.ok(copied.includes(file), `${file} есть в sessions.html, но не в prepare-frontend.js`);
   }
 });
+
+test('settings.html грузит те же модули, что и зовёт', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  // Модуль, забытый в разметке, даёт пустую страницу настроек и ошибку в
+  // консоли, которую в отдельном окне никто не видит.
+  for (const src of ['settings-form.js', 'ui-state.js', 'session-groups.js', 'action-hotkey.js']) {
+    assert.ok(html.includes(`src="${src}"`), `нет тега ${src}`);
+  }
+  // Вкладки и контейнер страницы — по ним рисование находит своё место.
+  assert.ok(html.includes('id="tabs"'));
+  assert.ok(html.includes('id="page"'));
+});
+
+test('settings.html попадает в сборку', () => {
+  const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'prepare-frontend.js'), 'utf8');
+  // Страница, не попавшая в frontend/, откроется пустым окном в собранном
+  // приложении, а npm test при этом останется зелёным.
+  assert.ok(script.includes('settings.html'), 'settings.html не копируется');
+});

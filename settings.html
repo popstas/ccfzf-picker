@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Настройки ccfzf-picker</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; display: flex; height: 100vh;
+    font: 13px -apple-system, "Segoe UI", system-ui, sans-serif;
+    background: #1c1c1e; color: #e6e6e6;
+  }
+  #tabs { width: 170px; flex: none; padding: 12px 0; background: #232326; border-right: 1px solid #333; }
+  .tab { padding: 7px 16px; cursor: pointer; }
+  .tab.active { background: #3a3a3e; }
+  #page { flex: 1; overflow-y: auto; padding: 18px 22px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; margin-bottom: 4px; }
+  .field input[type=text], .field input[type=password], .field input[type=number], .field textarea {
+    width: 100%; box-sizing: border-box; padding: 5px 7px;
+    background: #2a2a2e; color: inherit; border: 1px solid #444; border-radius: 4px;
+    font: inherit;
+  }
+  .hint { color: #999; margin-top: 3px; }
+  #bar { position: sticky; bottom: 0; padding: 12px 0 0; background: #1c1c1e; }
+  #status { color: #999; margin-left: 10px; }
+  #status.bad { color: #ff7b72; }
+  table.axes { border-collapse: collapse; }
+  table.axes th, table.axes td { padding: 3px 12px 3px 0; text-align: left; font-weight: normal; }
+</style>
+</head>
+<body>
+<div id="tabs"></div>
+<div id="page"></div>
+<script src="session-groups.js"></script>
+<script src="ui-state.js"></script>
+<!-- action-hotkey до settings-form: тот берёт из него список занятых окном
+     комбинаций в момент загрузки. -->
+<script src="action-hotkey.js"></script>
+<script src="settings-form.js"></script>
+<script>
+(async function () {
+  const { PAGES, configToFields, fieldsToPatch, validate } = window.SettingsForm;
+  const invoke = (cmd, args) => (window.__TAURI__
+    ? window.__TAURI__.core.invoke(cmd, args)
+    : Promise.resolve());
+
+  // Набор ключей галок и их умолчания повторяют sessions.html. Второй список
+  // здесь неизбежен — страницы это разные окна, общего состояния у них нет, —
+  // но расходиться ему не дают нормализация в ui-state.js (незнакомый ключ
+  // выбрасывается) и подписи, взятые отсюда же.
+  const TOGGLE_LABELS = {
+    showPrompt: 'prompt', showAnswer: 'answer', showPaths: 'paths',
+    showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
+    showCost: 'cost', showContext: 'context', showWindow: 'window',
+  };
+  const FILTER_LABELS = { onlyWindow: 'только сессии с окном' };
+  const UI_DEFAULTS = {
+    sort: 'recent',
+    toggles: {
+      showPrompt: { list: true, statusline: true },
+      showAnswer: { list: true, statusline: true },
+      showPaths: { list: true, statusline: true },
+      showHotkey: { list: true, statusline: false },
+      showEvent: { list: false, statusline: false },
+      showId: { list: false, statusline: true },
+      showCost: { list: false, statusline: false },
+      showContext: { list: true, statusline: true },
+      showWindow: { list: true, statusline: false },
+      onlyWindow: { list: false, statusline: false },
+    },
+  };
+
+  let config = {};
+  let fields = {};
+  let ui = UI_DEFAULTS;
+  let current = 'general';
+  const tabs = document.getElementById('tabs');
+  const page = document.getElementById('page');
+
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function renderTabs() {
+    tabs.innerHTML = PAGES.map(p =>
+      `<div class="tab${p.id === current ? ' active' : ''}" data-page="${p.id}">${esc(p.title)}</div>`
+    ).join('');
+    for (const tab of tabs.querySelectorAll('.tab')) {
+      tab.addEventListener('click', () => { current = tab.dataset.page; renderTabs(); renderPage(); });
+    }
+  }
+
+  function fieldHtml(field) {
+    const value = fields[field.id];
+    const hint = field.hint ? `<div class="hint">${esc(field.hint)}</div>` : '';
+    if (field.type === 'bool') {
+      return `<div class="field"><label><input type="checkbox" data-field="${field.id}"${
+        value ? ' checked' : ''}> ${esc(field.label)}</label>${hint}</div>`;
+    }
+    if (field.type === 'lines') {
+      return `<div class="field"><label>${esc(field.label)}</label>`
+        + `<textarea rows="3" data-field="${field.id}">${esc(value)}</textarea>${hint}</div>`;
+    }
+    if (field.type === 'projects') {
+      const rows = (value || []).concat([{ path: '', hotkey: '' }]).map((p, i) =>
+        `<div class="field"><input type="text" data-project="${i}" data-part="path" `
+        + `placeholder="/путь/на/удалённом/хосте" value="${esc(p.path)}">`
+        + `<input type="text" data-project="${i}" data-part="hotkey" `
+        + `placeholder="Cmd+Shift+1" value="${esc(p.hotkey)}"></div>`).join('');
+      return `<div class="field"><label>${esc(field.label)}</label>${rows}${hint}</div>`;
+    }
+    const type = field.type === 'password' ? 'password' : (field.type === 'number' ? 'number' : 'text');
+    return `<div class="field"><label>${esc(field.label)}</label>`
+      + `<input type="${type}" data-field="${field.id}" value="${esc(value)}">${hint}</div>`;
+  }
+
+  function axesTableHtml() {
+    const row = (key, label) => `<tr><td>${esc(label)}</td>`
+      + `<td><input type="checkbox" data-axis="statusline" data-key="${key}"${
+        ui.toggles[key].statusline ? ' checked' : ''}></td>`
+      + `<td><input type="checkbox" data-axis="list" data-key="${key}"${
+        ui.toggles[key].list ? ' checked' : ''}></td></tr>`;
+    return '<table class="axes"><tr><th>Колонка</th><th>statusline</th><th>list</th></tr>'
+      + Object.entries(TOGGLE_LABELS).map(([k, l]) => row(k, l)).join('')
+      + '</table>'
+      + '<div class="field"><label>Фильтры</label><table class="axes">'
+      + '<tr><th></th><th>statusline</th><th>включён</th></tr>'
+      + Object.entries(FILTER_LABELS).map(([k, l]) => row(k, l)).join('')
+      + '</table><div class="hint">Фильтр решает, какие строки попадут в список, '
+      + 'а не какие колонки видны.</div></div>';
+  }
+
+  function actionsListHtml() {
+    const actions = Array.isArray(config.actions) ? config.actions : [];
+    if (!actions.length) return '';
+    // Только на чтение: редактор argv с плейсхолдерами — отдельная работа, а
+    // форма, которая делает вид, что правит их, врала бы.
+    return '<div class="field"><label>Действия открытия папки</label><ul>'
+      + actions.map(a => `<li>${esc(a && a.id)} — <code>${esc(JSON.stringify(a && a.argv))}</code></li>`).join('')
+      + '</ul><div class="hint">Правятся в config.yaml — окно их только показывает.</div></div>';
+  }
+
+  function renderPage() {
+    const def = PAGES.find(p => p.id === current);
+    const body = current === 'ui'
+      ? axesTableHtml()
+      : def.fields.map(fieldHtml).join('') + (current === 'integrations' ? actionsListHtml() : '');
+    page.innerHTML = body
+      + '<div id="bar"><button id="save">Сохранить</button><span id="status"></span></div>';
+
+    for (const input of page.querySelectorAll('[data-field]')) {
+      input.addEventListener('input', () => {
+        fields[input.dataset.field] = input.type === 'checkbox' ? input.checked : input.value;
+      });
+      if (input.type === 'checkbox') {
+        input.addEventListener('change', () => { fields[input.dataset.field] = input.checked; });
+      }
+    }
+    for (const input of page.querySelectorAll('[data-project]')) {
+      input.addEventListener('input', () => {
+        const rows = (fields.projects || []).slice();
+        const i = Number(input.dataset.project);
+        while (rows.length <= i) rows.push({ path: '', hotkey: '' });
+        rows[i] = { ...rows[i], [input.dataset.part]: input.value };
+        fields.projects = rows;
+      });
+    }
+    for (const input of page.querySelectorAll('[data-axis]')) {
+      input.addEventListener('change', () => {
+        const key = input.dataset.key;
+        ui.toggles[key] = { ...ui.toggles[key], [input.dataset.axis]: input.checked };
+      });
+    }
+    document.getElementById('save').addEventListener('click', save);
+  }
+
+  async function save() {
+    const status = document.getElementById('status');
+    status.className = '';
+    status.textContent = 'сохраняю…';
+    try {
+      if (current === 'ui') {
+        await invoke('save_ui', { ui: window.UiState.uiStateToSave(ui.sort, ui.toggles) });
+        // Пикер — другое окно, своего ui.json он не перечитает. Событие
+        // рассылается всем окнам, и подписан на него только он.
+        if (window.__TAURI__) await window.__TAURI__.event.emit('ui-changed');
+        status.textContent = 'сохранено';
+      } else {
+        // Проверка до записи: сохранённый пустой sshHost оставил бы человека
+        // с пикером, который не работает и не говорит почему.
+        const problems = validate(fields);
+        if (problems.length) {
+          status.className = 'bad';
+          status.textContent = problems.join('; ');
+          return;
+        }
+        const patch = fieldsToPatch(fields, config);
+        const result = await invoke('save_config', { patch });
+        config = await invoke('load_config') || {};
+        fields = configToFields(config);
+        // Регистрация глобального хоткея могла не удаться (Windows держит
+        // часть комбинаций за собой). Отказ не фатален, но молчать о нём
+        // нельзя: человек будет думать, что хоткей сменился, а тот мёртв.
+        if (result && result.hotkeyRegistered === false) {
+          status.className = 'bad';
+          status.textContent = `сохранено, но хоткей ${result.hotkeyAccelerator} не встал — занят системой или другим приложением`;
+          return;
+        }
+        status.textContent = 'сохранено';
+      }
+    } catch (e) {
+      status.className = 'bad';
+      status.textContent = String(e);
+    }
+  }
+
+  try {
+    config = await invoke('load_config') || {};
+  } catch (e) {
+    config = {};
+  }
+  fields = configToFields(config);
+  try {
+    ui = window.UiState.normalizeUiState(await invoke('load_ui'), UI_DEFAULTS);
+  } catch (e) {
+    ui = window.UiState.normalizeUiState({}, UI_DEFAULTS);
+  }
+  renderTabs();
+  renderPage();
+})();
+</script>
+</body>
+</html>

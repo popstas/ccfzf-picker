@@ -35,7 +35,8 @@ const FILES = [
 
 fs.mkdirSync(OUT, { recursive: true });
 fs.copyFileSync(path.join(ROOT, 'sessions.html'), path.join(OUT, 'index.html'));
+fs.copyFileSync(path.join(ROOT, 'settings.html'), path.join(OUT, 'settings.html'));
 for (const src of FILES) {
   fs.copyFileSync(path.join(ROOT, src), path.join(OUT, path.basename(src)));
 }
-console.log(`prepared ${FILES.length + 1} files`);
+console.log(`prepared ${FILES.length + 2} files`);
