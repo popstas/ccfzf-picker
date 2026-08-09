@@ -115,7 +115,26 @@ impl Poller {
 
                 // Спрашивать нечего и некого: без хоста ssh не собрать, а
                 // выключенный фон при скрытом окне означает «стоим до показа».
-                let idle = host.trim().is_empty() || (!visible && !background);
+                let host_missing = host.trim().is_empty();
+                let idle = host_missing || (!visible && !background);
+                if host_missing {
+                    // До A5 то же самое говорила ошибка `fetch_state`, которую
+                    // читал фронтенд. После A5 команда для показа списка
+                    // больше не зовётся, и без этой строки ненастроенный
+                    // пикер молча показывал бы пустой список без единого
+                    // слова о причине. Текст — дословно тот же, что даёт
+                    // `check_ssh_host`: другой текст на то же самое читался
+                    // бы как два разных отказа.
+                    if let Err(msg) = crate::check_ssh_host(&host) {
+                        let mut cache = thread_cache.lock().unwrap();
+                        cache.error = msg;
+                        if visible {
+                            let body = payload(&cache);
+                            drop(cache);
+                            let _ = app.emit("state", body);
+                        }
+                    }
+                }
                 if !idle {
                     let changed = match crate::state_source::fetch(&host) {
                         Ok(state) => {
@@ -125,7 +144,9 @@ impl Poller {
                             let mut cache = thread_cache.lock().unwrap();
                             cache.state = Some(state);
                             cache.error.clear();
-                            let _ = app.emit("state", payload(&cache));
+                            let body = payload(&cache);
+                            drop(cache);
+                            let _ = app.emit("state", body);
                             changed
                         }
                         Err(e) => {
@@ -134,7 +155,9 @@ impl Poller {
                             // Показанному окну об отказе говорим сразу;
                             // скрытому — некому, и оно узнает при показе.
                             if visible {
-                                let _ = app.emit("state", payload(&cache));
+                                let body = payload(&cache);
+                                drop(cache);
+                                let _ = app.emit("state", body);
                             }
                             // Отказ — это «не изменилось»: сеть, лежащая
                             // десять минут, не повод десять минут долбить ssh.
@@ -154,7 +177,9 @@ impl Poller {
                         // Кэш отдаётся до опроса: ради этого фон и заведён —
                         // список рисуется, не дожидаясь ssh.
                         let cache = thread_cache.lock().unwrap();
-                        let _ = app.emit("state", payload(&cache));
+                        let body = payload(&cache);
+                        drop(cache);
+                        let _ = app.emit("state", body);
                     }
                     Ok(Signal::Hidden) => {
                         visible = false;
@@ -162,7 +187,9 @@ impl Poller {
                     }
                     Ok(Signal::Nudge) => {
                         let cache = thread_cache.lock().unwrap();
-                        let _ = app.emit("state", payload(&cache));
+                        let body = payload(&cache);
+                        drop(cache);
+                        let _ = app.emit("state", body);
                     }
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => return,
