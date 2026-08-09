@@ -646,11 +646,15 @@ function fakeStatusChecks() {
 function renderChecksWith(uiToggles) {
   const checksSource = SESSIONS_HTML.match(/\n {2}const TOGGLE_CHECKS = \[[\s\S]*?\n {2}\];\n/);
   assert.ok(checksSource, 'TOGGLE_CHECKS не найден в sessions.html — тест сторожит не то');
+  // FILTER_KEYS считается из TOGGLE_CHECKS и стоит следом за ним; без него
+  // обработчик галки не знает, какая из них отбирает строки.
+  const filterKeysSource = SESSIONS_HTML.match(/\n {2}const FILTER_KEYS = new Set\(.*\);\n/);
+  assert.ok(filterKeysSource, 'FILTER_KEYS не найден в sessions.html — тест сторожит не то');
   const renderSource = SESSIONS_HTML.match(
     /\n {2}const toggleInputs = new Map\(\);\n\n {2}function renderChecks\(\) \{[\s\S]*?\n {2}\}\n/,
   );
   assert.ok(renderSource, 'renderChecks не найден в sessions.html — тест сторожит не то');
-  const calls = { render: 0, saveUi: 0 };
+  const calls = { render: 0, regroup: 0, saveUi: 0 };
   const ctx = {
     window: { UiState: require('../frontend-src/ui-state') },
     escapeHtml: Glyph.escapeHtml,
@@ -658,6 +662,7 @@ function renderChecksWith(uiToggles) {
     uiToggles,
     toggles: {},
     render: () => { calls.render += 1; },
+    regroup: () => { calls.regroup += 1; },
     saveUi: () => { calls.saveUi += 1; },
   };
   vm.createContext(ctx);
@@ -665,7 +670,8 @@ function renderChecksWith(uiToggles) {
   // объявления не становятся свойствами контекста (в отличие от var), и без
   // явного экспорта ctx.toggleInputs остался бы undefined.
   vm.runInContext(
-    `${checksSource[0]}\n${renderSource[0]}\nrenderChecks();\nvar toggleInputsExport = toggleInputs;`,
+    `${checksSource[0]}${filterKeysSource[0]}\n${renderSource[0]}\nrenderChecks();`
+    + `\nvar toggleInputsExport = toggleInputs;`,
     ctx, { filename: 'sessions.html' },
   );
   return { statusChecks: ctx.statusChecks, toggleInputs: ctx.toggleInputsExport, ctx, calls };
@@ -727,6 +733,28 @@ test('клик по нарисованному чекбоксу правит о�
   // отрисовка строк ещё один кадр рисовала бы колонку по старому значению.
   assert.strictEqual(ctx.toggles.showId, true);
   assert.strictEqual(calls.render, 1);
+  assert.strictEqual(calls.saveUi, 1);
+  // Колонка — это отрисовка, состав списка от неё не зависит: пересчитывать
+  // группы незачем.
+  assert.strictEqual(calls.regroup, 0);
+});
+
+test('клик по галке-фильтру пересчитывает состав списка, а не только рисунок', () => {
+  // Фильтр отбирает строки, а отбор живёт в regroup. С одним только render
+  // галка сработала бы к следующему ответу агрегатора — а на скрытом окне тот
+  // приходит через минуты, и неизменившееся состояние отсекается по отпечатку.
+  const uiToggles = {
+    showPrompt: { list: true, statusline: true },
+    showAll: { list: false, statusline: true },
+  };
+  const { toggleInputs, calls } = renderChecksWith(uiToggles);
+  const input = toggleInputs.get('showAll');
+  input.checked = true;
+  input.listeners.change();
+  assert.strictEqual(uiToggles.showAll.list, true);
+  assert.strictEqual(calls.regroup, 1);
+  // render зовёт сам regroup — второй раз отсюда он рисовал бы список дважды.
+  assert.strictEqual(calls.render, 0);
   assert.strictEqual(calls.saveUi, 1);
 });
 
@@ -800,4 +828,61 @@ test('фильтры и колонки разделены в обоих окна
     settings.filters.sort(),
     checks.filter(c => c.side === 'filter').map(c => c.key).sort(),
   );
+});
+
+// ── showAll перекрывает onlyLive из конфига ────────────────────────────────
+//
+// Галка и настройка отвечают на один вопрос, и связь между ними живёт ровно в
+// одной строке `regroup()`. Строка эта незаметная: перепутанный знак не роняет
+// ничего — список просто всегда фильтруется (или всегда не фильтруется), а
+// заметить это можно только сравнив с содержимым config.yaml. Поэтому здесь
+// вычитывается настоящий regroup, тем же приёмом, что renderChecks выше, и
+// проверяется, что уезжает в buildSessionsPayload при всех четырёх сочетаниях.
+function regroupWith(configOnlyLive, toggles) {
+  const source = SESSIONS_HTML.match(/\n {2}function regroup\(\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(source, 'regroup не найден в sessions.html — тест сторожит не то');
+  let opts = null;
+  const ctx = {
+    window: {
+      SessionGroups: {
+        buildSessionsPayload: (_state, sort, o) => { opts = o; return { groups: [], sort }; },
+      },
+    },
+    CONFIG: { onlyLive: configOnlyLive },
+    toggles,
+    lastSessions: [],
+    seen: {},
+    sortMode: 'recent',
+    groups: [],
+    paintSort: () => {},
+    paintToggles: () => {},
+    render: () => {},
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${source[0]}\nregroup();`, ctx, { filename: 'sessions.html' });
+  assert.ok(opts, 'buildSessionsPayload не позван');
+  return opts;
+}
+
+test('showAll снимает onlyLive, заданный конфигом', () => {
+  assert.strictEqual(regroupWith(true, { showAll: true }).onlyLive, false);
+});
+
+test('без showAll решает конфиг', () => {
+  assert.strictEqual(regroupWith(true, { showAll: false }).onlyLive, true);
+  assert.strictEqual(regroupWith(false, { showAll: false }).onlyLive, false);
+});
+
+test('showAll при выключенном onlyLive ничего не ломает', () => {
+  // Галка — отступление от настройки, а не второй фильтр: включённая поверх
+  // уже выключенного onlyLive она обязана остаться без последствий.
+  assert.strictEqual(regroupWith(false, { showAll: true }).onlyLive, false);
+});
+
+test('onlyWindow едет мимо showAll', () => {
+  // Два фильтра независимы: showAll про живость, onlyWindow про окна. Один
+  // общий `&&` на оба схлопнул бы их в один, и «показать все» заодно
+  // отключало бы фильтр по окнам.
+  const opts = regroupWith(true, { showAll: true, onlyWindow: true });
+  assert.strictEqual(opts.onlyWindow, true);
 });

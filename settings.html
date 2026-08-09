@@ -54,7 +54,7 @@
     showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
     showCost: 'cost', showContext: 'context', showWindow: 'window',
   };
-  const FILTER_LABELS = { onlyWindow: 'только сессии с окном' };
+  const FILTER_LABELS = { onlyWindow: 'only sessions with a window', showAll: 'show all sessions' };
   const UI_DEFAULTS = {
     sort: 'recent',
     toggles: {
@@ -68,6 +68,7 @@
       showContext: { list: true, statusline: true },
       showWindow: { list: true, statusline: false },
       onlyWindow: { list: false, statusline: false },
+      showAll: { list: false, statusline: true },
     },
   };
 

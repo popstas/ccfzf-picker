@@ -372,7 +372,11 @@
     { key: 'showContext', label: 'context', side: 'right' },
     { key: 'showWindow', label: 'window', side: 'right' },
     { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
+    { key: 'showAll', label: 'show all', side: 'filter' },
   ];
+  // Ключи фильтров — из той же таблицы, а не вторым списком: разойдясь, новый
+  // фильтр молча стал бы колонкой, то есть галкой, которая не отбирает строки.
+  const FILTER_KEYS = new Set(TOGGLE_CHECKS.filter(c => c.side === 'filter').map(c => c.key));
   // Умолчания. Ось `list` — как было: выключены те колонки, что отвечают на
   // вопрос «как эта сессия дошла до жизни такой», а не «стоит ли в неё
   // заходить». Ось `statusline` решает, попадёт ли галка в строку внизу; там
@@ -394,6 +398,11 @@
     // Выключен: список без трекера и так весь без окон, и включённый фильтр
     // показал бы пустоту вместо сессий — с виду неотличимо от сломанного ssh.
     onlyWindow: { list: false, statusline: false },
+    // Выключен, но вынесен в статуслайн. Ось `list` у фильтра значит
+    // «включён», и выключенный showAll оставляет решение за `onlyLive` из
+    // config.yaml: галка — это отступление от настройки, а не вторая
+    // настройка. Отступление запоминается в ui.json, как и все остальные.
+    showAll: { list: false, statusline: true },
   };
   // Плоская карта «показывать ли колонку»: её читают рисовальщики строк и
   // чекбоксы статуслайна. Пересчитывается из uiToggles одной функцией, чтобы
@@ -475,12 +484,19 @@
       input.addEventListener('click', (e) => {
         e.stopPropagation();
       });
+      const isFilter = FILTER_KEYS.has(key);
       input.addEventListener('change', () => {
         // Галка в статуслайне правит ось list: она и значит «показывать
         // колонку». Второй осью распоряжается только окно настроек.
         uiToggles[key] = { ...uiToggles[key], list: input.checked };
         toggles = window.UiState.listColumns(uiToggles);
-        render();
+        // Фильтр решает состав списка, а состав считает regroup — render
+        // рисует уже отобранное. С одним только render галка сработала бы
+        // лишь к следующему ответу агрегатора, а тот может не прийти вовсе:
+        // на скрытом окне такт уходит в минуты, а неизменившееся состояние
+        // отсекается по отпечатку. Выглядело бы это мёртвым чекбоксом.
+        if (isFilter) regroup();
+        else render();
         saveUi();
       });
     }
@@ -737,7 +753,11 @@
   function regroup() {
     const payload = window.SessionGroups.buildSessionsPayload(
       { ok: true, sessions: lastSessions, seen }, sortMode,
-      { onlyLive: CONFIG.onlyLive, onlyWindow: toggles.onlyWindow },
+      // showAll перекрывает onlyLive, а не заменяет его: конфиг задаёт, с чем
+      // пикер открывается, галка — разовое «покажи и мёртвые тоже». Обратной
+      // галки нет намеренно: включённый onlyLive и есть умолчание, а вторая
+      // галка «только живые» поверх настройки читалась бы как второй фильтр.
+      { onlyLive: CONFIG.onlyLive && !toggles.showAll, onlyWindow: toggles.onlyWindow },
     );
     groups = payload.groups;
     sortMode = payload.sort;
