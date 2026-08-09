@@ -2,19 +2,12 @@
 
 # next
 
-- [x] Скопировать функции snapshots из windows-mqtt в ccfzf-picker, также
-  взаимодействие с windows11-manager. Легло: `frontend-src/picker-snapshots.js`
-  (строки), `frontend-src/state-shape.js` (проверка формы `snapshots`),
-  `src-tauri/src/mqtt.rs` и команда `restore_snapshot_mqtt` в
-  `src-tauri/src/main.rs` (просьба о восстановлении), режим `/s`/`^S` в
-  `sessions.html`. Дорога данных — в windows11-manager (снимки в файле
-  трекера) и в агрегаторе `ccfzf --state` (поле `snapshots` в ответе); разбор
-  тела просьбы на приёме — `parseRestorePayload` в windows-mqtt.
+- [ ] Режим обновления ccfzf в фоне, раз в 1 минуту, при отсутствии активности увеличивать: 2, 4, 8 минут, при активности сбрасывать на 1 минуту.
+- [ ] Добавлять суффиксы `-2`, `-3` к названиям сессий при открытии через ctrl+n, если такое название уже есть. В picker и ccfzf.
 - [ ] Создать страницу настроек, вынести в первую очередь галочки в statusline: по каждому элементу 2 галочки: statusline, list - где показывать. Нужно убрать из статуслайна галочки отображения, кроме prompt, answer, paths, context, id.
   В статуслайне справа иконка-кнопка с шестерёнкой для настройки. Хоткей `Ctrl+,`, `Cmd+,`.
   Настройки открываются отдельным окном, как у https://github.com/cjpais/Handy, слева вкладки настроек, справа страницы настроек.
   General, UI, Hotkeys - состав страниц нужно уточнить, в соответствии с config.yaml
-
 
 
 # future
