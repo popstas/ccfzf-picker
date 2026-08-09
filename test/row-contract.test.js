@@ -729,3 +729,75 @@ test('клик по нарисованному чекбоксу правит о�
   assert.strictEqual(calls.render, 1);
   assert.strictEqual(calls.saveUi, 1);
 });
+
+// ── Таблицы галок в пикере и в настройках не расходятся (C-final) ───────────
+//
+// Ключи живут в двух окнах: TOGGLE_CHECKS в sessions.html и TOGGLE_LABELS +
+// FILTER_LABELS в settings.html. Один список из другого не построить — это
+// разные страницы, общего состояния у них нет, — а расхождение молчаливое и
+// одностороннее: `normalizeUiState(load_ui(), UI_DEFAULTS)` в окне настроек
+// оставляет только свои ключи, так что колонка, добавленная в пикер и забытая
+// в настройках, теряла бы своё значение при каждом сохранении вкладки UI.
+// Отсюда и сторож: сравниваются наборы, а не порядок — порядок у страниц свой
+// (в статуслайне галки идут группами left/right/filter, в таблице настроек
+// колонки отделены от фильтров).
+const SETTINGS_HTML = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+
+function keysFromSettings() {
+  const labels = SETTINGS_HTML.match(/\n {2}const TOGGLE_LABELS = \{[\s\S]*?\n {2}\};\n/);
+  assert.ok(labels, 'TOGGLE_LABELS не найден в settings.html — тест сторожит не то');
+  const filters = SETTINGS_HTML.match(/\n {2}const FILTER_LABELS = \{[^}]*\};\n/);
+  assert.ok(filters, 'FILTER_LABELS не найден в settings.html — тест сторожит не то');
+  const defaults = SETTINGS_HTML.match(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/);
+  assert.ok(defaults, 'UI_DEFAULTS не найден в settings.html — тест сторожит не то');
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(
+    `${labels[0]}\n${filters[0]}\n${defaults[0]}\nvar toggles = Object.keys(TOGGLE_LABELS);`
+    + `\nvar filterKeys = Object.keys(FILTER_LABELS);`
+    + `\nvar defaultKeys = Object.keys(UI_DEFAULTS.toggles);`,
+    ctx, { filename: 'settings.html' },
+  );
+  return {
+    toggles: Array.from(ctx.toggles),
+    filters: Array.from(ctx.filterKeys),
+    defaults: Array.from(ctx.defaultKeys),
+  };
+}
+
+function checksFromPicker() {
+  const source = SESSIONS_HTML.match(/\n {2}const TOGGLE_CHECKS = \[[\s\S]*?\n {2}\];\n/);
+  assert.ok(source, 'TOGGLE_CHECKS не найден в sessions.html — тест сторожит не то');
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(`${source[0]}\nvar out = TOGGLE_CHECKS.map(c => ({ key: c.key, side: c.side }));`,
+    ctx, { filename: 'sessions.html' });
+  return Array.from(ctx.out).map(c => ({ key: c.key, side: c.side }));
+}
+
+test('окно настроек знает все галки пикера и ни одной лишней', () => {
+  const checks = checksFromPicker();
+  const settings = keysFromSettings();
+  assert.deepStrictEqual(
+    [...settings.toggles, ...settings.filters].sort(),
+    checks.map(c => c.key).sort(),
+  );
+  // И третий список той же страницы — умолчания: по ним нормализуется
+  // прочитанное, а таблица галок читает `ui.toggles[key].statusline` без
+  // предохранителя. Подпись без умолчания уронила бы отрисовку вкладки UI.
+  assert.deepStrictEqual(
+    settings.defaults.sort(),
+    [...settings.toggles, ...settings.filters].sort(),
+  );
+});
+
+test('фильтры и колонки разделены в обоих окнах одинаково', () => {
+  // Фильтр решает, какие строки попадут в список, а не какие колонки видны:
+  // попав в таблицу колонок настроек, он обещал бы человеку не то, что делает.
+  const checks = checksFromPicker();
+  const settings = keysFromSettings();
+  assert.deepStrictEqual(
+    settings.filters.sort(),
+    checks.filter(c => c.side === 'filter').map(c => c.key).sort(),
+  );
+});
