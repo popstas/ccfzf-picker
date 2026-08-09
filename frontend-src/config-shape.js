@@ -33,6 +33,14 @@
     // здесь оно описано затем же, зачем и остальные: чтобы форма конфига была
     // в одном месте и проверялась одним тестом.
     hideOnBlur: true,
+    // Опрос продолжается при закрытом окне. Он не только держит список тёплым
+    // к следующему открытию: `ccfzf --state` переписывает свой дамп, а с того
+    // дампа живёт экспорт в Home Assistant и панель openHASP. Закрытый пикер,
+    // который перестал спрашивать, останавливает и панель.
+    //
+    // Выключать это стоит там, где панели нет: на маке фон — ssh раз в минуту
+    // без выгоды.
+    backgroundRefresh: true,
     // Имя машины, на которой работает этот пикер. Сверяется с `windowHost` из
     // ответа агрегатора и отвечает ровно на один вопрос: окна, о которых он
     // рассказал, — на этом экране или на чужом. Совпало — Enter поднимает окно;
@@ -142,6 +150,9 @@
       // договорились», а не «показывай две сотни транскриптов».
       onlyLive: typeof src.onlyLive === 'boolean' ? src.onlyLive : DEFAULTS.onlyLive,
       hideOnBlur: typeof src.hideOnBlur === 'boolean' ? src.hideOnBlur : DEFAULTS.hideOnBlur,
+      backgroundRefresh: typeof src.backgroundRefresh === 'boolean'
+        ? src.backgroundRefresh
+        : DEFAULTS.backgroundRefresh,
       windowHost: typeof src.windowHost === 'string'
         ? src.windowHost.trim()
         : DEFAULTS.windowHost,

@@ -156,3 +156,13 @@ test('проект без хоткея остаётся в списке', () => 
   const c = normalizeConfig({ projects: [{ path: '/home/user/y' }] });
   assert.deepStrictEqual(c.projects, [{ path: '/home/user/y', hotkey: '' }]);
 });
+
+test('backgroundRefresh по умолчанию включён', () => {
+  // Умолчание true, а не false: фоновый опрос кормит панель openHASP, и
+  // выключенным по умолчанию он молча лишал бы её обновлений.
+  assert.strictEqual(normalizeConfig({}).backgroundRefresh, true);
+  assert.strictEqual(normalizeConfig(null).backgroundRefresh, true);
+  assert.strictEqual(normalizeConfig({ backgroundRefresh: false }).backgroundRefresh, false);
+  // Нелогическое значение — умолчание, как у соседних ключей.
+  assert.strictEqual(normalizeConfig({ backgroundRefresh: 'нет' }).backgroundRefresh, true);
+});
