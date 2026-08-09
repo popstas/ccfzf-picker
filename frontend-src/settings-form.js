@@ -1,0 +1,160 @@
+// Loaded twice: as a <script> in settings.html and as a module in the tests.
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.SettingsForm = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  /**
+   * Страницы настроек и поля на них.
+   *
+   * Одна таблица на всё: по ней страница рисуется, по ней же собирается патч.
+   * Поле, попавшее на две страницы, означало бы два источника правды для
+   * одного ключа — сохранив одну страницу, человек молча откатил бы вторую;
+   * это сторожит тест.
+   *
+   * `id` поля — это путь в конфиге через точку. Разбор пути тут же, ниже:
+   * заводить ради двух уровней вложенности схему было бы дороже.
+   *
+   * Страница `ui` полей не имеет: она правит ui.json, а не config.yaml, и
+   * рисуется своим кодом в settings.html — таблицей галок по двум осям.
+   */
+  const PAGES = [
+    {
+      id: 'general',
+      title: 'General',
+      fields: [
+        { id: 'sshHost', label: 'Хост с сессиями', type: 'text',
+          hint: 'Любая форма, понятная ssh. Без него список брать неоткуда.' },
+        { id: 'terminal.file', label: 'Терминал', type: 'text' },
+        { id: 'terminal.args', label: 'Аргументы терминала', type: 'lines',
+          hint: 'По одному на строку — запятая встречается в самих аргументах.' },
+        { id: 'onlyLive', label: 'Только работающие сессии', type: 'bool' },
+        { id: 'hideOnBlur', label: 'Гасить окно при потере фокуса', type: 'bool' },
+        { id: 'backgroundRefresh', label: 'Опрашивать при закрытом окне', type: 'bool',
+          hint: 'Держит свежим дамп агрегатора: с него живёт панель openHASP.' },
+        { id: 'caps.reptyr', label: 'Разрешить перенос процесса (reptyr)', type: 'bool' },
+        { id: 'caps.takeover', label: 'Разрешить перехват сессии', type: 'bool' },
+      ],
+    },
+    { id: 'ui', title: 'UI', fields: [] },
+    {
+      id: 'hotkeys',
+      title: 'Hotkeys',
+      fields: [
+        { id: 'hotkey', label: 'Показать пикер', type: 'text',
+          hint: 'SUPER — это Cmd на маке и Win на Windows.' },
+        { id: 'projects', label: 'Проектные хоткеи', type: 'projects' },
+      ],
+    },
+    {
+      id: 'integrations',
+      title: 'Integrations',
+      fields: [
+        { id: 'windowHost', label: 'Имя этой машины', type: 'text',
+          hint: 'Совпало с windowHost из ответа — Enter поднимает окно.' },
+        { id: 'mqtt.host', label: 'Брокер MQTT', type: 'text' },
+        { id: 'mqtt.port', label: 'Порт брокера', type: 'number' },
+        { id: 'mqtt.user', label: 'Пользователь', type: 'text' },
+        { id: 'mqtt.password', label: 'Пароль', type: 'password',
+          hint: 'Пусто — оставить прежний.' },
+        { id: 'mqtt.base', label: 'Префикс топиков', type: 'text' },
+        { id: 'pathMap.remote', label: 'Каталог на удалённом хосте', type: 'text' },
+        { id: 'pathMap.local', label: 'Он же здесь', type: 'text' },
+      ],
+    },
+  ];
+
+  const FIELDS = PAGES.flatMap(page => page.fields);
+
+  function at(source, path) {
+    return path.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), source);
+  }
+
+  function put(target, path, value) {
+    const keys = path.split('.');
+    let node = target;
+    for (const key of keys.slice(0, -1)) {
+      if (!node[key] || typeof node[key] !== 'object') node[key] = {};
+      node = node[key];
+    }
+    node[keys[keys.length - 1]] = value;
+  }
+
+  function emptyFor(type) {
+    if (type === 'bool') return false;
+    if (type === 'number') return '';
+    if (type === 'projects') return [];
+    return '';
+  }
+
+  /** Значение конфига в том виде, в каком его держит поле формы. */
+  function toField(field, value) {
+    // Пароль в форму не кладётся вовсе: он ездил бы через мост в webview на
+    // каждое открытие настроек, а показывать его незачем. Пустое поле значит
+    // «оставить прежний» — так и написано в подсказке.
+    if (field.type === 'password') return '';
+    if (value === undefined || value === null) return emptyFor(field.type);
+    if (field.type === 'bool') return Boolean(value);
+    if (field.type === 'lines') return (Array.isArray(value) ? value : []).join('\n');
+    if (field.type === 'projects') {
+      return (Array.isArray(value) ? value : [])
+        .filter(p => p && typeof p === 'object')
+        .map(p => ({ path: String(p.path || ''), hotkey: String(p.hotkey || '') }));
+    }
+    return value;
+  }
+
+  /** Значение поля формы в том виде, в каком оно ложится в конфиг. */
+  function fromField(field, value) {
+    if (field.type === 'lines') {
+      return String(value == null ? '' : value)
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+    if (field.type === 'number') {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : undefined;
+    }
+    if (field.type === 'bool') return Boolean(value);
+    if (field.type === 'projects') {
+      return (Array.isArray(value) ? value : [])
+        .filter(p => p && String(p.path || '').trim())
+        .map(p => ({ path: String(p.path).trim(), hotkey: String(p.hotkey || '').trim() }));
+    }
+    return String(value == null ? '' : value);
+  }
+
+  function configToFields(config) {
+    const src = config && typeof config === 'object' ? config : {};
+    const fields = {};
+    for (const field of FIELDS) fields[field.id] = toField(field, at(src, field.id));
+    return fields;
+  }
+
+  /**
+   * Патч: только то, что человек и правда поменял.
+   *
+   * Не весь конфиг, потому что окно знает не про все ключи, и не «всё, что
+   * есть в форме», потому что пустой пароль значит «оставить прежний», а не
+   * «стереть». Стёртый пароль брокера заметить можно только по молчащему
+   * Enter на чужой машине.
+   */
+  function fieldsToPatch(fields, original) {
+    const before = configToFields(original);
+    const patch = {};
+    for (const field of FIELDS) {
+      const value = fields[field.id];
+      if (field.type === 'password') {
+        if (String(value || '')) put(patch, field.id, String(value));
+        continue;
+      }
+      if (JSON.stringify(value) === JSON.stringify(before[field.id])) continue;
+      const converted = fromField(field, value);
+      if (converted === undefined) continue;
+      put(patch, field.id, converted);
+    }
+    return patch;
+  }
+
+  return { PAGES, configToFields, fieldsToPatch };
+});
