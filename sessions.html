@@ -709,11 +709,6 @@
     render();
   }
 
-  // Один запрос за раз. Опрос тикает раз в секунду, а ssh на удалённый хост
-  // столько же и стоит: без сторожа медленный ответ копил бы очередь вызовов, и каждый
-  // следующий отставал бы сильнее предыдущего.
-  let inFlight = false;
-
   // Хвост последнего ответа агрегатора, кроме самих сессий: на какой машине
   // открыты окна и какому процессу они принадлежат. Пустой объект — рабочее
   // состояние, а не поломка: оконного трекера может не быть вовсе.
@@ -737,18 +732,20 @@
       && window.SessionWindows.canFocus(lastState, CONFIG.windowHost);
   }
 
-  async function refresh() {
-    if (inFlight) return;
-    inFlight = true;
-    let state;
-    try {
-      state = await invoke('fetch_state', { sshHost: CONFIG.sshHost });
-    } catch (e) {
-      error = String(e);
+  /**
+   * Ответ агрегатора приехал.
+   *
+   * Опрос идёт в Rust: у скрытого окна webview тормозит таймеры, а WebView2 у
+   * свёрнутого умеет усыплять страницу целиком — фон на setInterval замолчал
+   * бы молча. Здесь остаётся только разбор ответа, тот же, что был.
+   */
+  function applyState(payload) {
+    const state = payload && payload.state;
+    if (!state) {
+      // Отказ без единого удачного ответа — показывать нечего, кроме отказа.
+      if (payload && payload.error) error = String(payload.error);
       render();
       return;
-    } finally {
-      inFlight = false;
     }
     const problems = window.StateShape.validateState(state);
     if (problems.length) {
@@ -764,7 +761,11 @@
     //
     // Претензии к записям снимков — по той же причине и в ту же строку. Первая
     // непустая строка отказа побеждает: показывается всё равно одна.
-    error = window.StateShape.projectProblems(state)[0]
+    //
+    // Отказ ssh стоит первым: он про то, что список устарел целиком, а
+    // остальные — про отдельные записи в нём.
+    error = (payload && payload.error ? String(payload.error) : '')
+      || window.StateShape.projectProblems(state)[0]
       || window.StateShape.snapshotProblems(state)[0] || '';
     lastSessions = state.sessions;
     // Поля может не быть — старый агрегатор на той стороне. Тогда режим /a
@@ -776,20 +777,10 @@
     regroup();
   }
 
-  // Опрос идёт, только пока окно на экране: закрытый пикер спрашивать незачем,
-  // а каждый вызов — это ssh на другую машину. Границы показа приходят из Rust
-  // событиями picker-shown/picker-hidden; visibilitychange для этого не годится
-  // — скрытому окну Tauri он не приходит.
-  let timer = null;
-
-  function startPolling() {
-    refresh();
-    if (timer === null) timer = setInterval(refresh, 1000);
-  }
-
-  function stopPolling() {
-    if (timer !== null) { clearInterval(timer); timer = null; }
-  }
+  // Опрос идёт в Rust и не останавливается вместе с показом: он же держит
+  // свежим дамп агрегатора, с которого живёт панель openHASP. Границы показа
+  // приходят туда же событиями picker-shown/picker-hidden — они меняют такт,
+  // а не включают и выключают опрос.
 
   function paint() {
     const nodes = list.querySelectorAll('.row');
@@ -1374,10 +1365,12 @@
     saveUi();
   });
 
-  // Reset the palette for a show and (re)start the feed. Called both from the
-  // 'picker-shown' listener (every show after the window has finished
-  // loading) and, once, directly from start() to cover the show that raced
-  // ahead of this webview finishing DOMContentLoaded (see start()).
+  // Reset the palette for a show. Feed itself doesn't (re)start here — it
+  // runs continuously in Rust, see the comment above applyState. Called both
+  // from the 'picker-shown' listener (every show after the window has
+  // finished loading) and, once, directly from start() to cover the show
+  // that raced ahead of this webview finishing DOMContentLoaded (see
+  // start()).
   function beginShow() {
     closeMenu();
     closeInfo();
@@ -1403,7 +1396,6 @@
     // Первый показ за загрузку страницы: рисовать нечего, и «Loading…» стоит
     // вместо пустоты. Дальше сюда не попадаем — список уже есть.
     if (!rows.length && !error) message.textContent = 'Loading…';
-    startPolling();
   }
 
   async function start() {
@@ -1450,14 +1442,20 @@
       newSession(event.payload);
     });
 
+    // Ответ агрегатора приезжает событием: опросом распоряжается Rust.
+    await listen('state', (event) => applyState(event.payload));
+
     // Fired by Rust every time the window is shown.
     await listen('picker-shown', beginShow);
 
     await listen('picker-hidden', () => {
       closeMenu();
       closeInfo();
-      stopPolling();
     });
+
+    // Подписка готова — забрать то, что поток успел узнать до неё, и
+    // подтолкнуть свежий опрос.
+    applyState(await invoke('poll_now'));
 
     paintSort();
     paintToggles();
@@ -1468,7 +1466,7 @@
     // picker without a 'picker-shown' event ever reaching a listener that
     // didn't exist yet. Cover that first-show race by checking whether the
     // window is already visible right now; if so, this is that race and the
-    // feed needs to be started here instead of waiting for an event that
+    // palette needs to be reset here instead of waiting for an event that
     // already fired.
     const alreadyVisible = await getCurrentWindow().isVisible().catch(() => false);
     if (alreadyVisible) {
