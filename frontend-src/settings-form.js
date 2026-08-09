@@ -118,7 +118,12 @@
         .filter(Boolean);
     }
     if (field.type === 'number') {
-      const n = Number(value);
+      // Пустая (или из пробелов) строка — это «не трогали», а не число 0:
+      // `Number('')` даёт 0, и без этой проверки стёртое поле порта тихо
+      // сохранилось бы как mqtt.port: 0 — недопустимый порт брокера.
+      const trimmed = String(value == null ? '' : value).trim();
+      if (!trimmed) return undefined;
+      const n = Number(trimmed);
       return Number.isFinite(n) ? n : undefined;
     }
     if (field.type === 'bool') return Boolean(value);
@@ -144,6 +149,16 @@
    * есть в форме», потому что пустой пароль значит «оставить прежний», а не
    * «стереть». Стёртый пароль брокера заметить можно только по молчащему
    * Enter на чужой машине.
+   *
+   * Договор по типам: `fields` может нести значения в любом виде, какой
+   * отдаёт вызывающая сторона, — «родном» (число, bool, массив, как из
+   * `configToFields`) или строковом (как `value` у любого элемента формы в
+   * DOM, включая `<input type="number">` — там оно строка всегда). Функции
+   * это безразлично, потому что и текущее значение, и то, с чем оно
+   * сравнивается, пропускаются через один и тот же `fromField` — сравнение
+   * идёт по итогу приведения, а не по сырым типам. Без этого `"1883"` от
+   * DOM и сохранённое число `1883` считались бы разным значением, и
+   * нетронутое поле каждый раз попадало бы в патч.
    */
   function fieldsToPatch(fields, original) {
     const before = configToFields(original);
@@ -154,9 +169,10 @@
         if (String(value || '')) put(patch, field.id, String(value));
         continue;
       }
-      if (JSON.stringify(value) === JSON.stringify(before[field.id])) continue;
       const converted = fromField(field, value);
       if (converted === undefined) continue;
+      const convertedBefore = fromField(field, before[field.id]);
+      if (JSON.stringify(converted) === JSON.stringify(convertedBefore)) continue;
       put(patch, field.id, converted);
     }
     return patch;

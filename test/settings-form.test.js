@@ -63,6 +63,28 @@ test('проекты редактируются списком', () => {
   assert.deepStrictEqual(patch, { projects: [{ path: '/b', hotkey: '' }] });
 });
 
+test('стёртое числовое поле не превращается в 0', () => {
+  // `Number('')` в JS даёт 0 — но стёртое поле порта значит «не трогали»,
+  // а не «порт 0»: 0 — недопустимый порт брокера, и сохранить его молча
+  // значит сломать mqtt так, что ни одна проверка формы этого не поймает.
+  const original = { mqtt: { host: 'broker', port: 1883, base: 'home/room/pc' } };
+  const fields = configToFields(original);
+  assert.strictEqual(fields['mqtt.port'], 1883);
+  const patch = fieldsToPatch({ ...fields, 'mqtt.port': '  ' }, original);
+  assert.deepStrictEqual(patch, {});
+});
+
+test('число, отданное строкой из DOM, не считается изменением', () => {
+  // Настоящий <input type="number"> (C6) всегда отдаёт value строкой.
+  // Сравнение должно идти по приведённым значениям, иначе "1883" от DOM и
+  // сохранённое число 1883 считались бы разным — и нетронутое поле порта
+  // попадало бы в патч при каждом сохранении.
+  const original = { mqtt: { host: 'broker', port: 1883, base: 'home/room/pc' } };
+  const fields = configToFields(original);
+  const patch = fieldsToPatch({ ...fields, 'mqtt.port': '1883' }, original);
+  assert.deepStrictEqual(patch, {});
+});
+
 test('пустой хост — отказ, а не пустой список', () => {
   // Без sshHost список брать неоткуда, и сохранить такое молча значит отдать
   // человеку пикер, который не работает и не говорит почему.
