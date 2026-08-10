@@ -18,8 +18,10 @@
 
 ## Global Constraints
 
-- **Работа идёт на pc-virt.** Пути — линуксовые: `V:\` с Windows это
-  `/home/popstas`. Репозитории: `~/projects/js/windows11-manager` (ветка
+- **Работа идёт на машине с сессиями** — той, где живут репозитории, хуки
+  агента и сам `ccfzf`; с Windows её домашний каталог примонтирован сетевым
+  диском, но пути в плане линуксовые.
+  Репозитории: `~/projects/js/windows11-manager` (ветка
   `feat/claude-wt-agent-progress`), `~/projects/shell/ccfzf`,
   `~/projects/js/ccfzf-picker` (ветка `windows-mqtt-migrate`),
   `~/projects/js/windows-mqtt` (ветка `feat/session-picker-agent-state`).
@@ -33,7 +35,7 @@
   (`test/no-private-data.test.js` в пикере это сторожит).
 - **Спека:** `docs/superpowers/specs/2026-08-11-project-hotkeys-through-aggregator-design.md`.
 - **Финальная сборка Rust для Windows и деплой — на Windows-машине**, не на
-  pc-virt: `cargo test` на Linux проходит (webkit2gtk-4.1 есть), но
+  машине с сессиями: `cargo test` на Linux проходит (webkit2gtk-4.1 есть), но
   `#[cfg(windows)]`-ветки windows-mqtt на Linux не компилируются.
 
 ---
@@ -633,33 +635,33 @@ mod tests {
     #[test]
     fn a_silent_answer_changes_nothing() {
         let s = state("", serde_json::json!([{"path": "/p/one", "hotkey": "Ctrl+F11"}]));
-        assert_eq!(wanted_from_state(&s, "popstas-pc"), None);
+        assert_eq!(wanted_from_state(&s, "tracker-host"), None);
     }
 
     /// Чужая машина ничего не регистрирует: клавиши там принадлежат её хозяину.
     #[test]
     fn another_machine_registers_nothing() {
-        let s = state("popstas-pc", serde_json::json!([{"path": "/p/one", "hotkey": "Ctrl+F11"}]));
-        assert_eq!(wanted_from_state(&s, "macbook"), None);
+        let s = state("tracker-host", serde_json::json!([{"path": "/p/one", "hotkey": "Ctrl+F11"}]));
+        assert_eq!(wanted_from_state(&s, "other-host"), None);
         assert_eq!(wanted_from_state(&s, ""), None);
     }
 
     /// Живой трекер с пустым списком — это «хоткеев нет», и он их снимает.
     #[test]
     fn a_live_tracker_with_no_hotkeys_clears_them() {
-        let s = state("popstas-pc", serde_json::json!([{"path": "/p/one"}]));
-        assert_eq!(wanted_from_state(&s, "popstas-pc"), Some(vec![]));
+        let s = state("tracker-host", serde_json::json!([{"path": "/p/one"}]));
+        assert_eq!(wanted_from_state(&s, "tracker-host"), Some(vec![]));
     }
 
     #[test]
     fn hotkeys_arrive_in_the_order_the_answer_gave_them() {
-        let s = state("popstas-pc", serde_json::json!([
+        let s = state("tracker-host", serde_json::json!([
             {"path": "/p/one", "hotkey": "Ctrl+F11"},
             {"path": "/p/two", "hotkey": " Ctrl+F12 "},
             {"path": "", "hotkey": "Ctrl+F9"},
         ]));
         assert_eq!(
-            wanted_from_state(&s, "popstas-pc"),
+            wanted_from_state(&s, "tracker-host"),
             Some(vec![
                 Project { cwd: "/p/one".into(), hotkey: "Ctrl+F11".into() },
                 Project { cwd: "/p/two".into(), hotkey: "Ctrl+F12".into() },
@@ -1320,7 +1322,7 @@ Run: `cd ~/projects/js/windows-mqtt && npm test && npm run lint`
 Expected: PASS; ни одного `Cannot find module`.
 
 Run: `cd ~/projects/js/windows-mqtt/src-tauri && cargo check`
-Expected: на pc-virt возможны ошибки только в `#[cfg(windows)]`-ветках — их
+Expected: на Linux возможны ошибки только в `#[cfg(windows)]`-ветках — их
 проверяет сборка на Windows на шаге выкатки. Всё прочее обязано компилироваться.
 
 - [ ] **Step 6: Коммит**
@@ -1336,8 +1338,8 @@ git commit -m "refactor: claude-wt уезжает в windows11-manager и ccfzf-
 ### Task 10: Документация
 
 **Files:**
-- Modify: `~/.claude/skills/claude-wt/SKILL.md` (с Windows —
-  `C:\Users\popstas\.claude\skills\claude-wt\SKILL.md`)
+- Modify: `~/.claude/skills/claude-wt/SKILL.md` (скилл лежит в домашнем
+  каталоге той машины, с которой его читают, — он вне репозиториев)
 - Modify: `~/projects/js/ccfzf-picker/CLAUDE.md`
 - Modify: `~/projects/js/ccfzf-picker/docs/TODO.md`
 
@@ -1411,7 +1413,7 @@ for d in ~/projects/js/windows11-manager ~/projects/js/windows-mqtt ~/projects/j
 
 - [ ] **Step 2: Выкатить windows-mqtt (первым)**
 
-На Windows-машине: `cd D:\projects\js\windows-mqtt && npm run deploy-local`.
+На Windows-машине, из клона windows-mqtt: `npm run deploy-local`.
 
 - [ ] **Step 3: Убедиться, что клавиши освободились**
 
@@ -1431,11 +1433,11 @@ Expected: обе FREE (пикер в этот момент ещё старый �
 
 - [ ] **Step 4: Выкатить windows11-manager**
 
-На Windows: `cd D:\projects\js\windows11-manager && ./data/scripts/deploy-pc.sh --no-build`.
+На Windows-машине, из клона windows11-manager: `./data/scripts/deploy-pc.sh --no-build`.
 
 - [ ] **Step 5: Убедиться, что хоткеи доехали до ответа**
 
-На pc-virt:
+На машине с сессиями:
 
 ```bash
 cd ~/projects/shell/ccfzf && ./ccfzf --state | python3 -c "import json,sys; s=json.load(sys.stdin); print(s['windowHost'], [p for p in s['projects'] if p.get('hotkey')])"
@@ -1445,29 +1447,29 @@ Expected: непустой `windowHost` и обе строки с хоткеям
 
 - [ ] **Step 6: Выкатить пикер**
 
-На Windows: `cd D:\projects\js\ccfzf-picker && ./data/scripts/deploy-win.sh`.
+На Windows-машине, из клона ccfzf-picker: `./data/scripts/deploy-win.sh`.
 
 - [ ] **Step 7: Убрать `projects:` из живого конфига**
 
 `merge_patch` незнакомые ключи не трогает, и ключ остался бы мусором:
 
 ```bash
-ssh popstas-pc "powershell -NoProfile -Command \"(Get-Content C:/Users/popstas/.config/ccfzf-picker/config.yaml -Raw)\""
+# Файл — `~/.config/ccfzf-picker/config.yaml` на Windows-машине.
 ```
 
 Блок `projects:` удалить руками тем редактором, который сохраняет UTF-8.
 
 - [ ] **Step 8: Проверить руками**
 
-1. Нажать `Ctrl+F11` — на pc-virt поднимается новая сессия в
-   `/home/popstas/projects/text/obsidian/home`, окно пикера при этом не
+1. Нажать `Ctrl+F11` — на машине с сессиями поднимается новая сессия в
+   каталоге первого проекта из `claudeWt.projects`, окно пикера при этом не
    открывается.
 2. Открыть пикер, нажать `/a` — в режиме проектов у двух строк видна колонка
    `hk` с `Ctrl+F11` и `Ctrl+F12`.
 3. Убить процесс демона claude-wt и подождать три минуты — клавиши продолжают
    работать (липкий список), в списке пометки об окнах пропали. Демона поднимет
    Tauri сам.
-4. Перезапустить пикер при выключенном pc-virt — клавиши работают из
+4. Перезапустить пикер при выключенной машине с сессиями — клавиши работают из
    `hotkeys.json`.
 
 - [ ] **Step 9: Повторить пробу занятости**
