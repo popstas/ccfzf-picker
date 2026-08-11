@@ -344,10 +344,13 @@
   // мелькнула бы и исчезла раньше, чем её успели прочитать.
   let notice = '';
   let noticeTimer = null;
-  // Комбинации, которые не встали. Приезжает от Rust — событием
-  // project-hotkeys и разовым опросом project_hotkeys_taken на старте — и
-  // только оттуда: со страницы не видно, что регистрирует система, а что нет.
-  let hotkeysTaken = new Set();
+  // Клавиши, которые не встали: записи `{cwd, hotkey, reason}`. Приезжает от
+  // Rust — событием project-hotkeys и разовым опросом project_hotkeys_taken на
+  // старте — и только оттуда: со страницы не видно, что регистрирует система,
+  // а что нет. Причина едет вместе с записью, потому что причин несколько, и
+  // называть все занятостью значило бы отправлять человека искать чужое
+  // приложение там, где хоткей просто назван дважды.
+  let hotkeysTaken = [];
 
   function showNotice(text) {
     notice = text;
@@ -744,10 +747,12 @@
     } else if (error) {
       message.style.display = 'block';
       message.textContent = error;
-    } else if (hotkeysTaken.size) {
+    } else if (hotkeysTaken.length) {
       message.style.display = 'block';
-      // Единственное место, где человек узнаёт про отобранную клавишу.
-      message.textContent = `${Array.from(hotkeysTaken).join(', ')} is taken by another app`;
+      // Единственное место, где человек узнаёт про не вставшую клавишу.
+      // Формулировку складывает тот же помощник, что помечает строки: две
+      // копии разошлись бы на первой же правке.
+      message.textContent = window.ProjectList.hotkeysTakenMessage(hotkeysTaken);
     } else {
       message.style.display = rows.length ? 'none' : 'block';
       if (!rows.length) {
@@ -806,14 +811,14 @@
    * Принять свежий список занятых комбинаций — общий код для события
    * project-hotkeys и разового опроса project_hotkeys_taken на старте.
    *
-   * Один помощник, а не две копии `hotkeysTaken = new Set(...); regroup();`:
+   * Один помощник, а не две копии `hotkeysTaken = [...]; regroup();`:
    * подписка ловит только то, что случится после неё, а клавиши вешаются в
    * Rust ещё в setup(), раньше, чем догрузилась эта страница, — без разового
    * опроса тем же кодом первый отказ, случившийся до подписки, не показался
    * бы никогда.
    */
   function applyHotkeysTaken(taken) {
-    hotkeysTaken = new Set(Array.isArray(taken) ? taken : []);
+    hotkeysTaken = Array.isArray(taken) ? taken : [];
     regroup();
   }
 

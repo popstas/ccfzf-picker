@@ -1,6 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { buildProjectList, markHotkeysTaken } = require('../frontend-src/project-list');
+const {
+  buildProjectList, markHotkeysTaken, hotkeysTakenMessage,
+} = require('../frontend-src/project-list');
 
 const STATE = {
   projects: [
@@ -60,26 +62,89 @@ test('запись без пути выбрасывается, безымянн�
   assert.deepStrictEqual(rows.map(r => r.label), ['/p/x']);
 });
 
+// Хоткей у менеджера пишет человек, и пробелы вокруг него — обычное дело.
+// Rust их снимает при разборе ответа, а строка списка — нет: разойдись эти
+// два вида, пометка «клавиша не встала» промахнулась бы мимо строки молча,
+// потому что сверяется она с тем, что приехало от Rust.
+test('хоткей приезжает в строку без пробелов по краям', () => {
+  const rows = buildProjectList({
+    projects: [{ path: '/p/one', name: 'one', sessions: 0, live: 0, mtime: 0,
+      hotkey: ' Ctrl+F12 ' }],
+  });
+  assert.equal(rows[0].hotkey, 'Ctrl+F12');
+});
+
 // markHotkeysTaken — общий помощник для события project-hotkeys и разового
 // опроса project_hotkeys_taken на старте страницы: обе ветки применяют один и
 // тот же список к строкам одним и тем же способом.
-test('markHotkeysTaken помечает только те строки, чья клавиша не встала', () => {
-  const rows = [{ hotkey: 'Ctrl+F11' }, { hotkey: 'Ctrl+F12' }, { hotkey: '' }];
-  markHotkeysTaken(rows, new Set(['Ctrl+F11']));
-  assert.deepStrictEqual(rows.map(r => r.hotkeyTaken), [true, false, false]);
-});
-
-test('markHotkeysTaken принимает обычный массив — не только Set', () => {
-  // Событие приезжает массивом (JSON), а разовый опрос на старте — тем же
-  // массивом из ответа Rust; заставлять вызывающего оборачивать его в Set
-  // самому значило бы копию этой строки в двух местах.
-  const rows = [{ hotkey: 'Ctrl+F11' }];
-  markHotkeysTaken(rows, ['Ctrl+F11']);
-  assert.strictEqual(rows[0].hotkeyTaken, true);
+//
+// Помечается строка по каталогу, а не по комбинации: у внутреннего
+// столкновения комбинация общая, и пометка по ней гасила бы и победителя —
+// того, у кого клавиша как раз работает.
+test('markHotkeysTaken помечает строку проигравшего, а не всех с той же клавишей', () => {
+  const rows = [
+    { cwd: '/p/one', hotkey: 'Ctrl+F11' },
+    { cwd: '/p/two', hotkey: 'Ctrl+F11' },
+    { cwd: '/p/three', hotkey: '' },
+  ];
+  markHotkeysTaken(rows, [{ cwd: '/p/two', hotkey: 'Ctrl+F11', reason: 'duplicate' }]);
+  assert.deepStrictEqual(rows.map(r => r.hotkeyTaken), [false, true, false]);
 });
 
 test('markHotkeysTaken на пустом списке занятых снимает пометку со всех', () => {
-  const rows = [{ hotkey: 'Ctrl+F11', hotkeyTaken: true }];
+  const rows = [{ cwd: '/p/one', hotkey: 'Ctrl+F11', hotkeyTaken: true }];
   markHotkeysTaken(rows, []);
   assert.strictEqual(rows[0].hotkeyTaken, false);
+});
+
+test('markHotkeysTaken переживает мусор вместо списка', () => {
+  const rows = [{ cwd: '/p/one', hotkey: 'Ctrl+F11', hotkeyTaken: true }];
+  markHotkeysTaken(rows, undefined);
+  assert.strictEqual(rows[0].hotkeyTaken, false);
+});
+
+// Строка в статуслайне — единственное место, где человек узнаёт об отказе, и
+// назвать в ней надо настоящую причину: отправить искать чужое приложение
+// там, где хоткей просто назван дважды, — час впустую.
+test('каждая причина отказа говорит человеку своё', () => {
+  const one = r => hotkeysTakenMessage([{ cwd: '/p/one', hotkey: 'Ctrl+F11', reason: r }]);
+  assert.match(one('system'), /another app/);
+  assert.match(one('duplicate'), /more than one project/);
+  assert.match(one('reserved'), /picker/);
+  assert.match(one('unparsable'), /not a valid hotkey/);
+  // Причины сведены в одну строку по группам, а не свалены в кучу.
+  const both = hotkeysTakenMessage([
+    { cwd: '/p/one', hotkey: 'Ctrl+F11', reason: 'system' },
+    { cwd: '/p/two', hotkey: 'Ctrl+F12', reason: 'duplicate' },
+  ]);
+  assert.ok(both.includes('Ctrl+F11') && both.includes('Ctrl+F12'), both);
+  assert.match(both, /another app/);
+  assert.match(both, /more than one project/);
+});
+
+// «Ctrl+F11, Ctrl+F12 is taken» — то, что выходило раньше на любом втором
+// отказе: одна формулировка на любое число клавиш.
+test('число клавиш и число в сказуемом сходятся', () => {
+  const single = hotkeysTakenMessage([{ cwd: '/p/one', hotkey: 'Ctrl+F11', reason: 'system' }]);
+  assert.match(single, /^Ctrl\+F11 is taken by another app$/);
+  const many = hotkeysTakenMessage([
+    { cwd: '/p/one', hotkey: 'Ctrl+F11', reason: 'system' },
+    { cwd: '/p/two', hotkey: 'Ctrl+F12', reason: 'system' },
+  ]);
+  assert.match(many, /^Ctrl\+F11, Ctrl\+F12 are taken by another app$/);
+});
+
+// Дважды названная клавиша приезжает записью на каждого проигравшего: три
+// проекта на одном Ctrl+F11 дали бы «Ctrl+F11, Ctrl+F11 are…».
+test('одна и та же комбинация называется в строке один раз', () => {
+  const message = hotkeysTakenMessage([
+    { cwd: '/p/two', hotkey: 'Ctrl+F11', reason: 'duplicate' },
+    { cwd: '/p/three', hotkey: 'Ctrl+F11', reason: 'duplicate' },
+  ]);
+  assert.match(message, /^Ctrl\+F11 is set on more than one project$/);
+});
+
+test('пустой список занятых — пустая строка, а не пустое обещание', () => {
+  assert.strictEqual(hotkeysTakenMessage([]), '');
+  assert.strictEqual(hotkeysTakenMessage(undefined), '');
 });

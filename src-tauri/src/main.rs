@@ -702,9 +702,20 @@ fn save_seen(seen: serde_json::Value) -> Result<(), String> {
 /// возможно, никогда за весь запуск. Пустое состояние (ничего ещё не
 /// применялось) — пустой список, не ошибка: `Registered::default()` уже
 /// такой.
+///
+/// `async` здесь по той же причине, что и у `open_settings`, но с обратной
+/// стороны: синхронную команду Tauri исполняет прямо в потоке цикла событий, а
+/// эта команда ждёт мьютекс, который в это же время может держать поток
+/// поллера, вешающий клавиши. Плагин хоткеев вешает их через главный поток —
+/// и цикл замкнулся бы: страница спросила бы «что не встало», главный поток
+/// встал бы на мьютексе, а державший мьютекс — на главном потоке. Приложение
+/// при этом не падает, а тихо перестаёт отвечать на что бы то ни было.
 #[tauri::command]
-fn project_hotkeys_taken(state: tauri::State<project_hotkeys::Registered>) -> Vec<String> {
-    state.0.lock().unwrap().taken.clone()
+async fn project_hotkeys_taken(
+    state: tauri::State<'_, project_hotkeys::Registered>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let taken = state.state.lock().unwrap().taken.clone();
+    Ok(project_hotkeys::taken_json(&taken))
 }
 
 /// Вид списка: сортировка и чекбоксы statusline.
@@ -1182,6 +1193,24 @@ mod tests {
         );
     }
 
+    /// Команда о занятых клавишах обязана быть `async`.
+    ///
+    /// Синхронную Tauri исполняет в потоке цикла событий, а она ждёт мьютекс
+    /// проектных хоткеев — тот самый, который держит поток поллера, пока
+    /// плагин вешает клавиши через главный поток. Синхронной она замыкала бы
+    /// круг: страница спросила бы «что не встало», главный поток встал бы на
+    /// мьютексе, державший мьютекс — на главном потоке, и приложение
+    /// перестало бы отвечать целиком. Поведением это не поймать без живого
+    /// приложения, поэтому сторожится форма.
+    #[test]
+    fn taken_command_runs_off_the_event_loop() {
+        let src = include_str!("main.rs");
+        assert!(
+            src.contains("async fn project_hotkeys_taken"),
+            "project_hotkeys_taken должна быть async — иначе взаимный замок с поллером"
+        );
+    }
+
     /// Опрос агрегатора не поднимает процессов мимо `proc::hidden_command`.
     ///
     /// Сторожит ту самую поломку, ради которой `proc.rs` и появился: на Windows
@@ -1244,18 +1273,21 @@ caps:
 terminal:
   file: open
   args: ['-na', 'kitty', '--args']
-projects:
-  - path: /home/user/projects/demo
-    hotkey: Cmd+Shift+1
+actions:
+  - label: Open folder
+    hotkey: Ctrl+O
+    file: open
 "#;
         let v: serde_json::Value = serde_yaml::from_str(text).unwrap();
         assert_eq!(v["sshHost"].as_str(), Some("example-host"));
         assert_eq!(v["caps"]["reptyr"].as_bool(), Some(true));
         assert_eq!(v["terminal"]["file"].as_str(), Some("open"));
         assert_eq!(v["terminal"]["args"].as_array().unwrap().len(), 3);
-        let projects = v["projects"].as_array().unwrap();
-        assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0]["hotkey"].as_str(), Some("Cmd+Shift+1"));
+        // Массив объектов — образцом взяты `actions`: проектные хоткеи из
+        // конфига ушли к менеджеру, и ключа `projects` здесь больше нет.
+        let actions = v["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0]["hotkey"].as_str(), Some("Ctrl+O"));
     }
 
     /// Пустой `sshHost` — это ненастроенный конфиг, а не «сходи в никуда».

@@ -435,9 +435,35 @@ test('строка проекта несёт колонку hk, и занята�
     { path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 0, hotkey: 'Ctrl+F11' },
     { path: '/p/two', name: 'two', sessions: 1, live: 0, mtime: 0, hotkey: 'Ctrl+F12' },
   ];
-  const { items } = renderProjectRows(withHotkeys, '', undefined, ['Ctrl+F11']);
+  const taken = [{ cwd: '/p/one', hotkey: 'Ctrl+F11', reason: 'system' }];
+  const { items } = renderProjectRows(withHotkeys, '', undefined, taken);
   assert.ok(items[0].html.includes('<div class="hk taken">Ctrl+F11</div>'), items[0].html);
   assert.ok(items[1].html.includes('<div class="hk">Ctrl+F12</div>'), items[1].html);
+});
+
+// Пометка идёт по каталогу, а не по комбинации: у дважды названной клавиши
+// она общая, а работает клавиша у одного — у первого по каталогу. Пометив по
+// комбинации, список перечеркнул бы обоих, и человек искал бы поломку там,
+// где её нет.
+test('дважды названная клавиша гасит проигравшего, но не победителя', () => {
+  const twins = [
+    { path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 0, hotkey: 'Ctrl+F11' },
+    { path: '/p/two', name: 'two', sessions: 1, live: 0, mtime: 0, hotkey: 'Ctrl+F11' },
+  ];
+  const taken = [{ cwd: '/p/two', hotkey: 'Ctrl+F11', reason: 'duplicate' }];
+  const { items } = renderProjectRows(twins, '', undefined, taken);
+  assert.ok(items[0].html.includes('<div class="hk">Ctrl+F11</div>'), items[0].html);
+  assert.ok(items[1].html.includes('<div class="hk taken">Ctrl+F11</div>'), items[1].html);
+});
+
+// Строку статуслайна складывает тот же помощник, что и помечает строки: две
+// копии разошлись бы на первой же правке формулировок, а поймать это было бы
+// нечем — статуслайн ни один тест не читает.
+test('статуслайн складывает жалобу помощником, а не своими руками', () => {
+  assert.ok(
+    SESSIONS_HTML.includes('ProjectList.hotkeysTakenMessage('),
+    'sessions.html обязан звать hotkeysTakenMessage — иначе причина отказа снова врёт',
+  );
 });
 
 test('выключенный чекбокс hotkeys убирает колонку hk у строки проекта', () => {

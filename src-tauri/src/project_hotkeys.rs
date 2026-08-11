@@ -1,7 +1,7 @@
 //! Проектные хоткеи: список приезжает ответом агрегатора, а не из конфига.
 
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Mutex, Once};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
@@ -49,18 +49,128 @@ pub fn wanted_from_state(state: &serde_json::Value, own_host: &str) -> Option<Ve
             hotkey: hotkey.trim().to_string(),
         });
     }
+    sort_by_cwd(&mut out);
     Some(out)
+}
+
+/// Ответ несёт хоткеи, а взять их некому — сказать об этом ровно раз.
+///
+/// Пустой или чужой `windowHost` на маке — это норма и умолчание: агрегатор
+/// рассказывает там про окна Windows-машины, хоткеев на маке не бывает, и
+/// строка об этом была бы шумом на каждом запуске. Но на самой
+/// Windows-машине незаполненный `windowHost` даёт ровно ту картину, ради
+/// которой всё и затевалось: клавиши не работают, и молчат обе стороны.
+/// Отличить эти два случая по конфигу нельзя — он одинаков; отличает их ответ,
+/// в котором либо есть хоткеи, либо нет. Обе стороны сравнения — в строке:
+/// иначе человеку негде увидеть, какое имя писать в конфиг.
+pub fn host_mismatch_note(state: &serde_json::Value, own: &str) -> Option<String> {
+    if wanted_from_state(state, own).is_some() {
+        return None;
+    }
+    let carries = state
+        .get("projects")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .any(|row| {
+            row.get("hotkey")
+                .and_then(|v| v.as_str())
+                .is_some_and(|h| !h.trim().is_empty())
+        });
+    if !carries {
+        return None;
+    }
+    let host = state.get("windowHost").and_then(|v| v.as_str()).unwrap_or("");
+    Some(format!(
+        "ccfzf-picker: the answer brings project hotkeys for windowHost \"{host}\", \
+         but this picker's windowHost is \"{}\" — no project hotkeys registered",
+        own.trim()
+    ))
+}
+
+/// Список — по каталогу, и это не косметика.
+///
+/// Порядок ответа порядком конфига менеджера не является: `project_rows` в
+/// ccfzf отдаёт проекты по свежести сессий (`-mtime`, затем имя), и он
+/// меняется по ходу работы. Решай столкновение по нему — дважды названная
+/// комбинация молча переезжала бы от проекта к проекту, стоило поработать в
+/// другом; считай по нему отпечаток — каждая перестановка выглядела бы сменой
+/// списка и стоила полного цикла «снять-повесить» с перезаписью
+/// `hotkeys.json` для списка, который не менялся. Сортировка устойчивая:
+/// одинаковых каталогов в ответе не бывает, но и порядок дублей менять не за
+/// чем.
+pub fn sort_by_cwd(list: &mut [Project]) {
+    list.sort_by(|a, b| a.cwd.cmp(&b.cwd));
 }
 
 /// Отпечаток списка: то же ли это, что уже висит.
 ///
-/// Считается по паре «каталог + клавиша» и по порядку: порядок решает, кому
-/// достанется дважды названная комбинация, и его смена — настоящее изменение.
+/// Считается по паре «каталог + клавиша» и по порядку — а порядок задан
+/// `sort_by_cwd`, не ответом.
 pub fn fingerprint(list: &[Project]) -> String {
     list.iter()
         .map(|p| format!("{}\u{0}{}", p.cwd, p.hotkey))
         .collect::<Vec<_>>()
         .join("\u{1}")
+}
+
+/// Почему клавиша не встала.
+///
+/// Причина едет наверх вместе с записью, а не подразумевается одна на всех:
+/// «занято другим приложением» на внутреннем столкновении — неправда, и она
+/// отправляет человека искать чужое приложение, которого нет.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TakenReason {
+    /// Систему попросили, система отказала: клавишу держит кто-то ещё.
+    System,
+    /// Комбинация названа больше чем на одном проекте.
+    Duplicate,
+    /// Комбинация совпала с собственным хоткеем пикера.
+    Reserved,
+    /// Комбинация не разбирается.
+    Unparsable,
+}
+
+impl TakenReason {
+    /// Имя причины для страницы. Формулировку складывает она (`project-list.js`):
+    /// человеческие строки живут там же, где остальные, и по-английски.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TakenReason::System => "system",
+            TakenReason::Duplicate => "duplicate",
+            TakenReason::Reserved => "reserved",
+            TakenReason::Unparsable => "unparsable",
+        }
+    }
+}
+
+/// Запись «эта клавиша не встала»: каталог, комбинация и причина.
+///
+/// Каталог здесь не для полноты картины: строку в списке фронтенд помечает по
+/// нему. Пометка по комбинации накрывала бы и победителя внутреннего
+/// столкновения — клавиша у них общая, а работает она у одного.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Taken {
+    pub cwd: String,
+    pub hotkey: String,
+    pub reason: TakenReason,
+}
+
+impl Taken {
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "cwd": self.cwd,
+            "hotkey": self.hotkey,
+            "reason": self.reason.as_str(),
+        })
+    }
+}
+
+/// Одна и та же форма для события `project-hotkeys` и для команды
+/// `project_hotkeys_taken`: разбирает их на странице один помощник, и разойдись
+/// эти два тела — разошлись бы и пометки в списке с жалобой в статуслайне.
+pub fn taken_json(list: &[Taken]) -> Vec<serde_json::Value> {
+    list.iter().map(Taken::to_json).collect()
 }
 
 /// Что висит прямо сейчас и по какому списку.
@@ -81,32 +191,92 @@ pub struct RegisteredState {
     pub live: Vec<(Project, Shortcut)>,
     pub fingerprint: String,
     pub wanted: Vec<Project>,
-    pub taken: Vec<String>,
+    pub taken: Vec<Taken>,
+}
+
+/// Кто вешает клавиши прямо сейчас и что попросили повесить, пока он занят.
+///
+/// Очередь на одну заявку, а не мьютекс на всё применение: см. `claim`.
+#[derive(Default)]
+pub struct Work {
+    pub busy: bool,
+    pub pending: Option<Vec<Project>>,
 }
 
 #[derive(Default)]
-pub struct Registered(pub Mutex<RegisteredState>);
+pub struct Registered {
+    pub state: Mutex<RegisteredState>,
+    pub work: Mutex<Work>,
+}
+
+/// Взяться за список самому или отдать его тому, кто уже вешает.
+///
+/// Мьютекс состояния во время работы с плагином отпущен (иначе поток поллера
+/// ждал бы главный поток, а главный — мьютекс), и без очереди два `apply`
+/// внахлёст — поллер против сохранения настроек — разошлись бы: второй забрал
+/// бы уже опустевший `live` и оставил регистрации первого висеть в системе,
+/// никем не учтёнными, а `unregister` до них больше не дошёл бы никогда.
+///
+/// Ждать здесь нельзя по той же причине, по какой нельзя держать мьютекс:
+/// `apply` зовётся и с главного потока (`apply_config` → `reapply`), а
+/// работающий в это время поток поллера сам ждёт главный поток внутри
+/// плагина. Поэтому опоздавший не ждёт, а оставляет заявку — её подберёт
+/// работающий, закончив.
+pub fn claim(work: &Mutex<Work>, wanted: Vec<Project>) -> Option<Vec<Project>> {
+    let mut w = work.lock().unwrap();
+    if w.busy {
+        // Заявка хранится последняя: список приезжает целиком, и предыдущий
+        // желаемый устарел ровно тогда, когда пришёл следующий.
+        w.pending = Some(wanted);
+        return None;
+    }
+    w.busy = true;
+    Some(wanted)
+}
+
+/// Закончил — забрать оставленную заявку или освободить место.
+pub fn finish(work: &Mutex<Work>) -> Option<Vec<Project>> {
+    let mut w = work.lock().unwrap();
+    match w.pending.take() {
+        Some(next) => Some(next),
+        None => {
+            w.busy = false;
+            None
+        }
+    }
+}
 
 /// Кто из желаемых получит клавишу, а кто останется ни с чем.
 ///
 /// Столкновения решаются в одну сторону и всегда одинаково: встроенная клавиша
 /// пикера выигрывает у настроенной, а из двух настроенных — первая по порядку.
 /// Возвращается вторым списком то, о чём придётся сказать человеку: пока это
-/// была строка в stderr, занятый `Ctrl+F11` расследовали полдня.
+/// была строка в stderr, занятый `Ctrl+F11` расследовали полдня. Причина у
+/// каждого проигравшего своя и едет с ним: столкновение внутри конфига
+/// менеджера и отобранная соседом по системе клавиша чинятся в разных местах,
+/// и одно название на оба случая посылало бы человека не туда.
 pub fn plan(
     wanted: &[Project],
     reserved: Option<&Shortcut>,
-) -> (Vec<(Project, Shortcut)>, Vec<String>) {
+) -> (Vec<(Project, Shortcut)>, Vec<Taken>) {
     let mut ok: Vec<(Project, Shortcut)> = Vec::new();
-    let mut taken: Vec<String> = Vec::new();
+    let mut taken: Vec<Taken> = Vec::new();
+    let lost = |project: &Project, reason: TakenReason| Taken {
+        cwd: project.cwd.clone(),
+        hotkey: project.hotkey.clone(),
+        reason,
+    };
     for project in wanted {
         let Ok(shortcut) = Shortcut::from_str(&project.hotkey) else {
-            taken.push(project.hotkey.clone());
+            taken.push(lost(project, TakenReason::Unparsable));
             continue;
         };
-        let clashes = reserved == Some(&shortcut) || ok.iter().any(|(_, s)| *s == shortcut);
-        if clashes {
-            taken.push(project.hotkey.clone());
+        if reserved == Some(&shortcut) {
+            taken.push(lost(project, TakenReason::Reserved));
+            continue;
+        }
+        if ok.iter().any(|(_, s)| *s == shortcut) {
+            taken.push(lost(project, TakenReason::Duplicate));
             continue;
         }
         ok.push((project.clone(), shortcut));
@@ -143,6 +313,10 @@ pub fn from_cache(value: &serde_json::Value) -> Vec<Project> {
         }
         out.push(Project { cwd: cwd.to_string(), hotkey: hotkey.to_string() });
     }
+    // Тем же порядком, что и ответ: разойдись они, первый же ответ после
+    // старта не совпал бы с отпечатком повешенного с диска списка и перевесил
+    // бы всё заново на ровном месте.
+    sort_by_cwd(&mut out);
     out
 }
 
@@ -152,17 +326,51 @@ pub fn from_cache(value: &serde_json::Value) -> Vec<Project> {
 /// списка уронил бы и хоткей самого пикера, а он живёт по другому поводу и
 /// перевешивается только сменой конфига.
 ///
-/// Наверх уходит `project-hotkeys` с занятыми комбинациями: отказ обязан быть
-/// виден. До этой правки он стоил строки в stderr, которого у приложения из
-/// трея не читает никто, — и `Ctrl+F11`, отобранный соседом по системе, выглядел
-/// как сломанный конфиг.
+/// Список приходит отсортированным по каталогу — `sort_by_cwd` стоит в обоих
+/// источниках, `wanted_from_state` и `from_cache`, а `reapply` берёт уже
+/// применённый. На этом стоит и сравнение отпечатков в `apply_from_state`.
+///
+/// Наверх уходит `project-hotkeys` записями «каталог, комбинация, причина»:
+/// отказ обязан быть виден, и виден настоящей причиной. До этой правки он
+/// стоил строки в stderr, которого у приложения из трея не читает никто, — и
+/// `Ctrl+F11`, отобранный соседом по системе, выглядел как сломанный конфиг.
 pub fn apply(app: &tauri::AppHandle, wanted: Vec<Project>) {
+    let Some(reg) = app.try_state::<Registered>() else { return };
+    // Занято — оставляем заявку и уходим: ждать нельзя, см. `claim`.
+    let Some(mut list) = claim(&reg.work, wanted) else { return };
+    loop {
+        apply_once(app, &reg, list);
+        match finish(&reg.work) {
+            Some(next) => list = next,
+            None => break,
+        }
+    }
+}
+
+/// Один проход: снять прежние, повесить эти, запомнить исход.
+///
+/// Мьютекс состояния берётся здесь дважды по чуть-чуть и **не** держится, пока
+/// идёт работа с плагином. `unregister` и `on_shortcut` в
+/// `tauri-plugin-global-shortcut` идут через `run_main_thread!`, то есть кладут
+/// задачу в цикл событий и блокируются на ответе главного потока. Держи мы при
+/// этом мьютекс, замок сошёлся бы двумя путями сразу: поток поллера ждал бы
+/// главный поток, а тот в это время ждал бы мьютекс в команде
+/// `project_hotkeys_taken`; и второй, короче, — `apply_config` зовёт `reapply`
+/// прямо с главного потока, и `run_main_thread!` под собственным мьютексом
+/// ждал бы там сам себя.
+fn apply_once(app: &tauri::AppHandle, reg: &Registered, wanted: Vec<Project>) {
     let reserved = crate::picker_hotkey(&crate::load_config().unwrap_or(serde_json::Value::Null)).0;
     let (ok, taken) = plan(&wanted, Some(&reserved));
 
-    let Some(state) = app.try_state::<Registered>() else { return };
-    let mut guard = state.0.lock().unwrap();
-    for (_, shortcut) in guard.live.drain(..) {
+    let (previous, was_fingerprint, was_taken) = {
+        let mut guard = reg.state.lock().unwrap();
+        (
+            std::mem::take(&mut guard.live),
+            guard.fingerprint.clone(),
+            guard.taken.clone(),
+        )
+    };
+    for (_, shortcut) in previous {
         let _ = app.global_shortcut().unregister(shortcut);
     }
 
@@ -182,23 +390,54 @@ pub fn apply(app: &tauri::AppHandle, wanted: Vec<Project>) {
             Ok(()) => live.push((project, shortcut)),
             Err(e) => {
                 eprintln!("ccfzf-picker: cannot register hotkey {}: {e}", project.hotkey);
-                failed.push(project.hotkey);
+                failed.push(Taken {
+                    cwd: project.cwd,
+                    hotkey: project.hotkey,
+                    reason: TakenReason::System,
+                });
             }
         }
     }
-    guard.fingerprint = fingerprint(&wanted);
-    // wanted и taken запоминаются здесь же, а не выводятся из live позже: это
-    // единственное место, где виден весь список целиком, включая тех, кто
-    // проиграл столкновение и в live не попал.
-    guard.wanted = wanted.clone();
-    guard.live = live;
-    guard.taken = failed.clone();
-    drop(guard);
+    let fp = fingerprint(&wanted);
+    {
+        let mut guard = reg.state.lock().unwrap();
+        guard.fingerprint = fp.clone();
+        // wanted и taken запоминаются здесь же, а не выводятся из live позже:
+        // это единственное место, где виден весь список целиком, включая тех,
+        // кто проиграл столкновение и в live не попал.
+        guard.wanted = wanted.clone();
+        guard.live = live;
+        guard.taken = failed.clone();
+    }
 
+    // Ни списка, ни исхода не изменилось — значит, это очередная попытка
+    // отобрать назад занятую клавишу (`needs_reapply`), и рассказывать о ней
+    // некому: файл получил бы ту же запись, а страница — то же событие, раз в
+    // секунду и без повода.
+    if was_fingerprint == fp && was_taken == failed {
+        return;
+    }
     if let Err(e) = crate::save_json("hotkeys.json", &to_cache(&wanted)) {
         eprintln!("ccfzf-picker: cannot remember hotkeys: {e}");
     }
-    let _ = app.emit("project-hotkeys", serde_json::json!({ "taken": failed }));
+    let _ = app.emit(
+        "project-hotkeys",
+        serde_json::json!({ "taken": taken_json(&failed) }),
+    );
+}
+
+/// Стоит ли трогать клавиши на этот ответ.
+///
+/// Отпечаток считается по желаемому, а не по исходу, и одной его проверки
+/// мало: клавиша, отобранная соседом по системе на момент старта, не
+/// перепробовалась бы больше ни разу — список-то не менялся, — и жалоба в
+/// статуслайне провисела бы до перезапуска, хотя вор давно ушёл. Поэтому пока
+/// в `taken` кто-то есть, список применяется заново на каждый опрос: снять и
+/// повесить десяток клавиш раз в секунду дешевле, чем врать человеку про
+/// занятость. Учесть исход в самом отпечатке не вышло бы: отпечаток
+/// сравнивается до применения, а исход известен только после.
+pub fn needs_reapply(state: &RegisteredState, wanted: &[Project]) -> bool {
+    !state.taken.is_empty() || state.fingerprint != fingerprint(wanted)
 }
 
 /// Применить то, что приехало ответом. Зовётся поллером на каждый удачный опрос.
@@ -207,9 +446,17 @@ pub fn apply_from_state(app: &tauri::AppHandle, state: &serde_json::Value) {
         .ok()
         .and_then(|c| c.get("windowHost").and_then(|v| v.as_str()).map(str::to_string))
         .unwrap_or_default();
-    let Some(wanted) = wanted_from_state(state, &own) else { return };
+    let Some(wanted) = wanted_from_state(state, &own) else {
+        if let Some(note) = host_mismatch_note(state, &own) {
+            // Один раз за запуск: опрос идёт раз в секунду, и повторять эту
+            // строку значило бы залить ею весь stderr.
+            static SAID: Once = Once::new();
+            SAID.call_once(|| eprintln!("{note}"));
+        }
+        return;
+    };
     if let Some(reg) = app.try_state::<Registered>() {
-        if reg.0.lock().unwrap().fingerprint == fingerprint(&wanted) {
+        if !needs_reapply(&reg.state.lock().unwrap(), &wanted) {
             return;
         }
     }
@@ -244,7 +491,10 @@ pub fn reapply_list(state: &RegisteredState) -> Vec<Project> {
 /// Повесить заново то, что уже висело: после `unregister_all()` в `apply_config`.
 pub fn reapply(app: &tauri::AppHandle) {
     let Some(reg) = app.try_state::<Registered>() else { return };
-    let wanted = reapply_list(&reg.0.lock().unwrap());
+    // Мьютекс отпускается этой же строкой, до `apply`: держать его дальше
+    // значило бы войти в плагин под замком — тот самый путь, от которого
+    // `apply_once` и расщеплён.
+    let wanted = reapply_list(&reg.state.lock().unwrap());
     if wanted.is_empty() {
         return;
     }
@@ -287,7 +537,7 @@ mod tests {
     }
 
     #[test]
-    fn hotkeys_arrive_in_the_order_the_answer_gave_them() {
+    fn hotkeys_arrive_sorted_by_directory() {
         let s = state("tracker-host", serde_json::json!([
             {"path": "/p/one", "hotkey": "Ctrl+F11"},
             {"path": "/p/two", "hotkey": " Ctrl+F12 "},
@@ -300,6 +550,140 @@ mod tests {
                 Project { cwd: "/p/two".into(), hotkey: "Ctrl+F12".into() },
             ])
         );
+    }
+
+    /// Порядок ответа значения не имеет: он приезжает по свежести сессий и
+    /// меняется, стоит поработать в другом проекте. Реши мы по нему
+    /// столкновение — дважды названная клавиша молча переезжала бы от проекта
+    /// к проекту; считай по нему отпечаток — каждая перестановка выглядела бы
+    /// сменой списка и стоила полного цикла «снять-повесить» с перезаписью
+    /// hotkeys.json.
+    #[test]
+    fn a_reshuffled_answer_is_the_same_list() {
+        let fresh_first = state("tracker-host", serde_json::json!([
+            {"path": "/p/two", "hotkey": "Ctrl+F11"},
+            {"path": "/p/one", "hotkey": "Ctrl+F11"},
+        ]));
+        let fresh_last = state("tracker-host", serde_json::json!([
+            {"path": "/p/one", "hotkey": "Ctrl+F11"},
+            {"path": "/p/two", "hotkey": "Ctrl+F11"},
+        ]));
+        let a = wanted_from_state(&fresh_first, "tracker-host").unwrap();
+        let b = wanted_from_state(&fresh_last, "tracker-host").unwrap();
+        assert_eq!(a, b);
+        assert_eq!(fingerprint(&a), fingerprint(&b));
+        // Победитель один и тот же в обоих случаях — каталог, а не свежесть.
+        let (ok, _) = plan(&a, None);
+        assert_eq!(ok.iter().map(|(p, _)| p.cwd.as_str()).collect::<Vec<_>>(), vec!["/p/one"]);
+    }
+
+    /// Кэш читается тем же порядком, что и ответ: разойдись они, первый же
+    /// ответ после старта не совпал бы с отпечатком повешенного с диска
+    /// списка и перевесил бы всё заново на ровном месте.
+    #[test]
+    fn the_cache_comes_back_sorted_too() {
+        let stored = serde_json::json!({"projects": [
+            {"cwd": "/p/two", "hotkey": "Ctrl+F12"},
+            {"cwd": "/p/one", "hotkey": "Ctrl+F11"},
+        ]});
+        assert_eq!(
+            from_cache(&stored).iter().map(|p| p.cwd.as_str()).collect::<Vec<_>>(),
+            vec!["/p/one", "/p/two"]
+        );
+    }
+
+    /// Ответ несёт хоткеи, а свой `windowHost` пуст или не тот — единственный
+    /// случай, когда об этом надо сказать. На маке ответ хоткеев не несёт, и
+    /// жаловаться там не на что.
+    #[test]
+    fn hotkeys_for_a_host_we_are_not_are_worth_a_word() {
+        let s = state("tracker-host", serde_json::json!([{"path": "/p/one", "hotkey": "Ctrl+F11"}]));
+        let note = host_mismatch_note(&s, "").expect("пустой свой хост при хоткеях в ответе");
+        assert!(note.contains("tracker-host"), "чужая сторона сравнения в строке: {note}");
+        assert!(note.contains("windowHost"), "человеку нужно имя ключа в конфиге: {note}");
+        assert!(host_mismatch_note(&s, "other-host").is_some(), "несовпадение — тот же случай");
+        assert_eq!(host_mismatch_note(&s, "tracker-host"), None, "свои хоткеи — не жалоба");
+    }
+
+    /// Ответ без хоткеев молчит: это и есть мак, где их не бывает.
+    #[test]
+    fn an_answer_without_hotkeys_says_nothing() {
+        let s = state("tracker-host", serde_json::json!([
+            {"path": "/p/one"},
+            {"path": "/p/two", "hotkey": "  "},
+        ]));
+        assert_eq!(host_mismatch_note(&s, ""), None);
+    }
+
+    /// Пока хоть одна клавиша не встала, список пробуется заново на каждый
+    /// опрос. Отпечаток считается по желаемому, а не по исходу: срежь по нему
+    /// — и клавиша, отобранная соседом по системе на момент старта, не
+    /// перепробуется больше ни разу, а жалоба провисит до перезапуска, хотя
+    /// вор давно ушёл.
+    #[test]
+    fn a_taken_key_is_tried_again_on_every_answer() {
+        let wanted = vec![Project { cwd: "/p/one".into(), hotkey: "Ctrl+F11".into() }];
+        let settled = RegisteredState {
+            fingerprint: fingerprint(&wanted),
+            wanted: wanted.clone(),
+            ..Default::default()
+        };
+        assert!(!needs_reapply(&settled, &wanted), "тот же список без отказов не трогаем");
+
+        let complaining = RegisteredState {
+            taken: vec![Taken {
+                cwd: "/p/one".into(),
+                hotkey: "Ctrl+F11".into(),
+                reason: TakenReason::System,
+            }],
+            ..settled
+        };
+        assert!(needs_reapply(&complaining, &wanted), "непойманная клавиша — повод пробовать");
+    }
+
+    #[test]
+    fn a_changed_list_is_applied_even_without_complaints() {
+        let old = vec![Project { cwd: "/p/one".into(), hotkey: "Ctrl+F11".into() }];
+        let new = vec![Project { cwd: "/p/one".into(), hotkey: "Ctrl+F12".into() }];
+        let state = RegisteredState {
+            fingerprint: fingerprint(&old),
+            wanted: old,
+            ..Default::default()
+        };
+        assert!(needs_reapply(&state, &new));
+    }
+
+    /// Опоздавший не ждёт, а оставляет заявку.
+    ///
+    /// Ждать нельзя: `apply` зовётся и с главного потока (`apply_config` →
+    /// `reapply`), а работающий в это время поток поллера сам ждёт главный
+    /// поток внутри плагина — взаимный замок. Но и разойтись двум `apply`
+    /// нельзя: второй забрал бы уже опустевший `live` и оставил регистрации
+    /// первого висеть, никем не учтёнными.
+    #[test]
+    fn a_second_apply_leaves_a_note_instead_of_waiting() {
+        let work = Mutex::new(Work::default());
+        let first = vec![Project { cwd: "/p/one".into(), hotkey: "Ctrl+F11".into() }];
+        let second = vec![Project { cwd: "/p/two".into(), hotkey: "Ctrl+F12".into() }];
+        assert_eq!(claim(&work, first.clone()), Some(first), "свободно — берём сами");
+        assert_eq!(claim(&work, second.clone()), None, "занято — отдаём заявкой");
+        assert_eq!(finish(&work), Some(second), "заявку подбирает тот, кто работал");
+        assert_eq!(finish(&work), None, "заявок больше нет — место свободно");
+        let third = vec![Project { cwd: "/p/three".into(), hotkey: "Ctrl+F9".into() }];
+        assert_eq!(claim(&work, third.clone()), Some(third), "после finish место свободно");
+    }
+
+    /// Заявка хранится последняя: список приезжает целиком, и предыдущий
+    /// желаемый устарел ровно в тот момент, когда пришёл следующий.
+    #[test]
+    fn only_the_latest_note_survives() {
+        let work = Mutex::new(Work::default());
+        assert!(claim(&work, vec![]).is_some());
+        let older = vec![Project { cwd: "/p/one".into(), hotkey: "Ctrl+F11".into() }];
+        let newer = vec![Project { cwd: "/p/two".into(), hotkey: "Ctrl+F12".into() }];
+        assert_eq!(claim(&work, older), None);
+        assert_eq!(claim(&work, newer.clone()), None);
+        assert_eq!(finish(&work), Some(newer));
     }
 
     /// Отпечаток нужен затем же, зачем и у состояния: перевешивать клавиши на
@@ -329,6 +713,10 @@ mod tests {
     /// Правило то же, что у настроенных действий в `config-shape.js`, и цена
     /// его отсутствия та же: комбинация досталась бы тому, кто ниже в списке, а
     /// колонка `hk` обещала бы клавишу, ведущую в другое место.
+    ///
+    /// Причина у каждого проигравшего своя, и она уезжает наверх вместе с
+    /// записью: назвав внутреннее столкновение занятостью, пикер отправил бы
+    /// человека искать чужое приложение, которого нет.
     #[test]
     fn the_picker_key_wins_and_the_first_project_wins() {
         let picker = Shortcut::from_str("Super+F10").unwrap();
@@ -339,7 +727,10 @@ mod tests {
         ];
         let (ok, taken) = plan(&wanted, Some(&picker));
         assert_eq!(ok.iter().map(|(p, _)| p.cwd.as_str()).collect::<Vec<_>>(), vec!["/p/one"]);
-        assert_eq!(taken, vec!["Ctrl+F11".to_string(), "Super+F10".to_string()]);
+        assert_eq!(taken, vec![
+            Taken { cwd: "/p/two".into(), hotkey: "Ctrl+F11".into(), reason: TakenReason::Duplicate },
+            Taken { cwd: "/p/three".into(), hotkey: "Super+F10".into(), reason: TakenReason::Reserved },
+        ]);
     }
 
     /// Неразобранная комбинация — не повод уронить остальные.
@@ -351,7 +742,29 @@ mod tests {
         ];
         let (ok, taken) = plan(&wanted, None);
         assert_eq!(ok.iter().map(|(p, _)| p.cwd.as_str()).collect::<Vec<_>>(), vec!["/p/two"]);
-        assert_eq!(taken, vec!["не хоткей".to_string()]);
+        assert_eq!(taken, vec![Taken {
+            cwd: "/p/one".into(),
+            hotkey: "не хоткей".into(),
+            reason: TakenReason::Unparsable,
+        }]);
+    }
+
+    /// Наверх уезжает каталог, а не одна комбинация: строку в списке фронтенд
+    /// помечает по нему. По комбинации пометка накрыла бы и победителя
+    /// внутреннего столкновения — клавиша у них общая, а работает она у
+    /// одного.
+    #[test]
+    fn the_report_names_the_directory_that_lost() {
+        let wanted = vec![
+            Project { cwd: "/p/one".into(), hotkey: "Ctrl+F11".into() },
+            Project { cwd: "/p/two".into(), hotkey: "Ctrl+F11".into() },
+        ];
+        let (_, taken) = plan(&wanted, None);
+        let json = taken_json(&taken);
+        assert_eq!(json.len(), 1);
+        assert_eq!(json[0]["cwd"].as_str(), Some("/p/two"));
+        assert_eq!(json[0]["hotkey"].as_str(), Some("Ctrl+F11"));
+        assert_eq!(json[0]["reason"].as_str(), Some("duplicate"));
     }
 
     /// Записанное на диск читается обратно тем же списком: кэш вешается на
@@ -379,7 +792,11 @@ mod tests {
             live: vec![(winner.clone(), shortcut)],
             fingerprint: String::new(),
             wanted: vec![winner.clone(), loser.clone()],
-            taken: vec!["Ctrl+F11".to_string()],
+            taken: vec![Taken {
+                cwd: "/p/two".into(),
+                hotkey: "Ctrl+F11".into(),
+                reason: TakenReason::Duplicate,
+            }],
         };
         // live содержит только победителя — если бы reapply_list читал его,
         // loser здесь не оказалось бы.

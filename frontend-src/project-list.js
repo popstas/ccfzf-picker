@@ -38,9 +38,45 @@
         // Под тем же именем, что у сессии: колонку `hk` рисует общая
         // hotkeyHtml, и второе имя для того же смысла ей пришлось бы
         // объяснять. Пустая строка, а не undefined, — та же причина.
-        hotkey: typeof p.hotkey === 'string' ? p.hotkey : '',
+        //
+        // trim по той же причине, по какой он стоит в Rust при разборе
+        // ответа: хоткей у менеджера пишет человек, пробелы вокруг него —
+        // обычное дело, и разойдись эти два вида, комбинация в колонке
+        // отличалась бы от той, о которой отчитался Rust.
+        hotkey: typeof p.hotkey === 'string' ? p.hotkey.trim() : '',
       }));
   }
+
+  /**
+   * Отказы, как их присылает Rust: записи `{cwd, hotkey, reason}`.
+   *
+   * Мусор отсеивается здесь, а не в каждом читателе: приезжает это по двум
+   * дорогам — событием `project-hotkeys` и командой `project_hotkeys_taken`, —
+   * и обе идут через JSON.
+   */
+  function takenEntries(taken) {
+    return (Array.isArray(taken) ? taken : []).filter(e => e && typeof e === 'object');
+  }
+
+  /**
+   * Что сказать человеку про каждую причину: единственное число, множественное.
+   *
+   * Одной формулировки на все отказы не хватает, и дело не в стиле. «Занято
+   * другим приложением» на комбинации, названной дважды в самом конфиге
+   * менеджера, — неправда: человек пойдёт искать чужое приложение, которого
+   * нет. Число тоже считается: «Ctrl+F11, Ctrl+F12 is taken» — то, что выходило
+   * раньше на любом втором отказе.
+   */
+  const TAKEN_REASONS = {
+    system: ['is taken by another app', 'are taken by another app'],
+    duplicate: ['is set on more than one project', 'are set on more than one project'],
+    reserved: ["is the picker's own hotkey", "are the picker's own hotkeys"],
+    unparsable: ['is not a valid hotkey', 'are not valid hotkeys'],
+  };
+  // Причина, которой эта страница не знает: Rust умеет назвать новую раньше,
+  // чем страница научится её переводить. Молчать об отказе нельзя и в этом
+  // случае — ради видимости отказа всё и затевалось.
+  const UNKNOWN_REASON = ['did not register', 'did not register'];
 
   /**
    * Проставить «клавиша не встала» на уже собранных строках проектов.
@@ -48,14 +84,46 @@
    * Отдельно от buildProjectList: та строит строку из ответа агрегатора, а
    * занятость клавиши агрегатору неизвестна — об этом отчитывается Rust,
    * событием `project-hotkeys` или командой `project_hotkeys_taken`, и оба
-   * пути сводятся к одному и тому же набору строк, что и разбирает эта
-   * функция — Set или обычный массив, без разницы вызывающему.
+   * пути сводятся к одному и тому же набору записей, что и разбирает эта
+   * функция.
+   *
+   * Помечается строка по каталогу, а не по комбинации. У внутреннего
+   * столкновения комбинация общая: два проекта названы на один Ctrl+F11,
+   * первый её получил, второй нет. Пометка по комбинации перечеркнула бы
+   * обоих — и того, у кого клавиша как раз работает.
    */
   function markHotkeysTaken(rows, taken) {
-    const set = taken instanceof Set ? taken : new Set(Array.isArray(taken) ? taken : []);
-    for (const row of rows) row.hotkeyTaken = set.has(row.hotkey);
+    const set = new Set(takenEntries(taken).map(e => e.cwd).filter(Boolean));
+    for (const row of rows) row.hotkeyTaken = set.has(row.cwd);
     return rows;
   }
 
-  return { buildProjectList, markHotkeysTaken };
+  /**
+   * Строка статуслайна про не вставшие клавиши — по одной части на причину.
+   *
+   * Единственное место, где человек узнаёт об отказе: колонка `hk` видна
+   * только в режиме проектов и только с включённой галкой.
+   */
+  function hotkeysTakenMessage(taken) {
+    const byReason = new Map();
+    for (const entry of takenEntries(taken)) {
+      const hotkey = typeof entry.hotkey === 'string' ? entry.hotkey.trim() : '';
+      if (!hotkey) continue;
+      const reason = typeof entry.reason === 'string' ? entry.reason : '';
+      if (!byReason.has(reason)) byReason.set(reason, []);
+      const keys = byReason.get(reason);
+      // Одна и та же комбинация внутри причины — один раз: дважды названный
+      // хоткей приезжает записью на каждого проигравшего, и без этого вышло бы
+      // «Ctrl+F11, Ctrl+F11 are…».
+      if (!keys.includes(hotkey)) keys.push(hotkey);
+    }
+    const parts = [];
+    for (const [reason, keys] of byReason) {
+      const text = TAKEN_REASONS[reason] || UNKNOWN_REASON;
+      parts.push(`${keys.join(', ')} ${keys.length > 1 ? text[1] : text[0]}`);
+    }
+    return parts.join('; ');
+  }
+
+  return { buildProjectList, markHotkeysTaken, hotkeysTakenMessage };
 });
