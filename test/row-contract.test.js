@@ -18,7 +18,7 @@ const Groups = require('../frontend-src/session-groups');
 const Glyph = require('../frontend-src/session-glyph');
 const { buildSessionInfoRows } = require('../frontend-src/session-info');
 const { filterSessions, filterProjects } = require('../frontend-src/picker-filter');
-const { buildProjectList } = require('../frontend-src/project-list');
+const { buildProjectList, markHotkeysTaken } = require('../frontend-src/project-list');
 
 // Форма — с живого ответа `ccfzf --state` (см. scripts/check-state.js), поля
 // в том же порядке и с теми же именами.
@@ -237,7 +237,10 @@ const CONSUMERS = [
 // Читаются с сессии, но источника не имеют. desktop — понятие Windows,
 // которого на этом проекте нет вовсе (см. groupSessions); hotkey — понятие
 // windows11-manager, список claudeWt.projects живёт только в его конфиге.
-const NO_SOURCE = new Set(['hotkey', 'desktop']);
+// hotkeyTaken — той же природы, что и hotkey: его проставляет не сборка
+// строки, а markHotkeysTaken (project-list.js) поверх уже готовых строк
+// проектов, по ответу Rust о занятых клавишах.
+const NO_SOURCE = new Set(['hotkey', 'desktop', 'hotkeyTaken']);
 
 function readsOfConsumers() {
   const names = new Set();
@@ -314,20 +317,31 @@ const AGGREGATOR_PROJECTS = [
 
 const PROJECTS_NOW = 1786045920; // минута после mtime первого
 
-/** Пропустить проекты настоящим путём: buildProjectList → filterProjects → renderProjects. */
-function renderProjectRows(projects, query, toggles) {
+/**
+ * Пропустить проекты настоящим путём: buildProjectList → markHotkeysTaken →
+ * filterProjects → renderProjects.
+ *
+ * `taken` прогоняется через markHotkeysTaken тем же порядком, что и в
+ * render() (sessions.html): признак ставится до фильтрации и отрисовки, а не
+ * внутри buildProjectList — она про ответ агрегатора, а занятость клавиши
+ * знает только эта машина.
+ */
+function renderProjectRows(projects, query, toggles, taken) {
   const source = SESSIONS_HTML.match(/\n {2}function renderProjects\(query, items, nowSec\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'renderProjects не найден в sessions.html — тест сторожит не то');
+  const projectRows = buildProjectList({ projects });
+  markHotkeysTaken(projectRows, taken || []);
   const ctx = {
     // Ровно то, чем renderProjects пользуется снаружи себя.
     window: { PickerFilter: { filterProjects } },
-    projectRows: buildProjectList({ projects }),
+    projectRows,
     rows: [],
     items: [],
     toggles: toggles || { showPaths: true },
     escapeHtml: Glyph.escapeHtml,
     shortPath: Glyph.shortPath,
     ageHtml: Glyph.ageHtml,
+    hotkeyHtml: Glyph.hotkeyHtml,
     titleAttr: Glyph.titleAttr,
     query: query || '',
     nowSec: PROJECTS_NOW,
@@ -410,6 +424,28 @@ test('выключенный чекбокс путей убирает путь �
   assert.ok(!items[0].html.includes('class="cwd"'), items[0].html);
   // Подсказка остаётся: она и заведена для того, чего в строке не видно.
   assert.ok(items[0].html.includes('title="~/projects/ccfzf"'), items[0].html);
+});
+
+// Задачи 4 и 7 довели row.hotkey и row.hotkeyTaken до строки проекта, но
+// renderProjects hotkeyHtml не звала вовсе — колонка hk у проектов не
+// рисовалась, и обе задачи не давали ничего видимого. Сторожим то, что
+// столкнуло эту дыру: настоящий вызов renderProjects с настоящей hotkeyHtml.
+test('строка проекта несёт колонку hk, и занятая клавиша в ней погашена', () => {
+  const withHotkeys = [
+    { path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 0, hotkey: 'Ctrl+F11' },
+    { path: '/p/two', name: 'two', sessions: 1, live: 0, mtime: 0, hotkey: 'Ctrl+F12' },
+  ];
+  const { items } = renderProjectRows(withHotkeys, '', undefined, ['Ctrl+F11']);
+  assert.ok(items[0].html.includes('<div class="hk taken">Ctrl+F11</div>'), items[0].html);
+  assert.ok(items[1].html.includes('<div class="hk">Ctrl+F12</div>'), items[1].html);
+});
+
+test('выключенный чекбокс hotkeys убирает колонку hk у строки проекта', () => {
+  const { items } = renderProjectRows(
+    [{ path: '/p/one', name: 'one', sessions: 0, live: 0, mtime: 0, hotkey: 'Ctrl+F11' }],
+    '', { showPaths: true, showHotkey: false },
+  );
+  assert.ok(!items[0].html.includes('class="hk'), items[0].html);
 });
 
 // ── Тот же шов у строк снимков ───────────────────────────────────────────────

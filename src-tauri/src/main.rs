@@ -692,6 +692,21 @@ fn save_seen(seen: serde_json::Value) -> Result<(), String> {
     save_json("seen.json", &seen)
 }
 
+/// Какие проектные хоткеи не встали — то же тело, что несёт событие
+/// `project-hotkeys`, но спрошенное один раз при загрузке страницы.
+///
+/// Клавиши вешаются в `setup()`, раньше, чем webview исполнил свой JS, а
+/// `emit` не буферизуется для слушателя, который подпишется позже: без этой
+/// команды первый отказ, случившийся до подписки, не показался бы никогда —
+/// а следующий `project-hotkeys` придёт только при смене списка, то есть,
+/// возможно, никогда за весь запуск. Пустое состояние (ничего ещё не
+/// применялось) — пустой список, не ошибка: `Registered::default()` уже
+/// такой.
+#[tauri::command]
+fn project_hotkeys_taken(state: tauri::State<project_hotkeys::Registered>) -> Vec<String> {
+    state.0.lock().unwrap().taken.clone()
+}
+
 /// Вид списка: сортировка и чекбоксы statusline.
 ///
 /// Отдельным файлом, а не в config.yaml: конфиг пишет человек, а это пикер
@@ -774,7 +789,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             hide_picker, poll_now, spawn_detached, load_seen, save_seen, load_config,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
-            restore_snapshot_mqtt, open_session_mqtt, save_config, open_settings
+            restore_snapshot_mqtt, open_session_mqtt, save_config, open_settings,
+            project_hotkeys_taken
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из

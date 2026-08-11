@@ -433,6 +433,20 @@ test('hotkeyHtml is a column of its own, empty when the project has no key', () 
   assert.strictEqual(hotkeyHtml({ hotkey: '^F12' }, false), '');
 });
 
+// Занятый хоткей обязан быть виден: до этой правки отказ регистрации стоил
+// строки в stderr, которого у приложения из трея не читает никто, — и клавиша,
+// отобранная соседом по системе, выглядела как сломанный конфиг.
+test('незарегистрированный хоткей помечен в колонке', () => {
+  const html = hotkeyHtml({ hotkey: 'Ctrl+F11', hotkeyTaken: true });
+  assert.match(html, /class="hk taken"/);
+  assert.match(html, /Ctrl\+F11/);
+});
+
+test('обычный хоткей рисуется без пометки', () => {
+  const html = hotkeyHtml({ hotkey: 'Ctrl+F11' });
+  assert.match(html, /class="hk"/);
+});
+
 test('shortSessionId names the agent that is writing, not the one it forked from', () => {
   assert.strictEqual(shortSessionId({ id: 'parent-id', agentSessionId: 'child-id-1234' }), 'chil');
   assert.strictEqual(shortSessionId({ id: 'parent-id-9999' }), 'pare');

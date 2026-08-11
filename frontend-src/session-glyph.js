@@ -181,7 +181,10 @@
    */
   function hotkeyHtml(session, showHotkey = true) {
     if (!showHotkey) return '';
-    return `<div class="hk">${escapeHtml(session?.hotkey ?? '')}</div>`;
+    // Занятую комбинацию гасим, а не прячем: человеку нужно видеть, какая
+    // именно клавиша не сработала, а не только то, что что-то не сработало.
+    const taken = session?.hotkeyTaken ? ' taken' : '';
+    return `<div class="hk${taken}">${escapeHtml(session?.hotkey ?? '')}</div>`;
   }
 
   // Пороги подсветки контекста. До тридцати процентов заполненность ничего не

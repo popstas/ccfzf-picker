@@ -147,6 +147,10 @@
             flex: 0 0 auto; padding-left: 10px;
             font-size: 11px; color: #7d838c; white-space: nowrap;
         }
+        /* Клавиша, которую забрал сосед по системе: видна, но погашена — по
+           ней узнают, какая именно комбинация не сработала, а не только то,
+           что что-то не сработало. */
+        .hk.taken { opacity: .45; text-decoration: line-through; }
         /* Пометка «окно терминала уже открыто». Ширина задана жёстко: у сессий
            без окна элемент пустой, и без ширины колонка дышала бы от строки к
            строке. Цвет как у живого статуса — это признак того же рода: сессия,
@@ -340,6 +344,10 @@
   // мелькнула бы и исчезла раньше, чем её успели прочитать.
   let notice = '';
   let noticeTimer = null;
+  // Комбинации, которые не встали. Приезжает от Rust — событием
+  // project-hotkeys и разовым опросом project_hotkeys_taken на старте — и
+  // только оттуда: со страницы не видно, что регистрирует система, а что нет.
+  let hotkeysTaken = new Set();
 
   function showNotice(text) {
     notice = text;
@@ -594,6 +602,14 @@
         `<div class="count">${project.sessionCount}` +
         (project.liveCount ? ` · ${project.liveCount}●` : '') +
         `</div>` +
+        // Колонка `hk` у проекта — та же самая колонка, что и у сессии, и
+        // рисует её та же hotkeyHtml: второй способ рисовать то же самое
+        // разошёлся бы с первым на первой же правке (ровно то, что уже
+        // произошло — задачи 4 и 7 доводили hotkey/hotkeyTaken до строки
+        // проекта, а на экран это не попадало, потому что здесь функция не
+        // звалась вовсе). Порядок — как у строки сессии (698-704): hotkeyHtml
+        // перед ageHtml.
+        hotkeyHtml(project, toggles.showHotkey) +
         ageHtml(project, nowSec) +
         `</div></div>`;
       items.push({ key: `p:${project.id}`, html });
@@ -704,6 +720,10 @@
     const nowSec = Math.floor(Date.now() / 1000);
     rows = [];
     const items = [];
+    // Признак ставится здесь, а не в buildProjectList: тот про ответ
+    // агрегатора, а «встала ли клавиша» знает только эта машина, и меняется
+    // отдельным событием — не в такт опросу, который перестраивает projectRows.
+    window.ProjectList.markHotkeysTaken(projectRows, hotkeysTaken);
     // Режим живёт в строке поиска, а не отдельным флагом: см. picker-mode.js.
     const { mode, query } = window.PickerMode.parseQuery(search.value);
     // Режим снимков предлагается только там, где восстановление выполнимо:
@@ -724,6 +744,10 @@
     } else if (error) {
       message.style.display = 'block';
       message.textContent = error;
+    } else if (hotkeysTaken.size) {
+      message.style.display = 'block';
+      // Единственное место, где человек узнаёт про отобранную клавишу.
+      message.textContent = `${Array.from(hotkeysTaken).join(', ')} is taken by another app`;
     } else {
       message.style.display = rows.length ? 'none' : 'block';
       if (!rows.length) {
@@ -776,6 +800,21 @@
     // по чекбоксу.
     paintToggles();
     render();
+  }
+
+  /**
+   * Принять свежий список занятых комбинаций — общий код для события
+   * project-hotkeys и разового опроса project_hotkeys_taken на старте.
+   *
+   * Один помощник, а не две копии `hotkeysTaken = new Set(...); regroup();`:
+   * подписка ловит только то, что случится после неё, а клавиши вешаются в
+   * Rust ещё в setup(), раньше, чем догрузилась эта страница, — без разового
+   * опроса тем же кодом первый отказ, случившийся до подписки, не показался
+   * бы никогда.
+   */
+  function applyHotkeysTaken(taken) {
+    hotkeysTaken = new Set(Array.isArray(taken) ? taken : []);
+    regroup();
   }
 
   // Хвост последнего ответа агрегатора, кроме самих сессий: на какой машине
@@ -1564,6 +1603,22 @@
     await listen('project-hotkey', (event) => {
       newSession(event.payload);
     });
+
+    // Какие клавиши не встали. Приезжает от Rust на каждое применение списка:
+    // судить об этом со страницы нельзя — регистрирует не она.
+    await listen('project-hotkeys', (event) => {
+      applyHotkeysTaken(event.payload?.taken);
+    });
+
+    // Подписка ловит только то, что случится после неё; хоткеи вешаются в
+    // Rust ещё в setup(), раньше, чем догрузилась эта страница. Тем же
+    // приёмом, что и poll_now ниже, — разовый опрос забирает то, что Rust
+    // успел решить до подписки.
+    try {
+      applyHotkeysTaken(await invoke('project_hotkeys_taken'));
+    } catch (e) {
+      error = String(e);
+    }
 
     // Ответ агрегатора приезжает событием: опросом распоряжается Rust.
     await listen('state', (event) => applyState(event.payload));

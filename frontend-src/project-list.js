@@ -42,5 +42,20 @@
       }));
   }
 
-  return { buildProjectList };
+  /**
+   * Проставить «клавиша не встала» на уже собранных строках проектов.
+   *
+   * Отдельно от buildProjectList: та строит строку из ответа агрегатора, а
+   * занятость клавиши агрегатору неизвестна — об этом отчитывается Rust,
+   * событием `project-hotkeys` или командой `project_hotkeys_taken`, и оба
+   * пути сводятся к одному и тому же набору строк, что и разбирает эта
+   * функция — Set или обычный массив, без разницы вызывающему.
+   */
+  function markHotkeysTaken(rows, taken) {
+    const set = taken instanceof Set ? taken : new Set(Array.isArray(taken) ? taken : []);
+    for (const row of rows) row.hotkeyTaken = set.has(row.hotkey);
+    return rows;
+  }
+
+  return { buildProjectList, markHotkeysTaken };
 });

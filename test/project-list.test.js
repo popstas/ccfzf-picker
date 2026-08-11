@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { buildProjectList } = require('../frontend-src/project-list');
+const { buildProjectList, markHotkeysTaken } = require('../frontend-src/project-list');
 
 const STATE = {
   projects: [
@@ -58,4 +58,28 @@ test('запись без пути выбрасывается, безымянн�
     { path: '/p/x' },
   ] });
   assert.deepStrictEqual(rows.map(r => r.label), ['/p/x']);
+});
+
+// markHotkeysTaken — общий помощник для события project-hotkeys и разового
+// опроса project_hotkeys_taken на старте страницы: обе ветки применяют один и
+// тот же список к строкам одним и тем же способом.
+test('markHotkeysTaken помечает только те строки, чья клавиша не встала', () => {
+  const rows = [{ hotkey: 'Ctrl+F11' }, { hotkey: 'Ctrl+F12' }, { hotkey: '' }];
+  markHotkeysTaken(rows, new Set(['Ctrl+F11']));
+  assert.deepStrictEqual(rows.map(r => r.hotkeyTaken), [true, false, false]);
+});
+
+test('markHotkeysTaken принимает обычный массив — не только Set', () => {
+  // Событие приезжает массивом (JSON), а разовый опрос на старте — тем же
+  // массивом из ответа Rust; заставлять вызывающего оборачивать его в Set
+  // самому значило бы копию этой строки в двух местах.
+  const rows = [{ hotkey: 'Ctrl+F11' }];
+  markHotkeysTaken(rows, ['Ctrl+F11']);
+  assert.strictEqual(rows[0].hotkeyTaken, true);
+});
+
+test('markHotkeysTaken на пустом списке занятых снимает пометку со всех', () => {
+  const rows = [{ hotkey: 'Ctrl+F11', hotkeyTaken: true }];
+  markHotkeysTaken(rows, []);
+  assert.strictEqual(rows[0].hotkeyTaken, false);
 });

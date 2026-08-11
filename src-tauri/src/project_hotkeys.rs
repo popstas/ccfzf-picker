@@ -68,10 +68,20 @@ pub fn fingerprint(list: &[Project]) -> String {
 /// Отпечаток хранится рядом с самим списком: без него каждый секундный опрос
 /// снимал бы и ставил регистрации заново — шестьдесят раз в минуту на ровном
 /// месте.
+///
+/// `live` — это победители: у кого клавиша действительно висит в системе.
+/// `wanted` и `taken` — не производные от него, а отдельная память о полном
+/// последнем применённом списке и о том, что из него не встало. Оба вопроса,
+/// «что показать человеку» (колонка `hk`, команда `project_hotkeys_taken`) и
+/// «что перевесить после общего сброса» (`reapply`), — про список целиком, а
+/// не про победителей: вывести их из `live` значило бы каждый раз терять
+/// проигравших столкновение.
 #[derive(Default)]
 pub struct RegisteredState {
     pub live: Vec<(Project, Shortcut)>,
     pub fingerprint: String,
+    pub wanted: Vec<Project>,
+    pub taken: Vec<String>,
 }
 
 #[derive(Default)]
@@ -177,7 +187,12 @@ pub fn apply(app: &tauri::AppHandle, wanted: Vec<Project>) {
         }
     }
     guard.fingerprint = fingerprint(&wanted);
+    // wanted и taken запоминаются здесь же, а не выводятся из live позже: это
+    // единственное место, где виден весь список целиком, включая тех, кто
+    // проиграл столкновение и в live не попал.
+    guard.wanted = wanted.clone();
     guard.live = live;
+    guard.taken = failed.clone();
     drop(guard);
 
     if let Err(e) = crate::save_json("hotkeys.json", &to_cache(&wanted)) {
@@ -213,10 +228,23 @@ pub fn apply_cached(app: &tauri::AppHandle) {
     apply(app, cached);
 }
 
+/// Список, который `reapply` повесит заново после общего сброса.
+///
+/// Читает `wanted`, а не `live`: `live` хранит только победителей, и собирать
+/// список для перевешивания по нему значило бы на каждом общем сбросе заново
+/// терять тех, кто проиграл столкновение при первом применении, — и
+/// `hotkeys.json`, и колонка `hk`, и предупреждение в статуслайне после
+/// такого сброса стали бы неполными. Отдельная функция — чтобы это правило
+/// проверялось `cargo test` без живого `AppHandle`, которого само это правило
+/// не касается.
+pub fn reapply_list(state: &RegisteredState) -> Vec<Project> {
+    state.wanted.clone()
+}
+
 /// Повесить заново то, что уже висело: после `unregister_all()` в `apply_config`.
 pub fn reapply(app: &tauri::AppHandle) {
     let Some(reg) = app.try_state::<Registered>() else { return };
-    let wanted: Vec<Project> = reg.0.lock().unwrap().live.iter().map(|(p, _)| p.clone()).collect();
+    let wanted = reapply_list(&reg.0.lock().unwrap());
     if wanted.is_empty() {
         return;
     }
@@ -335,5 +363,27 @@ mod tests {
         let stored = to_cache(&list);
         assert_eq!(from_cache(&stored), list);
         assert_eq!(from_cache(&serde_json::json!({})), Vec::<Project>::new());
+    }
+
+    /// `reapply` обязан вешать заново весь желаемый список, а не только
+    /// победителей: `live` у столкнувшейся пары хранит одного, а `wanted` — обоих.
+    /// До этой правки `reapply` собирал список из `live`, и проигравший
+    /// столкновение при общем сбросе (`apply_config`) пропадал бы из
+    /// `hotkeys.json` и из предупреждения молча — второй раз подряд.
+    #[test]
+    fn reapply_list_keeps_the_loser_of_a_collision_that_live_would_drop() {
+        let winner = Project { cwd: "/p/one".into(), hotkey: "Ctrl+F11".into() };
+        let loser = Project { cwd: "/p/two".into(), hotkey: "Ctrl+F11".into() };
+        let shortcut = Shortcut::from_str("Ctrl+F11").unwrap();
+        let state = RegisteredState {
+            live: vec![(winner.clone(), shortcut)],
+            fingerprint: String::new(),
+            wanted: vec![winner.clone(), loser.clone()],
+            taken: vec!["Ctrl+F11".to_string()],
+        };
+        // live содержит только победителя — если бы reapply_list читал его,
+        // loser здесь не оказалось бы.
+        assert_eq!(state.live.len(), 1);
+        assert_eq!(reapply_list(&state), vec![winner, loser]);
     }
 }
