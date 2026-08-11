@@ -146,6 +146,29 @@ fn open_project_payload(cwd: &str) -> String {
     serde_json::json!({ "action": "terminal", "cwd": cwd }).to_string()
 }
 
+/// Попросить завести новую сессию в каталоге, не поднимая существующую.
+///
+/// Отличается от `open_project` не топиком, а действием: топик отвечает на
+/// вопрос «о чём просьба» — открыть сессию, — а не «каким способом». Отдельное
+/// значение `action`, а не флаг рядом с прежним `terminal`, выбрано по тому,
+/// как ошибётся старый приёмник: незнакомое действие он отклоняет вслух
+/// (`unsupported action` в журнал и уведомлением), а незнакомый флаг молча
+/// пропустил бы и поднял старое окно — сделал бы обратное просьбе, и никто бы
+/// не узнал.
+pub fn open_new(broker: &Broker, cwd: &str, name: &str) -> Result<(), String> {
+    publish(broker, OPEN_TOPIC, &open_new_payload(cwd, name))
+}
+
+/// Тело просьбы о новой сессии: действие, каталог и имя.
+///
+/// Имя обязательно и пустым не бывает: без него приёмник взял бы basename
+/// каталога — то самое имя, которое уже занято открытой сессией. Пустую строку
+/// сюда класть нельзя по тому же правилу, по которому её нет в `open_payload`:
+/// ключ без значения — это тело, которое врёт о том, что знает.
+fn open_new_payload(cwd: &str, name: &str) -> String {
+    serde_json::json!({ "action": "terminal-new", "cwd": cwd, "name": name }).to_string()
+}
+
 /// Тело просьбы о восстановлении.
 ///
 /// Без `sessionIds` приёмник поднимает снимок целиком. Пустой массив он
@@ -228,8 +251,8 @@ fn publish(broker: &Broker, tail: &str, payload: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        broker_from_config, open_payload, open_project_payload, restore_payload, topic_of,
-        FOCUS_TOPIC, OPEN_TOPIC, RESTORE_TOPIC, UNREAD_TOPIC,
+        broker_from_config, open_new_payload, open_payload, open_project_payload, restore_payload,
+        topic_of, FOCUS_TOPIC, OPEN_TOPIC, RESTORE_TOPIC, UNREAD_TOPIC,
     };
 
     // Хвосты заданы приёмником — демоном на Windows-машине. Опечатка здесь
@@ -323,6 +346,22 @@ mod tests {
         assert_eq!(
             open_project_payload("/p/site"),
             r#"{"action":"terminal","cwd":"/p/site"}"#
+        );
+    }
+
+    // Тело просьбы «заведи ещё одну»: каталог, имя и отдельное действие.
+    // Имя здесь не украшение — его считает пикер (`uniqueSessionName`), потому
+    // что basename каталога уже занят открытой сессией, а два окна с одним
+    // заголовком трекер привязал бы к одной сессии.
+    //
+    // `id` не едет и сюда, даже когда нажали на строке живой сессии: с ним
+    // приёмник поднял бы ровно ту сессию, рядом с которой просили открыть
+    // новую.
+    #[test]
+    fn open_new_body_names_the_session() {
+        assert_eq!(
+            open_new_payload("/p/site", "site-2"),
+            r#"{"action":"terminal-new","cwd":"/p/site","name":"site-2"}"#
         );
     }
 

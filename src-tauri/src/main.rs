@@ -201,6 +201,18 @@ fn allow_tracker_foreground(pid: u32) {
 #[cfg(not(target_os = "windows"))]
 fn allow_tracker_foreground(_pid: u32) {}
 
+/// Брокер из конфига или внятный отказ.
+///
+/// Общий для всех команд, публикующих просьбы: шесть копий одной проверки
+/// разошлись бы в тексте отказа, а его читает человек в строке ошибки пикера.
+fn configured_broker() -> Result<mqtt::Broker, String> {
+    let broker = mqtt::broker_from_config(&load_config()?);
+    if !broker.is_configured() {
+        return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
+    }
+    Ok(broker)
+}
+
 /// Поднять окно сессии через MQTT.
 ///
 /// Зовётся вместо `spawn_detached` у стратегии `focus`: окно уже открыто, и
@@ -216,11 +228,7 @@ async fn focus_window_mqtt(id: String, pid: u32) -> Result<(), String> {
     // До публикации, а не после: право должно быть у трекера к моменту, когда
     // он дойдёт до подъёма окна.
     allow_tracker_foreground(pid);
-    let raw = load_config()?;
-    let broker = mqtt::broker_from_config(&raw);
-    if !broker.is_configured() {
-        return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
-    }
+    let broker = configured_broker()?;
     tauri::async_runtime::spawn_blocking(move || mqtt::focus(&broker, &id))
         .await
         .map_err(|e| format!("focus_window_mqtt task failed: {e}"))?
@@ -238,11 +246,7 @@ async fn focus_window_mqtt(id: String, pid: u32) -> Result<(), String> {
 /// оранжевеет на глазах.
 #[tauri::command]
 async fn unread_session_mqtt(id: String) -> Result<(), String> {
-    let raw = load_config()?;
-    let broker = mqtt::broker_from_config(&raw);
-    if !broker.is_configured() {
-        return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
-    }
+    let broker = configured_broker()?;
     tauri::async_runtime::spawn_blocking(move || mqtt::unread(&broker, &id))
         .await
         .map_err(|e| format!("unread_session_mqtt task failed: {e}"))?
@@ -255,11 +259,7 @@ async fn unread_session_mqtt(id: String) -> Result<(), String> {
 /// и `AllowSetForegroundWindow` тут не при чём.
 #[tauri::command]
 async fn restore_snapshot_mqtt(id: String, session_ids: Vec<String>) -> Result<(), String> {
-    let raw = load_config()?;
-    let broker = mqtt::broker_from_config(&raw);
-    if !broker.is_configured() {
-        return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
-    }
+    let broker = configured_broker()?;
     tauri::async_runtime::spawn_blocking(move || mqtt::restore(&broker, &id, &session_ids))
         .await
         .map_err(|e| format!("restore_snapshot_mqtt task failed: {e}"))?
@@ -289,15 +289,40 @@ async fn restore_snapshot_mqtt(id: String, session_ids: Vec<String>) -> Result<(
 /// бы ошибкой разбора, и Enter отчитался бы человеку про аргументы команды.
 #[tauri::command]
 async fn open_session_mqtt(id: String, cwd: Option<String>) -> Result<(), String> {
-    let raw = load_config()?;
-    let broker = mqtt::broker_from_config(&raw);
-    if !broker.is_configured() {
-        return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
-    }
+    let broker = configured_broker()?;
     let cwd = cwd.unwrap_or_default().trim().to_string();
     tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &id, &cwd))
         .await
         .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
+}
+
+/// Попросить менеджера открыть проект по каталогу.
+///
+/// `id` в теле нет вовсе: у строки проекта сессии ещё не существует, есть
+/// только каталог, и что с ним делать — поднять окно этого проекта или завести
+/// сессию с его профилем — решает `openClaudeProject` на той стороне. Ту же
+/// просьбу шлёт проектный хоткей из `project_hotkeys.rs`; здесь она нужна
+/// затем, что у страницы своего входа к ней не было.
+#[tauri::command]
+async fn open_project_mqtt(cwd: String) -> Result<(), String> {
+    let broker = configured_broker()?;
+    tauri::async_runtime::spawn_blocking(move || mqtt::open_project(&broker, &cwd))
+        .await
+        .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
+}
+
+/// Попросить менеджера завести новую сессию в каталоге.
+///
+/// Отдельная команда, а не флаг у `open_project_mqtt`: на мосту в webview флаг
+/// стал бы необязательным аргументом, а различает он две разные просьбы с
+/// разными телами. Имя считает пикер и присылает готовым — менеджер списка
+/// занятых имён не ведёт.
+#[tauri::command]
+async fn new_session_mqtt(cwd: String, name: String) -> Result<(), String> {
+    let broker = configured_broker()?;
+    tauri::async_runtime::spawn_blocking(move || mqtt::open_new(&broker, &cwd, &name))
+        .await
+        .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
 }
 
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
@@ -800,8 +825,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             hide_picker, poll_now, spawn_detached, load_seen, save_seen, load_config,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
-            restore_snapshot_mqtt, open_session_mqtt, save_config, open_settings,
-            project_hotkeys_taken
+            restore_snapshot_mqtt, open_session_mqtt, open_project_mqtt, new_session_mqtt,
+            save_config, open_settings, project_hotkeys_taken
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
