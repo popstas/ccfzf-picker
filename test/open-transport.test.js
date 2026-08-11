@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   chooseOpenTransport, canOpenRemote, chooseEnterAction, rowProjectDir,
+  chooseProjectOpenAction,
 } = require('../frontend-src/open-transport');
 
 test('свой хост, брокер настроен — открываем через менеджер', () => {
@@ -291,4 +292,36 @@ test('строки нет вовсе — локально', () => {
 test('трекера нет вовсе — локально', () => {
   assert.equal(chooseEnterAction(WINDOWED, 'resume', {}, CONFIG_HOST, true), 'local');
   assert.equal(chooseEnterAction(WINDOWED, 'resume', null, CONFIG_HOST, true), 'local');
+});
+
+test('строка проекта на машине трекера уходит к менеджеру', () => {
+  // Профиль Windows Terminal по каталогу знает только менеджер, и ради него
+  // просьба и уезжает: собранная в пикере команда wt.exe профиль теряет.
+  const row = { kind: 'project', id: '/p/site', cwd: '/p/site' };
+  assert.equal(chooseProjectOpenAction(row, { windowHost: 'PC-WIN' }, 'pc-win', true), 'manager');
+});
+
+test('вид строки на выбор не влияет — важен только каталог', () => {
+  // «New session» предлагается и рядом с живой сессией, и на сессии снимка.
+  // Просьба у всех одна и та же — про каталог, — и id в ней нет вовсе,
+  // поэтому позитивный список SESSION_ID_ROW_KINDS здесь не нужен.
+  const state = { windowHost: 'PC-WIN' };
+  for (const kind of ['project', 'interactive', 'snapshot-session', 'что-то новое']) {
+    assert.equal(chooseProjectOpenAction({ kind, cwd: '/p/site' }, state, 'pc-win', true), 'manager');
+  }
+});
+
+test('чужая машина и ненастроенный брокер — открываем сами', () => {
+  const row = { kind: 'project', cwd: '/p/site' };
+  assert.equal(chooseProjectOpenAction(row, { windowHost: 'PC-WIN' }, 'macbook', true), 'local');
+  assert.equal(chooseProjectOpenAction(row, { windowHost: 'PC-WIN' }, 'pc-win', false), 'local');
+});
+
+test('каталога нет — просить не о чем', () => {
+  // Без каталога просьба умерла бы в журнале менеджера молча: ответа у
+  // публикации нет. Прежняя местная дорога хотя бы скажет человеку об отказе.
+  const state = { windowHost: 'PC-WIN' };
+  assert.equal(chooseProjectOpenAction({ kind: 'project', cwd: '  ' }, state, 'pc-win', true), 'local');
+  assert.equal(chooseProjectOpenAction({ kind: 'project' }, state, 'pc-win', true), 'local');
+  assert.equal(chooseProjectOpenAction(null, state, 'pc-win', true), 'local');
 });

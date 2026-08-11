@@ -162,5 +162,29 @@
     return chooseOpenTransport(state, configHost, mqttConfigured);
   }
 
-  return { chooseOpenTransport, canOpenRemote, chooseEnterAction, rowProjectDir };
+  /**
+   * Кто открывает терминал по каталогу: 'manager' | 'local'.
+   *
+   * Общая для двух поводов: Enter на строке проекта и «New session» (`^N` и
+   * пункт меню) на любой строке. Тела просьб у них разные — `terminal` против
+   * `terminal-new`, — а транспорт один, и разводить его значило бы завести две
+   * копии правила, которые разойдутся.
+   *
+   * Позитивного списка видов строк, как у `chooseEnterAction`, здесь нет
+   * намеренно: тот список защищает `id` от того, чтобы уехать чужим, а в этих
+   * двух просьбах `id` не едет вовсе. Значение имеет только каталог.
+   *
+   * Пустой каталог оставляет строку местной дороге: без него менеджеру не за
+   * что взяться, он записал бы отказ в свой журнал, а пикер об этом не узнал
+   * бы — ответа у публикации нет.
+   */
+  function chooseProjectOpenAction(row, state, configHost, mqttConfigured) {
+    if (!rowProjectDir(row)) return 'local';
+    return chooseOpenTransport(state, configHost, mqttConfigured);
+  }
+
+  return {
+    chooseOpenTransport, canOpenRemote, chooseEnterAction, rowProjectDir,
+    chooseProjectOpenAction,
+  };
 });
