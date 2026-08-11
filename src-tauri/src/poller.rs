@@ -141,6 +141,10 @@ impl Poller {
                             let fp = fingerprint(&state);
                             let changed = prev_fingerprint.as_deref() != Some(fp.as_str());
                             prev_fingerprint = Some(fp);
+                            // Хоткеи вешает Rust, а не страница: у скрытого
+                            // окна WebView2 умеет усыплять её целиком, и
+                            // клавиши вставали бы только при открытом пикере.
+                            crate::project_hotkeys::apply_from_state(&app, &state);
                             let mut cache = thread_cache.lock().unwrap();
                             cache.state = Some(state);
                             cache.error.clear();

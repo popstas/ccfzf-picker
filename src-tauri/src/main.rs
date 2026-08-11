@@ -539,7 +539,7 @@ fn apply_config(app: &tauri::AppHandle) -> (bool, String) {
 
     let _ = app.global_shortcut().unregister_all();
     let (registered, accelerator) = register_picker_hotkey(app, &config);
-    register_project_hotkeys(app, &config);
+    project_hotkeys::reapply(app);
 
     if let Some(item) = app.try_state::<ShowMenuItem>() {
         update_show_item(&item.0, registered, &accelerator);
@@ -659,7 +659,7 @@ fn state_path(name: &str) -> Result<std::path::PathBuf, String> {
 
 /// Отсутствующий файл — пустой объект, а не отказ: до первого сохранения его и
 /// не должно быть.
-fn load_json(name: &str) -> Result<serde_json::Value, String> {
+pub(crate) fn load_json(name: &str) -> Result<serde_json::Value, String> {
     let path = state_path(name)?;
     match std::fs::read_to_string(&path) {
         Ok(t) => serde_json::from_str(&t).map_err(|e| format!("bad json in {}: {e}", path.display())),
@@ -670,7 +670,7 @@ fn load_json(name: &str) -> Result<serde_json::Value, String> {
 
 /// Запись через временный файл и переименование: читатель никогда не видит
 /// половину файла.
-fn save_json(name: &str, value: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn save_json(name: &str, value: &serde_json::Value) -> Result<(), String> {
     let path = state_path(name)?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
@@ -734,7 +734,7 @@ const DEFAULT_HOTKEY_ACCELERATOR: &str = "Super+Shift+C";
 /// идёт строка из конфига как написана, а при откате к умолчанию — запись
 /// умолчания. Показывается именно действующий хоткей: непонятая строка в меню
 /// обещала бы клавишу, которой никто не слушает.
-fn picker_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
+pub(crate) fn picker_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
     if let Some(s) = config.get("hotkey").and_then(|v| v.as_str()) {
         match s.parse::<Shortcut>() {
             Ok(sc) => return (sc, s.to_string()),
@@ -758,36 +758,6 @@ fn show_item_label(hotkey_registered: bool) -> &'static str {
         "Show sessions"
     } else {
         "Hotkey is taken, click here"
-    }
-}
-
-/// Проектный хоткей открывает новую сессию мимо списка, поэтому окно пикера не
-/// поднимается: наружу уходит только событие.
-fn register_project_hotkeys(app: &tauri::AppHandle, config: &serde_json::Value) {
-    let projects = config
-        .get("projects")
-        .and_then(|p| p.as_array())
-        .cloned()
-        .unwrap_or_default();
-    for item in projects {
-        let (Some(path), Some(hotkey)) = (
-            item.get("path").and_then(|v| v.as_str()),
-            item.get("hotkey").and_then(|v| v.as_str()),
-        ) else { continue };
-        if hotkey.is_empty() { continue }
-        let Ok(sc) = hotkey.parse::<Shortcut>() else {
-            eprintln!("ccfzf-picker: cannot parse hotkey {hotkey}");
-            continue;
-        };
-        let handle = app.clone();
-        let path = path.to_string();
-        if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
-            if event.state() == ShortcutState::Pressed {
-                let _ = handle.emit("project-hotkey", path.clone());
-            }
-        }) {
-            eprintln!("ccfzf-picker: cannot register hotkey {hotkey}: {e}");
-        }
     }
 }
 
@@ -844,6 +814,11 @@ fn main() {
             //
             // Обработчик ставится всегда, а решает по флагу: см. `HideOnBlur`.
             app.manage(HideOnBlur(AtomicBool::new(hide_on_blur(&config))));
+            // Список хоткеев приезжает ответом агрегатора, а не из конфига:
+            // единственный его источник — claudeWt.projects у
+            // windows11-manager. До первого ответа висит список прошлого
+            // запуска.
+            app.manage(project_hotkeys::Registered::default());
             if let Some(window) = app.get_webview_window("picker") {
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
@@ -951,7 +926,7 @@ fn main() {
                 })
                 .build(app)?;
 
-            register_project_hotkeys(app.handle(), &config);
+            project_hotkeys::apply_cached(app.handle());
             Ok(())
         })
         .run(tauri::generate_context!())
