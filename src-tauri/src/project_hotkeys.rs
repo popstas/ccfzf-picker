@@ -387,6 +387,61 @@ pub fn tracker_pid_from(snapshot: &serde_json::Value) -> u32 {
         .unwrap_or(0) as u32
 }
 
+/// Нажали проектный хоткей.
+///
+/// Развилку «поднять окно или завести сессию» принимает не пикер, а менеджер:
+/// правило «последняя открытая сессия этого каталога» уже написано и покрыто
+/// тестами у него (`pickOpenProjectSession`), список пикера у скрытого окна
+/// отстаёт до восьми минут, и профиль Windows Terminal по каталогу знает тоже
+/// только он. Отсюда уходит просьба, а не решение.
+///
+/// Живёт в этом файле, а не в `main.rs`: она про нажатие хоткея, а не про
+/// пикер вообще, и читается вместе с тем, кто её вешает.
+pub fn press(app: &tauri::AppHandle, cwd: &str) {
+    if let Some(reg) = app.try_state::<Registered>() {
+        if !take_press(&reg, cwd, Instant::now()) {
+            return;
+        }
+    }
+    // Гасим до просьбы, а не после: показанный пикер накрыл бы поднятое окно.
+    // Та же причина, по которой гасит до публикации `focusSession` на странице.
+    // Идемпотентна — уже скрытое окно повторно не гасит.
+    crate::hide_window(app);
+
+    let raw = crate::load_config().unwrap_or(serde_json::Value::Null);
+    let broker = crate::mqtt::broker_from_config(&raw);
+    if !broker.is_configured() {
+        // Просить некого. Прежняя дорога: страница поднимет новую сессию сама —
+        // это и было поведением до всей правки, и без брокера другого нет.
+        let _ = app.emit("project-hotkey", cwd.to_string());
+        return;
+    }
+
+    // Неизвестный pid отменяет грамоту, но не просьбу — и это сознательно иначе,
+    // чем в `canFocus` на странице, где нулевой pid запрещает подъём целиком.
+    // Там цена ошибки — открыть терминал у себя; здесь — молча завести второй
+    // терминал на проект, у которого окно уже есть. Окно, поднятое без грамоты,
+    // в худшем случае мигнёт кнопкой на таскбаре, и это дешевле.
+    let pid = app
+        .try_state::<crate::poller::Poller>()
+        .map(|poller| tracker_pid_from(&poller.snapshot()))
+        .unwrap_or(0);
+    if pid > 0 {
+        crate::allow_tracker_foreground(pid);
+    }
+
+    // Публикация ждёт подтверждения брокера до пяти секунд — держать на этом
+    // поток, из которого плагин зовёт обработчик, нельзя. Ответа у просьбы нет
+    // по замыслу, как у фокуса и восстановления: приёмник отчитывается в свой
+    // журнал, а не нам.
+    let cwd = cwd.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(e) = crate::mqtt::open_project(&broker, &cwd) {
+            eprintln!("ccfzf-picker: cannot ask to open {cwd}: {e}");
+        }
+    });
+}
+
 /// Повесить список, сняв прежний.
 ///
 /// Снятие поимённое, а не `unregister_all()`: общий сброс на каждое изменение
@@ -450,7 +505,7 @@ fn apply_once(app: &tauri::AppHandle, reg: &Registered, wanted: Vec<Project>) {
             .global_shortcut()
             .on_shortcut(shortcut, move |_app, _sc, event| {
                 if event.state() == ShortcutState::Pressed {
-                    let _ = handle.emit("project-hotkey", cwd.clone());
+                    press(&handle, &cwd);
                 }
             });
         match hooked {
