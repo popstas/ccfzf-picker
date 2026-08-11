@@ -140,7 +140,7 @@ Terminal по каталогу (`claudeWt.projects` → `profileForCwd`) и ви
 `open_project_payload(cwd)`:
 
 ```json
-{"action": "terminal", "cwd": "/home/popstas/projects/js/ccfzf-picker"}
+{"action": "terminal", "cwd": "/p/site"}
 ```
 
 Ключа `id` в теле **нет**. Звать `open()` с пустым id нельзя: в этом файле уже
