@@ -6,7 +6,8 @@
 //! `<base>/windows/claude-session-unread`, оба с `{"id": …}`,
 //! `<base>/windows/claude-snapshot-restore` с телом `{"id": …}` и
 //! необязательным `sessionIds`, и `<base>/windows/claude-session-open` с телом
-//! `{"id": …, "action": "terminal"}` и необязательным `cwd`), и придумывать
+//! `{"action": "terminal"}`, где необязательны оба опознавателя — `id`
+//! известной сессии и `cwd` проекта), и придумывать
 //! рядом свои значило бы заводить приёмник, которого нет.
 //!
 //! Настройки брокера читаются здесь, из того же `config.yaml`, а не приходят
@@ -125,6 +126,26 @@ fn open_payload(id: &str, cwd: &str) -> String {
     serde_json::json!({ "id": id, "action": "terminal", "cwd": cwd }).to_string()
 }
 
+/// Попросить открыть проект по каталогу — какую сессию, решит менеджер.
+///
+/// Отличается от `open()` тем, чего в теле нет: `id`. Проектный хоткей знает
+/// только каталог, а какая сессия в нём последняя — вопрос к живым окнам
+/// Windows, и отвечает на него `openClaudeProject` у менеджера, а не список
+/// пикера: у скрытого окна тот отстаёт до восьми минут (бэкофф в `poller.rs`),
+/// а при выключенном фоновом опросе не обновляется вовсе.
+pub fn open_project(broker: &Broker, cwd: &str) -> Result<(), String> {
+    publish(broker, OPEN_TOPIC, &open_project_payload(cwd))
+}
+
+/// Тело просьбы об открытии проекта: действие и каталог, без `id`.
+///
+/// Пустой `id` сюда класть не надо, хотя приёмник его и переживёт: ключ без
+/// значения — это тело, которое врёт о том, что знает. Ровно по этому правилу
+/// здесь же выброшен пустой `cwd` в `open_payload`.
+fn open_project_payload(cwd: &str) -> String {
+    serde_json::json!({ "action": "terminal", "cwd": cwd }).to_string()
+}
+
 /// Тело просьбы о восстановлении.
 ///
 /// Без `sessionIds` приёмник поднимает снимок целиком. Пустой массив он
@@ -207,8 +228,8 @@ fn publish(broker: &Broker, tail: &str, payload: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        broker_from_config, open_payload, restore_payload, topic_of, FOCUS_TOPIC, OPEN_TOPIC,
-        RESTORE_TOPIC, UNREAD_TOPIC,
+        broker_from_config, open_payload, open_project_payload, restore_payload, topic_of,
+        FOCUS_TOPIC, OPEN_TOPIC, RESTORE_TOPIC, UNREAD_TOPIC,
     };
 
     // Хвосты заданы приёмником — демоном на Windows-машине. Опечатка здесь
@@ -290,6 +311,19 @@ mod tests {
     #[test]
     fn open_body_without_a_dir_carries_no_key() {
         assert_eq!(open_payload("s1", ""), r#"{"action":"terminal","id":"s1"}"#);
+    }
+
+    // Тело просьбы проектного хоткея: каталог есть, `id` нет вовсе. Пустую
+    // строку приёмник сегодня прочитал бы как «id нет» и просьбу не сломал бы,
+    // но тело перестало бы говорить правду — то же правило, по которому здесь
+    // же выброшен пустой `cwd`. А проверка `id !== undefined` на той стороне
+    // сломала бы просьбу молча и не на глаз.
+    #[test]
+    fn open_project_body_carries_no_id() {
+        assert_eq!(
+            open_project_payload("/p/site"),
+            r#"{"action":"terminal","cwd":"/p/site"}"#
+        );
     }
 
     // Хвост задан приёмником — подпиской в windows-mqtt. Опечатка здесь ничего
