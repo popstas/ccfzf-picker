@@ -35,6 +35,23 @@ test('пустой или отсутствующий список — не по�
   assert.deepStrictEqual(buildProjectList({ projects: null }), []);
 });
 
+test('хоткей переезжает в строку под тем же именем, что читает колонка hk', () => {
+  const rows = buildProjectList({
+    projects: [{ path: '/p/one', name: 'one', sessions: 0, live: 0, mtime: 0,
+      hotkey: 'Ctrl+F11' }],
+  });
+  assert.equal(rows[0].hotkey, 'Ctrl+F11');
+});
+
+// Пустая строка, а не undefined: hotkeyHtml подставляет значение в разметку, и
+// «undefined» доехало бы до экрана словом.
+test('без хоткея поле пустое, а не отсутствует', () => {
+  const rows = buildProjectList({
+    projects: [{ path: '/p/one', name: 'one', sessions: 0, live: 0, mtime: 0 }],
+  });
+  assert.equal(rows[0].hotkey, '');
+});
+
 test('запись без пути выбрасывается, безымянная берёт путь именем', () => {
   const rows = buildProjectList({ projects: [
     { path: '', name: 'нет пути' },

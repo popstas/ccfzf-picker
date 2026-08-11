@@ -90,6 +90,14 @@
       for (const [key, type] of PROJECT_FIELDS) {
         if (typeof (p || {})[key] !== type) out.push(`projects[${i}].${key} is not a ${type}`);
       }
+      // Хоткей необязателен: агрегатор без него — это старый агрегатор, а не
+      // ошибка. Но если он есть, он обязан быть строкой. Проверка здесь, а не
+      // в validateState: число в хоткее не стоит списка сессий — колонка и
+      // регистрация клавиш его и так проглотят молча (buildProjectList
+      // подставляет пустую строку, Rust читает поле через as_str()).
+      if (p && p.hotkey !== undefined && typeof p.hotkey !== 'string') {
+        out.push(`projects[${i}].hotkey is not a string`);
+      }
     });
     return out;
   }

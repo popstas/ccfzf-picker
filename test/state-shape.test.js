@@ -65,6 +65,47 @@ test('записи проектов проверяются отдельным с
   assert.deepStrictEqual(projectProblems(ok), []);
 });
 
+test('строка проекта с хоткеем проходит проверку', () => {
+  const state = {
+    generated: 1, sessions: [],
+    projects: [{ path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 5,
+      hotkey: 'Ctrl+F11' }],
+  };
+  assert.deepEqual(validateState(state), []);
+});
+
+// Старый агрегатор про хоткеи не знает, и это не ошибка: пикер и агрегатор
+// обновляются порознь.
+test('строка проекта без хоткея — не ошибка', () => {
+  const state = {
+    generated: 1, sessions: [],
+    projects: [{ path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 5 }],
+  };
+  assert.deepEqual(validateState(state), []);
+});
+
+test('хоткей не строкой — ошибка', () => {
+  const state = {
+    generated: 1, sessions: [],
+    projects: [{ path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 5,
+      hotkey: 11 }],
+  };
+  // Претензия к полю записи, а не к форме ответа: та же дорожка, что у
+  // остальных полей проекта, — validateState такую порчу молча пропускает.
+  assert.equal(projectProblems(state).length, 1);
+});
+
+// Перенос проверки в projectProblems сторожится и с положительной стороны:
+// валидный строковый хоткей не должен всплыть претензией у соседа.
+test('строка проекта с валидным хоткеем не жалуется в projectProblems', () => {
+  const state = {
+    generated: 1, sessions: [],
+    projects: [{ path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 5,
+      hotkey: 'Ctrl+F11' }],
+  };
+  assert.deepEqual(projectProblems(state), []);
+});
+
 test('порченый проект не отбирает у человека список сессий', () => {
   // Суть правки: агрегатор — отдельная программа на отдельной машине, и
   // переименованное там поле проекта не должно замораживать сессии. Здесь
