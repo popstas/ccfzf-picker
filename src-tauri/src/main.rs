@@ -15,6 +15,7 @@ mod config_file;
 mod mqtt;
 mod poller;
 mod proc;
+mod project_hotkeys;
 mod state_source;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
