@@ -90,17 +90,23 @@ mod tests {
         assert!(out.contains("home/room/pc"), "префикс топиков не тронут: {out}");
     }
 
-    /// Списки заменяются целиком: слить два списка проектов по ключам нечем,
-    /// а «дописать» — не то, чего хочет человек, убравший строку из формы.
+    /// Списки заменяются целиком, а не сливаются поэлементно.
+    ///
+    /// Образцом взят `terminal.args` — единственный список, который форма
+    /// настроек и правда шлёт (поле типа `lines`). Человек правит там строки
+    /// целиком, и «дописать» вместо «заменить» означало бы, что убранный
+    /// аргумент возвращается сам, а порядок аргументов терминала — не то, во
+    /// что можно дописывать.
     #[test]
     fn lists_are_replaced_whole() {
-        let mut d = doc("projects:\n  - path: /a\n    hotkey: Cmd+Shift+1\n  - path: /b\n");
+        let mut d = doc("terminal:\n  file: open\n  args:\n    - -na\n    - kitty\n");
         merge_patch(&mut d, &serde_json::json!({
-            "projects": [{"path": "/a", "hotkey": "Cmd+Shift+9"}]
+            "terminal": {"args": ["-na", "wezterm"]}
         })).unwrap();
         let out = render(&d).unwrap();
-        assert!(out.contains("Cmd+Shift+9"));
-        assert!(!out.contains("/b"), "убранный проект не воскресает: {out}");
+        assert!(out.contains("wezterm"));
+        assert!(!out.contains("kitty"), "убранный аргумент не воскресает: {out}");
+        assert!(out.contains("open"), "соседний ключ на месте: {out}");
     }
 
     /// Пустой документ — не отказ: конфига могло не быть вовсе.
