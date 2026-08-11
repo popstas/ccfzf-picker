@@ -12,6 +12,20 @@ pub struct Project {
     pub hotkey: String,
 }
 
+/// Приводит имя машины к виду, пригодному для сравнения: обрезает пробелы по
+/// краям и переводит в нижний регистр.
+///
+/// Одна сторона сравнения — `os.hostname()` соседней машины, другая — строка,
+/// набранная человеком в конфиге. Регистр в именах машин Windows не значит
+/// ничего, а пробел по краям набирается легко и не виден вовсе. Это не
+/// случайное послабление, а то же самое правило, которым фронтенд уже
+/// сравнивает хосты в `canFocus` (`normHost` в
+/// `frontend-src/session-windows.js`) — здесь та же формула на той же паре
+/// строк, только на стороне Rust.
+fn norm_host(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
 /// Чего хочет ответ агрегатора.
 ///
 /// `None` — «трогать нечего»: либо ответ про окна ничего не знает (пустой
@@ -24,8 +38,9 @@ pub struct Project {
 /// живой трекер сказал, что в конфиге пусто.
 pub fn wanted_from_state(state: &serde_json::Value, own_host: &str) -> Option<Vec<Project>> {
     let host = state.get("windowHost").and_then(|v| v.as_str()).unwrap_or("");
-    let own = own_host.trim();
-    if host.is_empty() || own.is_empty() || host != own {
+    let host_norm = norm_host(host);
+    let own_norm = norm_host(own_host);
+    if host_norm.is_empty() || own_norm.is_empty() || host_norm != own_norm {
         return None;
     }
     let mut out = Vec::new();
@@ -539,6 +554,51 @@ mod tests {
         let s = state("tracker-host", serde_json::json!([{"path": "/p/one", "hotkey": "Ctrl+F11"}]));
         assert_eq!(wanted_from_state(&s, "other-host"), None);
         assert_eq!(wanted_from_state(&s, ""), None);
+    }
+
+    /// Живая ошибка с выкатки: в конфиге человек написал `TRACKER-HOST`,
+    /// `os.hostname()` на той же машине отдаёт `tracker-host` — тот же хост,
+    /// разный регистр. `canFocus` во фронтенде через `normHost` эту разницу
+    /// не видит, и Rust обязан сравнивать так же, а не строже: до этой правки
+    /// условие `host != own` никогда не выполнялось, и ответ агрегатора с
+    /// хоткеями не регистрировал ни одного.
+    #[test]
+    fn own_host_case_does_not_matter() {
+        let s = state("tracker-host", serde_json::json!([{"path": "/p/one", "hotkey": "Ctrl+F11"}]));
+        assert_eq!(
+            wanted_from_state(&s, "TRACKER-HOST"),
+            Some(vec![Project { cwd: "/p/one".into(), hotkey: "Ctrl+F11".into() }])
+        );
+    }
+
+    /// Тот же случай, но со стороны ответа: не только конфиг человека может
+    /// быть набран в другом регистре — `windowHost` в ответе агрегатора тоже.
+    #[test]
+    fn answer_host_case_does_not_matter() {
+        let s = state("TRACKER-HOST", serde_json::json!([{"path": "/p/one", "hotkey": "Ctrl+F11"}]));
+        assert_eq!(
+            wanted_from_state(&s, "tracker-host"),
+            Some(vec![Project { cwd: "/p/one".into(), hotkey: "Ctrl+F11".into() }])
+        );
+    }
+
+    /// Пробел по краям в конфиге набирается легко и не виден вовсе —
+    /// сравнение обязано его прощать так же, как `normHost`.
+    #[test]
+    fn surrounding_spaces_in_own_host_do_not_matter() {
+        let s = state("tracker-host", serde_json::json!([{"path": "/p/one", "hotkey": "Ctrl+F11"}]));
+        assert_eq!(
+            wanted_from_state(&s, "  tracker-host  "),
+            Some(vec![Project { cwd: "/p/one".into(), hotkey: "Ctrl+F11".into() }])
+        );
+    }
+
+    /// Послабление не должно превращаться в «совпадает со всем»: настоящее
+    /// несовпадение имён машин по-прежнему ничего не регистрирует.
+    #[test]
+    fn a_genuinely_different_host_still_registers_nothing() {
+        let s = state("TRACKER-HOST", serde_json::json!([{"path": "/p/one", "hotkey": "Ctrl+F11"}]));
+        assert_eq!(wanted_from_state(&s, "other-host"), None);
     }
 
     /// Живой трекер с пустым списком — это «хоткеев нет», и он их снимает.
