@@ -132,8 +132,6 @@ backgroundRefresh: true
 #     hotkey: Cmd+Shift+V
 #     argv: ['code', '{localPath}']
 
-# Проектные хоткеи: комбинация открывает новую сессию в каталоге.
-# Каталог — на удалённом хосте, не на локальной машине.
-projects:
-  - path: /home/user/projects/demo
-    hotkey: Cmd+Shift+1
+# Project hotkeys live in windows11-manager (claudeWt.projects) and reach the
+# picker through `ccfzf --state`. There is no key for them here on purpose: two
+# lists kept in sync by hand is exactly what this replaced.

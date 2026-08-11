@@ -19,7 +19,6 @@ test('пустой конфиг даёт рабочие значения по у
   assert.strictEqual(c.onlyLive, true);
   assert.strictEqual(c.hideOnBlur, true);
   assert.deepStrictEqual(c.terminal, { file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] });
-  assert.deepStrictEqual(c.projects, []);
   // Пустое имя машины — фокуса не бывает. Умолчания у него нет по той же
   // причине, что и у sshHost: любое значение было бы чужим именем машины.
   assert.strictEqual(c.windowHost, '');
@@ -143,18 +142,14 @@ test('поля с умолчанием true выключаются только 
   }
 });
 
-test('проект без пути отбрасывается, а не роняет конфиг', () => {
-  const c = normalizeConfig({ projects: [
-    { path: '/home/user/x', hotkey: 'Cmd+Shift+1' },
-    { hotkey: 'Cmd+Shift+2' },
-    'мусор',
-  ] });
-  assert.deepStrictEqual(c.projects, [{ path: '/home/user/x', hotkey: 'Cmd+Shift+1' }]);
-});
-
-test('проект без хоткея остаётся в списке', () => {
-  const c = normalizeConfig({ projects: [{ path: '/home/user/y' }] });
-  assert.deepStrictEqual(c.projects, [{ path: '/home/user/y', hotkey: '' }]);
+// Ключ уехал в windows11-manager: единственный источник хоткеев — его
+// claudeWt.projects, а сюда список приезжает ответом агрегатора. Оставшийся в
+// файле человека ключ читать нельзя — два списка снова разошлись бы.
+test('projects из конфига не читается вовсе', () => {
+  const cfg = normalizeConfig({
+    sshHost: 'host', projects: [{ path: '/p/one', hotkey: 'Ctrl+F11' }],
+  });
+  assert.equal(cfg.projects, undefined);
 });
 
 test('backgroundRefresh по умолчанию включён', () => {

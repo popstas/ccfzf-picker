@@ -132,9 +132,6 @@
 
   function normalizeConfig(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
-    const projects = (Array.isArray(src.projects) ? src.projects : [])
-      .filter(p => p && typeof p === 'object' && typeof p.path === 'string' && p.path)
-      .map(p => ({ path: p.path, hotkey: typeof p.hotkey === 'string' ? p.hotkey : '' }));
 
     return {
       sshHost: typeof src.sshHost === 'string' && src.sshHost ? src.sshHost : DEFAULTS.sshHost,
@@ -163,7 +160,6 @@
       mqtt: { configured: Boolean(nonEmpty((src.mqtt || {}).host) && nonEmpty((src.mqtt || {}).base)) },
       pathMap: normalizePathMap(src.pathMap),
       actions: normalizeActions(src.actions),
-      projects,
     };
   }
 

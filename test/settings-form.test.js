@@ -83,14 +83,6 @@ test('строка аргументов возвращается массиво�
   assert.deepStrictEqual(patch, { terminal: { args: ['-w', '0'] } });
 });
 
-test('проекты редактируются списком', () => {
-  const original = { projects: [{ path: '/a', hotkey: 'Cmd+Shift+1' }] };
-  const fields = configToFields(original);
-  assert.deepStrictEqual(fields.projects, [{ path: '/a', hotkey: 'Cmd+Shift+1' }]);
-  const patch = fieldsToPatch({ ...fields, projects: [{ path: '/b', hotkey: '' }] }, original);
-  assert.deepStrictEqual(patch, { projects: [{ path: '/b', hotkey: '' }] });
-});
-
 test('стёртое числовое поле не превращается в 0', () => {
   // `Number('')` в JS даёт 0 — но стёртое поле порта значит «не трогали»,
   // а не «порт 0»: 0 — недопустимый порт брокера, и сохранить его молча
@@ -125,13 +117,6 @@ test('комбинация, занятая самим окном пикера, �
   // молча не сработал бы: окно забирает нажатие себе.
   const problems = validate({ ...configToFields({ sshHost: 'h' }), hotkey: 'Ctrl+K' });
   assert.ok(problems.some(p => p.includes('Ctrl+K')), problems.join('; '));
-});
-
-test('точка с запятой в пути проекта не проходит', () => {
-  // Windows Terminal режет свою командную строку по `;` до всякого шелла:
-  // сессия в таком каталоге развалилась бы на панели вместо запуска.
-  const fields = { ...configToFields({ sshHost: 'h' }), projects: [{ path: '/a;b', hotkey: '' }] };
-  assert.ok(validate(fields).some(p => p.includes('/a;b')));
 });
 
 test('исправная форма претензий не вызывает', () => {

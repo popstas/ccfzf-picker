@@ -49,7 +49,6 @@
       fields: [
         { id: 'hotkey', label: 'Show the picker', type: 'text',
           hint: 'SUPER is Cmd on a Mac and Win on Windows.' },
-        { id: 'projects', label: 'Project hotkeys', type: 'projects' },
       ],
     },
     {
@@ -102,7 +101,6 @@
   function emptyFor(field) {
     if (field.type === 'bool') return Boolean(field.default);
     if (field.type === 'number') return '';
-    if (field.type === 'projects') return [];
     return '';
   }
 
@@ -115,11 +113,6 @@
     if (value === undefined || value === null) return emptyFor(field);
     if (field.type === 'bool') return Boolean(value);
     if (field.type === 'lines') return (Array.isArray(value) ? value : []).join('\n');
-    if (field.type === 'projects') {
-      return (Array.isArray(value) ? value : [])
-        .filter(p => p && typeof p === 'object')
-        .map(p => ({ path: String(p.path || ''), hotkey: String(p.hotkey || '') }));
-    }
     return value;
   }
 
@@ -141,11 +134,6 @@
       return Number.isFinite(n) ? n : undefined;
     }
     if (field.type === 'bool') return Boolean(value);
-    if (field.type === 'projects') {
-      return (Array.isArray(value) ? value : [])
-        .filter(p => p && String(p.path || '').trim())
-        .map(p => ({ path: String(p.path).trim(), hotkey: String(p.hotkey || '').trim() }));
-    }
     return String(value == null ? '' : value);
   }
 
@@ -197,9 +185,8 @@
    *
    * Проверки те же, что уже стоят на пути конфига, и переписывать их здесь
    * нельзя: разойдясь, форма разрешила бы то, что пикер потом молча выбросит.
-   * Отсюда и список — три случая, каждый из которых иначе виден только
-   * пальцами: неработающий список, неотзывающаяся клавиша, команда,
-   * развалившаяся на панели Windows Terminal.
+   * Отсюда и список — два случая, каждый из которых иначе виден только
+   * пальцами: неработающий список, неотзывающаяся клавиша.
    */
   function validate(fields) {
     const problems = [];
@@ -211,12 +198,6 @@
     // забирает себе, перечислены там, и второй список разошёлся бы с первым.
     if (hotkey && hotkeyApi.isReserved(hotkeyApi.parseHotkey(hotkey))) {
       problems.push(`${hotkey} is taken by the picker window itself — inside it, it will not respond`);
-    }
-    for (const project of (Array.isArray(fields.projects) ? fields.projects : [])) {
-      const path = String((project || {}).path || '');
-      if (path.includes(';')) {
-        problems.push(`path ${path} contains ";" — Windows Terminal will split the command into panes`);
-      }
     }
     return problems;
   }

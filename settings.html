@@ -113,14 +113,6 @@
       return `<div class="field"><label>${esc(field.label)}</label>`
         + `<textarea rows="3" data-field="${field.id}">${esc(value)}</textarea>${hint}</div>`;
     }
-    if (field.type === 'projects') {
-      const rows = (value || []).concat([{ path: '', hotkey: '' }]).map((p, i) =>
-        `<div class="field"><input type="text" data-project="${i}" data-part="path" `
-        + `placeholder="/path/on/the/remote/host" value="${esc(p.path)}">`
-        + `<input type="text" data-project="${i}" data-part="hotkey" `
-        + `placeholder="Cmd+Shift+1" value="${esc(p.hotkey)}"></div>`).join('');
-      return `<div class="field"><label>${esc(field.label)}</label>${rows}${hint}</div>`;
-    }
     const type = field.type === 'password' ? 'password' : (field.type === 'number' ? 'number' : 'text');
     return `<div class="field"><label>${esc(field.label)}</label>`
       + `<input type="${type}" data-field="${field.id}" value="${esc(value)}">${hint}</div>`;
@@ -167,15 +159,6 @@
       if (input.type === 'checkbox') {
         input.addEventListener('change', () => { fields[input.dataset.field] = input.checked; });
       }
-    }
-    for (const input of page.querySelectorAll('[data-project]')) {
-      input.addEventListener('input', () => {
-        const rows = (fields.projects || []).slice();
-        const i = Number(input.dataset.project);
-        while (rows.length <= i) rows.push({ path: '', hotkey: '' });
-        rows[i] = { ...rows[i], [input.dataset.part]: input.value };
-        fields.projects = rows;
-      });
     }
     for (const input of page.querySelectorAll('[data-axis]')) {
       input.addEventListener('change', () => {
