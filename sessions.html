@@ -1104,9 +1104,11 @@
     if (row.kind === 'snapshot-session') {
       return row.open ? focusSession(row) : restoreSnapshot(row.snapshotId, [row.id]);
     }
-    // У строки проекта продолжать нечего — есть только каталог. Enter значит
-    // здесь то же, что и на строке сессии: «открой мне терминал с агентом».
-    if (row.kind === 'project') return newSession(row.cwd);
+    // У строки проекта нет id сессии — есть только каталог, и что с ним
+    // делать, решает менеджер: поднять окно этого проекта или завести сессию с
+    // его профилем. Enter здесь значит «покажи мне проект», а не «дай ещё один
+    // терминал» — вторая просьба живёт под `^N`.
+    if (row.kind === 'project') return openProjectRow(row);
     return openSession(row);
   }
 
@@ -1255,11 +1257,13 @@
   }
 
   /**
-   * Поднять новую сессию в каталоге строки.
+   * Поднять новую сессию в каталоге строки самому.
    *
-   * Один вход на три повода: Enter на строке проекта, `^N` на любой строке и
-   * пункт меню. Разводить их значило бы завести три места, где собирается одна
-   * и та же удалённая команда, — а собирать её мимо OpenStrategy нельзя вовсе.
+   * Запасная дорога: и Enter на строке проекта, и «New session» сначала
+   * спрашивают `chooseProjectOpenAction`, и сюда попадают там, где менеджера
+   * нет — на чужой машине и без настроенного брокера. Профиль Windows Terminal
+   * по каталогу здесь теряется, и иначе быть не может: соответствие живёт в
+   * `claudeWt.projects` у windows11-manager, а на такой машине его нет вовсе.
    *
    * Отметки «просмотрено» здесь нет: смотреть ещё нечего, сессия только что
    * началась.
@@ -1296,6 +1300,70 @@
   }
 
   /**
+   * Enter на строке проекта: попросить менеджера открыть проект.
+   *
+   * Развилку «поднять окно этого каталога или завести сессию» принимает он:
+   * правило «последняя открытая сессия проекта» написано и покрыто тестами у
+   * него (`pickOpenProjectSession`), и профиль Windows Terminal по каталогу
+   * знает тоже только он. Та же просьба, что уходит от проектного хоткея.
+   *
+   * Отметки «просмотрено» здесь нет и быть не может: у строки проекта нет id
+   * сессии, отмечать нечего.
+   */
+  async function openProjectRow(row) {
+    const dir = window.OpenTransport.rowProjectDir(row);
+    const action = window.OpenTransport.chooseProjectOpenAction(
+      row, lastState, CONFIG.windowHost, CONFIG.mqtt.configured,
+    );
+    if (action !== 'manager') return newSession(row.cwd);
+    try {
+      await invoke('open_project_mqtt', { cwd: dir });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    error = '';
+    invoke('hide_picker');
+  }
+
+  /**
+   * «New session» — всегда новая, но профиль знает менеджер.
+   *
+   * Отличается от `openProjectRow` ровно тем, что просит не искать открытую:
+   * `^N` человек нажимает, когда сессия уже есть и нужна ещё одна.
+   *
+   * Имя считается здесь, а не на той стороне: менеджер списка занятых имён не
+   * ведёт и взял бы basename каталога — то самое имя, которое уже занято, — а
+   * два окна с одним заголовком трекер привязал бы к одной сессии. Пустое имя
+   * значит отказ `OpenStrategy` (путь с `;`), и тогда местная дорога скажет об
+   * этом человеку — своей копии того же сообщения здесь не надо.
+   */
+  async function newSessionHere(row) {
+    const dir = window.OpenTransport.rowProjectDir(row);
+    const action = window.OpenTransport.chooseProjectOpenAction(
+      row, lastState, CONFIG.windowHost, CONFIG.mqtt.configured,
+    );
+    if (action !== 'manager') return newSession(row.cwd);
+    const taken = takenSessionNames();
+    const name = window.OpenStrategy.newSessionName(dir, taken);
+    if (!name) return newSession(row.cwd);
+    try {
+      await invoke('new_session_mqtt', { cwd: dir, name });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    error = '';
+    // Имя занимается после удачной отправки — как и в newSession: иначе два
+    // быстрых `^N` подряд дали бы одно и то же имя, потому что дамп ccfzf
+    // первую сессию ещё не увидел.
+    issuedNames.set(name, Date.now());
+    invoke('hide_picker');
+  }
+
+  /**
    * Выполнить действие над строкой.
    *
    * Применимость проверяется здесь, а не у вызывающего: пунктов меню и прямых
@@ -1321,7 +1389,7 @@
       return;
     }
     if (id === 'new') {
-      newSession(row.cwd);
+      newSessionHere(row);
       return;
     }
     if (id === 'pr') {
