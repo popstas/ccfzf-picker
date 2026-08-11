@@ -1,7 +1,9 @@
 //! Проектные хоткеи: список приезжает ответом агрегатора, а не из конфига.
 
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{Mutex, Once};
+use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
@@ -222,6 +224,13 @@ pub struct Work {
 pub struct Registered {
     pub state: Mutex<RegisteredState>,
     pub work: Mutex<Work>,
+    /// Когда по каждому каталогу нажимали в прошлый раз — см. `PRESS_DEBOUNCE`.
+    ///
+    /// Отдельный мьютекс, а не поле в `RegisteredState`: тот берут и отпускают
+    /// вокруг работы с плагином (см. `apply_once`), и добавлять туда что-то,
+    /// что читается на каждое нажатие, значило бы связать нажатие клавиши с
+    /// перевешиванием списка.
+    pub presses: Mutex<HashMap<String, Instant>>,
 }
 
 /// Взяться за список самому или отдать его тому, кто уже вешает.
@@ -333,6 +342,49 @@ pub fn from_cache(value: &serde_json::Value) -> Vec<Project> {
     // бы всё заново на ровном месте.
     sort_by_cwd(&mut out);
     out
+}
+
+/// Окно дребезга проектного хоткея.
+///
+/// Секунда — оттуда же, откуда её взял ограничитель `keys/press-throttled` для
+/// кнопок панели: ниже этого порога человек не нажимает нарочно.
+pub const PRESS_DEBOUNCE: Duration = Duration::from_secs(1);
+
+/// Пропустить ли нажатие: прошлое по этому же каталогу было достаточно давно.
+///
+/// Отдельно от отметок, чтобы правило проверялось `cargo test` без мьютекса и
+/// без живого `AppHandle` — тем же приёмом, что `picker_toggle` в `main.rs`.
+pub fn press_allowed(last: Option<Instant>, now: Instant, window: Duration) -> bool {
+    match last {
+        Some(previous) => now.duration_since(previous) >= window,
+        None => true,
+    }
+}
+
+/// Записать нажатие, если дребезг его пропускает.
+fn take_press(reg: &Registered, cwd: &str, now: Instant) -> bool {
+    let mut presses = reg.presses.lock().unwrap();
+    if !press_allowed(presses.get(cwd).copied(), now, PRESS_DEBOUNCE) {
+        return false;
+    }
+    presses.insert(cwd.to_string(), now);
+    true
+}
+
+/// pid демона трекера из последнего ответа поллера; ноль — «грамоту выдавать
+/// некому».
+///
+/// Форма та же, что у `focusPid` во фронтенде: конечное положительное число,
+/// всё прочее — ноль. Читается из тела `Poller::snapshot()`, а оно
+/// `{state, error}`: сам ответ агрегатора лежит под `state`, и там же
+/// `windowPid`, который трекер кладёт в файл окон.
+pub fn tracker_pid_from(snapshot: &serde_json::Value) -> u32 {
+    snapshot
+        .get("state")
+        .and_then(|s| s.get("windowPid"))
+        .and_then(|v| v.as_u64())
+        .filter(|pid| *pid > 0 && *pid <= u32::MAX as u64)
+        .unwrap_or(0) as u32
 }
 
 /// Повесить список, сняв прежний.
@@ -900,5 +952,74 @@ mod tests {
         // loser здесь не оказалось бы.
         assert_eq!(state.live.len(), 1);
         assert_eq!(reapply_list(&state), vec![winner, loser]);
+    }
+
+    /// Удержанная клавиша — это очередь повторов, а не очередь просьб.
+    ///
+    /// `RegisterHotKey` на Windows шлёт `WM_HOTKEY` заново, пока клавишу
+    /// держат, и все повторы приходят как `Pressed` — фильтр по состоянию их не
+    /// отсекает. Без окна дребезга первые повторы успевают отработать раньше,
+    /// чем окно нового терминала появится на экране и станет видно менеджеру,
+    /// то есть плодят терминалы вместо повторного подъёма одного.
+    #[test]
+    fn a_held_key_asks_once() {
+        let now = Instant::now();
+        assert!(press_allowed(None, now, PRESS_DEBOUNCE));
+        assert!(!press_allowed(Some(now), now, PRESS_DEBOUNCE));
+        assert!(!press_allowed(
+            Some(now - Duration::from_millis(900)),
+            now,
+            PRESS_DEBOUNCE
+        ));
+    }
+
+    /// Нарочное второе нажатие через секунду проходит: окно дребезга — про
+    /// палец на клавише, а не про запрет открывать проект дважды.
+    #[test]
+    fn a_deliberate_second_press_goes_through() {
+        let now = Instant::now();
+        assert!(press_allowed(
+            Some(now - Duration::from_millis(1100)),
+            now,
+            PRESS_DEBOUNCE
+        ));
+    }
+
+    /// Соседние проекты друг друга не глушат: отметка своя на каждый каталог.
+    #[test]
+    fn projects_do_not_silence_each_other() {
+        let reg = Registered::default();
+        let now = Instant::now();
+        assert!(take_press(&reg, "/p/one", now));
+        assert!(take_press(&reg, "/p/two", now));
+        assert!(!take_press(&reg, "/p/one", now));
+    }
+
+    /// pid трекера лежит внутри `state`, а не рядом с ним: тело
+    /// `Poller::snapshot()` — это `{state, error}`.
+    #[test]
+    fn the_tracker_pid_comes_from_inside_the_answer() {
+        let snapshot = serde_json::json!({"state": {"windowPid": 4242}, "error": ""});
+        assert_eq!(tracker_pid_from(&snapshot), 4242);
+    }
+
+    /// Ответа ещё нет, pid не число, pid ноль — грамоту выдавать некому.
+    ///
+    /// Ноль здесь не мелочь: `AllowSetForegroundWindow(0)` — это не «никому», а
+    /// отдельное значение, и отдавать его системе по недосмотру не стоит.
+    #[test]
+    fn no_answer_means_no_grant() {
+        assert_eq!(
+            tracker_pid_from(&serde_json::json!({"state": null, "error": "ssh failed"})),
+            0
+        );
+        assert_eq!(
+            tracker_pid_from(&serde_json::json!({"state": {"windowPid": "4242"}})),
+            0
+        );
+        assert_eq!(
+            tracker_pid_from(&serde_json::json!({"state": {"windowPid": 0}})),
+            0
+        );
     }
 }
