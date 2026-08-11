@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Два репозитория. Пикер: `/home/popstas/projects/js/ccfzf-picker`, ветка `windows-mqtt-migrate`. Менеджер: `/home/popstas/projects/js/windows11-manager`, ветка `feat/claude-wt-agent-progress`. Правки одного репозитория не коммитить в другом.
+- Два репозитория. Пикер: `~/projects/js/ccfzf-picker`, ветка `windows-mqtt-migrate`. Менеджер: `~/projects/js/windows11-manager`, ветка `feat/claude-wt-agent-progress`. Правки одного репозитория не коммитить в другом.
 - В обоих репозиториях **перед коммитом проверить `git status`** и добавлять в индекс только файлы своей задачи по именам: в рабочем дереве могут лежать чужие незакоммиченные правки.
 - ccfzf-picker публичный. `npm test` (там `node --test`) включает стража `test/no-private-data.test.js`, который ходит по `git ls-files`: живых домашних путей (`/home/<имя>`, `/Users/<имя>`, `\Users\<имя>`) и имён машин в коде, комментариях и документации быть не должно. Каталоги в фикстурах и примерах — `/p/one`, `/p/site`, `/p/home`.
 - Комментарии и докстринги — по-русски, как весь файл, и объясняют **почему**, а не пересказывают код.
@@ -533,9 +533,9 @@ git commit -m "feat(picker): Enter на проекте поднимает окн
 Правило «чьё имя главнее» — единственное в правке менеджера, что можно проверить без окон Windows. Выносится рядом с остальными такими же в `project-helpers.js`.
 
 **Files:**
-- Modify: `/home/popstas/projects/js/windows11-manager/src/claude-wt/project-helpers.js` — новая функция после `basenameOfCwd` (строка 10), новый экспорт (строки 80–88).
-- Modify: `/home/popstas/projects/js/windows11-manager/src/claude-wt/project-helpers.test.js` — новые тесты в конце файла.
-- Modify: `/home/popstas/projects/js/windows11-manager/src/claude-wt/project.js` — сигнатура `openClaudeProject` (строка 42), имя сессии (строка 47), пропуск поисков (строки 57–71).
+- Modify: `~/projects/js/windows11-manager/src/claude-wt/project-helpers.js` — новая функция после `basenameOfCwd` (строка 10), новый экспорт (строки 80–88).
+- Modify: `~/projects/js/windows11-manager/src/claude-wt/project-helpers.test.js` — новые тесты в конце файла.
+- Modify: `~/projects/js/windows11-manager/src/claude-wt/project.js` — сигнатура `openClaudeProject` (строка 42), имя сессии (строка 47), пропуск поисков (строки 57–71).
 
 **Interfaces:**
 - Consumes: `basenameOfCwd` — уже есть в `project-helpers.js`.
@@ -575,7 +575,7 @@ describe('sessionNameFor', () => {
 - [ ] **Step 2: Убедиться, что тесты падают**
 
 ```bash
-cd /home/popstas/projects/js/windows11-manager && npm test -- project-helpers
+cd ~/projects/js/windows11-manager && npm test -- project-helpers
 ```
 
 Ожидается: падение, `sessionNameFor is not a function`.
@@ -626,7 +626,7 @@ export {
 - [ ] **Step 4: Убедиться, что тесты проходят**
 
 ```bash
-cd /home/popstas/projects/js/windows11-manager && npm test -- project-helpers
+cd ~/projects/js/windows11-manager && npm test -- project-helpers
 ```
 
 Ожидается: все тесты файла зелёные.
@@ -725,7 +725,7 @@ async function openClaudeProject({ cwd, name, profile, reuseOpen = true } = {}) 
 - [ ] **Step 6: Прогнать весь набор и закоммитить**
 
 ```bash
-cd /home/popstas/projects/js/windows11-manager && npm test
+cd ~/projects/js/windows11-manager && npm test
 git status --porcelain
 git add src/claude-wt/project-helpers.js src/claude-wt/project-helpers.test.js src/claude-wt/project.js
 git commit -m "feat(claude-wt): openClaudeProject умеет заводить сессию, не поднимая открытую"
@@ -738,8 +738,8 @@ git commit -m "feat(claude-wt): openClaudeProject умеет заводить с
 ### Task 5: Приёмник понимает `terminal-new`
 
 **Files:**
-- Modify: `/home/popstas/projects/js/windows11-manager/src/commands/claude-commands.js` — `openProject` (строки 93–109) и обработчик `claude-session-open` (строки 173–218).
-- Modify: `/home/popstas/projects/js/windows11-manager/src/commands/claude-commands.test.js` — новые тесты рядом с существующими про `claude-session-open`.
+- Modify: `~/projects/js/windows11-manager/src/commands/claude-commands.js` — `openProject` (строки 93–109) и обработчик `claude-session-open` (строки 173–218).
+- Modify: `~/projects/js/windows11-manager/src/commands/claude-commands.test.js` — новые тесты рядом с существующими про `claude-session-open`.
 
 **Interfaces:**
 - Consumes: `winMan.openClaudeProject({ cwd, name, reuseOpen })` (Task 4).
@@ -794,7 +794,7 @@ git commit -m "feat(claude-wt): openClaudeProject умеет заводить с
 - [ ] **Step 2: Убедиться, что тесты падают**
 
 ```bash
-cd /home/popstas/projects/js/windows11-manager && npm test -- claude-commands
+cd ~/projects/js/windows11-manager && npm test -- claude-commands
 ```
 
 Ожидается: первые три теста падают (`openClaudeProject` зовётся без `reuseOpen` либо не зовётся вовсе). Четвёртый должен проходить сразу — он про уже написанное поведение, и стоит здесь затем, чтобы правка его не сломала.
@@ -911,7 +911,7 @@ cd /home/popstas/projects/js/windows11-manager && npm test -- claude-commands
 - [ ] **Step 6: Прогнать весь набор и закоммитить**
 
 ```bash
-cd /home/popstas/projects/js/windows11-manager && npm test
+cd ~/projects/js/windows11-manager && npm test
 git status --porcelain
 git add src/commands/claude-commands.js src/commands/claude-commands.test.js
 git commit -m "feat(claude-wt): terminal-new — открыть сессию, не поднимая существующую"
@@ -922,7 +922,7 @@ git commit -m "feat(claude-wt): terminal-new — открыть сессию, н
 ### Task 6: Документация
 
 **Files:**
-- Modify: `/home/popstas/projects/js/ccfzf-picker/CLAUDE.md` — рядом с правилом «Проектный хоткей решения не принимает — он его пересылает».
+- Modify: `~/projects/js/ccfzf-picker/CLAUDE.md` — рядом с правилом «Проектный хоткей решения не принимает — он его пересылает».
 - Modify: `~/.claude/skills/claude-wt/ccfzf-picker.md` — вне репозитория, коммитом не закрывается.
 
 - [ ] **Step 1: Дописать правило в `CLAUDE.md`**
@@ -970,7 +970,7 @@ git commit -m "feat(claude-wt): terminal-new — открыть сессию, н
 - [ ] **Step 3: Прогнать стража и закоммитить**
 
 ```bash
-cd /home/popstas/projects/js/ccfzf-picker && npm test
+cd ~/projects/js/ccfzf-picker && npm test
 git status --porcelain
 git add CLAUDE.md
 git commit -m "docs(picker): правило — терминал по каталогу открывает менеджер"
@@ -991,29 +991,29 @@ git commit -m "docs(picker): правило — терминал по катал
 `deploy-win.sh` тянет ветку с GitHub, а не копирует рабочее дерево: без пуша он соберёт прежний код и отчитается об успехе.
 
 ```bash
-cd /home/popstas/projects/js/ccfzf-picker && git push origin windows-mqtt-migrate
+cd ~/projects/js/ccfzf-picker && git push origin windows-mqtt-migrate
 ```
 
 `deploy-pc.sh` у менеджера устроен так же — `git fetch origin && git checkout <ветка> && git pull --ff-only` на самой Windows-машине (строка 71), — поэтому его ветку тоже надо отправить:
 
 ```bash
-cd /home/popstas/projects/js/windows11-manager && git push origin feat/claude-wt-agent-progress
+cd ~/projects/js/windows11-manager && git push origin feat/claude-wt-agent-progress
 ```
 
 - [ ] **Step 2: Выкатить менеджер и пикер**
 
 ```bash
-cd /home/popstas/projects/js/windows11-manager && ./data/scripts/deploy-pc.sh
-cd /home/popstas/projects/js/ccfzf-picker && bash data/scripts/deploy-win.sh
+cd ~/projects/js/windows11-manager && ./data/scripts/deploy-pc.sh
+cd ~/projects/js/ccfzf-picker && bash data/scripts/deploy-win.sh
 ```
 
 Менеджер первым: пикер после выкатки шлёт просьбы, которых старый приёмник не знает, и на `terminal-new` ответил бы `unsupported action` вместо открытия.
 
 Проверить, что доехало именно новое:
 
-```bash
-ssh popstas-pc "powershell -NoProfile -Command \"cd D:\projects\js\windows11-manager; git log --oneline -1\""
-```
+По ssh на Windows-машине: `git log --oneline -1` в каталоге установленного
+менеджера должен показать свежий коммит ветки. Команда с именем машины и её
+путём — в `data/scripts/` (каталог под `.gitignore`).
 
 - [ ] **Step 3: Проверить Enter на строке проекта**
 
