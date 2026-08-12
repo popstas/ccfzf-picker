@@ -535,7 +535,7 @@
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
     // Про `/s` рассказываем только там, где он работает: подсказка о режиме,
     // которого нет, обманывает ровно так же, как молчащий Enter.
-    menuHint.textContent = '^K - Session menu, ^N - new session, ^A - all projects'
+    menuHint.textContent = '^K / right click - Session menu, ^N - new session, ^A - all projects'
       + (canFocusWindows() ? ', ^S - snapshots' : '');
   }
 
@@ -1579,6 +1579,27 @@
       return;
     }
     choose();
+  });
+
+  // Правая кнопка по строке — тот же `^K`: меню действий у мыши другого входа
+  // не имело вовсе, а клавиатурный `^K` работает по активной строке, до
+  // которой мышью ещё надо доехать стрелками.
+  //
+  // preventDefault стоит до всех проверок и на весь список: родное меню
+  // WebView2 («Назад», «Обновить», «Сохранить как») в пикере не делает ничего
+  // осмысленного, а поверх нашего оно и вовсе перекрыло бы его. В поле поиска
+  // родное меню остаётся — там из него берут «Вставить».
+  list.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (menuOpen) return;
+    const row = e.target.closest('.row');
+    if (!row) return;
+    active = Number(row.dataset.index);
+    // paint, а не render: подсветке надо переехать на строку, по которой
+    // щёлкнули, а список ради этого перерисовывать незачем — openMenu читает
+    // rows[active], а не DOM.
+    paint();
+    openMenu();
   });
 
   actionsList.addEventListener('click', (e) => {

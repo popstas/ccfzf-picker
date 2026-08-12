@@ -965,3 +965,48 @@ test('подсветка наведения объявлена до подсве
   assert.notStrictEqual(active, -1, '.row.active пропал из sessions.html — тест сторожит не то');
   assert.ok(hover < active, 'при равной специфичности порядок решает всё: выбор должен быть ниже');
 });
+
+// ── Правая кнопка открывает то же меню, что и `^K` ─────────────────────────
+//
+// Обработчик вычитывается из страницы и выполняется в vm — как choose выше.
+// Проверять его иначе некому: в браузере тестов нет, а сломать здесь можно
+// молча. Забытый preventDefault не гасит меню WebView2 — оно встаёт поверх
+// нашего; забытый paint оставляет подсветку на прежней строке, и меню
+// открывается для сессии, по которой не щёлкали.
+function contextMenuOn(target, menuOpen) {
+  const source = SESSIONS_HTML.match(
+    /\n {2}list\.addEventListener\('contextmenu',[\s\S]*?\n {2}\}\);\n/,
+  );
+  assert.ok(source, 'обработчик contextmenu не найден в sessions.html — тест сторожит не то');
+  const calls = [];
+  const ctx = {
+    menuOpen,
+    active: 0,
+    paint: () => calls.push('paint'),
+    openMenu: () => calls.push('openMenu'),
+    list: { addEventListener: (name, fn) => { ctx.handler = fn; } },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(source[0], ctx, { filename: 'sessions.html' });
+  ctx.handler({
+    preventDefault: () => calls.push('preventDefault'),
+    target: { closest: sel => (sel === '.row' ? target : null) },
+  });
+  return { calls, active: ctx.active };
+}
+
+test('правый клик по строке переносит выбор и открывает меню', () => {
+  const { calls, active } = contextMenuOn({ dataset: { index: '3' } }, false);
+  assert.strictEqual(active, 3, 'меню читает rows[active] — выбор обязан переехать на строку под курсором');
+  assert.deepStrictEqual(calls, ['preventDefault', 'paint', 'openMenu']);
+});
+
+test('правый клик мимо строки гасит только родное меню', () => {
+  const { calls } = contextMenuOn(null, false);
+  assert.deepStrictEqual(calls, ['preventDefault']);
+});
+
+test('при открытом меню правый клик ничего не открывает заново', () => {
+  const { calls } = contextMenuOn({ dataset: { index: '3' } }, true);
+  assert.deepStrictEqual(calls, ['preventDefault']);
+});
