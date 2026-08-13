@@ -879,6 +879,24 @@
   }
 
   /**
+   * Трекер, чей менеджер откроет сессию. Ответ на вопрос про машину, а не про
+   * строку: у строки проекта окна нет вовсе.
+   */
+  function openManagerHere() {
+    return window.SessionWindows.openManager(lastState, CONFIG.windowHost);
+  }
+
+  /** Куда просить о подъёме окна этой строки. Пусто — спросим свой конфиг. */
+  function focusBase(row) {
+    return window.SessionWindows.mqttBaseFor(row, lastState);
+  }
+
+  /** Куда просить об открытии сессии. Пусто — спросим свой конфиг. */
+  function managerBase() {
+    return (openManagerHere() || {}).mqttBase || '';
+  }
+
+  /**
    * Ответ агрегатора приехал.
    *
    * Опрос идёт в Rust: у скрытого окна webview тормозит таймеры, а WebView2 у
@@ -970,13 +988,19 @@
    * оранжевый, и откатывать его обратно значило бы отвечать на неудачу тем же,
    * чем на успех. Пикер при этом не гаснет — список перерисовывается раз в
    * секунду, и перекраску видно на глазах.
+   *
+   * Адрес берётся у машины окна, а не у своего конфига: отметку ставит тот
+   * трекер, который видел взгляд, а он может стоять на соседней машине.
+   * Строка без окна адреса не назовёт — тогда просьба уходит по своей базе,
+   * как раньше: слот в windows11-manager переживает закрытие окна, и такую
+   * сессию он всё ещё может знать по id.
    */
   function markUnread(row) {
     // Перерисовка — из последнего ответа, без похода на удалённый хост:
     // изменились отметки, а не сессии.
     markSeen(row.id, row.lastActivity - 1).then(regroup);
     if (!CONFIG.mqtt.configured) return;
-    invoke('unread_session_mqtt', { id: row.id })
+    invoke('unread_session_mqtt', { id: row.id, base: focusBase(row) })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -1002,7 +1026,7 @@
   async function focusSession(row) {
     await invoke('hide_picker');
     try {
-      await invoke('focus_window_mqtt', { id: row.id });
+      await invoke('focus_window_mqtt', { id: row.id, base: focusBase(row) });
     } catch (e) {
       error = String(e);
       render();
@@ -1025,7 +1049,10 @@
   async function restoreSnapshot(snapshotId, sessionIds) {
     await invoke('hide_picker');
     try {
-      await invoke('restore_snapshot_mqtt', { id: snapshotId, sessionIds });
+      await invoke('restore_snapshot_mqtt', {
+        id: snapshotId, sessionIds,
+        base: (window.SessionWindows.trackerHere(lastState, CONFIG.windowHost) || {}).mqttBase || '',
+      });
     } catch (e) {
       error = String(e);
       render();
@@ -1054,7 +1081,7 @@
     // взялись подъём окна мимо права на передний план и Enter, не сделавший
     // ничего у незнакомой трекеру сессии.
     const action = window.OpenTransport.chooseEnterAction(
-      row, strategy, lastState, CONFIG.windowHost, CONFIG.mqtt.configured,
+      row, strategy, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
     );
     // Окно уже открыто, и поднять его умеет только эта дорога: она гасит пикер
     // до публикации и выдаёт трекеру право на передний план.
@@ -1112,7 +1139,7 @@
     await invoke('hide_picker');
     try {
       await invoke('open_session_mqtt', {
-        id: row.id, cwd: window.OpenTransport.rowProjectDir(row),
+        id: row.id, cwd: window.OpenTransport.rowProjectDir(row), base: managerBase(),
       });
     } catch (e) {
       error = String(e);
@@ -1230,10 +1257,10 @@
 
   /**
    * Действия для строки: availableActions плюс пункт, который availableActions
-   * дать не может — «открыть на трекере» зависит от lastState.windowHost, а
-   * не от самой строки, и availableActions его не видит. Общая функция для
-   * openMenu и runAction: список меню и то, что runAction готов выполнить,
-   * должны быть одним и тем же списком, а не двумя похожими.
+   * дать не может — «открыть на трекере» зависит от машины-менеджера
+   * (openManagerHere()), а не от самой строки, и availableActions её не видит.
+   * Общая функция для openMenu и runAction: список меню и то, что runAction
+   * готов выполнить, должны быть одним и тем же списком, а не двумя похожими.
    *
    * Применимость пункта решает canOpenRemote (open-transport.js) — не здесь:
    * она проверена тестами на каждый вид строки и все четыре состояния
@@ -1242,10 +1269,10 @@
    */
   function actionsFor(row) {
     const actions = window.SessionActions.availableActions(row, CONFIG);
-    if (window.OpenTransport.canOpenRemote(row, lastState, CONFIG.windowHost, CONFIG.mqtt.configured)) {
+    if (window.OpenTransport.canOpenRemote(row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured)) {
       actions.push({
         id: 'open-remote',
-        label: `Open on ${lastState.windowHost}`,
+        label: `Open on ${(openManagerHere() || {}).host}`,
       });
     }
     return actions;
@@ -1359,12 +1386,12 @@
   async function openProjectRow(row) {
     const dir = window.OpenTransport.rowProjectDir(row);
     const action = window.OpenTransport.chooseProjectOpenAction(
-      row, lastState, CONFIG.windowHost, CONFIG.mqtt.configured,
+      row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
     );
     if (action !== 'manager') return newSession(row.cwd);
     await invoke('hide_picker');
     try {
-      await invoke('open_project_mqtt', { cwd: dir });
+      await invoke('open_project_mqtt', { cwd: dir, base: managerBase() });
     } catch (e) {
       error = String(e);
       render();
@@ -1401,7 +1428,7 @@
   async function newSessionHere(row) {
     const dir = window.OpenTransport.rowProjectDir(row);
     const action = window.OpenTransport.chooseProjectOpenAction(
-      row, lastState, CONFIG.windowHost, CONFIG.mqtt.configured,
+      row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
     );
     if (action !== 'manager') return newSession(row.cwd);
     const taken = takenSessionNames();
@@ -1416,7 +1443,7 @@
     issuedNames.set(name, Date.now());
     await invoke('hide_picker');
     try {
-      await invoke('new_session_mqtt', { cwd: dir, name });
+      await invoke('new_session_mqtt', { cwd: dir, name, base: managerBase() });
     } catch (e) {
       // Отказ — имя не занято: сессия не поднялась, и следующая попытка
       // вправе получить то же самое.

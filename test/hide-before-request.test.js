@@ -47,6 +47,11 @@ function callsOf(name, extra = {}) {
     takenSessionNames: () => [],
     newSession: () => { calls.push('newSession'); return Promise.resolve(); },
     markSeen: () => { calls.push('markSeen'); return Promise.resolve(); },
+    // Адрес машины — не предмет этого сторожа, он про порядок вызовов; тут
+    // достаточно заглушки с тем же именем, что и у настоящих помощников.
+    openManagerHere: () => ({ host: 'pc-win', mqttBase: 'windows/pc-win' }),
+    focusBase: () => 'windows/pc-win',
+    managerBase: () => 'windows/pc-win',
     render: () => {},
     error: '',
     row: ROW,
