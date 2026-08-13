@@ -265,3 +265,29 @@ test('путь с точкой с запятой отказывает и по и
   assert.strictEqual(newSessionCommand('/home/user/a;b', ['a;b']), '');
   assert.strictEqual(newSessionName('/home/user/a;b', []), '');
 });
+
+test('строка внутри zellij открывается присоединением, а не вторым процессом', () => {
+  const row = { id: 'a', live: true, pid: 42, zellij: 'obsidian-agent-base' };
+  assert.strictEqual(chooseOpenStrategy(row, { reptyr: true }, {}), 'attach');
+  const cmd = buildOpenCommand(row, 'attach', { sshHost: 'user@example-host', terminal: { file: 'wt', args: [] } });
+  assert.ok(cmd.argv.includes("zellij attach 'obsidian-agent-base'"), cmd.argv);
+  assert.strictEqual(cmd.destructive, false);
+});
+
+test('при обоих мультиплексорах выигрывает tmux', () => {
+  // Порядок веток — по убыванию сохранности, и между двумя одинаково
+  // сохранными решает то, что было раньше: менять привычное поведение
+  // tmux-строк эта правка не должна.
+  const row = { id: 'a', live: true, tmux: 'main:0.1', zellij: 'home' };
+  const cmd = buildOpenCommand(row, 'attach', { sshHost: 'user@example-host', terminal: { file: 'wt', args: [] } });
+  assert.ok(cmd.argv.includes("tmux attach -t 'main:0.1'"), cmd.argv);
+});
+
+test('строка зелийной сессии присоединяется своим же именем', () => {
+  // У строки kind: 'zellij' нет ни pid, ни живой сессии — только имя, и его
+  // хватает: поле одно и то же, ветка одна и та же.
+  const row = { id: 'zellij:home', kind: 'zellij', zellij: 'home' };
+  assert.strictEqual(chooseOpenStrategy(row, {}, {}), 'attach');
+  const cmd = buildOpenCommand(row, 'attach', { sshHost: 'user@example-host', terminal: { file: 'wt', args: [] } });
+  assert.ok(cmd.argv.includes("zellij attach 'home'"), cmd.argv);
+});
