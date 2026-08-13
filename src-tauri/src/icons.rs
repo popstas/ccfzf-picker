@@ -84,10 +84,12 @@ pub fn resolve_name(
     // Path::join режет по `/`: на Linux, где тесты и гоняют, обратный слэш —
     // обычный символ, и склейка через него разошлась бы с ожиданием. Каталоги
     // здесь всегда виндовые (PATH с целевой машины), поэтому слэш свой.
+    // Хвостовой разделитель у элемента PATH срезаем сами: Windows его туда
+    // пускает, а склейка форматом дала бы двойной `\\`.
     path_var
         .split(';')
         .filter(|dir| !dir.is_empty())
-        .map(|dir| PathBuf::from(format!("{dir}\\{file}")))
+        .map(|dir| PathBuf::from(format!("{}\\{file}", dir.trim_end_matches(['\\', '/']))))
         .find(|candidate| exists(candidate))
 }
 
@@ -179,5 +181,18 @@ mod tests {
             Some(r"X:\two\cursor.exe".to_string()),
         );
         assert_eq!(resolve_name("nope", path_var, &exists), None);
+    }
+
+    /// Элемент `PATH` с хвостовым `\` — законная запись на Windows; без
+    /// среза склейка дала бы двойной разделитель, и `exists` не нашёл бы
+    /// файл, хотя он там есть.
+    #[test]
+    fn trailing_separator_in_a_path_entry_does_not_matter() {
+        let path_var = r"X:\one\;X:\two";
+        let exists = |p: &std::path::Path| p.to_string_lossy() == r"X:\one\cursor.exe";
+        assert_eq!(
+            resolve_name("cursor", path_var, &exists).map(|p| p.to_string_lossy().to_string()),
+            Some(r"X:\one\cursor.exe".to_string()),
+        );
     }
 }
