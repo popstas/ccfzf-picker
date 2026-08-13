@@ -1699,6 +1699,22 @@
     if (!rows.length && !error) message.textContent = 'Loading…';
   }
 
+  /**
+   * Иконки приложений для меню.
+   *
+   * Отказ не событие: пустая карта значит «у всех пунктов глифы», и это
+   * рабочее состояние — на маке оно единственное.
+   */
+  async function loadActionIcons() {
+    try {
+      actionIcons = await invoke('action_icons', {
+        specs: window.ActionIcons.iconSpecs(CONFIG),
+      }) || {};
+    } catch (e) {
+      actionIcons = {};
+    }
+  }
+
   async function start() {
     if (!window.__TAURI__) { message.textContent = 'No backend detected.'; return; }
     const { listen } = window.__TAURI__.event;
@@ -1720,6 +1736,9 @@
     } catch (e) {
       error = String(e);
     }
+    // Меню Ctrl+K обязано открыться уже с картинками, а не дорисовывать их на
+    // глазах у первого же нажатия.
+    await loadActionIcons();
 
     // Вид списка — до первой отрисовки: иначе первый показ рисуется чужой
     // сортировкой и перекладывается на глазах.
@@ -1809,6 +1828,9 @@
       } catch (e) {
         error = String(e);
       }
+      // Настроенные действия могли смениться вместе с конфигом: иконки от
+      // прежних приложений остались бы висеть у новых пунктов.
+      await loadActionIcons();
       regroup();
     });
 
