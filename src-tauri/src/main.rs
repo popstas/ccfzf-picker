@@ -178,28 +178,38 @@ fn poll_now(poller: tauri::State<poller::Poller>) -> serde_json::Value {
     poller.snapshot()
 }
 
-/// Выдать процессу трекера право занять передний план.
+/// Отдать право занять передний план тому, кто выполнит просьбу.
 ///
 /// Windows позволяет вызвать `SetForegroundWindow` только процессу, который
-/// передним планом уже владеет либо получил последнее событие ввода. Демон
-/// трекера — не тот и не другой: к моменту просьбы он просто слушает брокера.
-/// Право ему передаёт пикер, и именно сейчас: нажатие, из-за которого мы здесь,
-/// было последним событием ввода, и оно наше. Без этого `bringToTop()` на той
-/// стороне отчитается об успехе, а на экране мигнёт кнопка на таскбаре.
+/// передним планом уже владеет либо получил последнее событие ввода. Ни один из
+/// тех, кто исполняет наши просьбы, не таков: к этому моменту они просто слушают
+/// брокера. Право передаёт пикер, и именно сейчас: нажатие, из-за которого мы
+/// здесь, было последним событием ввода, и оно наше.
 ///
-/// `pid` приезжает полем `windowPid` в ответе агрегатора: трекер кладёт свой pid
-/// в файл, который тот читает. Отказ не фатален и значит ровно то же, что и
-/// отсутствие грамоты, — окно не поднимется.
+/// Право уходит всем (`ASFW_ANY`), а не названному pid, и это исправление, а не
+/// послабление. Названный pid у нас был один — `windowPid` из ответа
+/// агрегатора, — но кладёт его в файл трекера демон `claude-wt watch`, а окна
+/// поднимает и терминал запускает служба MQTT: с переезда claude-wt из
+/// windows-mqtt в windows11-manager это два разных дочерних процесса трея, и
+/// грамота по pid всё это время уходила не тому. Третьего же — только что
+/// запущенный `wt.exe` — по pid не назвать вовсе: в момент выдачи его не
+/// существует, а свернувшееся окно нового терминала было именно его отказом.
+/// Правка действует до следующего ввода человека, то есть секунды.
+///
+/// Отказ не фатален и значит ровно то же, что и отсутствие грамоты, — окно не
+/// поднимется само. Уже открытое окно менеджер поднимает и без неё:
+/// `bringToTop()` в node-window-manager подцепляет свой ввод к потоку переднего
+/// окна (`AttachThreadInput`), а такой подъём Windows не запрещает.
 #[cfg(target_os = "windows")]
-fn allow_tracker_foreground(pid: u32) {
-    use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
-    if let Err(e) = unsafe { AllowSetForegroundWindow(pid) } {
-        eprintln!("ccfzf-picker: cannot grant foreground to pid {pid}: {e}");
+fn allow_any_foreground() {
+    use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+    if let Err(e) = unsafe { AllowSetForegroundWindow(ASFW_ANY) } {
+        eprintln!("ccfzf-picker: cannot grant foreground: {e}");
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn allow_tracker_foreground(_pid: u32) {}
+fn allow_any_foreground() {}
 
 /// Брокер из конфига или внятный отказ.
 ///
@@ -224,10 +234,10 @@ fn configured_broker() -> Result<mqtt::Broker, String> {
 /// на той стороне, — но цена оказалась мала: отказ («сессия неизвестна», «окна
 /// нет») человек и так увидел бы уже после того, как пикер погас.
 #[tauri::command]
-async fn focus_window_mqtt(id: String, pid: u32) -> Result<(), String> {
-    // До публикации, а не после: право должно быть у трекера к моменту, когда
-    // он дойдёт до подъёма окна.
-    allow_tracker_foreground(pid);
+async fn focus_window_mqtt(id: String) -> Result<(), String> {
+    // До публикации, а не после: право должно быть на той стороне к моменту,
+    // когда там дойдут до подъёма окна.
+    allow_any_foreground();
     let broker = configured_broker()?;
     tauri::async_runtime::spawn_blocking(move || mqtt::focus(&broker, &id))
         .await
@@ -275,11 +285,12 @@ async fn restore_snapshot_mqtt(id: String, session_ids: Vec<String>) -> Result<(
 /// cross-origin ещё до отправки. Ответа у просьбы нет по той же причине, что и
 /// у фокуса: приёмник отчитывается в свой лог, а не нам.
 ///
-/// Права на передний план, в отличие от `focus_window_mqtt`, не выдаётся — его
-/// и некому выдать: pid эта команда не принимает. Поэтому подъём уже открытого
-/// окна ей не поручают: без `AllowSetForegroundWindow` трекер отчитается об
-/// успехе, а на экране мигнёт кнопка на таскбаре. Разводит эти два случая
-/// `chooseEnterAction` во фронтенде.
+/// Право на передний план выдаётся и здесь: просьба кончается либо подъёмом
+/// окна, либо новым терминалом, и оба на той стороне упираются в одно и то же
+/// разрешение Windows. Раньше его тут не выдавали, потому что выдавали по pid, а
+/// pid эта команда не принимает; `allow_any_foreground` никакого pid и не ждёт.
+/// Разводит подъём и открытие `chooseEnterAction` во фронтенде — по причинам,
+/// которые с грамотой не связаны вовсе.
 ///
 /// `cwd` — каталог проекта строки, и он необязателен только по форме: без него
 /// менеджер умеет открыть лишь сессию, которую сам же и помнит слотом, а
@@ -289,6 +300,7 @@ async fn restore_snapshot_mqtt(id: String, session_ids: Vec<String>) -> Result<(
 /// бы ошибкой разбора, и Enter отчитался бы человеку про аргументы команды.
 #[tauri::command]
 async fn open_session_mqtt(id: String, cwd: Option<String>) -> Result<(), String> {
+    allow_any_foreground();
     let broker = configured_broker()?;
     let cwd = cwd.unwrap_or_default().trim().to_string();
     tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &id, &cwd))
@@ -303,8 +315,12 @@ async fn open_session_mqtt(id: String, cwd: Option<String>) -> Result<(), String
 /// сессию с его профилем — решает `openClaudeProject` на той стороне. Ту же
 /// просьбу шлёт проектный хоткей из `project_hotkeys.rs`; здесь она нужна
 /// затем, что у страницы своего входа к ней не было.
+///
+/// Грамота — как у хоткея, и по той же причине: оба исхода просьбы кончаются
+/// окном, которому нужен передний план.
 #[tauri::command]
 async fn open_project_mqtt(cwd: String) -> Result<(), String> {
+    allow_any_foreground();
     let broker = configured_broker()?;
     tauri::async_runtime::spawn_blocking(move || mqtt::open_project(&broker, &cwd))
         .await
@@ -319,6 +335,7 @@ async fn open_project_mqtt(cwd: String) -> Result<(), String> {
 /// занятых имён не ведёт.
 #[tauri::command]
 async fn new_session_mqtt(cwd: String, name: String) -> Result<(), String> {
+    allow_any_foreground();
     let broker = configured_broker()?;
     tauri::async_runtime::spawn_blocking(move || mqtt::open_new(&broker, &cwd, &name))
         .await

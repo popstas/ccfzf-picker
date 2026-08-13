@@ -382,22 +382,6 @@ fn take_press(reg: &Registered, cwd: &str, now: Instant) -> bool {
     true
 }
 
-/// pid демона трекера из последнего ответа поллера; ноль — «грамоту выдавать
-/// некому».
-///
-/// Форма та же, что у `focusPid` во фронтенде: конечное положительное число,
-/// всё прочее — ноль. Читается из тела `Poller::snapshot()`, а оно
-/// `{state, error}`: сам ответ агрегатора лежит под `state`, и там же
-/// `windowPid`, который трекер кладёт в файл окон.
-pub fn tracker_pid_from(snapshot: &serde_json::Value) -> u32 {
-    snapshot
-        .get("state")
-        .and_then(|s| s.get("windowPid"))
-        .and_then(|v| v.as_u64())
-        .filter(|pid| *pid > 0 && *pid <= u32::MAX as u64)
-        .unwrap_or(0) as u32
-}
-
 /// Нажали проектный хоткей.
 ///
 /// Развилку «поднять окно или завести сессию» принимает не пикер, а менеджер:
@@ -448,18 +432,11 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
         return;
     }
 
-    // Неизвестный pid отменяет грамоту, но не просьбу — и это сознательно иначе,
-    // чем в `canFocus` на странице, где нулевой pid запрещает подъём целиком.
-    // Там цена ошибки — открыть терминал у себя; здесь — молча завести второй
-    // терминал на проект, у которого окно уже есть. Окно, поднятое без грамоты,
-    // в худшем случае мигнёт кнопкой на таскбаре, и это дешевле.
-    let pid = app
-        .try_state::<crate::poller::Poller>()
-        .map(|poller| tracker_pid_from(&poller.snapshot()))
-        .unwrap_or(0);
-    if pid > 0 {
-        crate::allow_tracker_foreground(pid);
-    }
+    // Грамота уходит до публикации: нажатие хоткея — последнее событие ввода, и
+    // оно наше, а через секунду право отдавать будет уже нечем. Кому именно —
+    // не выбираем: исполнителей у просьбы трое (демон, служба MQTT, новый
+    // `wt.exe`), см. `allow_any_foreground`.
+    crate::allow_any_foreground();
 
     // Публикация ждёт подтверждения брокера до пяти секунд — держать на этом
     // поток, из которого плагин зовёт обработчик, нельзя. Ответа у просьбы нет
@@ -1084,31 +1061,4 @@ mod tests {
         assert!(!take_press(&reg, "/p/one", now));
     }
 
-    /// pid трекера лежит внутри `state`, а не рядом с ним: тело
-    /// `Poller::snapshot()` — это `{state, error}`.
-    #[test]
-    fn the_tracker_pid_comes_from_inside_the_answer() {
-        let snapshot = serde_json::json!({"state": {"windowPid": 4242}, "error": ""});
-        assert_eq!(tracker_pid_from(&snapshot), 4242);
-    }
-
-    /// Ответа ещё нет, pid не число, pid ноль — грамоту выдавать некому.
-    ///
-    /// Ноль здесь не мелочь: `AllowSetForegroundWindow(0)` — это не «никому», а
-    /// отдельное значение, и отдавать его системе по недосмотру не стоит.
-    #[test]
-    fn no_answer_means_no_grant() {
-        assert_eq!(
-            tracker_pid_from(&serde_json::json!({"state": null, "error": "ssh failed"})),
-            0
-        );
-        assert_eq!(
-            tracker_pid_from(&serde_json::json!({"state": {"windowPid": "4242"}})),
-            0
-        );
-        assert_eq!(
-            tracker_pid_from(&serde_json::json!({"state": {"windowPid": 0}})),
-            0
-        );
-    }
 }
