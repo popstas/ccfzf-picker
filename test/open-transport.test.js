@@ -1,43 +1,44 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const OpenTransport = require('../frontend-src/open-transport');
 const {
   chooseOpenTransport, canOpenRemote, chooseEnterAction, rowProjectDir,
   chooseProjectOpenAction,
-} = require('../frontend-src/open-transport');
+} = OpenTransport;
 
 test('свой хост, брокер настроен — открываем через менеджер', () => {
-  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'pc-win', true), 'manager');
+  assert.equal(chooseOpenTransport({ host: 'PC-WIN' }, 'pc-win', true), 'manager');
 });
 
 test('свой хост, брокер НЕ настроен — открываем локально', () => {
   // Без брокера просьбе некуда уйти: 'manager' здесь означает публикацию в
   // MQTT, и на машине без mqtt: в конфиге Enter обязан остаться прежним —
   // wt.exe, а не ошибка «mqtt не настроен» там, где раньше всё работало.
-  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'pc-win', false), 'local');
-  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'pc-win', undefined), 'local');
+  assert.equal(chooseOpenTransport({ host: 'PC-WIN' }, 'pc-win', false), 'local');
+  assert.equal(chooseOpenTransport({ host: 'PC-WIN' }, 'pc-win', undefined), 'local');
 });
 
 test('регистр и пробелы не мешают', () => {
-  assert.equal(chooseOpenTransport({ windowHost: ' pc-win ' }, 'PC-Win', true), 'manager');
+  assert.equal(chooseOpenTransport({ host: ' pc-win ' }, 'PC-Win', true), 'manager');
 });
 
 test('чужой хост — открываем локально независимо от брокера', () => {
-  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'macbook', true), 'local');
-  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, 'macbook', false), 'local');
+  assert.equal(chooseOpenTransport({ host: 'PC-WIN' }, 'macbook', true), 'local');
+  assert.equal(chooseOpenTransport({ host: 'PC-WIN' }, 'macbook', false), 'local');
 });
 
 test('пустой windowHost в конфиге — локально', () => {
-  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, '', true), 'local');
-  assert.equal(chooseOpenTransport({ windowHost: 'PC-WIN' }, undefined, true), 'local');
+  assert.equal(chooseOpenTransport({ host: 'PC-WIN' }, '', true), 'local');
+  assert.equal(chooseOpenTransport({ host: 'PC-WIN' }, undefined, true), 'local');
 });
 
 test('нет ответа агрегатора — локально', () => {
   assert.equal(chooseOpenTransport(null, 'pc-win', true), 'local');
-  assert.equal(chooseOpenTransport({}, 'pc-win', true), 'local');
+  assert.equal(chooseOpenTransport(null, 'pc-win', true), 'local');
 });
 
 test('pid трекера на выбор не влияет', () => {
-  assert.equal(chooseOpenTransport({ windowHost: 'pc-win', windowPid: 0 }, 'pc-win', true), 'manager');
+  assert.equal(chooseOpenTransport({ host: 'pc-win', pid: 0 }, 'pc-win', true), 'manager');
 });
 
 // canOpenRemote: применимость пункта «Open on <host>» — на каждый вид
@@ -46,8 +47,8 @@ test('pid трекера на выбор не влияет', () => {
 // Без этой сетки инлайновая проверка в sessions.html однажды пропустила
 // заголовок снимка — тот же id, что и у сессии, по форме, но не по смыслу.
 
-const OTHER_HOST_STATE = { windowHost: 'DESKTOP-BOX' };
-const THIS_HOST_STATE = { windowHost: 'pc-win' };
+const OTHER_HOST_MANAGER = { host: 'DESKTOP-BOX' };
+const THIS_HOST_MANAGER = { host: 'pc-win' };
 const CONFIG_HOST = 'pc-win';
 // Единственные виды строк, у которых id — это id настоящей сессии.
 const SESSION_ROW_KINDS = ['interactive', 'snapshot-session'];
@@ -58,7 +59,7 @@ const NON_SESSION_ROW_KINDS = ['project', 'snapshot', 'zellij'];
 test('обычная сессия и сессия из снимка — трекер на чужой машине, брокер настроен — да', () => {
   for (const kind of SESSION_ROW_KINDS) {
     assert.equal(
-      canOpenRemote({ kind, id: 's1' }, OTHER_HOST_STATE, CONFIG_HOST, true),
+      canOpenRemote({ kind, id: 's1' }, OTHER_HOST_MANAGER, CONFIG_HOST, true),
       true,
       kind,
     );
@@ -71,7 +72,7 @@ test('обычная сессия и сессия из снимка — трек
 test('брокер НЕ настроен — нет, даже на чужой машине с настоящей сессией', () => {
   for (const kind of SESSION_ROW_KINDS) {
     assert.equal(
-      canOpenRemote({ kind, id: 's1' }, OTHER_HOST_STATE, CONFIG_HOST, false),
+      canOpenRemote({ kind, id: 's1' }, OTHER_HOST_MANAGER, CONFIG_HOST, false),
       false,
       kind,
     );
@@ -83,7 +84,7 @@ test('заголовок снимка и строка проекта — тре�
   // у заголовка снимка `id` — id снимка, findSession на приёме его не найдёт.
   for (const kind of NON_SESSION_ROW_KINDS) {
     assert.equal(
-      canOpenRemote({ kind, id: 'snap-or-path' }, OTHER_HOST_STATE, CONFIG_HOST, true),
+      canOpenRemote({ kind, id: 'snap-or-path' }, OTHER_HOST_MANAGER, CONFIG_HOST, true),
       false,
       kind,
     );
@@ -94,30 +95,29 @@ test('незнакомый вид строки (или вовсе без kind) �
   // Позитивный список: новый вид строки, про который эта функция не знает,
   // остаётся без пункта меню сам по себе, а не только пока кто-то помнит его
   // сюда дописать.
-  assert.equal(canOpenRemote({ kind: 'something-new', id: 's1' }, OTHER_HOST_STATE, CONFIG_HOST, true), false);
-  assert.equal(canOpenRemote({ id: 's1' }, OTHER_HOST_STATE, CONFIG_HOST, true), false);
+  assert.equal(canOpenRemote({ kind: 'something-new', id: 's1' }, OTHER_HOST_MANAGER, CONFIG_HOST, true), false);
+  assert.equal(canOpenRemote({ id: 's1' }, OTHER_HOST_MANAGER, CONFIG_HOST, true), false);
 });
 
 test('трекера нет вовсе — нет, ни для одного вида строки', () => {
   for (const kind of SESSION_ROW_KINDS) {
-    assert.equal(canOpenRemote({ kind, id: 's1' }, {}, CONFIG_HOST, true), false, kind);
     assert.equal(canOpenRemote({ kind, id: 's1' }, null, CONFIG_HOST, true), false, kind);
   }
 });
 
 test('трекер на этой же машине — нет, это делает Enter напрямую', () => {
   for (const kind of SESSION_ROW_KINDS) {
-    assert.equal(canOpenRemote({ kind, id: 's1' }, THIS_HOST_STATE, CONFIG_HOST, true), false, kind);
+    assert.equal(canOpenRemote({ kind, id: 's1' }, THIS_HOST_MANAGER, CONFIG_HOST, true), false, kind);
   }
 });
 
-test('lastState ещё {} (ответ агрегатора не пришёл) — нет', () => {
-  assert.equal(canOpenRemote({ kind: 'interactive', id: 's1' }, {}, CONFIG_HOST, true), false);
+test('менеджера ещё нет (ответ агрегатора не пришёл) — нет', () => {
+  assert.equal(canOpenRemote({ kind: 'interactive', id: 's1' }, null, CONFIG_HOST, true), false);
 });
 
 test('строки нет вовсе — нет', () => {
-  assert.equal(canOpenRemote(null, OTHER_HOST_STATE, CONFIG_HOST, true), false);
-  assert.equal(canOpenRemote(undefined, OTHER_HOST_STATE, CONFIG_HOST, true), false);
+  assert.equal(canOpenRemote(null, OTHER_HOST_MANAGER, CONFIG_HOST, true), false);
+  assert.equal(canOpenRemote(undefined, OTHER_HOST_MANAGER, CONFIG_HOST, true), false);
 });
 
 // chooseEnterAction: что делает Enter на строке сессии. Раньше эти условия
@@ -142,7 +142,7 @@ const WINDOWLESS_WITH_CWD = { kind: 'interactive', id: 's1', cwd: '/p/site' };
 // при мигнувшей кнопке на таскбаре.
 test('окно открыто и пикер умеет его поднять — фокус, а не менеджер', () => {
   assert.equal(
-    chooseEnterAction(WINDOWED, 'focus', THIS_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction(WINDOWED, 'focus', THIS_HOST_MANAGER, CONFIG_HOST, true),
     'focus',
   );
 });
@@ -151,7 +151,7 @@ test('окно открыто, но трекер на чужой машине �
   // На маке стратегия до 'focus' не доходит (canFocus ложен), и Enter обязан
   // открыть терминал сам, как и раньше.
   assert.equal(
-    chooseEnterAction(WINDOWED, 'resume', OTHER_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction(WINDOWED, 'resume', OTHER_HOST_MANAGER, CONFIG_HOST, true),
     'local',
   );
 });
@@ -164,11 +164,11 @@ test('окно открыто, но трекер на чужой машине �
 // впустую.
 test('ни окна, ни каталога — открываем локально, как до этой ветки', () => {
   assert.equal(
-    chooseEnterAction(WINDOWLESS, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction(WINDOWLESS, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
     'local',
   );
   assert.equal(
-    chooseEnterAction({ ...WINDOWLESS, window: null }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction({ ...WINDOWLESS, window: null }, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
     'local',
   );
 });
@@ -179,22 +179,22 @@ test('ни окна, ни каталога — открываем локальн
 // Собранная в пикере команда `wt.exe` профиль теряет.
 test('окна нет, но каталог проекта известен — просим менеджер', () => {
   assert.equal(
-    chooseEnterAction(WINDOWLESS_WITH_CWD, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction(WINDOWLESS_WITH_CWD, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
     'manager',
   );
 });
 
 test('пустой или пробельный каталог — то же, что его нет вовсе', () => {
   assert.equal(
-    chooseEnterAction({ ...WINDOWLESS, cwd: '' }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction({ ...WINDOWLESS, cwd: '' }, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
     'local',
   );
   assert.equal(
-    chooseEnterAction({ ...WINDOWLESS, cwd: '   ' }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction({ ...WINDOWLESS, cwd: '   ' }, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
     'local',
   );
   assert.equal(
-    chooseEnterAction({ ...WINDOWLESS, cwd: 42 }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction({ ...WINDOWLESS, cwd: 42 }, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
     'local',
   );
 });
@@ -203,11 +203,11 @@ test('каталог не отменяет ни чужого хоста, ни о
   // Обе проверки стоят раньше и остаются на месте: на маке менеджера не
   // существует, а без брокера просьбе некуда уйти.
   assert.equal(
-    chooseEnterAction(WINDOWLESS_WITH_CWD, 'resume', OTHER_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction(WINDOWLESS_WITH_CWD, 'resume', OTHER_HOST_MANAGER, CONFIG_HOST, true),
     'local',
   );
   assert.equal(
-    chooseEnterAction(WINDOWLESS_WITH_CWD, 'resume', THIS_HOST_STATE, CONFIG_HOST, false),
+    chooseEnterAction(WINDOWLESS_WITH_CWD, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, false),
     'local',
   );
 });
@@ -217,7 +217,7 @@ test('каталог не открывает ветку менеджера ст�
   // позитивный список видов строк должен стоять раньше каталога.
   for (const kind of NON_SESSION_ROW_KINDS) {
     assert.equal(
-      chooseEnterAction({ ...WINDOWLESS_WITH_CWD, kind }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+      chooseEnterAction({ ...WINDOWLESS_WITH_CWD, kind }, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
       'local',
       kind,
     );
@@ -239,14 +239,14 @@ test('трекер знает сессию, но поднять окно пик�
   // право на передний план выдать некому) — поднимать окно самим нечем, а
   // менеджер умеет и открыть терминал с профилем проекта.
   assert.equal(
-    chooseEnterAction(WINDOWED, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction(WINDOWED, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
     'manager',
   );
 });
 
 test('свой хост, но брокера нет — локально: просьбе некуда уйти', () => {
   assert.equal(
-    chooseEnterAction(WINDOWED, 'resume', THIS_HOST_STATE, CONFIG_HOST, false),
+    chooseEnterAction(WINDOWED, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, false),
     'local',
   );
 });
@@ -258,7 +258,7 @@ test('свой хост, но брокера нет — локально: про
 test('строка не сессии — локально, даже с полем window и на своём хосте', () => {
   for (const kind of NON_SESSION_ROW_KINDS) {
     assert.equal(
-      chooseEnterAction({ ...WINDOWED, kind }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+      chooseEnterAction({ ...WINDOWED, kind }, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
       'local',
       kind,
     );
@@ -267,31 +267,30 @@ test('строка не сессии — локально, даже с поле�
 
 test('незнакомый вид строки (или вовсе без kind) — локально', () => {
   assert.equal(
-    chooseEnterAction({ ...WINDOWED, kind: 'something-new' }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction({ ...WINDOWED, kind: 'something-new' }, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
     'local',
   );
   assert.equal(
-    chooseEnterAction({ id: 's1', window: {} }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction({ id: 's1', window: {} }, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
     'local',
   );
 });
 
 test('сессия из снимка с открытым окном — тот же вид строки, что и обычная', () => {
   assert.equal(
-    chooseEnterAction({ ...WINDOWED, kind: 'snapshot-session' }, 'resume', THIS_HOST_STATE, CONFIG_HOST, true),
+    chooseEnterAction({ ...WINDOWED, kind: 'snapshot-session' }, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
     'manager',
   );
 });
 
 test('строки нет вовсе — локально', () => {
-  assert.equal(chooseEnterAction(null, 'resume', THIS_HOST_STATE, CONFIG_HOST, true), 'local');
+  assert.equal(chooseEnterAction(null, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true), 'local');
   // 'focus' до строки не добирается: стратегию посчитали по ней же, и без
   // строки её не бывает.
-  assert.equal(chooseEnterAction(undefined, 'resume', THIS_HOST_STATE, CONFIG_HOST, true), 'local');
+  assert.equal(chooseEnterAction(undefined, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true), 'local');
 });
 
 test('трекера нет вовсе — локально', () => {
-  assert.equal(chooseEnterAction(WINDOWED, 'resume', {}, CONFIG_HOST, true), 'local');
   assert.equal(chooseEnterAction(WINDOWED, 'resume', null, CONFIG_HOST, true), 'local');
 });
 
@@ -299,32 +298,32 @@ test('строка проекта на машине трекера уходит 
   // Профиль Windows Terminal по каталогу знает только менеджер, и ради него
   // просьба и уезжает: собранная в пикере команда wt.exe профиль теряет.
   const row = { kind: 'project', id: '/p/site', cwd: '/p/site' };
-  assert.equal(chooseProjectOpenAction(row, { windowHost: 'PC-WIN' }, 'pc-win', true), 'manager');
+  assert.equal(chooseProjectOpenAction(row, { host: 'PC-WIN' }, 'pc-win', true), 'manager');
 });
 
 test('вид строки на выбор не влияет — важен только каталог', () => {
   // «New session» предлагается и рядом с живой сессией, и на сессии снимка.
   // Просьба у всех одна и та же — про каталог, — и id в ней нет вовсе,
   // поэтому позитивный список SESSION_ID_ROW_KINDS здесь не нужен.
-  const state = { windowHost: 'PC-WIN' };
+  const manager = { host: 'PC-WIN' };
   for (const kind of ['project', 'interactive', 'snapshot-session', 'что-то новое']) {
-    assert.equal(chooseProjectOpenAction({ kind, cwd: '/p/site' }, state, 'pc-win', true), 'manager');
+    assert.equal(chooseProjectOpenAction({ kind, cwd: '/p/site' }, manager, 'pc-win', true), 'manager');
   }
 });
 
 test('чужая машина и ненастроенный брокер — открываем сами', () => {
   const row = { kind: 'project', cwd: '/p/site' };
-  assert.equal(chooseProjectOpenAction(row, { windowHost: 'PC-WIN' }, 'macbook', true), 'local');
-  assert.equal(chooseProjectOpenAction(row, { windowHost: 'PC-WIN' }, 'pc-win', false), 'local');
+  assert.equal(chooseProjectOpenAction(row, { host: 'PC-WIN' }, 'macbook', true), 'local');
+  assert.equal(chooseProjectOpenAction(row, { host: 'PC-WIN' }, 'pc-win', false), 'local');
 });
 
 test('каталога нет — просить не о чем', () => {
   // Без каталога просьба умерла бы в журнале менеджера молча: ответа у
   // публикации нет. Прежняя местная дорога хотя бы скажет человеку об отказе.
-  const state = { windowHost: 'PC-WIN' };
-  assert.equal(chooseProjectOpenAction({ kind: 'project', cwd: '  ' }, state, 'pc-win', true), 'local');
-  assert.equal(chooseProjectOpenAction({ kind: 'project' }, state, 'pc-win', true), 'local');
-  assert.equal(chooseProjectOpenAction(null, state, 'pc-win', true), 'local');
+  const manager = { host: 'PC-WIN' };
+  assert.equal(chooseProjectOpenAction({ kind: 'project', cwd: '  ' }, manager, 'pc-win', true), 'local');
+  assert.equal(chooseProjectOpenAction({ kind: 'project' }, manager, 'pc-win', true), 'local');
+  assert.equal(chooseProjectOpenAction(null, manager, 'pc-win', true), 'local');
 });
 
 test('строка зелийной сессии не уезжает к менеджеру со своим id', () => {
@@ -333,7 +332,47 @@ test('строка зелийной сессии не уезжает к мене
   // это на позитивном списке SESSION_ID_ROW_KINDS: «починить» его на
   // негативный значило бы отправлять туда каждый новый вид строки.
   const row = { id: 'zellij:home', kind: 'zellij', zellij: 'home' };
-  const state = { windowHost: 'pc-win' };
-  assert.equal(chooseEnterAction(row, 'attach', state, 'pc-win', true), 'local');
-  assert.equal(canOpenRemote(row, state, 'другой-хост', true), false);
+  const manager = { host: 'pc-win' };
+  assert.equal(chooseEnterAction(row, 'attach', manager, 'pc-win', true), 'local');
+  assert.equal(canOpenRemote(row, manager, 'другой-хост', true), false);
+});
+
+// Задача 10: транспорт спрашивает про менеджера (openManager), а не про
+// верхнее поле ответа — разбор списка трекеров остался в session-windows.js.
+
+test('менеджер на нашей машине — просьба уходит ему', () => {
+  assert.equal(
+    OpenTransport.chooseOpenTransport({ host: 'windows-box' }, 'windows-box', true),
+    'manager',
+  );
+});
+
+test('менеджера нет вовсе — открываем сами', () => {
+  // На маке менеджера не существует, и просьба уехала бы открывать окно на
+  // чужой машине.
+  assert.equal(OpenTransport.chooseOpenTransport(null, 'mac-host', true), 'local');
+});
+
+test('менеджер на соседней машине — открываем сами', () => {
+  assert.equal(
+    OpenTransport.chooseOpenTransport({ host: 'windows-box' }, 'mac-host', true),
+    'local',
+  );
+});
+
+test('без брокера остаётся местная дорога', () => {
+  // Иначе Enter вёл бы в ошибку там, где раньше открывал терминал, — на
+  // машине, которой MQTT никогда не был нужен.
+  assert.equal(
+    OpenTransport.chooseOpenTransport({ host: 'windows-box' }, 'windows-box', false),
+    'local',
+  );
+});
+
+test('пункт «Open on <host>» предлагается только при чужом менеджере', () => {
+  const row = { kind: 'interactive', id: 'abc' };
+  assert.equal(OpenTransport.canOpenRemote(row, { host: 'windows-box' }, 'mac-host', true), true);
+  assert.equal(OpenTransport.canOpenRemote(row, { host: 'windows-box' }, 'windows-box', true), false);
+  assert.equal(OpenTransport.canOpenRemote(row, null, 'mac-host', true), false);
+  assert.equal(OpenTransport.canOpenRemote(row, { host: 'windows-box' }, 'mac-host', false), false);
 });

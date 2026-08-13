@@ -31,9 +31,15 @@
    * мало, чтобы вести туда Enter: строка должна нести настоящий id сессии, и
    * трекер должен эту сессию знать. Обе проверки — в `chooseEnterAction`, и
    * звать на развилке Enter надо её, а не эту.
+   *
+   * Спрашивает не состояние, а готовый ответ `openManager` из
+   * `session-windows.js`: разбор списка трекеров живёт там и только там.
+   * Заведись он и здесь — два разбора разошлись бы на первой же правке.
+   * Раньше здесь стояло верхнее поле `windowHost`, но с несколькими трекерами
+   * оно называет машину с проектными хоткеями, а не машину с менеджером.
    */
-  function chooseOpenTransport(state, configHost, mqttConfigured) {
-    const host = normHost((state || {}).windowHost);
+  function chooseOpenTransport(manager, configHost, mqttConfigured) {
+    const host = normHost((manager || {}).host);
     const mine = normHost(configHost);
     return host && host === mine && mqttConfigured ? 'manager' : 'local';
   }
@@ -76,11 +82,11 @@
    * хосте (трекера нет вовсе), и пункт в этом случае предлагать тоже нечего —
    * открывать «у себя», когда себя не существует.
    */
-  function canOpenRemote(row, state, configHost, mqttConfigured) {
+  function canOpenRemote(row, manager, configHost, mqttConfigured) {
     if (!row || !SESSION_ID_ROW_KINDS.has(row.kind)) return false;
-    if (!(state || {}).windowHost) return false;
+    if (!manager || !manager.host) return false;
     if (!mqttConfigured) return false;
-    return chooseOpenTransport(state, configHost, mqttConfigured) === 'local';
+    return chooseOpenTransport(manager, configHost, mqttConfigured) === 'local';
   }
 
   /**
@@ -151,11 +157,11 @@
    *
    * И только потом — сам транспорт.
    */
-  function chooseEnterAction(row, strategy, state, configHost, mqttConfigured) {
+  function chooseEnterAction(row, strategy, manager, configHost, mqttConfigured) {
     if (strategy === 'focus') return 'focus';
     if (!row || !SESSION_ID_ROW_KINDS.has(row.kind)) return 'local';
     if (!trackerKnowsSession(row) && !rowProjectDir(row)) return 'local';
-    return chooseOpenTransport(state, configHost, mqttConfigured);
+    return chooseOpenTransport(manager, configHost, mqttConfigured);
   }
 
   /**
@@ -174,9 +180,9 @@
    * что взяться, он записал бы отказ в свой журнал, а пикер об этом не узнал
    * бы — ответа у публикации нет.
    */
-  function chooseProjectOpenAction(row, state, configHost, mqttConfigured) {
+  function chooseProjectOpenAction(row, manager, configHost, mqttConfigured) {
     if (!rowProjectDir(row)) return 'local';
-    return chooseOpenTransport(state, configHost, mqttConfigured);
+    return chooseOpenTransport(manager, configHost, mqttConfigured);
   }
 
   return {
