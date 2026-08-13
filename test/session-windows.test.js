@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { canFocusRow, trackerHere, trackerHosts, focusPid } =
-  require('../frontend-src/session-windows');
+const SessionWindows = require('../frontend-src/session-windows');
+const { canFocusRow, trackerHere, trackerHosts, focusPid } = SessionWindows;
 
 // Ответ нового агрегатора: две машины, у каждой свой трекер.
 const STATE = {
@@ -96,4 +96,63 @@ test('focusPid отдаёт ноль всему, что не положител�
   for (const src of [{ pid: 0 }, { pid: -1 }, { pid: '4242' }, {}, null]) {
     assert.strictEqual(focusPid(src), 0, JSON.stringify(src));
   }
+});
+
+test('адрес подъёма берётся у машины окна, а не у верхнего поля', () => {
+  // Трекеров несколько, и адрес у каждого свой. Верхнее поле называет одну
+  // машину — по нему просьба уехала бы поднимать окно на чужом экране.
+  const state = {
+    windowHost: 'windows-box',
+    windowHosts: [{ host: 'windows-box', mqttBase: 'home/room/pc/windows' },
+                  { host: 'mac-host', mqttBase: 'home/room/mac/windows' }],
+  };
+  const row = { window: { host: 'mac-host', pid: 7, canFocus: true, mqttBase: 'home/room/mac/windows' } };
+  assert.equal(SessionWindows.mqttBaseFor(row, state), 'home/room/mac/windows');
+});
+
+test('строка без окна адреса не называет', () => {
+  assert.equal(SessionWindows.mqttBaseFor({}, {}), '');
+});
+
+test('старый агрегатор адреса не даёт, и это пустая строка, а не поломка', () => {
+  // Пустая строка значит «спроси свой конфиг» — так пикер вёл себя до
+  // появления поля, и так он обязан вести себя со старым агрегатором.
+  const state = { windowHost: 'windows-box', windowPid: 42 };
+  assert.equal(SessionWindows.mqttBaseFor({ window: { title: 'ccfzf' } }, state), '');
+});
+
+test('менеджером берётся свой трекер, если он умеет открывать сессии', () => {
+  const state = {
+    windowHosts: [{ host: 'mac-host', pid: 7, openSession: false, mqttBase: 'home/room/mac/windows' },
+                  { host: 'windows-box', pid: 42, mqttBase: 'home/room/pc/windows' }],
+  };
+  assert.equal(SessionWindows.openManager(state, 'windows-box').host, 'windows-box');
+});
+
+test('свой трекер, не берущийся открывать сессии, менеджером не считается', () => {
+  // Иначе пикер на маке увёл бы просьбу к маку, где её никто не разбирает, —
+  // и Enter замолчал бы. Молчащий Enter хуже открытого терминала.
+  const state = {
+    windowHosts: [{ host: 'mac-host', pid: 7, openSession: false, mqttBase: 'home/room/mac/windows' },
+                  { host: 'windows-box', pid: 42, mqttBase: 'home/room/pc/windows' }],
+  };
+  assert.equal(SessionWindows.openManager(state, 'mac-host').host, 'windows-box');
+});
+
+test('свой трекер важнее чужого', () => {
+  const state = {
+    windowHosts: [{ host: 'windows-box', pid: 42 }, { host: 'other-box', pid: 43 }],
+  };
+  assert.equal(SessionWindows.openManager(state, 'windows-box').host, 'windows-box');
+});
+
+test('без трекеров менеджера нет', () => {
+  assert.equal(SessionWindows.openManager({}, 'mac-host'), null);
+});
+
+test('старый агрегатор называет одну машину, и она же менеджер', () => {
+  // Одного трекера хватало всегда, и пикер новее агрегатора обязан вести себя
+  // как прежде, а не терять ветку менеджера.
+  const state = { windowHost: 'windows-box', windowPid: 42 };
+  assert.equal(SessionWindows.openManager(state, 'windows-box').host, 'windows-box');
 });

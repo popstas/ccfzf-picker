@@ -86,5 +86,41 @@
       && e.canFocus !== false && focusPid(e) > 0) || null;
   }
 
-  return { canFocusRow, trackerHere, trackerHosts, focusPid };
+  /**
+   * Куда просить о подъёме окна этой строки.
+   *
+   * Адрес — свойство машины окна, а не всего ответа: трекеров несколько, и у
+   * каждого свой топик. Пустая строка значит «спроси свой конфиг» — так пикер
+   * вёл себя до появления поля, и так он обязан вести себя со старым
+   * агрегатором и со старым трекером.
+   */
+  function mqttBaseFor(row, state) {
+    const w = windowOf(row, state);
+    const base = w && typeof w.mqttBase === 'string' ? w.mqttBase.trim() : '';
+    return base;
+  }
+
+  /**
+   * Трекер, чей менеджер берётся открывать сессии и терминалы.
+   *
+   * Вопрос про машину, а не про строку, и построчным он стать не может: у
+   * строки проекта окна нет вовсе, а спросить «кто откроет терминал» надо и
+   * про неё. Раньше на него отвечало верхнее поле `windowHost`, но с
+   * несколькими трекерами оно значит «машина, чьи проектные хоткеи мы взяли»
+   * (`lead` в `read_window_sources`), а вовсе не «машина, где стоит менеджер»:
+   * упади Windows-трекер, верхним хостом стал бы мак.
+   *
+   * Свой раньше чужого: на машине с менеджером просьба уходит ему, на машине
+   * без менеджера — остаётся имя чужой машины для пункта «Open on <host>».
+   *
+   * Отсутствующий `openSession` читается как «берётся» — то же правило, что у
+   * `canFocus`: windows11-manager этого поля не пишет и не должен.
+   */
+  function openManager(state, configHost) {
+    const able = trackerHosts(state).filter(e => e && e.openSession !== false);
+    const mine = normHost(configHost);
+    return able.find(e => normHost(e.host) === mine) || able[0] || null;
+  }
+
+  return { canFocusRow, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager };
 });
