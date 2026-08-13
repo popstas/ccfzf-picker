@@ -151,14 +151,32 @@ mod tests {
 
     #[test]
     fn the_screen_with_the_most_overlap_wins() {
-        // Два экрана, окно уехало между ними и еле цепляет оба. Возвращать надо
-        // на тот, где его больше: иначе окно прыгает через весь стол.
-        let d = screens(&[b(0, 0, 1000, 1000), b(1000, 0, 1000, 1000)]);
-        let w = b(900, 100, 400, 400);
-        let got = clamp_to_displays(w, &d);
-        assert_eq!(got.y, 100);
-        assert_eq!(got.width, 400);
-        assert!(got.x >= 1000 - 400, "окно осталось у стыка, а не улетело к дальнему краю");
+        // Два экрана с зазором между ними, окно уехало в зазор и цепляет оба
+        // краями. Накрыто меньше половины площади — значит возвращать; вернуть
+        // надо на тот экран, где окна больше, иначе оно прыгает через весь стол.
+        //
+        // Зазор между экранами обязателен: на смежных экранах окно, уехавшее на
+        // стык, накрыто целиком, ветка выбора экрана не исполняется вовсе, и
+        // тест зеленел бы, ничего не проверив.
+        //
+        // Случая два, и они зеркальны намеренно: с одним тест не отличил бы
+        // правило «побеждает наибольшее перекрытие» от правила «побеждает
+        // первый экран в списке».
+        let d = screens(&[b(0, 0, 1000, 1000), b(1500, 0, 1000, 1000)]);
+
+        // Слева 300 столбцов из 900, справа 100 — накрыто 160 000 из 360 000.
+        assert_eq!(
+            clamp_to_displays(b(700, 100, 900, 400), &d),
+            b(100, 100, 900, 400),
+            "перекрытие больше слева — окно вернулось на левый экран",
+        );
+
+        // Зеркально: слева 100 столбцов, справа 300.
+        assert_eq!(
+            clamp_to_displays(b(900, 100, 900, 400), &d),
+            b(1500, 100, 900, 400),
+            "перекрытие больше справа — правило «первый в списке» выбрало бы левый",
+        );
     }
 
     #[test]
@@ -551,6 +569,7 @@ EOF
 
 **Files:**
 - Modify: `crates/mwm-core/src/index.rs`
+- Modify: `crates/mwm-core/src/tracker.rs` — ровно настолько, чтобы собралось (шаг 4)
 
 **Interfaces:**
 - Produces: `pub struct SessionRef { pub id: String, pub cwd: String }` с `#[derive(Debug, Clone, PartialEq, Eq)]`; `parse_index` меняет тип на `BTreeMap<String, SessionRef>`.
@@ -710,6 +729,7 @@ EOF
 
 **Files:**
 - Modify: `crates/mwm-core/src/tracker.rs`
+- Modify: `src-tauri/src/ax.rs` — заглушка `bounds: None` в `Seen` (шаг 4); настоящую геометрию туда поставит задача 7
 
 **Interfaces:**
 - Consumes: `crate::geometry::Bounds` (задача 1), `crate::state::SlotState` (задача 2), `crate::index::SessionRef` (задача 3).
@@ -1569,6 +1589,7 @@ EOF
 **Files:**
 - Modify: `crates/mwm-core/src/publish.rs`
 - Modify: `crates/mwm-core/src/config.rs`
+- Modify: `src-tauri/src/main.rs` — седьмой аргумент `build_file` в вызове (шаг 5)
 
 **Interfaces:**
 - Consumes: `crate::snapshots::Snapshot` (задача 5).
@@ -1960,7 +1981,9 @@ Expected: PASS оба (собираются заглушки; macOS-ветка �
 - [ ] **Step 6: Коммит**
 
 ```bash
-git add src-tauri/src/ax.rs src-tauri/Cargo.toml Cargo.lock
+git add src-tauri/src/ax.rs
+# Только если зависимость и правда добавилась — на основном пути её нет:
+# git add src-tauri/Cargo.toml Cargo.lock
 git commit -m "$(cat <<'EOF'
 feat(ax): чтение и установка геометрии окна, список экранов
 
@@ -2422,6 +2445,7 @@ EOF
 
 **Files:**
 - Modify: `sessions.html`
+- Test: `test/restore-branches.test.js` (создаётся)
 
 **Interfaces:**
 - Consumes: `PickerSnapshots.snapshotsHere`, `PickerSnapshots.snapshotBase` (задача 10); `OpenTransport.chooseOpenTransport` и `SessionWindows.openManager` (этап 2, без изменений).
@@ -2449,17 +2473,33 @@ EOF
   }
 
   /**
-   * Машина этого снимка как источник для развилки транспорта.
+   * Машина, которой уходит просьба о восстановлении, — или `null`, если такой
+   * машины нет.
    *
-   * Форма — та же, что у `openManager`: `chooseOpenTransport` спрашивает у неё
-   * только имя. Берётся она у снимка, а не у списка трекеров, потому что
-   * вопрос здесь другой: не «кто откроет сессию», а «кто снял эту раскладку».
+   * Вопрос здесь не «чей это снимок»: снимки в списке и так только свои,
+   * `snapshotsHere` отобрала их по машине. Вопрос — «берётся ли менеджер этой
+   * машины за раскладку», и отвечает на него `openManager`: он же отбирает
+   * трекеры по полю `openSession`. Второй разбор того же списка разошёлся бы с
+   * ним на первой же правке.
+   *
+   * Мак снимки делает, а менеджера у него нет: трекер там объявляет
+   * `openSession: false`, `openManager` его отбрасывает и отвечает либо чужой
+   * машиной, либо `null` — в обоих случаях `chooseOpenTransport` даёт `local`,
+   * и восстановление уходит в местную ветку. Возьми мы `host` прямо у снимка,
+   * на маке вышло бы `manager`, и просьба уехала бы в топик, который никто не
+   * слушает: молча, потому что у публикации нет ответа.
+   *
+   * Адрес при этом берётся у снимка, а не у менеджера: у каждой машины свой
+   * префикс топиков, и просьба обязана уйти той, что снимок сняла. Пустая
+   * строка значит «спроси свой конфиг» — так её читает `resolve_base` в
+   * `src-tauri/src/mqtt.rs`.
    */
   function snapshotOwner(id) {
     const snap = snapshotById(id);
     if (!snap) return null;
-    const host = snap.host || CONFIG.windowHost;
-    return host ? { host, mqttBase: window.PickerSnapshots.snapshotBase(snap) } : null;
+    const manager = window.SessionWindows.openManager(lastState, CONFIG.windowHost);
+    if (!manager) return null;
+    return { host: manager.host, mqttBase: window.PickerSnapshots.snapshotBase(snap) };
   }
 ```
 
@@ -2547,17 +2587,107 @@ EOF
 
 Если какое-то из трёх не сходится — чинить строку, а не эти функции: у них есть тесты на каждый вид строки, и правка там аукнется в Enter на строке списка.
 
-- [ ] **Step 5: Прогнать**
+- [ ] **Step 5: Сторож развилки**
+
+Развилка молчащая: у публикации в MQTT нет ответа, и просьба, уехавшая в топик, который никто не слушает, выглядит как сработавший Enter. Сторож проверяет настоящий код страницы, а не его копию.
+
+Создать `test/restore-branches.test.js`:
+
+```js
+// Развилка восстановления снимка: берётся ли менеджер этой машины за раскладку.
+//
+// Снимок мака и снимок Windows-машины в списке выглядят одинаково, а
+// восстанавливаются по-разному: там просьба менеджеру, здесь — открытие сессий
+// силами самого пикера. Ошибка тут молчащая: у публикации в MQTT нет ответа, и
+// просьба, уехавшая в топик, который никто не слушает, выглядит как сработавший
+// Enter.
+//
+// Проверяется настоящий код страницы: `snapshotOwner` вычитывается из
+// sessions.html и исполняется в vm с настоящими `SessionWindows` и
+// `PickerSnapshots` — тем же приёмом, что и в `hide-before-request.test.js`.
+// Копия разъехалась бы молча, а сторож остался бы зелёным.
+const { test } = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const SESSIONS_HTML = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+const SessionWindows = require('../frontend-src/session-windows.js');
+const PickerSnapshots = require('../frontend-src/picker-snapshots.js');
+const { chooseOpenTransport } = require('../frontend-src/open-transport.js');
+
+function sourceOf(name) {
+  const re = new RegExp(`\\n {2}function ${name}\\([\\s\\S]*?\\n {2}\\}\\n`);
+  const found = SESSIONS_HTML.match(re);
+  assert.ok(found, `${name} не найдена в sessions.html — тест сторожит не то`);
+  return found[0];
+}
+
+const SNAP = { id: 'snap-1', mqttBase: 'home/room/mac/windows', sessions: [] };
+
+/** Ответ `snapshotOwner` на машине `configHost` при таком списке трекеров. */
+function ownerOf(configHost, windowHosts, snapshot = SNAP) {
+  const ctx = {
+    CONFIG: { windowHost: configHost, mqtt: { configured: true } },
+    lastState: { windowHosts },
+    snapshotRows: [snapshot],
+    window: { SessionWindows, PickerSnapshots },
+    result: null,
+  };
+  vm.runInNewContext(
+    `${sourceOf('snapshotById')}\n${sourceOf('snapshotOwner')}\nresult = snapshotOwner('snap-1');`,
+    ctx,
+  );
+  return ctx.result;
+}
+
+const MAC = { host: 'mac', pid: 11, canFocus: true, openSession: false };
+const WIN = { host: 'pc-win', pid: 22, canFocus: true };
+
+test('на маке снимок восстанавливается своими силами', () => {
+  // Трекер мака объявляет `openSession: false` — менеджера там нет вовсе.
+  // Возьми развилка машину прямо у снимка, вышло бы `manager`, и просьба
+  // уехала бы в топик мака, который никто не слушает.
+  const owner = ownerOf('mac', [MAC]);
+  assert.equal(owner, null, 'машины, берущейся за раскладку, на маке нет');
+  assert.equal(chooseOpenTransport(owner, 'mac', true), 'local');
+});
+
+test('живой Windows-трекер не делает мак машиной менеджера', () => {
+  // Соседняя машина в списке есть, и `openManager` называет её — но это не
+  // наша машина, и восстанавливать её силами нашу раскладку нечего.
+  const owner = ownerOf('mac', [MAC, WIN]);
+  assert.equal(chooseOpenTransport(owner, 'mac', true), 'local');
+});
+
+test('на машине с менеджером просьба уходит ему, адрес — от снимка', () => {
+  const snap = { id: 'snap-1', mqttBase: 'home/room/pc/windows', sessions: [] };
+  const owner = ownerOf('pc-win', [WIN], snap);
+  assert.equal(chooseOpenTransport(owner, 'pc-win', true), 'manager');
+  assert.equal(owner.mqttBase, 'home/room/pc/windows',
+    'адрес называет снимок: у каждой машины свой префикс топиков');
+});
+
+test('снимок без адреса уводит просьбу на свой конфиг', () => {
+  // Пустая строка значит «спроси свой конфиг» — так её читает `resolve_base`
+  // в `src-tauri/src/mqtt.rs`. Старый трекер адреса не называет вовсе.
+  const owner = ownerOf('pc-win', [WIN], { id: 'snap-1', sessions: [] });
+  assert.equal(owner.mqttBase, '');
+});
+```
+
+- [ ] **Step 6: Прогнать**
 
 Run: `npm test && (cd src-tauri && cargo test)`
 Expected: PASS оба
 
 Если падает сторож порядка `test/hide-before-request.test.js` — читать и чинить: гашение обязано идти до просьбы, и в новой форме оно идёт до обеих веток. Это регрессия, а не устаревший тест.
 
-- [ ] **Step 6: Коммит**
+- [ ] **Step 7: Коммит**
 
 ```bash
-git add sessions.html
+git add sessions.html test/restore-branches.test.js
 git commit -m "$(cat <<'EOF'
 feat(picker): снимок восстанавливается там, где его сняли
 
