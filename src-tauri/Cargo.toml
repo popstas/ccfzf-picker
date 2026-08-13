@@ -33,12 +33,16 @@ base64 = "0.22"
 #
 # Остальные features — ради иконок из exe: Shell (SHGetFileInfoW), Gdi
 # (битмапы иконки), FileSystem и IO (reparse point за app-execution alias),
-# Environment (раскрытие `%SystemRoot%` в пути из конфига).
+# Environment (раскрытие `%SystemRoot%` в пути из конфига). `Win32_Security`
+# сам по себе не нужен, но без него `CreateFileW` из `Win32_Storage_FileSystem`
+# не существует: в её сигнатуре стоит `SECURITY_ATTRIBUTES`, и крейт прячет
+# всю функцию за этой feature.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Shell",
     "Win32_Graphics_Gdi",
+    "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Environment",
     "Win32_System_IO",
