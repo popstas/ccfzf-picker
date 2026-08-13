@@ -191,8 +191,10 @@ Windows-трекер — верхним хостом станет мак, и п�
 
 - `read_windows` — читает `mqttBase` (строка, мусор → пусто) и `openSession`
   (умолчание `True`, как у `focus`).
-- `read_window_sources` — проносит оба поля в `windowHosts` и в каждую запись
-  окна, рядом с `host`, `pid`, `canFocus`.
+- `read_window_sources` — проносит `mqttBase` и в `windowHosts`, и в каждую
+  запись окна, рядом с `host`, `pid`, `canFocus`: по записи окна выбирается
+  адрес для подъёма. `openSession` — только в `windowHosts`: это вопрос про
+  машину, и у записи окна он не значил бы ничего.
 
 ### ccfzf-picker
 
