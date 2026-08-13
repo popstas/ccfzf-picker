@@ -84,6 +84,21 @@ pub fn host_mismatch_note(state: &serde_json::Value, own: &str) -> Option<String
     if wanted_from_state(state, own).is_some() {
         return None;
     }
+    // Наше имя названо среди живых трекеров — значит, конфиг верен, а хоткеи
+    // просто приехали от соседней машины. Раньше этот случай был невозможен:
+    // трекер был один, и несовпадение имён значило опечатку. Теперь их
+    // несколько, и без этой проверки заметка ругалась бы на маке всегда.
+    let own_norm = norm_host(own);
+    let known = state
+        .get("windowHosts")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.get("host").and_then(|v| v.as_str()))
+        .any(|h| norm_host(h) == own_norm);
+    if known && !own_norm.is_empty() {
+        return None;
+    }
     let carries = state
         .get("projects")
         .and_then(|v| v.as_array())
@@ -1059,6 +1074,39 @@ mod tests {
         assert!(take_press(&reg, "/p/one", now));
         assert!(take_press(&reg, "/p/two", now));
         assert!(!take_press(&reg, "/p/one", now));
+    }
+
+    /// Мак теперь называет себя в конфиге — иначе подъём окна не с чем
+    /// сверять, — и заметка про чужие хоткеи начала бы ругаться на каждом
+    /// запуске. Ругаться ей положено на «настроили не ту машину», а это
+    /// отличается ровно одним: нашего имени нет среди трекеров вовсе.
+    #[test]
+    fn no_note_when_our_host_is_a_known_tracker() {
+        let state = serde_json::json!({
+            "windowHost": "windows-box",
+            "windowHosts": [
+                { "host": "windows-box", "pid": 42, "canFocus": true },
+                { "host": "mac-host", "pid": 7, "canFocus": false },
+            ],
+            "projects": [{ "path": "/projects/js/picker", "hotkey": "Ctrl+F11" }],
+        });
+        assert!(
+            host_mismatch_note(&state, "mac-host").is_none(),
+            "мак — известный трекер, ругаться не на что"
+        );
+    }
+
+    /// А вот имя, которого среди трекеров нет, — это и есть опечатка в
+    /// конфиге, ради которой заметка заведена.
+    #[test]
+    fn note_stays_for_a_host_no_tracker_knows() {
+        let state = serde_json::json!({
+            "windowHost": "windows-box",
+            "windowHosts": [{ "host": "windows-box", "pid": 42, "canFocus": true }],
+            "projects": [{ "path": "/projects/js/picker", "hotkey": "Ctrl+F11" }],
+        });
+        let note = host_mismatch_note(&state, "windwos-box").expect("опечатку надо назвать");
+        assert!(note.contains("windwos-box"), "человеку нужно его же имя: {note}");
     }
 
 }
