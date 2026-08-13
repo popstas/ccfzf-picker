@@ -219,6 +219,21 @@
            специфичность у правил равная. */
         .action-row:hover { background: #26282d; }
         .action-row.active { background: #31343a; }
+        /* Слот значка. Ширина фиксированная и одинаковая у всех строк, включая
+           глифовые: без неё подпись на строке без иконки съезжает влево, и
+           меню читается как два списка в одном окне.
+
+           16 px при иконке 32×32 из WinAPI — ровно вдвое; на масштабе 150%,
+           который стоит на машине, это 24 устройственных точки, то есть
+           картинку ужимают, а не растягивают. */
+        .action-icon {
+            flex: 0 0 16px; width: 16px; height: 16px;
+            display: flex; align-items: center; justify-content: center;
+            margin-right: 10px; font-size: 12px; color: #7d838c;
+        }
+        .action-icon img { width: 16px; height: 16px; }
+        /* Тем же оранжевым горит непросмотренная сессия в списке. */
+        .action-icon.unread { color: #db6d28; }
         .action-label {
             flex: 1 1 auto; min-width: 0; overflow: hidden;
             text-overflow: ellipsis; white-space: nowrap;
@@ -313,6 +328,7 @@
 <script src="picker-mode.js"></script>
 <script src="project-list.js"></script>
 <script src="picker-list-sync.js"></script>
+<script src="action-icons.js"></script>
 <script>
   let groups = [];
   let rows = [];
@@ -437,6 +453,9 @@
   let menuActions = [];
   let menuActive = 0;
   let menuSessionId = null;
+  // Иконки приложений: id действия → data-URI. Заполняется один раз при
+  // старте и на config-changed, см. loadActionIcons.
+  let actionIcons = {};
   let infoOpen = false;
 
   // Одна таблица «id действия ⇄ клавиша» на всё: подписи в меню Ctrl+K и
@@ -1183,8 +1202,15 @@
         const key = ACTION_KEYS[action.id];
         const shown = formatHotkey(key ? `Ctrl+${key}` : (action.hotkey || ''));
         const hotkey = shown ? `<span class="action-hotkey">${escapeHtml(shown)}</span>` : '';
+        // Значок: картинка приложения, если Rust её отдал, иначе глиф.
+        // Экранируется здесь, вместе с остальной строкой: data-URI приходит
+        // из Rust, но правило одно на всю сборку разметки.
+        const icon = window.ActionIcons.actionIcon(action, actionIcons);
+        const iconHtml = icon.kind === 'img'
+          ? `<span class="action-icon"><img src="${escapeHtml(icon.src)}" alt=""></span>`
+          : `<span class="action-icon${icon.cls ? ` ${icon.cls}` : ''}">${escapeHtml(icon.text)}</span>`;
         return `<div class="action-row${index === 0 ? ' active' : ''}" data-index="${index}" role="menuitem">` +
-          `<span class="action-label">${escapeHtml(action.label)}</span>${hotkey}</div>`;
+          `${iconHtml}<span class="action-label">${escapeHtml(action.label)}</span>${hotkey}</div>`;
       }).join('');
     }
     menuOpen = true;

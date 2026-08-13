@@ -31,6 +31,7 @@ const FILES = [
   'frontend-src/open-strategy.js',
   'frontend-src/session-name.js',
   'frontend-src/settings-form.js',
+  'frontend-src/action-icons.js',
 ];
 
 fs.mkdirSync(OUT, { recursive: true });
