@@ -56,7 +56,7 @@
       title: 'Integrations',
       fields: [
         { id: 'windowHost', label: 'Name of this machine', type: 'text',
-          hint: 'Matches windowHost from the reply — Enter raises the window.' },
+          hint: 'Matches the host on a session window — Enter raises it.' },
         { id: 'mqtt.host', label: 'MQTT broker', type: 'text' },
         { id: 'mqtt.port', label: 'Broker port', type: 'number' },
         { id: 'mqtt.user', label: 'User', type: 'text' },

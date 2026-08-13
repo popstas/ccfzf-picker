@@ -1044,6 +1044,11 @@
    * экране, и держать поверх них список незачем. Итог не показывается —
    * ответа у просьбы нет по замыслу, а не сработавшее видно на экране.
    *
+   * База — `managerBase()`, а не `trackerHere`: снимки восстанавливает служба
+   * на машине менеджера (windows-mqtt), а не оконный трекер строки. На маке
+   * `trackerHere` вернул бы запись мака — тот разбирает только `claude-focus`
+   * и `claude-session-unread`, просьба о снимке уйдёт туда молча и потеряется.
+   *
    * Пустой `sessionIds` значит «весь снимок»: так просит заголовок раскладки.
    */
   async function restoreSnapshot(snapshotId, sessionIds) {
@@ -1051,7 +1056,7 @@
     try {
       await invoke('restore_snapshot_mqtt', {
         id: snapshotId, sessionIds,
-        base: (window.SessionWindows.trackerHere(lastState, CONFIG.windowHost) || {}).mqttBase || '',
+        base: managerBase(),
       });
     } catch (e) {
       error = String(e);

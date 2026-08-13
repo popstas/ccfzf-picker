@@ -343,8 +343,9 @@ async fn open_session_mqtt(
 async fn open_project_mqtt(cwd: String, base: Option<String>) -> Result<(), String> {
     allow_any_foreground();
     let broker = configured_broker()?;
-    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
-    // запасной ход для трекера прежней версии.
+    // У строки проекта окна нет вовсе: адрес называет трекер машины
+    // менеджера, а не машины окна. Свой из конфига — запасной ход для
+    // трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
     tauri::async_runtime::spawn_blocking(move || mqtt::open_project(&broker, &base, &cwd))
         .await
@@ -361,8 +362,9 @@ async fn open_project_mqtt(cwd: String, base: Option<String>) -> Result<(), Stri
 async fn new_session_mqtt(cwd: String, name: String, base: Option<String>) -> Result<(), String> {
     allow_any_foreground();
     let broker = configured_broker()?;
-    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
-    // запасной ход для трекера прежней версии.
+    // Окна ещё нет — сессия только заводится: адрес называет трекер машины
+    // менеджера, а не машины окна. Свой из конфига — запасной ход для
+    // трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
     tauri::async_runtime::spawn_blocking(move || mqtt::open_new(&broker, &base, &cwd, &name))
         .await

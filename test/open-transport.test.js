@@ -32,9 +32,14 @@ test('пустой windowHost в конфиге — локально', () => {
   assert.equal(chooseOpenTransport({ host: 'PC-WIN' }, undefined, true), 'local');
 });
 
-test('нет ответа агрегатора — локально', () => {
+test('менеджера нет или он без имени — локально', () => {
+  // Первый аргумент — уже разобранный менеджер (openManager из
+  // session-windows.js), а не состояние агрегатора целиком: отсюда и два
+  // разных пустых случая, а не один и тот же дважды. `null` — трекера нет
+  // вовсе; `{}` — трекер есть, но имени машины в записи нет (normHost(undefined)
+  // === '') — это отдельная ветка chooseOpenTransport, а не та же самая.
   assert.equal(chooseOpenTransport(null, 'pc-win', true), 'local');
-  assert.equal(chooseOpenTransport(null, 'pc-win', true), 'local');
+  assert.equal(chooseOpenTransport({}, 'pc-win', true), 'local');
 });
 
 test('pid трекера на выбор не влияет', () => {
