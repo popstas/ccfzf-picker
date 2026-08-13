@@ -1037,13 +1037,29 @@ test('иконки спрашиваются при старте и после с
   const blockStart = configChangedMatch.index;
   const blockEnd = blockStart + configChangedMatch[0].length;
   const calls = [...startBody.matchAll(/await loadActionIcons\(\)/g)].map(m => m.index);
-  assert.ok(
-    calls.some(i => i < blockStart || i >= blockEnd),
-    'иконки не запрашиваются при старте',
-  );
+  const outsideCalls = calls.filter(i => i < blockStart || i >= blockEnd);
+  assert.ok(outsideCalls.length > 0, 'иконки не запрашиваются при старте');
   assert.ok(
     calls.some(i => i >= blockStart && i < blockEnd),
     'после смены конфига иконки остались бы от прежних приложений',
+  );
+
+  // Порядок внутри start() — не только наличие: вызов вне config-changed
+  // обязан стоять после первого опроса и после ветки гонки первого показа, а
+  // не перед ними (правки этого файла и 31ddb46 — ровно про эту перестановку,
+  // и откат любой из них здесь должен покраснеть).
+  const outsideCall = Math.max(...outsideCalls);
+  const pollNowIndex = startBody.indexOf("applyState(await invoke('poll_now'))");
+  assert.notStrictEqual(pollNowIndex, -1, 'тест сторожит не то');
+  assert.ok(
+    pollNowIndex < outsideCall,
+    'список сессий не должен ждать иконок',
+  );
+  const alreadyVisibleIndex = startBody.indexOf('getCurrentWindow().isVisible()');
+  assert.notStrictEqual(alreadyVisibleIndex, -1, 'тест сторожит не то');
+  assert.ok(
+    alreadyVisibleIndex < outsideCall,
+    'поле поиска при гонке первого показа тоже не должно ждать иконок',
   );
 });
 
