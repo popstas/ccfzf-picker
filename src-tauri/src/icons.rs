@@ -3,7 +3,10 @@
 //! Разбор — здесь и без `cfg(windows)`: и буфер reparse, и пиксели приезжают
 //! байтами, а байты одинаковы везде. Под `cfg(windows)` остаётся обвязка над
 //! WinAPI, у которой своей логики нет и проверять в ней нечего.
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 /// Один запрос от страницы: чья иконка и под каким id её вернуть.
 #[derive(serde::Deserialize)]
@@ -91,6 +94,268 @@ pub fn resolve_name(
         .filter(|dir| !dir.is_empty())
         .map(|dir| PathBuf::from(format!("{}\\{file}", dir.trim_end_matches(['\\', '/']))))
         .find(|candidate| exists(candidate))
+}
+
+/// Кеш иконок на время жизни процесса.
+///
+/// Ключ — путь плюс mtime: обновился Cursor, сменился mtime, иконка
+/// перечиталась сама. Кеш по одному пути протух бы незаметно и держался до
+/// перезапуска пикера, а перезапускают его только при выкатке. `None` в
+/// значении кеширует и неудачу — иначе несуществующий exe перепроверялся бы
+/// на каждый показ меню.
+#[derive(Default)]
+pub struct Cache(Mutex<HashMap<(PathBuf, Option<SystemTime>), Option<String>>>);
+
+/// Иконки для списка запросов. Чего не нашлось — просто нет в ответе.
+pub fn icons_for(specs: &[IconSpec], cache: &Cache) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for spec in specs {
+        let Some(path) = resolve(&spec.path) else {
+            continue;
+        };
+        let stamp = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+        let key = (path.clone(), stamp);
+        let cached = cache.0.lock().unwrap().get(&key).cloned();
+        let value = match cached {
+            Some(value) => value,
+            None => {
+                let value = extract(&path);
+                cache.0.lock().unwrap().insert(key, value.clone());
+                value
+            }
+        };
+        if let Some(uri) = value {
+            out.insert(spec.id.clone(), uri);
+        }
+    }
+    out
+}
+
+/// Путь из конфига — в путь на диске: переменные окружения, PATH, alias.
+fn resolve(raw: &str) -> Option<PathBuf> {
+    let expanded = expand_env(raw);
+    let direct = Path::new(&expanded);
+    let path = if expanded.contains('\\') || expanded.contains('/') {
+        if !direct.exists() {
+            return None;
+        }
+        direct.to_path_buf()
+    } else {
+        let path_var = std::env::var("PATH").unwrap_or_default();
+        resolve_name(&expanded, &path_var, &|p: &Path| p.exists())?
+    };
+    Some(alias_target(&path).unwrap_or(path))
+}
+
+#[cfg(not(windows))]
+fn expand_env(raw: &str) -> String {
+    raw.to_string()
+}
+
+#[cfg(not(windows))]
+fn alias_target(_path: &Path) -> Option<PathBuf> {
+    None
+}
+
+/// Вне Windows иконок не бывает: `.app` — другой API и другая задача.
+#[cfg(not(windows))]
+fn extract(_path: &Path) -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
+use std::mem::size_of;
+#[cfg(windows)]
+use windows::core::PCWSTR;
+#[cfg(windows)]
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
+#[cfg(windows)]
+use windows::Win32::Graphics::Gdi::{
+    CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
+    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP,
+};
+#[cfg(windows)]
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, OPEN_EXISTING,
+};
+#[cfg(windows)]
+use windows::Win32::System::Environment::ExpandEnvironmentStringsW;
+#[cfg(windows)]
+use windows::Win32::System::IO::DeviceIoControl;
+#[cfg(windows)]
+use windows::Win32::UI::Shell::{SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGetFileInfoW};
+#[cfg(windows)]
+use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
+
+/// Код FSCTL_GET_REPARSE_POINT. Записан числом, а не взят из
+/// `Win32_System_Ioctl`: ради одной константы тянуть ещё одну feature
+/// `windows` дороже, чем написать её здесь.
+#[cfg(windows)]
+const FSCTL_GET_REPARSE_POINT: u32 = 0x0009_00A8;
+
+#[cfg(windows)]
+fn wide(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// `%SystemRoot%\explorer.exe` → настоящий путь.
+///
+/// Раскрытие живёт только в этой ветке: `argv` запускается без шелла
+/// (`spawn_detached`), и раскрывать переменные там значило бы завести второй
+/// разбор команды.
+#[cfg(windows)]
+fn expand_env(raw: &str) -> String {
+    let src = wide(raw);
+    let mut buf = vec![0u16; 4096];
+    let len = unsafe { ExpandEnvironmentStringsW(PCWSTR(src.as_ptr()), Some(&mut buf)) } as usize;
+    // Ответ считается вместе с нулём в конце; ноль и переполнение значат
+    // «не вышло», и тогда путь остаётся тем, что дал человек.
+    if len == 0 || len > buf.len() {
+        return raw.to_string();
+    }
+    String::from_utf16_lossy(&buf[..len - 1])
+}
+
+/// Настоящий exe за app-execution alias — или `None`, если это обычный файл.
+#[cfg(windows)]
+fn alias_target(path: &Path) -> Option<PathBuf> {
+    let name = wide(&path.to_string_lossy());
+    // OPEN_REPARSE_POINT обязателен: без него открывается цель, а нам нужен
+    // сам reparse point. BACKUP_SEMANTICS — чтобы не спорить с ACL каталога.
+    let handle: HANDLE = unsafe {
+        CreateFileW(
+            PCWSTR(name.as_ptr()),
+            0,
+            FILE_SHARE_READ,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        )
+    }
+    .ok()?;
+    let mut buf = vec![0u8; 16 * 1024];
+    let mut returned = 0u32;
+    let ok = unsafe {
+        DeviceIoControl(
+            handle,
+            FSCTL_GET_REPARSE_POINT,
+            None,
+            0,
+            Some(buf.as_mut_ptr() as *mut _),
+            buf.len() as u32,
+            Some(&mut returned),
+            None,
+        )
+    };
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    ok.ok()?;
+    appexec_target(&buf[..returned as usize]).map(PathBuf::from)
+}
+
+/// Иконка файла — в `data:image/png;base64,…`.
+#[cfg(windows)]
+fn extract(path: &Path) -> Option<String> {
+    let name = wide(&path.to_string_lossy());
+    let mut info = SHFILEINFOW::default();
+    let ok = unsafe {
+        SHGetFileInfoW(
+            PCWSTR(name.as_ptr()),
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut info),
+            size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_LARGEICON,
+        )
+    };
+    if ok == 0 || info.hIcon.is_invalid() {
+        return None;
+    }
+    let png = icon_png(info.hIcon);
+    // Хендл иконки принадлежит нам, и его не возвращают: без DestroyIcon на
+    // каждый перечит утекает GDI-объект, а их у процесса десять тысяч.
+    unsafe {
+        let _ = DestroyIcon(info.hIcon);
+    }
+    png
+}
+
+#[cfg(windows)]
+fn icon_png(icon: HICON) -> Option<String> {
+    let mut ii = ICONINFO::default();
+    unsafe { GetIconInfo(icon, &mut ii) }.ok()?;
+    let colour = read_dib(ii.hbmColor);
+    let mask = read_dib(ii.hbmMask);
+    unsafe {
+        let _ = DeleteObject(ii.hbmColor.into());
+        let _ = DeleteObject(ii.hbmMask.into());
+    }
+    let (width, height, bgra) = colour?;
+    let mask_px = mask.map(|(_, _, px)| px).unwrap_or_default();
+    let rgba = to_rgba(&bgra, &mask_px);
+
+    let mut png = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().ok()?.write_image_data(&rgba).ok()?;
+    }
+    use base64::Engine;
+    Some(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    ))
+}
+
+/// Битмап → (ширина, высота, BGRA).
+///
+/// Высота в заголовке отрицательная намеренно: так строки идут сверху вниз.
+/// С положительной DIB приезжает снизу вверх, и иконка встала бы вверх ногами
+/// — молча, потому что размеры при этом верные.
+#[cfg(windows)]
+fn read_dib(bitmap: HBITMAP) -> Option<(u32, u32, Vec<u8>)> {
+    let mut bm = BITMAP::default();
+    let read = unsafe {
+        GetObjectW(
+            bitmap.into(),
+            size_of::<BITMAP>() as i32,
+            Some(&mut bm as *mut _ as *mut _),
+        )
+    };
+    if read == 0 || bm.bmWidth <= 0 || bm.bmHeight <= 0 {
+        return None;
+    }
+    let (width, height) = (bm.bmWidth as u32, bm.bmHeight as u32);
+    let mut info = BITMAPINFO::default();
+    info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
+    info.bmiHeader.biWidth = bm.bmWidth;
+    info.bmiHeader.biHeight = -bm.bmHeight;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB.0;
+    let mut pixels = vec![0u8; (width * height * 4) as usize];
+    let hdc = unsafe { CreateCompatibleDC(None) };
+    let rows = unsafe {
+        GetDIBits(
+            hdc,
+            bitmap,
+            0,
+            height,
+            Some(pixels.as_mut_ptr() as *mut _),
+            &mut info,
+            DIB_RGB_COLORS,
+        )
+    };
+    unsafe {
+        let _ = DeleteDC(hdc);
+    }
+    if rows == 0 {
+        return None;
+    }
+    Some((width, height, pixels))
 }
 
 #[cfg(test)]

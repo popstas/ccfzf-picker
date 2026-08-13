@@ -286,6 +286,8 @@ dependencies = [
 name = "ccfzf-picker"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "png 0.17.16",
  "rumqttc",
  "serde",
  "serde_json",

@@ -761,6 +761,19 @@ async fn project_hotkeys_taken(
     Ok(project_hotkeys::taken_json(&taken))
 }
 
+/// Иконки пунктов меню. Список собирает страница: Rust про меню не знает.
+///
+/// `async` — по той же причине, что и у `project_hotkeys_taken`: синхронная
+/// команда выполняется в потоке цикла событий, а тут поход в файловую систему
+/// за четырьмя иконками.
+#[tauri::command]
+async fn action_icons(
+    specs: Vec<icons::IconSpec>,
+    cache: tauri::State<'_, icons::Cache>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    Ok(icons::icons_for(&specs, &cache))
+}
+
 /// Вид списка: сортировка и чекбоксы statusline.
 ///
 /// Отдельным файлом, а не в config.yaml: конфиг пишет человек, а это пикер
@@ -844,7 +857,7 @@ fn main() {
             hide_picker, poll_now, spawn_detached, load_seen, save_seen, load_config,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, open_session_mqtt, open_project_mqtt, new_session_mqtt,
-            save_config, open_settings, project_hotkeys_taken
+            save_config, open_settings, project_hotkeys_taken, action_icons
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
@@ -889,6 +902,10 @@ fn main() {
             // windows11-manager. До первого ответа висит список прошлого
             // запуска.
             app.manage(project_hotkeys::Registered::default());
+            // Иконки меню читаются из exe на первый показ и держатся до
+            // перезапуска: ключ кеша знает mtime, так что обновившийся exe
+            // перечитается сам.
+            app.manage(icons::Cache::default());
             if let Some(window) = app.get_webview_window("picker") {
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
@@ -1251,6 +1268,23 @@ mod tests {
         assert!(
             src.contains("async fn project_hotkeys_taken"),
             "project_hotkeys_taken должна быть async — иначе взаимный замок с поллером"
+        );
+    }
+
+    /// Извлечение иконок не должно ехать в потоке цикла событий: там же
+    /// дозревает webview, и синхронная команда, полезшая в четыре exe за
+    /// иконками, придержала бы отрисовку окна. Поведением это не поймать —
+    /// на быстрой машине разницы не видно, — поэтому сторожится форма.
+    #[test]
+    fn action_icons_runs_off_the_event_loop() {
+        let src = include_str!("main.rs");
+        // Иголка склеена, а не написана литералом: `include_str!` затягивает и
+        // сам этот файл, и сторож с литералом находил бы себя же — зелёный без
+        // команды. Проверено: до появления `action_icons` он так и проходил.
+        let needle = format!("async fn {}", "action_icons");
+        assert!(
+            src.contains(&needle),
+            "action_icons должна быть async — иначе извлечение держит цикл событий"
         );
     }
 
