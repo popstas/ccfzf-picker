@@ -119,9 +119,16 @@ pub fn resolve_name(
 pub struct Cache(Mutex<HashMap<(PathBuf, Option<SystemTime>), Option<String>>>);
 
 /// Иконки для списка запросов. Чего не нашлось — просто нет в ответе.
+///
+/// Один id страница вправе прислать несколько раз: это кандидаты, и выигрывает
+/// первый, давший иконку. Так спрашивают агента, которого на Windows может не
+/// быть в `PATH` (см. `NEW_ICON_PATHS` в `action-icons.js`).
 pub fn icons_for(specs: &[IconSpec], cache: &Cache) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for spec in specs {
+        if out.contains_key(&spec.id) {
+            continue;
+        }
         let Some(path) = resolve(&spec.path) else {
             continue;
         };
@@ -149,11 +156,68 @@ pub fn icons_for(specs: &[IconSpec], cache: &Cache) -> HashMap<String, String> {
     out
 }
 
+/// Путь с `*` в одном сегменте — в существующий путь.
+///
+/// Заведено ради агента: установщик кладёт его в каталог, у которого версия
+/// стоит прямо в имени, и записанный жёстко путь протух бы с первым же
+/// обновлением — молча, значок просто исчез бы. Каталоги и существование
+/// приезжают предикатами: без них тест зависел бы от того, что стоит на
+/// машине, где его гоняют.
+///
+/// Совпадений может быть несколько (две версии рядом — обычное дело после
+/// обновления). Берём последнее по имени: иконка у всех одна, и выбор нужен
+/// только затем, чтобы он не менялся от запуска к запуску — иначе кеш в
+/// `Cache` пересчитывался бы на ровном месте.
+pub fn glob_expand(
+    pattern: &str,
+    list: &dyn Fn(&Path) -> Vec<String>,
+    exists: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    // Склейка через `\`, как и в `resolve_name`, и по той же причине: форма
+    // виндовая, а гоняют тест на Linux, где `Path::join` разделитель ставит
+    // свой.
+    let segments: Vec<&str> = pattern.split(['\\', '/']).collect();
+    let star = segments.iter().position(|s| s.contains('*'))?;
+    let (prefix, suffix) = segments[star].split_once('*')?;
+    // Второй `*` — не наш случай: разбирать его пришлось бы перебором
+    // каталогов вглубь, а просят об этом ровно один путь, и в нём звезда одна.
+    if suffix.contains('*') || segments[star + 1..].iter().any(|s| s.contains('*')) {
+        return None;
+    }
+    let base = segments[..star].join("\\");
+    let tail = segments[star + 1..].join("\\");
+    let mut names = list(Path::new(&base));
+    names.sort();
+    names
+        .iter()
+        .rev()
+        .filter(|n| n.len() >= prefix.len() + suffix.len())
+        .filter(|n| n.starts_with(prefix) && n.ends_with(suffix))
+        .map(|n| {
+            let hit = format!("{base}\\{n}");
+            PathBuf::from(if tail.is_empty() { hit } else { format!("{hit}\\{tail}") })
+        })
+        .find(|candidate| exists(candidate))
+}
+
+/// Имена в каталоге. Нет каталога — нет и имён: спрашивают про кандидата.
+fn dir_names(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect()
+}
+
 /// Путь из конфига — в путь на диске: переменные окружения, PATH, alias.
 fn resolve(raw: &str) -> Option<PathBuf> {
     let expanded = expand_env(raw);
     let direct = Path::new(&expanded);
-    let path = if expanded.contains('\\') || expanded.contains('/') {
+    let path = if expanded.contains('*') {
+        glob_expand(&expanded, &dir_names, &|p: &Path| p.exists())?
+    } else if expanded.contains('\\') || expanded.contains('/') {
         if !direct.exists() {
             return None;
         }
@@ -519,6 +583,43 @@ mod tests {
             resolve_name("cursor", path_var, &exists).map(|p| p.to_string_lossy().to_string()),
             Some(r"X:\one\cursor.exe".to_string()),
         );
+    }
+
+    /// Каталог с версией в имени: звезда закрывает ровно его, хвост после неё
+    /// приклеивается как есть.
+    #[test]
+    fn star_matches_a_versioned_directory() {
+        let list = |_: &std::path::Path| vec!["2.1.222".to_string(), "2.1.227".to_string()];
+        let exists = |p: &std::path::Path| p.to_string_lossy().starts_with(r"X:\app\claude-code\2.1.");
+        assert_eq!(
+            glob_expand(r"X:\app\claude-code\*\claude.exe", &list, &exists)
+                .map(|p| p.to_string_lossy().to_string()),
+            Some(r"X:\app\claude-code\2.1.227\claude.exe".to_string()),
+        );
+    }
+
+    /// Совпало имя каталога, но файла в нём нет — берётся следующий кандидат,
+    /// а не пустота: после обновления рядом лежат две версии, и недокачанная
+    /// новая не должна гасить значок.
+    #[test]
+    fn star_falls_through_to_the_next_match() {
+        let list = |_: &std::path::Path| vec!["1.0".to_string(), "2.0".to_string()];
+        let exists = |p: &std::path::Path| p.to_string_lossy() == r"X:\app\1.0\claude.exe";
+        assert_eq!(
+            glob_expand(r"X:\app\*\claude.exe", &list, &exists)
+                .map(|p| p.to_string_lossy().to_string()),
+            Some(r"X:\app\1.0\claude.exe".to_string()),
+        );
+    }
+
+    /// Пустой каталог и вторая звезда — оба «не нашлось», а не паника.
+    #[test]
+    fn star_without_a_match_is_none() {
+        let empty = |_: &std::path::Path| Vec::new();
+        let all = |_: &std::path::Path| true;
+        assert_eq!(glob_expand(r"X:\app\*\claude.exe", &empty, &all), None);
+        let two = |_: &std::path::Path| vec!["a".to_string()];
+        assert_eq!(glob_expand(r"X:\*\*\claude.exe", &two, &all), None, "двух звёзд не разбираем");
     }
 
     /// Вне Windows меню целиком глифовое — это дизайн, а не поломка. Контракт

@@ -1,16 +1,18 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { GLYPHS, iconSpecs, actionIcon } = require('../frontend-src/action-icons');
+const { GLYPHS, IMAGES, iconSpecs, actionIcon } = require('../frontend-src/action-icons');
 const { availableActions } = require('../frontend-src/session-actions');
 
 // Сторож на будущее: новый встроенный пункт приедет в меню без значка, и
-// заметить это можно только глазами на той машине, где пикер стоит. Список
-// id берётся не из BUILTIN_ACTION_KEYS (там только те, у кого есть прямая
-// клавиша — `open-remote` в неё уже пришлось дописывать руками), а прямым
-// вызовом availableActions на строке, у которой есть всё сразу: живая сессия
-// с pid (даёт attach), cwd (даёт new), pr_url с номером PR (даёт pr),
-// lastActivity и agentSeen (даёт unread) — info в списке всегда.
-test('у каждого встроенного пункта есть глиф', () => {
+// заметить это можно только глазами на той машине, где пикер стоит. Спрос
+// идёт с actionIcon, а не с одного GLYPHS: значок пункту даёт любая из двух
+// таблиц, и пункт с картинкой (`pr`) глифа не имеет вовсе. Список id берётся
+// не из BUILTIN_ACTION_KEYS (там только те, у кого есть прямая клавиша —
+// `open-remote` в неё уже пришлось дописывать руками), а прямым вызовом
+// availableActions на строке, у которой есть всё сразу: живая сессия с pid
+// (даёт attach), cwd (даёт new), pr_url с номером PR (даёт pr), lastActivity
+// и agentSeen (даёт unread) — info в списке всегда.
+test('у каждого встроенного пункта есть свой значок', () => {
   const row = {
     kind: 'session',
     cwd: '/home/user/projects/ccfzf',
@@ -22,13 +24,25 @@ test('у каждого встроенного пункта есть глиф', 
   };
   const ids = availableActions(row).map(a => a.id);
   assert.ok(ids.length > 1, 'availableActions вернул слишком мало — тест сторожит не то');
-  for (const id of ids) {
-    assert.ok(GLYPHS[id], `нет глифа для встроенного пункта ${id}`);
-  }
   // `open-remote` availableActions не отдаёт вовсе — этот пункт добавляет
   // страница (окно уже открыто на этой машине), а не сборка списка действий.
   // Дописан руками, потому и особый.
-  assert.ok(GLYPHS['open-remote'], 'нет глифа для open-remote');
+  for (const id of [...ids, 'open-remote']) {
+    assert.ok(
+      GLYPHS[id] || IMAGES[id],
+      `у встроенного пункта ${id} нет ни глифа, ни картинки — встанет запасной знак`,
+    );
+  }
+});
+
+// Стрелка `↗` значила «уедет наружу», а не «GitHub», и заменена значком
+// службы. Сторож смотрит на вывод actionIcon, а не на таблицу: важно, что
+// строка меню получит картинку.
+test('у pr значок GitHub, а не глиф', () => {
+  const icon = actionIcon({ id: 'pr' }, {});
+  assert.strictEqual(icon.kind, 'img', 'pr должен приезжать картинкой');
+  assert.ok(icon.src.startsWith('data:image/svg+xml'), 'картинка pr вшита в страницу');
+  assert.ok(icon.src.includes('viewBox'), 'в data-URI должен лежать разобранный svg');
 });
 
 test('icon перевешивает argv[0], а без него берётся argv[0]', () => {
@@ -47,13 +61,19 @@ test('icon перевешивает argv[0], а без него берётся a
 
 // Пункт `new` в конфиге не описан вовсе, а иконку у него взять есть откуда —
 // у агента. На машине без агента запрос вернётся пустым, и встанет глиф.
+// Кандидатов у него несколько: в `PATH` агента может не быть, а установщик
+// на Windows кладёт его в каталог с версией в имени — оттого `*` в пути.
 test('new спрашивается всегда, даже с пустым конфигом', () => {
-  assert.deepStrictEqual(iconSpecs(null), [{ id: 'new', path: 'claude.exe' }]);
+  const specs = iconSpecs(null);
+  assert.deepStrictEqual(specs.map(s => s.id), ['new', 'new']);
+  assert.strictEqual(specs[0].path, 'claude.exe');
+  assert.ok(specs[1].path.includes('*'), 'второй кандидат ищет каталог с версией по маске');
+  assert.ok(specs[1].path.endsWith('claude.exe'), 'и всё же кончается именем агента');
 });
 
 test('действие без icon и без argv в запрос не попадает', () => {
   const specs = iconSpecs({ actions: [{ id: 'broken', icon: '', argv: [] }] });
-  assert.deepStrictEqual(specs.map(s => s.id), ['new']);
+  assert.deepStrictEqual(specs.filter(s => s.id !== 'new'), []);
 });
 
 test('картинка выигрывает у глифа, когда она есть', () => {
