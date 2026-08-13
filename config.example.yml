@@ -110,6 +110,10 @@ backgroundRefresh: true
 #                               start`, который обратные слэши съедает и папку
 #                               не открывает
 #              {remotePath}     исходный путь на удалённом хосте
+# icon     — необязательный: откуда взять иконку пункта меню. Пусто —
+#            берётся argv[0]. Нужен там, где argv[0] не приложение: проводник
+#            открывается через `cmd /c start`, и без ключа пункт показал бы иконку
+#            командной строки. Переменные окружения раскрываются.
 #
 # Примеры под разные системы — возьмите те, что подходят вашей:
 # actions:
@@ -118,6 +122,7 @@ backgroundRefresh: true
 #     label: Open in Explorer
 #     hotkey: Ctrl+Shift+E
 #     argv: ['cmd', '/c', 'start', '', '{localPathSlash}']
+#     icon: '%SystemRoot%\explorer.exe'
 #   - id: cursor
 #     label: Open in Cursor
 #     hotkey: Ctrl+Shift+C

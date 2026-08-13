@@ -124,6 +124,9 @@
         label: nonEmpty(item.label) ? item.label.trim() : id,
         hotkey: taken ? '' : item.hotkey.trim(),
         parsedHotkey: taken ? null : parsed,
+        // Откуда брать иконку пункта. Пусто — берётся argv[0]; ключ нужен
+        // там, где argv[0] не приложение: `cmd /c start` у проводника.
+        icon: nonEmpty(item.icon) ? item.icon.trim() : '',
         argv,
       });
     }

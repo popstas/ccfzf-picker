@@ -161,3 +161,27 @@ test('backgroundRefresh по умолчанию включён', () => {
   // Нелогическое значение — умолчание, как у соседних ключей.
   assert.strictEqual(normalizeConfig({ backgroundRefresh: 'нет' }).backgroundRefresh, true);
 });
+
+// Иконку действия берут из отдельного ключа, а не из argv[0], потому что у
+// самого частого действия argv[0] — это `cmd`: проводник открывается через
+// `cmd /c start` (правило в CLAUDE.md), и иконка вышла бы от командной строки.
+test('icon у действия доезжает до нормализованного конфига', () => {
+  const c = normalizeConfig({
+    actions: [{
+      id: 'explorer',
+      label: 'Open in Explorer',
+      argv: ['cmd', '/c', 'start', '', '{localPathSlash}'],
+      icon: '%SystemRoot%\\explorer.exe',
+    }],
+  });
+  assert.strictEqual(c.actions[0].icon, '%SystemRoot%\\explorer.exe');
+});
+
+// То же правило, что у hotkey: испорченный ключ обнуляется, но действие
+// остаётся в меню. Спрятать пункт из-за опечатки в иконке — потерять доступ к
+// нему вовсе, а иконка тут украшение.
+test('мусорный icon обнуляется, а действие остаётся в списке', () => {
+  const c = normalizeConfig({ actions: [{ id: 'cursor', argv: ['cursor', '{localPath}'], icon: 42 }] });
+  assert.strictEqual(c.actions.length, 1, 'опечатка в иконке не повод прятать пункт');
+  assert.strictEqual(c.actions[0].icon, '');
+});
