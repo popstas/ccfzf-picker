@@ -4,7 +4,7 @@
 переключает на них. Открытые фокусируются, закрытые поднимаются заново.
 
 Ссылки вида `windows.js:10` — на файлы `windows-mqtt`, если не сказано иное.
-Соседний проект — `windows11-manager` (`D:\projects\js\windows11-manager`),
+Соседний проект — `windows11-manager` (`X:\projects\js\windows11-manager`),
 подключён как файловая зависимость.
 
 ## Зачем

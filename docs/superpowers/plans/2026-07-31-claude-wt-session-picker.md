@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Два репозитория: `D:\projects\js\windows-mqtt` (основной) и `D:\projects\js\windows11-manager` (сосед, подключён junction-ом как `node_modules/windows11-manager`). Правки в обоих разрешены. Правка файла в `node_modules/windows11-manager` — это правка соседнего репозитория, каталог не копия.
+- Два репозитория: `X:\projects\js\windows-mqtt` (основной) и `X:\projects\js\windows11-manager` (сосед, подключён junction-ом как `node_modules/windows11-manager`). Правки в обоих разрешены. Правка файла в `node_modules/windows11-manager` — это правка соседнего репозитория, каталог не копия.
 - Тесты — только чистая логика, никакого запуска нативных бинарей (AGENTS.md).
 - Перед любой командой cargo: `source "$HOME/.cargo/env"` (на этой машине cargo уже в PATH, шаг можно пропустить, если `cargo --version` отвечает).
 - `cargo check` запускать с `TAURI_CONFIG='{"bundle":{"resources":[]}}'`, иначе build script обходит `.git` внутри junction-а и падает с `Access is denied`.
@@ -27,7 +27,7 @@
 
 ## Файлы
 
-**windows11-manager** (`D:\projects\js\windows11-manager`):
+**windows11-manager** (`X:\projects\js\windows11-manager`):
 
 | Файл | Ответственность |
 | --- | --- |
@@ -37,7 +37,7 @@
 | `src/windows.js` (изменить) | `focusWindowById(id)` — примитив фокуса, которого в пакете не было |
 | `src/lib/index.js` (изменить) | реэкспорт `view.js` |
 
-**windows-mqtt** (`D:\projects\js\windows-mqtt`):
+**windows-mqtt** (`X:\projects\js\windows-mqtt`):
 
 | Файл | Ответственность |
 | --- | --- |
@@ -62,10 +62,10 @@
 Список сессий с номером монитора, признаком «открыта» и хендлом окна. Без хендла нечего фокусировать, а `claudeWtStatus()` его не знает и `cwd` не отдаёт.
 
 **Files:**
-- Create: `D:\projects\js\windows11-manager\src\claude-wt\view-helpers.js`
-- Create: `D:\projects\js\windows11-manager\src\claude-wt\view-helpers.test.js`
-- Create: `D:\projects\js\windows11-manager\src\claude-wt\view.js`
-- Modify: `D:\projects\js\windows11-manager\src\lib\index.js`
+- Create: `X:\projects\js\windows11-manager\src\claude-wt\view-helpers.js`
+- Create: `X:\projects\js\windows11-manager\src\claude-wt\view-helpers.test.js`
+- Create: `X:\projects\js\windows11-manager\src\claude-wt\view.js`
+- Modify: `X:\projects\js\windows11-manager\src\lib\index.js`
 
 **Interfaces:**
 - Consumes: `getWindows()` из `../windows.js` (массив объектов `Window` с `.id`, `.getTitle()`), `getMons()` из `../monitors.js` (массив, где индекс = номер монитора, нулевой элемент — заглушка), `readState(path)`, `loadSessionIndex(path)`, `resolveSession(title, sessionIndex, slots) -> {id, cwd, ambiguous} | null`, `stripTitleDecoration(title)`, `getClaudeWtConfig()`, `isTerminalWindow(w)`.
@@ -282,7 +282,7 @@ cd /d/projects/js/windows11-manager && git add src/claude-wt/view-helpers.js src
 Временный пункт трея нужен только для ручной проверки; задача 7 его убирает.
 
 **Files:**
-- Modify: `D:\projects\js\windows11-manager\src\windows.js`
+- Modify: `X:\projects\js\windows11-manager\src\windows.js`
 - Modify: `src/stdin-handler.js:12-25`
 - Modify: `src/mqtt-bridge.js:31-33`
 - Modify: `src/modules/windows.js`
@@ -376,7 +376,7 @@ Expected: PASS, 3 теста
 
 - [ ] **Step 5: Добавить примитив фокуса соседу**
 
-В `D:\projects\js\windows11-manager\src\windows.js` рядом с `getWindowById` добавить:
+В `X:\projects\js\windows11-manager\src\windows.js` рядом с `getWindowById` добавить:
 
 ```js
 // Windows parks minimized windows at x = -32000. restore() un-maximizes a
@@ -782,14 +782,14 @@ const groups = () => ([
   {
     label: 'Desktop 1 · Monitor 1',
     sessions: [
-      { id: 'a', label: 'ccfzf', cwd: '/home/popstas/projects/shell/ccfzf' },
-      { id: 'b', label: 'b2b-kpi', cwd: '/home/popstas/projects/text/ExpertizeMe' },
+      { id: 'a', label: 'ccfzf', cwd: '/home/user/projects/shell/ccfzf' },
+      { id: 'b', label: 'b2b-kpi', cwd: '/home/user/projects/text/ExpertizeMe' },
     ],
   },
   {
     label: 'Desktop 2 · Monitor 1',
     sessions: [
-      { id: 'c', label: 'do', cwd: '/home/popstas/projects/text/skill-do' },
+      { id: 'c', label: 'do', cwd: '/home/user/projects/text/skill-do' },
     ],
   },
 ]);
@@ -1263,7 +1263,7 @@ git add sessions.html scripts/prepare-frontend.js test/tauri-config.test.js && g
 - Modify: `src-tauri/tauri.conf.json`
 - Modify: `src-tauri/src/main.rs`
 - Modify: `config.example.yml`
-- Modify: `C:\Users\popstas\AppData\Roaming\windows-mqtt\config.yml`
+- Modify: `%APPDATA%\windows-mqtt\config.yml`
 - Test: `src-tauri/src/main.rs` (модуль `tests`)
 
 **Interfaces:**
@@ -1605,7 +1605,7 @@ tray:
   leftClick: log
 ```
 
-В рабочий конфиг `C:\Users\popstas\AppData\Roaming\windows-mqtt\config.yml` добавить то же самое, но с `leftClick: picker`.
+В рабочий конфиг `%APPDATA%\windows-mqtt\config.yml` добавить то же самое, но с `leftClick: picker`.
 
 - [ ] **Step 11: Собрать и проверить**
 

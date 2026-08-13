@@ -2,12 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Менеджер сессий claude-wt на macOS: список сессий с pc-virt, открытие
+**Goal:** Менеджер сессий claude-wt на macOS: список сессий с remote-host, открытие
 выбранной сессии в kitty, без отслеживания окон и без монтирования файловой
 системы.
 
-**Architecture:** Новый репозиторий `ccfzf-picker` на pc-virt
-(`~/projects/js/ccfzf-picker`). Три слоя: агрегатор `ccfzf --state` на pc-virt
+**Architecture:** Новый репозиторий `ccfzf-picker` на remote-host
+(`~/projects/js/ccfzf-picker`). Три слоя: агрегатор `ccfzf --state` на remote-host
 отдаёт весь список одним JSON по ssh; чистые функции во `frontend-src/` считают
 всё про строку сессии; Rust (Tauri 2) держит окно, хоткеи и запуск процессов.
 Windows-сторона не трогается — переводится отдельным спеком позже.
@@ -20,8 +20,8 @@ Tauri 2 + tauri-plugin-global-shortcut + tauri-plugin-shell, kitty.
 
 ## Global Constraints
 
-- Репозиторий: `~/projects/js/ccfzf-picker` на pc-virt (`popstas@pc-virt.popstas.pro`).
-- Задачи 1–8 выполняются **на pc-virt**. Задачи 9–14 требуют **macOS** (сборка Tauri).
+- Репозиторий: `~/projects/js/ccfzf-picker` на remote-host (`user@remote-host`).
+- Задачи 1–8 выполняются **на remote-host**. Задачи 9–14 требуют **macOS** (сборка Tauri).
 - Файлы `frontend-src/*.js` пишутся в UMD-шиме: работают и как `<script>`, и как
   CommonJS-модуль в тестах. Паттерн копируется из
   `windows-mqtt/frontend-src/session-glyph.js` дословно.
@@ -29,7 +29,7 @@ Tauri 2 + tauri-plugin-global-shortcut + tauri-plugin-shell, kitty.
 - Никаких чтений с сетевых дисков: единственный источник данных — `ccfzf --state`
   по ssh.
 - Глобальный хоткей пикера по умолчанию: `Cmd+Shift+T`.
-- `ccfzf` живёт по пути `/home/popstas/bin/ccfzf` (913 строк, bash + встроенный
+- `ccfzf` живёт по пути `/home/user/bin/ccfzf` (913 строк, bash + встроенный
   python в heredoc `PY`), правится на месте и **не копируется в репозиторий**.
 - Ни одна задача не меняет режим `dump` в ccfzf: от него зависит работающий
   пикер на Windows.
@@ -52,7 +52,7 @@ Tauri 2 + tauri-plugin-global-shortcut + tauri-plugin-shell, kitty.
 
 - [ ] **Step 1: Убедиться, что есть на чём ставить опыт**
 
-Запустить на pc-virt:
+Запустить на remote-host:
 
 ```bash
 ps -eo pid,tty,nlwp,comm,args --sort=pid | grep -E '^\s*[0-9]+ pts' | grep -i claude | grep -v grep
@@ -196,7 +196,7 @@ const good = {
   generated: 1785858452.9,
   sessions: [{
     id: '89e04faa-04fb-4828-96e2-21249b41fca3',
-    cwd: '/home/popstas/projects/x',
+    cwd: '/home/user/projects/x',
     title: 'b2b-kpi',
     gist: 'что-то',
     mtime: 1785858452.9,
@@ -226,7 +226,7 @@ test('сессия без id названа по индексу', () => {
 
 test('лишние поля не считаются ошибкой', () => {
   const extra = JSON.parse(JSON.stringify(good));
-  extra.sessions[0].projects = ['/home/popstas/projects/x'];
+  extra.sessions[0].projects = ['/home/user/projects/x'];
   assert.deepStrictEqual(validateState(extra), []);
 });
 
@@ -343,7 +343,7 @@ git commit -m "feat: скелет репозитория и валидатор �
 Режим `dump` не трогается: от него зависит работающий пикер на Windows.
 
 **Files:**
-- Modify: `/home/popstas/bin/ccfzf` (bash-разбор аргументов ~строки 56–94 и
+- Modify: `/home/user/bin/ccfzf` (bash-разбор аргументов ~строки 56–94 и
   ~650; python-блок `PY`: новая функция рядом с `usage_of` ~строка 234, новая
   ветка `mode` после `elif mode == "dump"` ~строка 645)
 
@@ -363,7 +363,7 @@ Expected: `ccfzf: unknown option --state` или подобная ошибка, 
 
 - [ ] **Step 2: Добавить чтение записи агента в python-блок**
 
-В `/home/popstas/bin/ccfzf`, сразу после функции `usage_of` (заканчивается на
+В `/home/user/bin/ccfzf`, сразу после функции `usage_of` (заканчивается на
 строке 248 `return int(num(o.get("contextPct"))), int(num(o.get("costUsd")))`),
 вставить:
 
@@ -449,7 +449,7 @@ elif mode == "state":
 
 - [ ] **Step 4: Добавить флаг `--state` в bash-часть**
 
-Три правки в `/home/popstas/bin/ccfzf`:
+Три правки в `/home/user/bin/ccfzf`:
 
 1. После строки 58 (`dump_only=0`) добавить:
 
@@ -507,7 +507,7 @@ Expected: ненулевое число сессий с `agent`, у одной �
 - [ ] **Step 6: Убедиться, что режим dump не сломан**
 
 ```bash
-ccfzf --dump && node -e "const j=require('/home/popstas/.ccfzf.sessions.json');console.log('dump ok',j.sessions.length)"
+ccfzf --dump && node -e "const j=require('/home/user/.ccfzf.sessions.json');console.log('dump ok',j.sessions.length)"
 ```
 
 Expected: `dump ok 200`
@@ -527,7 +527,7 @@ Expected: `ccfzf: --state takes no other mode flags`, `exit=2`
 
 ```bash
 cd ~/projects/js/ccfzf-picker
-mkdir -p vendor && cp /home/popstas/bin/ccfzf vendor/ccfzf
+mkdir -p vendor && cp /home/user/bin/ccfzf vendor/ccfzf
 git add -A
 git commit -m "feat: ccfzf --state отдаёт список сессий с данными агента"
 ```
@@ -540,7 +540,7 @@ git commit -m "feat: ccfzf --state отдаёт список сессий с д�
 «чем сессия занята прямо сейчас».
 
 **Files:**
-- Modify: `/home/popstas/bin/ccfzf` (python-блок: `running_sessions()` ~строки
+- Modify: `/home/user/bin/ccfzf` (python-блок: `running_sessions()` ~строки
   349–423, ветка `mode == "state"` из Task 3)
 - Modify: `~/projects/js/ccfzf-picker/vendor/ccfzf`
 
@@ -560,7 +560,7 @@ Expected: `pid`, `tty`, `tmux` — `undefined`
 
 - [ ] **Step 2: Научить running_sessions() возвращать процессы**
 
-В `/home/popstas/bin/ccfzf`, в функции `running_sessions()`:
+В `/home/user/bin/ccfzf`, в функции `running_sessions()`:
 
 1. Строку 364 `live, fresh, agents = set(), [], {}` заменить на:
 
@@ -652,7 +652,7 @@ import glob, json, os, re, subprocess, sys, time
 Функция теперь возвращает три значения. Найти все вызовы:
 
 ```bash
-grep -n "running_sessions()" /home/popstas/bin/ccfzf
+grep -n "running_sessions()" /home/user/bin/ccfzf
 ```
 
 Ожидаются вызовы в ветках `projects`, `sessions`, `dump` и `state`. В первых
@@ -715,7 +715,7 @@ Expected: `'probe:0.0'`. Убрать за собой: `tmux kill-session -t pro
 - [ ] **Step 9: Убедиться, что dump и интерактивный режим не сломаны**
 
 ```bash
-ccfzf --dump && node -e "const j=require('/home/popstas/.ccfzf.sessions.json');console.log('dump ok',j.sessions.length,'live',j.sessions.filter(s=>s.live).length)"
+ccfzf --dump && node -e "const j=require('/home/user/.ccfzf.sessions.json');console.log('dump ok',j.sessions.length,'live',j.sessions.filter(s=>s.live).length)"
 ```
 
 Expected: `dump ok 200 live N`, где N совпадает с числом живых из Step 7.
@@ -723,7 +723,7 @@ Expected: `dump ok 200 live N`, где N совпадает с числом жи
 - [ ] **Step 10: Commit**
 
 ```bash
-cd ~/projects/js/ccfzf-picker && cp /home/popstas/bin/ccfzf vendor/ccfzf
+cd ~/projects/js/ccfzf-picker && cp /home/user/bin/ccfzf vendor/ccfzf
 git add -A
 git commit -m "feat: pid, tty и tmux в ccfzf --state"
 ```
@@ -925,7 +925,7 @@ const { buildSessionList } = require('../frontend-src/session-list');
 
 function state(extra) {
   return Object.assign({
-    id: 'a', cwd: '/home/popstas/x', title: 'Тема', gist: '', doing: '',
+    id: 'a', cwd: '/home/user/x', title: 'Тема', gist: '', doing: '',
     mtime: 100, live: false, frozen: false, kind: 'interactive', parent: '',
     pid: 0, tty: '', tmux: null, agent: null,
   }, extra || {});
@@ -1116,13 +1116,13 @@ const assert = require('node:assert');
 const { chooseOpenStrategy, buildOpenCommand } = require('../frontend-src/open-strategy');
 
 const OPTS = {
-  sshHost: 'popstas@pc-virt.popstas.pro',
+  sshHost: 'user@remote-host',
   terminal: { file: 'open', args: ['-na', 'kitty', '--args'] },
 };
 
 function row(extra) {
   return Object.assign({
-    id: 'aaaa-bbbb', cwd: '/home/popstas/projects/x',
+    id: 'aaaa-bbbb', cwd: '/home/user/projects/x',
     live: false, pid: 0, tty: '', tmux: null,
   }, extra || {});
 }
@@ -1157,7 +1157,7 @@ test('команда attach ведёт в панель tmux', () => {
   assert.strictEqual(cmd.destructive, false);
   assert.deepStrictEqual(cmd.argv, [
     'open', '-na', 'kitty', '--args',
-    'ssh', '-t', 'popstas@pc-virt.popstas.pro',
+    'ssh', '-t', 'user@remote-host',
     "tmux attach -t 'work:2.0'",
   ]);
 });
@@ -1173,7 +1173,7 @@ test('команда resume заходит в каталог сессии', () =
   assert.strictEqual(cmd.destructive, false);
   assert.strictEqual(
     cmd.argv[cmd.argv.length - 1],
-    "cd '/home/popstas/projects/x' && claude --resume 'aaaa-bbbb'",
+    "cd '/home/user/projects/x' && claude --resume 'aaaa-bbbb'",
   );
 });
 
@@ -1187,8 +1187,8 @@ test('перехват помечен необратимым и убивает �
 });
 
 test('кавычки в пути не разрывают команду', () => {
-  const cmd = buildOpenCommand(row({ cwd: "/home/popstas/it's" }), 'resume', OPTS);
-  assert.ok(cmd.argv[cmd.argv.length - 1].includes("/home/popstas/it'\\''s"));
+  const cmd = buildOpenCommand(row({ cwd: "/home/user/it's" }), 'resume', OPTS);
+  assert.ok(cmd.argv[cmd.argv.length - 1].includes("/home/user/it'\\''s"));
 });
 
 test('незнакомая стратегия не даёт команды', () => {
@@ -1323,16 +1323,16 @@ git add -A && git commit -m "feat: выбор стратегии открыти�
 
 - [ ] **Step 1: Скопировать файлы, которые переносятся без правок**
 
-С Windows-машины (или через смонтированный `V:`), из
-`D:\projects\js\windows-mqtt`:
+С Windows-машины (или через смонтированный `Y:`), из
+`X:\projects\js\windows-mqtt`:
 
 ```bash
 scp frontend-src/session-glyph.js frontend-src/session-info.js \
     frontend-src/picker-list-sync.js frontend-src/picker-filter.js \
-    popstas@pc-virt.popstas.pro:~/projects/js/ccfzf-picker/frontend-src/
+    user@remote-host:~/projects/js/ccfzf-picker/frontend-src/
 scp test/session-glyph.test.js test/session-info.test.js \
-    popstas@pc-virt.popstas.pro:~/projects/js/ccfzf-picker/test/
-scp sessions.html popstas@pc-virt.popstas.pro:~/projects/js/ccfzf-picker/
+    user@remote-host:~/projects/js/ccfzf-picker/test/
+scp sessions.html user@remote-host:~/projects/js/ccfzf-picker/
 ```
 
 - [ ] **Step 2: Проверить, что перенесённые тесты проходят**
@@ -1352,7 +1352,7 @@ const { normalizeSort, cycleSort, groupSessions } = require('../frontend-src/ses
 
 function row(extra) {
   return Object.assign({
-    id: 'a', title: 'T', cwd: '/home/popstas/x', live: false,
+    id: 'a', title: 'T', cwd: '/home/user/x', live: false,
     cost: 0, updated: 0, unread: false,
   }, extra || {});
 }
@@ -1514,7 +1514,7 @@ macOS можно только там.
 - [ ] **Step 1: Клонировать репозиторий на мак**
 
 ```bash
-git clone popstas@pc-virt.popstas.pro:projects/js/ccfzf-picker ~/projects/ccfzf-picker
+git clone user@remote-host:projects/js/ccfzf-picker ~/projects/ccfzf-picker
 cd ~/projects/ccfzf-picker && npm test
 ```
 
@@ -1732,7 +1732,7 @@ git push
 
 ---
 
-### Task 10: Транспорт до pc-virt
+### Task 10: Транспорт до remote-host
 
 **Files:**
 - Create: `src-tauri/src/state_source.rs`
@@ -1749,8 +1749,8 @@ git push
 В `~/.ssh/config` на маке:
 
 ```
-Host pc-virt
-  HostName pc-virt.popstas.pro
+Host remote-host
+  HostName remote-host
   User popstas
   ControlMaster auto
   ControlPath ~/.ssh/cm-%r@%h:%p
@@ -1761,8 +1761,8 @@ Host pc-virt
 - [ ] **Step 2: Замерить, сколько стоит вызов**
 
 ```bash
-ssh pc-virt ccfzf --state > /dev/null   # первый: поднимает канал
-time ssh pc-virt ccfzf --state > /tmp/state.json
+ssh remote-host ccfzf --state > /dev/null   # первый: поднимает канал
+time ssh remote-host ccfzf --state > /tmp/state.json
 node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/state.json')).sessions.length)"
 ```
 
@@ -1776,7 +1776,7 @@ Expected: второй вызов заметно быстрее первого, 
 ```rust
 use std::process::Command;
 
-/// Один вызов агрегатора на pc-virt.
+/// Один вызов агрегатора на remote-host.
 ///
 /// Ответ не разбирается и не чинится: форму проверяет фронтенд той же
 /// функцией, что и тесты. Здесь важно только отличить «не смогли спросить» от
@@ -1813,7 +1813,7 @@ mod state_source;
 #[tauri::command]
 fn fetch_state() -> Result<serde_json::Value, String> {
     // Хост зашит до Task 14, где появляется конфиг.
-    state_source::fetch("pc-virt")
+    state_source::fetch("remote-host")
 }
 ```
 
@@ -1836,7 +1836,7 @@ Expected: число, совпадающее со Step 2.
 
 - [ ] **Step 6: Проверить, что ошибка доезжает читаемой**
 
-Временно заменить `"pc-virt"` на `"pc-virt-нет-такого"`, пересобрать, повторить
+Временно заменить `"remote-host"` на `"remote-host-нет-такого"`, пересобрать, повторить
 вызов.
 
 Expected: отказ с текстом `ssh exited with …`, а не молчаливый `null`. Вернуть
@@ -1845,7 +1845,7 @@ Expected: отказ с текстом `ssh exited with …`, а не молча
 - [ ] **Step 7: Commit**
 
 ```bash
-git add -A && git commit -m "feat: транспорт до pc-virt через ssh"
+git add -A && git commit -m "feat: транспорт до remote-host через ssh"
 ```
 
 ---
@@ -1936,10 +1936,10 @@ Expected: список сессий с заголовками, возрасто�
 
 - [ ] **Step 5: Проверить, что опрос прекращается**
 
-Закрыть пикер по Esc, на pc-virt посмотреть:
+Закрыть пикер по Esc, на remote-host посмотреть:
 
 ```bash
-ssh pc-virt 'ps -eo etimes,args | grep "ccfzf --state" | grep -v grep'
+ssh remote-host 'ps -eo etimes,args | grep "ccfzf --state" | grep -v grep'
 ```
 
 Expected: пусто — при закрытом пикере агрегатор не запускается.
@@ -2054,7 +2054,7 @@ window.__TAURI__.core.invoke('load_seen')
   .catch(e => { document.getElementById('statusline').textContent = String(e); });
 
 const OPEN_OPTS = {
-  sshHost: 'pc-virt',
+  sshHost: 'remote-host',
   terminal: { file: 'open', args: ['-na', 'kitty', '--args'] },
 };
 // Заполняется из конфига в Task 14; до тех пор берётся вердикт опыта.
@@ -2072,7 +2072,7 @@ async function openSession(row) {
   if (cmd.destructive) {
     const ok = confirm(
       `Перехватить сессию «${row.title}»?\n\n`
-      + `Процесс ${row.pid} на pc-virt получит SIGHUP и завершится, окно на Windows закроется.\n`
+      + `Процесс ${row.pid} на remote-host получит SIGHUP и завершится, окно на Windows закроется.\n`
       + `Фоновые задачи, запущенные в её шелле, умрут вместе с ней.`,
     );
     if (!ok) return;
@@ -2091,7 +2091,7 @@ async function openSession(row) {
 
 Открыть пикер, выбрать сессию без пометки «живая», нажать Enter.
 
-Expected: открывается окно kitty, в нём ssh на pc-virt и продолженная сессия
+Expected: открывается окно kitty, в нём ssh на remote-host и продолженная сессия
 claude; пикер закрылся; кружок непрочитанного у этой строки погас при следующем
 открытии пикера.
 
@@ -2103,7 +2103,7 @@ Expected: диалог с pid и предупреждением. Отказ — 
 жива:
 
 ```bash
-ssh pc-virt 'ps -p <pid> -o pid,args'
+ssh remote-host 'ps -p <pid> -o pid,args'
 ```
 
 - [ ] **Step 6: Проверить перехват до конца**
@@ -2118,7 +2118,7 @@ Expected: окно kitty открылось, старый процесс ушё�
 Создать каталог с апострофом и запустить в нём сессию:
 
 ```bash
-ssh pc-virt "mkdir -p \"/home/popstas/tmp/it's\" && cd \"/home/popstas/tmp/it's\" && ls"
+ssh remote-host "mkdir -p \"/home/user/tmp/it's\" && cd \"/home/user/tmp/it's\" && ls"
 ```
 
 После появления сессии в списке открыть её из пикера.
@@ -2290,7 +2290,7 @@ const { normalizeConfig } = require('../frontend-src/config-shape');
 
 test('пустой конфиг даёт рабочие значения по умолчанию', () => {
   const c = normalizeConfig(null);
-  assert.strictEqual(c.sshHost, 'pc-virt');
+  assert.strictEqual(c.sshHost, 'remote-host');
   assert.strictEqual(c.hotkey, 'Cmd+Shift+T');
   assert.strictEqual(c.caps.reptyr, false);
   assert.deepStrictEqual(c.terminal, { file: 'open', args: ['-na', 'kitty', '--args'] });
@@ -2305,16 +2305,16 @@ test('заданные значения перекрывают умолчани�
 
 test('проект без пути отбрасывается, а не роняет конфиг', () => {
   const c = normalizeConfig({ projects: [
-    { path: '/home/popstas/x', hotkey: 'Cmd+Shift+1' },
+    { path: '/home/user/x', hotkey: 'Cmd+Shift+1' },
     { hotkey: 'Cmd+Shift+2' },
     'мусор',
   ] });
-  assert.deepStrictEqual(c.projects, [{ path: '/home/popstas/x', hotkey: 'Cmd+Shift+1' }]);
+  assert.deepStrictEqual(c.projects, [{ path: '/home/user/x', hotkey: 'Cmd+Shift+1' }]);
 });
 
 test('проект без хоткея остаётся в списке', () => {
-  const c = normalizeConfig({ projects: [{ path: '/home/popstas/y' }] });
-  assert.deepStrictEqual(c.projects, [{ path: '/home/popstas/y', hotkey: '' }]);
+  const c = normalizeConfig({ projects: [{ path: '/home/user/y' }] });
+  assert.deepStrictEqual(c.projects, [{ path: '/home/user/y', hotkey: '' }]);
 });
 ```
 
@@ -2333,7 +2333,7 @@ Expected: FAIL — `Cannot find module '../frontend-src/config-shape'`
   else root.ConfigShape = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   const DEFAULTS = {
-    sshHost: 'pc-virt',
+    sshHost: 'remote-host',
     hotkey: 'Cmd+Shift+T',
     terminal: { file: 'open', args: ['-na', 'kitty', '--args'] },
     caps: { reptyr: false },
@@ -2470,7 +2470,7 @@ window.__TAURI__.core.invoke('load_config')
 `~/.config/ccfzf-picker/config.yaml`:
 
 ```yaml
-sshHost: pc-virt
+sshHost: remote-host
 hotkey: Cmd+Shift+T
 caps:
   # Значение — вердикт из docs/reptyr-experiment.md
@@ -2479,9 +2479,9 @@ terminal:
   file: open
   args: ['-na', 'kitty', '--args']
 projects:
-  - path: /home/popstas/projects/js/windows-mqtt
+  - path: /home/user/projects/js/windows-mqtt
     hotkey: Cmd+Shift+1
-  - path: /home/popstas/projects/js/windows11-manager
+  - path: /home/user/projects/js/windows11-manager
     hotkey: Cmd+Shift+2
 ```
 
@@ -2490,7 +2490,7 @@ projects:
 Пересобрать. Нажать `Cmd+Shift+1`.
 
 Expected: открывается kitty с новой сессией claude в
-`/home/popstas/projects/js/windows-mqtt`; окно пикера при этом не появляется.
+`/home/user/projects/js/windows-mqtt`; окно пикера при этом не появляется.
 
 Затем убрать файл конфига и запустить снова.
 
@@ -2509,8 +2509,8 @@ Expected: PASS — все тесты задач 2–14.
 ## Проверка целиком
 
 - [ ] `npm test` на маке — все тесты проходят
-- [ ] `ssh pc-virt ccfzf --state | node scripts/check-state.js` — `ok: N sessions`
-- [ ] `ssh pc-virt ccfzf --dump` и пикер на Windows работают как прежде
+- [ ] `ssh remote-host ccfzf --state | node scripts/check-state.js` — `ok: N sessions`
+- [ ] `ssh remote-host ccfzf --dump` и пикер на Windows работают как прежде
 - [ ] `Cmd+Shift+T` открывает список, Esc закрывает, опрос при закрытом окне не идёт
 - [ ] Мёртвая сессия открывается в kitty и продолжается
 - [ ] Живая сессия требует подтверждения и после него переходит на мак

@@ -2,7 +2,7 @@
 
 ## Problem
 
-Дамп `~/.ccfzf.sessions.json` (с Windows — `V:/.ccfzf.sessions.json`) обновляется только при запуске ccfzf. Новая или переименованная сессия может минутами не попадать в индекс, пока кто-то не откроет ccfzf. Пикер windows-mqtt при открытии только читает уже лежащий файл.
+Дамп `~/.ccfzf.sessions.json` (с Windows — `Y:/.ccfzf.sessions.json`) обновляется только при запуске ccfzf. Новая или переименованная сессия может минутами не попадать в индекс, пока кто-то не откроет ccfzf. Пикер windows-mqtt при открытии только читает уже лежащий файл.
 
 ## Solution
 
@@ -11,7 +11,7 @@
 
 ## Details
 
-- Хост: `sessionOpen.sshHost` (default `popstas@pc-virt.popstas.pro`).
+- Хост: `sessionOpen.sshHost` (default `user@remote-host`).
 - SSH без `wt.exe` — без окна терминала.
 - Ошибки SSH только в лог.
 - Существующий `dump_state` в интерактивном ccfzf остаётся фоновым (`&`); `--dump` — foreground, чтобы remote-вызов завершался после записи.

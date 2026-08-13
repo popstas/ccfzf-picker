@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** On every sessions-picker open, refresh `V:/.ccfzf.sessions.json` via `ssh … ccfzf --dump`.
+**Goal:** On every sessions-picker open, refresh `Y:/.ccfzf.sessions.json` via `ssh … ccfzf --dump`.
 
 **Architecture:** Add a sync `--dump` mode to ccfzf. From windows-mqtt `startSessionsFeed()`, spawn a non-interactive SSH dump once (fire-and-forget). Existing mtime/cache + daemon late-bind pick up the new file.
 
@@ -20,7 +20,7 @@
 
 | File | Role |
 |---|---|
-| `V:/projects/shell/ccfzf/ccfzf` | `--dump` flag, sync dump, exit |
+| `Y:/projects/shell/ccfzf/ccfzf` | `--dump` flag, sync dump, exit |
 | `windows-mqtt/src/picker/session-open-helpers.js` | pure `buildDumpRefreshCommand` |
 | `windows-mqtt/test/session-open-helpers.test.js` | tests for that helper |
 | `windows-mqtt/src/modules/windows.js` | call refresh from `startSessionsFeed` |
@@ -32,7 +32,7 @@
 - [ ] Add `--dump` to the arg parser (mutually exclusive with `--print`/`--kiosk`/`--session` is fine to ignore — just dump and exit).
 - [ ] After deps check / before interactive setup, if dump-only: run python dump **synchronously** (no `&`), exit 0.
 - [ ] Document in usage header / README one line.
-- [ ] Verify: `ssh popstas@pc-virt.popstas.pro ccfzf --dump` updates `V:/.ccfzf.sessions.json` mtime.
+- [ ] Verify: `ssh user@remote-host ccfzf --dump` updates `Y:/.ccfzf.sessions.json` mtime.
 
 ### Task 2: windows-mqtt refresh helper (TDD)
 

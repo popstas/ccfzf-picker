@@ -54,7 +54,7 @@
 const state = liveState ?? readState(cfg.statePath);
 ```
 
-`cfg.statePath` лежит на `V:` — сетевом диске. Про чтение с него в этом проекте
+`cfg.statePath` лежит на `Y:` — сетевом диске. Про чтение с него в этом проекте
 уже собран целый список граблей (кэш SMB, врущий `mtime`, открытие файла с
 правом записи перед чтением). Синхронное чтение оттуда в обработчике блокирует
 единственный поток node, и если SMB не отвечает — оно не блокирует его на
@@ -96,14 +96,14 @@ CLI-сервер библиотеки (`node src/index.js --port …` с `/place
 `startHttpServer` намеренно **не** экспортируется из `src/lib/index.js` — ровно
 затем, чтобы поднять его внутри демона было нельзя по недосмотру. Прежде чем
 возвращать, проверьте догадку выше: снимите стек зависшего процесса и посмотрите,
-стоит ли он на чтении `V:`.
+стоит ли он на чтении `Y:`.
 
 ## Как собирать этот репозиторий
 
 Не через ssh напрямую. `npm run deploy-local` падает сразу:
 
 ```
-Error: UNKNOWN: unknown error, stat 'D:\projects\js\windows-mqtt\node_modules\windows11-manager'
+Error: UNKNOWN: unknown error, stat 'X:\projects\js\windows-mqtt\node_modules\windows11-manager'
     at Object.realpathSync (node:fs:2800:17)
     at prepareDeps (scripts/deps-bundle.js:68:17)
 ```
