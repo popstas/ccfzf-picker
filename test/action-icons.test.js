@@ -1,16 +1,34 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { GLYPHS, iconSpecs, actionIcon } = require('../frontend-src/action-icons');
-const { BUILTIN_ACTION_KEYS } = require('../frontend-src/action-hotkey');
+const { availableActions } = require('../frontend-src/session-actions');
 
 // Сторож на будущее: новый встроенный пункт приедет в меню без значка, и
-// заметить это можно только глазами на той машине, где пикер стоит.
-// `open-remote` в BUILTIN_ACTION_KEYS нет — у него нет прямой клавиши, но
-// строка в меню есть.
+// заметить это можно только глазами на той машине, где пикер стоит. Список
+// id берётся не из BUILTIN_ACTION_KEYS (там только те, у кого есть прямая
+// клавиша — `open-remote` в неё уже пришлось дописывать руками), а прямым
+// вызовом availableActions на строке, у которой есть всё сразу: живая сессия
+// с pid (даёт attach), cwd (даёт new), pr_url с номером PR (даёт pr),
+// lastActivity и agentSeen (даёт unread) — info в списке всегда.
 test('у каждого встроенного пункта есть глиф', () => {
-  for (const id of [...Object.keys(BUILTIN_ACTION_KEYS), 'open-remote']) {
+  const row = {
+    kind: 'session',
+    cwd: '/home/user/projects/ccfzf',
+    live: true,
+    pid: 4242,
+    pr_url: 'https://github.com/popstas/ccfzf/pull/3',
+    lastActivity: 1785870255,
+    agentSeen: 1785870300,
+  };
+  const ids = availableActions(row).map(a => a.id);
+  assert.ok(ids.length > 1, 'availableActions вернул слишком мало — тест сторожит не то');
+  for (const id of ids) {
     assert.ok(GLYPHS[id], `нет глифа для встроенного пункта ${id}`);
   }
+  // `open-remote` availableActions не отдаёт вовсе — этот пункт добавляет
+  // страница (окно уже открыто на этой машине), а не сборка списка действий.
+  // Дописан руками, потому и особый.
+  assert.ok(GLYPHS['open-remote'], 'нет глифа для open-remote');
 });
 
 test('icon перевешивает argv[0], а без него берётся argv[0]', () => {
