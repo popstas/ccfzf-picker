@@ -458,8 +458,11 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
     // по замыслу, как у фокуса и восстановления: приёмник отчитывается в свой
     // журнал, а не нам.
     let cwd = cwd.to_string();
+    // Ответа агрегатора здесь нет — только конфиг, поэтому просимый адрес
+    // всегда пуст, и `resolve_base` откатывается на базу из конфига.
+    let base = crate::mqtt::resolve_base(&broker, "");
     tauri::async_runtime::spawn_blocking(move || {
-        if let Err(e) = crate::mqtt::open_project(&broker, &cwd) {
+        if let Err(e) = crate::mqtt::open_project(&broker, &base, &cwd) {
             eprintln!("ccfzf-picker: cannot ask to open {cwd}: {e}");
         }
     });

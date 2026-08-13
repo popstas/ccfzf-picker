@@ -2,13 +2,18 @@
 //!
 //! Прямой http до трекера есть не отовсюду, а брокер в этой установке слушают
 //! обе машины. Топики и формат тела не наши: их уже слушает демон на
-//! Windows-машине (`<base>/windows/claude-focus` и
-//! `<base>/windows/claude-session-unread`, оба с `{"id": …}`,
-//! `<base>/windows/claude-snapshot-restore` с телом `{"id": …}` и
-//! необязательным `sessionIds`, и `<base>/windows/claude-session-open` с телом
+//! Windows-машине (`<база машины>/claude-focus` и
+//! `<база машины>/claude-session-unread`, оба с `{"id": …}`,
+//! `<база машины>/claude-snapshot-restore` с телом `{"id": …}` и
+//! необязательным `sessionIds`, и `<база машины>/claude-session-open` с телом
 //! `{"action": "terminal"}`, где необязательны оба опознавателя — `id`
 //! известной сессии и `cwd` проекта), и придумывать
 //! рядом свои значило бы заводить приёмник, которого нет.
+//!
+//! Базу называет трекер той машины, куда адресована просьба, — она приезжает
+//! в ответе агрегатора. `<config.base>/windows` — только запасной ход: на
+//! него откатывается пустая или не прошедшая просеивание строка, то есть
+//! трекер прежней версии либо испорченный файл на чужой машине.
 //!
 //! Настройки брокера читаются здесь, из того же `config.yaml`, а не приходят
 //! из фронтенда: иначе пароль ездил бы через мост в webview на каждое нажатие.
@@ -22,15 +27,15 @@ use rumqttc::{Client, ConnectionError, Event, MqttOptions, Packet, QoS, RecvTime
 /// окна, и лучше сказать «не вышло», чем молчать.
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Хвосты топиков. `base` из конфига — общий префикс установки; всё, что после
-/// него, задано приёмником и меняться отсюда не может.
-const FOCUS_TOPIC: &str = "/windows/claude-focus";
-const UNREAD_TOPIC: &str = "/windows/claude-session-unread";
-const RESTORE_TOPIC: &str = "/windows/claude-snapshot-restore";
+/// Хвосты топиков. База — адрес конкретной машины, разрешённый `resolve_base`;
+/// всё, что после неё, задано приёмником и меняться отсюда не может.
+const FOCUS_TOPIC: &str = "/claude-focus";
+const UNREAD_TOPIC: &str = "/claude-session-unread";
+const RESTORE_TOPIC: &str = "/claude-snapshot-restore";
 /// Просьба к windows11-manager открыть сессию у себя. Отличается от
 /// `FOCUS_TOPIC` тем, что ни окна, ни самой сессии у трекера может не быть
 /// вовсе: по каталогу проекта менеджер поднимет терминал с нужным профилем.
-const OPEN_TOPIC: &str = "/windows/claude-session-open";
+const OPEN_TOPIC: &str = "/claude-session-open";
 
 pub struct Broker {
     pub host: String,
@@ -77,8 +82,8 @@ pub fn broker_from_config(raw: &serde_json::Value) -> Broker {
 }
 
 /// Попросить о подъёме окна сессии.
-pub fn focus(broker: &Broker, id: &str) -> Result<(), String> {
-    publish(broker, FOCUS_TOPIC, &serde_json::json!({ "id": id }).to_string())
+pub fn focus(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
+    publish(broker, base, FOCUS_TOPIC, &serde_json::json!({ "id": id }).to_string())
 }
 
 /// Вернуть сессию в непрочитанное — у трекера, а не у себя.
@@ -91,8 +96,8 @@ pub fn focus(broker: &Broker, id: &str) -> Result<(), String> {
 /// Шлётся независимо от того, своя ли это машина: `windowHost` отвечает на
 /// вопрос «поднимать ли окно», а отметка о просмотре приезжает в список на
 /// любой машине.
-pub fn unread(broker: &Broker, id: &str) -> Result<(), String> {
-    publish(broker, UNREAD_TOPIC, &serde_json::json!({ "id": id }).to_string())
+pub fn unread(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
+    publish(broker, base, UNREAD_TOPIC, &serde_json::json!({ "id": id }).to_string())
 }
 
 /// Попросить открыть сессию на машине трекера.
@@ -104,8 +109,8 @@ pub fn unread(broker: &Broker, id: &str) -> Result<(), String> {
 /// режет такой запрос как cross-origin ещё до отправки. Поддержано одно
 /// действие, `terminal`: остальные (cursor, explorer, pr) осмысленны только
 /// там, где стоит человек, а не там, где висит окно.
-pub fn open(broker: &Broker, id: &str, cwd: &str) -> Result<(), String> {
-    publish(broker, OPEN_TOPIC, &open_payload(id, cwd))
+pub fn open(broker: &Broker, base: &str, id: &str, cwd: &str) -> Result<(), String> {
+    publish(broker, base, OPEN_TOPIC, &open_payload(id, cwd))
 }
 
 /// Тело просьбы об открытии.
@@ -133,8 +138,8 @@ fn open_payload(id: &str, cwd: &str) -> String {
 /// Windows, и отвечает на него `openClaudeProject` у менеджера, а не список
 /// пикера: у скрытого окна тот отстаёт до восьми минут (бэкофф в `poller.rs`),
 /// а при выключенном фоновом опросе не обновляется вовсе.
-pub fn open_project(broker: &Broker, cwd: &str) -> Result<(), String> {
-    publish(broker, OPEN_TOPIC, &open_project_payload(cwd))
+pub fn open_project(broker: &Broker, base: &str, cwd: &str) -> Result<(), String> {
+    publish(broker, base, OPEN_TOPIC, &open_project_payload(cwd))
 }
 
 /// Тело просьбы об открытии проекта: действие и каталог, без `id`.
@@ -158,8 +163,8 @@ fn open_project_payload(cwd: &str) -> String {
 /// только начиная с версии менеджера, где сделана правка № 1 по итогам
 /// финального ревью; уже выкаченная на момент этого коммита версия шлёт отказ
 /// только в журнал, честнее сказать это прямо, чем утверждать за неё лишнее.
-pub fn open_new(broker: &Broker, cwd: &str, name: &str) -> Result<(), String> {
-    publish(broker, OPEN_TOPIC, &open_new_payload(cwd, name))
+pub fn open_new(broker: &Broker, base: &str, cwd: &str, name: &str) -> Result<(), String> {
+    publish(broker, base, OPEN_TOPIC, &open_new_payload(cwd, name))
 }
 
 /// Тело просьбы о новой сессии: действие, каталог и имя.
@@ -190,13 +195,42 @@ fn restore_payload(id: &str, session_ids: &[String]) -> String {
 /// в свой лог. Заводить здесь приёмник ради отчёта значило бы держать
 /// соединение и ждать — ровно то, чего вся эта дорога избегает. Не сработало
 /// — видно на экране, окна там же.
-pub fn restore(broker: &Broker, id: &str, session_ids: &[String]) -> Result<(), String> {
-    publish(broker, RESTORE_TOPIC, &restore_payload(id, session_ids))
+pub fn restore(broker: &Broker, base: &str, id: &str, session_ids: &[String]) -> Result<(), String> {
+    publish(broker, base, RESTORE_TOPIC, &restore_payload(id, session_ids))
 }
 
-/// Полный топик: префикс установки плюс заданный приёмником хвост.
-fn topic_of(broker: &Broker, tail: &str) -> String {
-    format!("{}{}", broker.base, tail)
+/// Полный топик: разрешённая база плюс заданный приёмником хвост.
+fn topic_of(base: &str, tail: &str) -> String {
+    format!("{base}{tail}")
+}
+
+/// Куда публиковать: адрес, названный трекером, либо своя база из конфига.
+///
+/// Названный адрес приезжает из ответа агрегатора, то есть из файла, который
+/// написали на чужой машине. Кавычить такую строку было бы половиной защиты —
+/// её и не кавычат: подходит белый список, как у `remoteDir` в трекере.
+/// Отдельно про `#` и `+`: это подстановочные знаки MQTT, и публикация по
+/// такому топику ушла бы мимо всех, кто её ждёт. Пустой сегмент и ведущая
+/// косая — то же самое, только тише.
+///
+/// Отказ откатывает на базу из конфига, а не роняет просьбу: подъём окна
+/// важнее строгости, и старый трекер адреса не называет вовсе.
+pub fn resolve_base(broker: &Broker, asked: &str) -> String {
+    let fallback = format!("{}/windows", broker.base);
+    let s = asked.trim();
+    if s.is_empty() {
+        return fallback;
+    }
+    let ok = !s.starts_with('/')
+        && !s.ends_with('/')
+        && !s.contains("//")
+        && s.split('/').all(|seg| {
+            !seg.is_empty()
+                && seg
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+        });
+    if ok { s.to_string() } else { fallback }
 }
 
 /// Опубликовать готовое тело в топик установки и дождаться подтверждения.
@@ -204,7 +238,7 @@ fn topic_of(broker: &Broker, tail: &str) -> String {
 /// Ждём именно `PubAck`, а не просто отправки: без него «опубликовано» значит
 /// лишь «сложено в очередь клиента», и брокер, до которого не дотянулись, был
 /// бы неотличим от сработавшего.
-fn publish(broker: &Broker, tail: &str, payload: &str) -> Result<(), String> {
+fn publish(broker: &Broker, base: &str, tail: &str, payload: &str) -> Result<(), String> {
     let mut options = MqttOptions::new(
         // Идентификатор с pid: два пикера этой установки (на маке и на Windows)
         // с одинаковым id выбивали бы друг друга из брокера.
@@ -217,7 +251,7 @@ fn publish(broker: &Broker, tail: &str, payload: &str) -> Result<(), String> {
         options.set_credentials(&broker.user, &broker.password);
     }
 
-    let topic = topic_of(broker, tail);
+    let topic = topic_of(base, tail);
 
     let (client, mut connection) = Client::new(options, 10);
     client
@@ -254,9 +288,13 @@ fn publish(broker: &Broker, tail: &str, payload: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        broker_from_config, open_new_payload, open_payload, open_project_payload, restore_payload,
-        topic_of, FOCUS_TOPIC, OPEN_TOPIC, RESTORE_TOPIC, UNREAD_TOPIC,
+        broker_from_config, open_new_payload, open_payload, open_project_payload, resolve_base,
+        restore_payload, topic_of, FOCUS_TOPIC, OPEN_TOPIC, RESTORE_TOPIC, UNREAD_TOPIC,
     };
+
+    fn broker(base: &str) -> super::Broker {
+        broker_from_config(&serde_json::json!({ "mqtt": { "host": "broker", "base": base } }))
+    }
 
     // Хвосты заданы приёмником — демоном на Windows-машине. Опечатка здесь
     // ничего не ломает на глаз: публикация проходит, PubAck приходит, а окно не
@@ -266,10 +304,52 @@ mod tests {
         let broker = broker_from_config(&serde_json::json!({
             "mqtt": { "host": "broker", "base": "home/room/pc/" }
         }));
-        assert_eq!(topic_of(&broker, FOCUS_TOPIC), "home/room/pc/windows/claude-focus");
         assert_eq!(
-            topic_of(&broker, UNREAD_TOPIC),
+            topic_of(&resolve_base(&broker, ""), FOCUS_TOPIC),
+            "home/room/pc/windows/claude-focus"
+        );
+        assert_eq!(
+            topic_of(&resolve_base(&broker, ""), UNREAD_TOPIC),
             "home/room/pc/windows/claude-session-unread"
+        );
+    }
+
+    #[test]
+    fn an_asked_base_wins_over_the_configured_one() {
+        // Трекеров несколько, у каждого свой топик. Своя база из конфига
+        // отвечает только за ту машину, где пикер настраивали руками.
+        let b = broker("home/room/pc");
+        assert_eq!(resolve_base(&b, "home/room/mac/windows"), "home/room/mac/windows");
+    }
+
+    #[test]
+    fn no_asked_base_falls_back_to_the_config() {
+        // Старый трекер и старый агрегатор адреса не называют. Пикер обязан
+        // вести себя как прежде, а не молчать.
+        let b = broker("home/room/pc");
+        assert_eq!(resolve_base(&b, ""), "home/room/pc/windows");
+        assert_eq!(resolve_base(&b, "   "), "home/room/pc/windows");
+    }
+
+    #[test]
+    fn wildcards_and_junk_fall_back_to_the_config() {
+        // `#` и `+` — подстановочные знаки MQTT: публикация по такому топику
+        // ушла бы мимо всех, кто её ждёт. Строка приезжает из файла на чужой
+        // машине, и доверять ей нечего.
+        let b = broker("home/room/pc");
+        assert_eq!(resolve_base(&b, "home/#"), "home/room/pc/windows");
+        assert_eq!(resolve_base(&b, "home/+/windows"), "home/room/pc/windows");
+        assert_eq!(resolve_base(&b, "/room/pc"), "home/room/pc/windows");
+        assert_eq!(resolve_base(&b, "home//room"), "home/room/pc/windows");
+        assert_eq!(resolve_base(&b, "home/room/$(whoami)"), "home/room/pc/windows");
+    }
+
+    #[test]
+    fn the_topic_is_built_from_the_resolved_base() {
+        let b = broker("home/room/pc");
+        assert_eq!(
+            topic_of(&resolve_base(&b, "home/room/mac/windows"), FOCUS_TOPIC),
+            "home/room/mac/windows/claude-focus"
         );
     }
 
@@ -315,7 +395,7 @@ mod tests {
             "mqtt": { "host": "broker", "base": "home/room/pc/" }
         }));
         assert_eq!(
-            topic_of(&broker, OPEN_TOPIC),
+            topic_of(&resolve_base(&broker, ""), OPEN_TOPIC),
             "home/room/pc/windows/claude-session-open"
         );
     }
@@ -377,7 +457,7 @@ mod tests {
             "mqtt": { "host": "broker", "base": "home/room/pc/" }
         }));
         assert_eq!(
-            topic_of(&broker, RESTORE_TOPIC),
+            topic_of(&resolve_base(&broker, ""), RESTORE_TOPIC),
             "home/room/pc/windows/claude-snapshot-restore"
         );
     }

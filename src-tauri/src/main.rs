@@ -235,12 +235,15 @@ fn configured_broker() -> Result<mqtt::Broker, String> {
 /// на той стороне, — но цена оказалась мала: отказ («сессия неизвестна», «окна
 /// нет») человек и так увидел бы уже после того, как пикер погас.
 #[tauri::command]
-async fn focus_window_mqtt(id: String) -> Result<(), String> {
+async fn focus_window_mqtt(id: String, base: Option<String>) -> Result<(), String> {
     // До публикации, а не после: право должно быть на той стороне к моменту,
     // когда там дойдут до подъёма окна.
     allow_any_foreground();
     let broker = configured_broker()?;
-    tauri::async_runtime::spawn_blocking(move || mqtt::focus(&broker, &id))
+    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
+    // запасной ход для трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::focus(&broker, &base, &id))
         .await
         .map_err(|e| format!("focus_window_mqtt task failed: {e}"))?
 }
@@ -256,9 +259,12 @@ async fn focus_window_mqtt(id: String) -> Result<(), String> {
 /// этой команде не гаснет — список перерисовывается раз в секунду, и кружок
 /// оранжевеет на глазах.
 #[tauri::command]
-async fn unread_session_mqtt(id: String) -> Result<(), String> {
+async fn unread_session_mqtt(id: String, base: Option<String>) -> Result<(), String> {
     let broker = configured_broker()?;
-    tauri::async_runtime::spawn_blocking(move || mqtt::unread(&broker, &id))
+    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
+    // запасной ход для трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::unread(&broker, &base, &id))
         .await
         .map_err(|e| format!("unread_session_mqtt task failed: {e}"))?
 }
@@ -269,9 +275,16 @@ async fn unread_session_mqtt(id: String) -> Result<(), String> {
 /// выдаётся: восстановление открывает новые окна, а не поднимает существующее,
 /// и `AllowSetForegroundWindow` тут не при чём.
 #[tauri::command]
-async fn restore_snapshot_mqtt(id: String, session_ids: Vec<String>) -> Result<(), String> {
+async fn restore_snapshot_mqtt(
+    id: String,
+    session_ids: Vec<String>,
+    base: Option<String>,
+) -> Result<(), String> {
     let broker = configured_broker()?;
-    tauri::async_runtime::spawn_blocking(move || mqtt::restore(&broker, &id, &session_ids))
+    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
+    // запасной ход для трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::restore(&broker, &base, &id, &session_ids))
         .await
         .map_err(|e| format!("restore_snapshot_mqtt task failed: {e}"))?
 }
@@ -300,11 +313,18 @@ async fn restore_snapshot_mqtt(id: String, session_ids: Vec<String>) -> Result<(
 /// «каталога нет», а не рушил вызов на мосту: у `String` его отсутствие стало
 /// бы ошибкой разбора, и Enter отчитался бы человеку про аргументы команды.
 #[tauri::command]
-async fn open_session_mqtt(id: String, cwd: Option<String>) -> Result<(), String> {
+async fn open_session_mqtt(
+    id: String,
+    cwd: Option<String>,
+    base: Option<String>,
+) -> Result<(), String> {
     allow_any_foreground();
     let broker = configured_broker()?;
     let cwd = cwd.unwrap_or_default().trim().to_string();
-    tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &id, &cwd))
+    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
+    // запасной ход для трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &base, &id, &cwd))
         .await
         .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
 }
@@ -320,10 +340,13 @@ async fn open_session_mqtt(id: String, cwd: Option<String>) -> Result<(), String
 /// Грамота — как у хоткея, и по той же причине: оба исхода просьбы кончаются
 /// окном, которому нужен передний план.
 #[tauri::command]
-async fn open_project_mqtt(cwd: String) -> Result<(), String> {
+async fn open_project_mqtt(cwd: String, base: Option<String>) -> Result<(), String> {
     allow_any_foreground();
     let broker = configured_broker()?;
-    tauri::async_runtime::spawn_blocking(move || mqtt::open_project(&broker, &cwd))
+    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
+    // запасной ход для трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::open_project(&broker, &base, &cwd))
         .await
         .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
 }
@@ -335,10 +358,13 @@ async fn open_project_mqtt(cwd: String) -> Result<(), String> {
 /// разными телами. Имя считает пикер и присылает готовым — менеджер списка
 /// занятых имён не ведёт.
 #[tauri::command]
-async fn new_session_mqtt(cwd: String, name: String) -> Result<(), String> {
+async fn new_session_mqtt(cwd: String, name: String, base: Option<String>) -> Result<(), String> {
     allow_any_foreground();
     let broker = configured_broker()?;
-    tauri::async_runtime::spawn_blocking(move || mqtt::open_new(&broker, &cwd, &name))
+    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
+    // запасной ход для трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::open_new(&broker, &base, &cwd, &name))
         .await
         .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
 }
