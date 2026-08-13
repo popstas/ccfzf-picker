@@ -27,6 +27,7 @@ const FILES = [
   'frontend-src/picker-snapshots.js',
   'frontend-src/picker-mode.js',
   'frontend-src/project-list.js',
+  'frontend-src/zellij-list.js',
   'frontend-src/picker-list-sync.js',
   'frontend-src/open-strategy.js',
   'frontend-src/session-name.js',
