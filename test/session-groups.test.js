@@ -251,3 +251,25 @@ test('labelSessions даёт имя каждой строке и не трога
   assert.strictEqual(out.agentCostUsd, 3);
   assert.strictEqual(out.id, 'a');
 });
+
+// Фильтр `only windowed` живёт на одном лишь наличии поля `window` и о машинах
+// не знает ничего: `rows.filter(r => r.window)` в buildSessionsPayload. Сторож
+// на то, что окно с чужой машины он считает окном — этим и чинится «чекбокс
+// only windowed на macOS»: не правкой фильтра, а появлением источника.
+test('onlyWindow считает окном и окно на соседней машине', () => {
+  const raw = {
+    ok: true,
+    seen: {},
+    sessions: [
+      { id: 'mac-1', title: 'На маке', cwd: '/home/user/a', live: true,
+        window: { title: 'На маке', host: 'macbook', pid: 7, canFocus: false, lastSeen: 1 } },
+      { id: 'win-1', title: 'На Windows', cwd: '/home/user/b', live: true,
+        window: { title: 'На Windows', host: 'desktop-box', pid: 42, canFocus: true, lastSeen: 1 } },
+      { id: 'none-1', title: 'Без окна', cwd: '/home/user/c', live: true },
+    ],
+  };
+  assert.deepStrictEqual(
+    idsOf(buildSessionsPayload(raw, 'name', { onlyWindow: true })),
+    ['mac-1', 'win-1'],
+  );
+});

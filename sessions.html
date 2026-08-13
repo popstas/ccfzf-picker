@@ -560,7 +560,7 @@
     // Про `/s` рассказываем только там, где он работает: подсказка о режиме,
     // которого нет, обманывает ровно так же, как молчащий Enter.
     menuHint.textContent = '^K / right click - Session menu, ^N - new session, ^A - all projects'
-      + (canFocusWindows() ? ', ^S - snapshots' : '');
+      + (trackerIsHere() ? ', ^S - snapshots' : '');
   }
 
   /**
@@ -756,7 +756,7 @@
     // Режим снимков предлагается только там, где восстановление выполнимо:
     // те же условия, что у ветки focus. Не выполнены — `/s` остаётся обычным
     // поиском по сессиям, и Enter делает привычное, а не молчит.
-    const snapshotsMode = mode === 'snapshots' && canFocusWindows();
+    const snapshotsMode = mode === 'snapshots' && trackerIsHere();
     if (mode === 'projects') renderProjects(query, items, nowSec);
     else if (snapshotsMode) renderSnapshots(query, items, nowSec);
     else renderSessions(mode === 'snapshots' ? search.value.trim() : query, items, nowSec);
@@ -824,7 +824,7 @@
     groups = payload.groups;
     sortMode = payload.sort;
     paintSort();
-    // Подсказка зависит от ответа (canFocusWindows), а красится не на каждый
+    // Подсказка зависит от ответа (trackerIsHere), а красится не на каждый
     // опрос: без этого вызова хвост про `^S` появлялся бы только после клика
     // по чекбоксу.
     paintToggles();
@@ -852,21 +852,29 @@
   let lastState = {};
 
   /**
-   * Можно ли поднимать окно вместо открытия терминала.
+   * Жив ли трекер на этой машине и умеет ли он поднимать окна.
    *
-   * Решает совпадение имён машин. На маке агрегатор рассказывает про окна
-   * Windows-машины: пометка о них полезна — сессия где-то открыта, — а подъём
-   * ничего не дал бы человеку перед экраном и отнял бы у Enter привычное
-   * открытие терминала.
-   *
-   * Настроенный брокер — не второе решение, а условие выполнимости: просьба о
-   * подъёме уходит только публикацией, и без брокера её некуда отправить.
-   * Предложить ветку, у которой нет транспорта, значит подарить человеку
-   * молчащий Enter — ровно то, чего избегает и проверка pid.
+   * Вопрос про машину целиком, а не про строку: доступен ли режим снимков и
+   * показывать ли подсказку о нём. Настроенный брокер — не второе решение, а
+   * условие выполнимости: просьба уходит только публикацией, и без брокера её
+   * некуда отправить. Предложить режим, у которого нет транспорта, значит
+   * подарить человеку молчащий Enter.
    */
-  function canFocusWindows() {
+  function trackerIsHere() {
     return CONFIG.mqtt.configured
-      && window.SessionWindows.canFocus(lastState, CONFIG.windowHost);
+      && !!window.SessionWindows.trackerHere(lastState, CONFIG.windowHost);
+  }
+
+  /**
+   * Поднимать ли окно этой строки.
+   *
+   * Раньше на этот вопрос отвечала машина целиком, и другого ответа быть не
+   * могло: трекер был один. Теперь окно строки может стоять на соседней
+   * машине, и подъём его отсюда ничего не дал бы человеку перед экраном.
+   */
+  function rowCanFocus(row) {
+    return CONFIG.mqtt.configured
+      && window.SessionWindows.canFocusRow(row, lastState, CONFIG.windowHost);
   }
 
   /**
@@ -952,7 +960,7 @@
    * побеждает по максимуму, так что без отмотки у трекера местная не значила бы
    * ничего: следующий же опрос вернул бы кружок в «просмотрено».
    *
-   * Просьба уходит независимо от `canFocusWindows()`: там речь о подъёме окна,
+   * Просьба уходит независимо от `rowCanFocus()`: там речь о подъёме окна,
    * который на чужом экране бессмысленен, а отметка о просмотре приезжает в
    * список на любой машине. Не настроен брокер — остаётся местная отметка, как
    * было до появления трекерной.
@@ -1037,7 +1045,7 @@
   async function openSession(row) {
     if (!row) return;
     const strategy = window.OpenStrategy.chooseOpenStrategy(
-      row, CONFIG.caps, { canFocus: canFocusWindows() },
+      row, CONFIG.caps, { canFocus: rowCanFocus(row) },
     );
     // Развилку целиком решает chooseEnterAction (open-transport.js), а не
     // условия по месту: у неё есть тесты на каждый вид строки и на все
@@ -1573,7 +1581,7 @@
       // Молча ничего не делает там, где восстановление невыполнимо: тот же
       // отказ, что и у подсказки, и лучше молчащего режима с молчащим Enter.
       e.preventDefault();
-      if (!canFocusWindows()) return;
+      if (!trackerIsHere()) return;
       search.value = window.PickerMode.withSnapshotPrefix(search.value);
       search.focus();
       search.setSelectionRange(search.value.length, search.value.length);
