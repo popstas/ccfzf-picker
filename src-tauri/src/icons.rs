@@ -120,7 +120,13 @@ pub fn icons_for(specs: &[IconSpec], cache: &Cache) -> HashMap<String, String> {
             Some(value) => value,
             None => {
                 let value = extract(&path);
-                cache.0.lock().unwrap().insert(key, value.clone());
+                let mut map = cache.0.lock().unwrap();
+                // Записи того же пути с прежним mtime больше не спросят
+                // никогда: спрашивают всегда про нынешний файл. Без выброса
+                // карта росла бы на каждое обновление exe и до перезапуска
+                // держала бы иконки, которых уже нет.
+                map.retain(|(seen, _), _| seen != &path);
+                map.insert(key, value.clone());
                 value
             }
         };
@@ -179,6 +185,8 @@ use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS,
     FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, OPEN_EXISTING,
 };
+#[cfg(windows)]
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 #[cfg(windows)]
 use windows::Win32::System::Environment::ExpandEnvironmentStringsW;
 #[cfg(windows)]
@@ -256,9 +264,45 @@ fn alias_target(path: &Path) -> Option<PathBuf> {
     appexec_target(&buf[..returned as usize]).map(PathBuf::from)
 }
 
+/// COM на время извлечения.
+///
+/// `SHGetFileInfoW` — вход в шелл, а шелл живёт на COM: за иконкой он идёт в
+/// расширения, и без апартамента у потока они не отвечают. Апартамента у нас
+/// нет ниоткуда: команда `async`, то есть исполняется на воркере пула, а не в
+/// потоке, который Tauri инициализировал под себя. Дороже всего это стоит на
+/// целях внутри `WindowsApps` — путь туда как раз через расширения, — и
+/// стоило бы молча: отказ `SHGetFileInfoW` неотличим от «иконки у файла нет»,
+/// то есть в меню просто не было бы картинки и ни строчки о причине.
+///
+/// Разынициализируется ровно то, что удалось инициализировать: `S_OK` и
+/// `S_FALSE` обе значат «апартамент наш, парный вызов за нами», а
+/// `RPC_E_CHANGED_MODE` — «поток уже в другом апартаменте», и `CoUninitialize`
+/// на неё уронил бы чужой счётчик. Отсюда флаг внутри и `Drop`, а не два
+/// вызова по месту: между ними стоит `?`, и на раннем выходе парность
+/// потерялась бы.
+#[cfg(windows)]
+struct Com(bool);
+
+#[cfg(windows)]
+impl Com {
+    fn init() -> Self {
+        Self(unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_ok())
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Com {
+    fn drop(&mut self) {
+        if self.0 {
+            unsafe { CoUninitialize() };
+        }
+    }
+}
+
 /// Иконка файла — в `data:image/png;base64,…`.
 #[cfg(windows)]
 fn extract(path: &Path) -> Option<String> {
+    let _com = Com::init();
     let name = wide(&path.to_string_lossy());
     let mut info = SHFILEINFOW::default();
     let ok = unsafe {
@@ -336,7 +380,11 @@ fn read_dib(bitmap: HBITMAP) -> Option<(u32, u32, Vec<u8>)> {
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
     info.bmiHeader.biCompression = BI_RGB.0;
-    let mut pixels = vec![0u8; (width * height * 4) as usize];
+    // Счёт в usize, а не в u32 с приведением потом: в release переполнение
+    // молча обернулось бы, и WinAPI писал бы пиксели в буфер короче
+    // обещанного. Для иконки это недостижимо, но недостижимость тут держится
+    // на размерах, которые пришли снаружи.
+    let mut pixels = vec![0u8; width as usize * height as usize * 4];
     let hdc = unsafe { CreateCompatibleDC(None) };
     let rows = unsafe {
         GetDIBits(

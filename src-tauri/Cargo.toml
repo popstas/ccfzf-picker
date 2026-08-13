@@ -36,13 +36,16 @@ base64 = "0.22"
 # Environment (раскрытие `%SystemRoot%` в пути из конфига). `Win32_Security`
 # сам по себе не нужен, но без него `CreateFileW` из `Win32_Storage_FileSystem`
 # не существует: в её сигнатуре стоит `SECURITY_ATTRIBUTES`, и крейт прячет
-# всю функцию за этой feature.
+# всю функцию за этой feature. `Win32_System_Com` — ради пары
+# `CoInitializeEx`/`CoUninitialize` вокруг `SHGetFileInfoW`: шелл идёт за
+# иконкой в свои расширения, а те без апартамента у потока не отвечают.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Shell",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_System_Com",
     "Win32_Storage_FileSystem",
     "Win32_System_Environment",
     "Win32_System_IO",
