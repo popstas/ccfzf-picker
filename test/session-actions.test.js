@@ -118,3 +118,10 @@ test('у проекта есть действия папки, когда пут�
   ).map(a => a.id);
   assert.deepStrictEqual(ids, ['new', 'explorer']);
 });
+
+test('строке зелийной сессии предлагается только информация', () => {
+  // Ни записи агента, ни pid, ни каталога — всё сессионное ей не подходит, а
+  // присоединение висит на Enter и в меню не прячется.
+  const actions = availableActions({ kind: 'zellij', id: 'zellij:home', zellij: 'home', live: true });
+  assert.deepStrictEqual(actions, [{ id: 'info', label: 'Session info' }]);
+});

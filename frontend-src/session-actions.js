@@ -56,6 +56,12 @@
       }
       return forProject;
     }
+    // Зелийная сессия — терминал, а не работа агента: записи агента, pid и
+    // истории у неё нет, а каталог у её панелей может быть разный. Сейчас её
+    // отсеял бы и пустой cwd, но держаться на этом нельзя: первое же действие,
+    // не спрашивающее каталога, утекло бы в строку, которой оно ничего не
+    // сделает. Открытие в меню не значится намеренно — оно висит на Enter.
+    if ((row || {}).kind === 'zellij') return [{ id: 'info', label: 'Session info' }];
     if (pathApi.mapPath((row || {}).cwd, cfg.pathMap) !== null) {
       for (const a of cfg.actions || []) actions.push({ id: a.id, label: a.label, hotkey: a.hotkey });
     }

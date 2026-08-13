@@ -51,8 +51,9 @@ const THIS_HOST_STATE = { windowHost: 'pc-win' };
 const CONFIG_HOST = 'pc-win';
 // Единственные виды строк, у которых id — это id настоящей сессии.
 const SESSION_ROW_KINDS = ['interactive', 'snapshot-session'];
-// Виды строк, у которых id — что-то другое (путь проекта, id снимка).
-const NON_SESSION_ROW_KINDS = ['project', 'snapshot'];
+// Виды строк, у которых id — что-то другое (путь проекта, id снимка, имя
+// зелийной сессии с префиксом).
+const NON_SESSION_ROW_KINDS = ['project', 'snapshot', 'zellij'];
 
 test('обычная сессия и сессия из снимка — трекер на чужой машине, брокер настроен — да', () => {
   for (const kind of SESSION_ROW_KINDS) {
@@ -324,4 +325,15 @@ test('каталога нет — просить не о чем', () => {
   assert.equal(chooseProjectOpenAction({ kind: 'project', cwd: '  ' }, state, 'pc-win', true), 'local');
   assert.equal(chooseProjectOpenAction({ kind: 'project' }, state, 'pc-win', true), 'local');
   assert.equal(chooseProjectOpenAction(null, state, 'pc-win', true), 'local');
+});
+
+test('строка зелийной сессии не уезжает к менеджеру со своим id', () => {
+  // `zellij:home` — не id сессии, и менеджер ответил бы `unknown session` в
+  // свой лог, а пикер бы этого не увидел: у публикации нет ответа. Держится
+  // это на позитивном списке SESSION_ID_ROW_KINDS: «починить» его на
+  // негативный значило бы отправлять туда каждый новый вид строки.
+  const row = { id: 'zellij:home', kind: 'zellij', zellij: 'home' };
+  const state = { windowHost: 'pc-win' };
+  assert.equal(chooseEnterAction(row, 'attach', state, 'pc-win', true), 'local');
+  assert.equal(canOpenRemote(row, state, 'другой-хост', true), false);
 });

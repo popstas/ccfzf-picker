@@ -19,6 +19,7 @@ const Glyph = require('../frontend-src/session-glyph');
 const { buildSessionInfoRows } = require('../frontend-src/session-info');
 const { filterSessions, filterProjects } = require('../frontend-src/picker-filter');
 const { buildProjectList, markHotkeysTaken } = require('../frontend-src/project-list');
+const { availableActions } = require('../frontend-src/session-actions');
 
 // Форма — с живого ответа `ccfzf --state` (см. scripts/check-state.js), поля
 // в том же порядке и с теми же именами.
@@ -1106,4 +1107,65 @@ test('правый клик мимо строки гасит только род
 test('при открытом меню правый клик ничего не открывает заново', () => {
   const { calls } = contextMenuOn({ dataset: { index: '3' } }, true);
   assert.deepStrictEqual(calls, ['preventDefault']);
+});
+
+/**
+ * Пропустить строки общего списка настоящим путём: buildSessionsPayload →
+ * filterSessions → renderSessions.
+ *
+ * Сестра renderProjectRows и renderSnapshotRows: те гоняют свои режимы, а
+ * этот — общий список сессий. Понадобился он ради строк, которые сессиями не
+ * являются: у зелийной нет ни pid, ни записи агента, ни каталога, и молчаливо
+ * опустевшая колонка видна только здесь, где строку рисуют настоящей
+ * renderSessions из sessions.html, а не вызовом отрисовщика по одному.
+ */
+function renderSessionRows(state, query, toggles) {
+  const source = SESSIONS_HTML.match(/\n {2}function renderSessions\(query, items, nowSec\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(source, 'renderSessions не найден в sessions.html — тест сторожит не то');
+  const ctx = {
+    // Ровно то, чем renderSessions пользуется снаружи себя.
+    window: {
+      PickerFilter: { filterSessions },
+      SessionActions: { availableActions },
+    },
+    groups: buildSessionsPayload(state, 'recent').groups,
+    rows: [],
+    items: [],
+    toggles: toggles || { showPaths: true },
+    escapeHtml: Glyph.escapeHtml,
+    shortPath: Glyph.shortPath,
+    titleAttr: Glyph.titleAttr,
+    statusDotHtml: Glyph.statusDotHtml,
+    prBadgeHtml: Glyph.prBadgeHtml,
+    windowHtml: Glyph.windowHtml,
+    stateHtml: Glyph.stateHtml,
+    sessionIdHtml: Glyph.sessionIdHtml,
+    hotkeyHtml: Glyph.hotkeyHtml,
+    usageHtml: Glyph.usageHtml,
+    ageHtml: Glyph.ageHtml,
+    query: query || '',
+    nowSec: NOW,
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${source[0]}\nrenderSessions(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
+  return { items: ctx.items, rows: ctx.rows };
+}
+
+test('строка зелийной сессии доезжает до отрисовки и не пустует', () => {
+  // Строки проектов живут в своём режиме, а эта идёт в общий список сессий —
+  // дорогой, которой строка-не-сессия ещё не ходила. Здесь и видно, если
+  // отрисовщик спросит поле, которого у неё нет.
+  const state = { ok: true, sessions: [], zellij: [{ name: 'home', created: 1785591360, agents: 0 }] };
+  const payload = buildSessionsPayload(state, 'recent');
+  const group = payload.groups.find(g => g.label === 'Zellij - 1');
+  assert.ok(group, payload.groups.map(g => g.label));
+
+  const { items } = renderSessionRows(state);
+  const html = items.map(i => i.html).join('\n');
+  assert.ok(html.includes('Zellij - 1'), html);
+  assert.ok(html.includes('home'), html);
+  assert.ok(!html.includes('undefined'), html);
+  // Ключ строки — с префиксом: он же уходит в picker-list-sync, и столкнись
+  // он с uuid сессии, список перерисовывался бы целиком.
+  assert.ok(items.some(i => i.key === 's:zellij:home'), items.map(i => i.key));
 });

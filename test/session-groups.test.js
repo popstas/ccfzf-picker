@@ -273,3 +273,41 @@ test('onlyWindow считает окном и окно на соседней м�
     ['mac-1', 'win-1'],
   );
 });
+
+test('зелийные сессии идут своей группой, и она последняя', () => {
+  const res = {
+    ok: true,
+    sessions: [
+      { id: 'a', title: 'жив', live: true, agent: { state: 'active', updated: 100 } },
+      { id: 'b', title: 'мёртв', live: false },
+    ],
+    zellij: [{ name: 'home', created: 50, agents: 0 }],
+  };
+  const out = buildSessionsPayload(res, 'recent');
+  const labels = out.groups.map(g => g.label);
+  assert.strictEqual(labels[labels.length - 1], 'Zellij - 1');
+  const last = out.groups[out.groups.length - 1].sessions;
+  assert.strictEqual(last.length, 1);
+  assert.strictEqual(last[0].kind, 'zellij');
+  // Живая группа не должна их всосать: у строки live: true, и без явной
+  // ветки она встала бы среди работающих агентов.
+  assert.ok(!out.groups[0].sessions.some(s => s.kind === 'zellij'));
+});
+
+test('без зелийных сессий группы не появляется вовсе', () => {
+  const res = { ok: true, sessions: [{ id: 'a', title: 'жив', live: true }], zellij: [] };
+  const out = buildSessionsPayload(res, 'recent');
+  assert.ok(!out.groups.some(g => g.label.startsWith('Zellij')));
+});
+
+test('отсев onlyLive и onlyWindow зелийных строк не касается', () => {
+  // Оба отсева про сессии агента: у зелийной строки окна нет никогда, и
+  // onlyWindow вычистил бы весь режим.
+  const res = {
+    ok: true,
+    sessions: [{ id: 'a', title: 'жив', live: true }],
+    zellij: [{ name: 'home', created: 50 }],
+  };
+  const out = buildSessionsPayload(res, 'recent', { onlyWindow: true });
+  assert.ok(out.groups.some(g => g.label === 'Zellij - 1'));
+});

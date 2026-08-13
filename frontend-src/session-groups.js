@@ -11,6 +11,9 @@
   const listApi = typeof module === 'object' && module.exports
     ? require('./session-list')
     : globalThis.SessionList;
+  const zellijApi = typeof module === 'object' && module.exports
+    ? require('./zellij-list')
+    : globalThis.ZellijList;
 
   // Сессия с неизвестным столом сортируется перед всеми настоящими.
   const DESKTOP_UNKNOWN = -1;
@@ -130,6 +133,14 @@
    */
   function groupSessions(sessions, sort = DEFAULT_SORT) {
     const mode = normalizeSort(sort);
+    // Зелийные строки отбираются до всего остального: у них live: true, и
+    // живая группа всосала бы их к работающим агентам, где им не место.
+    // Своя группа стоит последней — это справочник «что ещё открыто на
+    // машине», а не то, к чему возвращаются в первую очередь.
+    const zellij = [];
+    const rest = [];
+    for (const s of sessions) (s.kind === 'zellij' ? zellij : rest).push(s);
+    sessions = rest;
     const open = [];
     const groups = new Map();
     for (const s of sessions) {
@@ -147,9 +158,14 @@
     for (const g of past) sortGroupSessions(g.sessions, mode);
     past.sort((a, b) => (a.desktop ?? DESKTOP_UNKNOWN) - (b.desktop ?? DESKTOP_UNKNOWN));
 
-    if (!open.length) return past;
+    const tail = zellij.length
+      ? [{ desktop: null, label: `Zellij - ${zellij.length}`, sessions: sortGroupSessions(zellij, mode) }]
+      : [];
+
+    if (!open.length) return [...past, ...tail];
     sortGroupSessions(open, mode);
-    return [{ desktop: null, label: `Active sessions - ${open.length}`, sessions: open }, ...past];
+    return [{ desktop: null, label: `Active sessions - ${open.length}`, sessions: open },
+            ...past, ...tail];
   }
 
   /**
@@ -179,7 +195,11 @@
     let rows = listApi.buildSessionList({ sessions: res.sessions, seen: res.seen });
     if (opts.onlyLive) rows = rows.filter(r => r.live);
     if (opts.onlyWindow) rows = rows.filter(r => r.window);
-    return { ok: true, groups: groupSessions(labelSessions(rows), mode), sort: mode };
+    // Отсевы выше — про сессии агента, и на зелийные строки они не
+    // распространяются: окна у зелийной сессии нет никогда, и onlyWindow
+    // вычистил бы весь режим целиком. Поэтому строки подмешиваются после.
+    const zellij = zellijApi.buildZellijList({ zellij: res.zellij });
+    return { ok: true, groups: groupSessions([...labelSessions(rows), ...zellij], mode), sort: mode };
   }
 
   return {
