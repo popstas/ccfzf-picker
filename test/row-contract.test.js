@@ -966,6 +966,24 @@ test('подсветка наведения объявлена до подсве
   assert.ok(hover < active, 'при равной специфичности порядок решает всё: выбор должен быть ниже');
 });
 
+// Меню `^K` лежит поверх того же списка — свои два фона выдали бы его за
+// другое окно. Поэтому сверяются не только порядок правил, но и цвета:
+// разойдясь, они разойдутся молча, пикер на такое не падает.
+test('строка меню красится тем же, чем строка списка', () => {
+  const menuHover = SESSIONS_HTML.match(/\.action-row:hover \{ background: (#[0-9a-f]{6}); \}/);
+  const menuActive = SESSIONS_HTML.match(/\.action-row\.active \{ background: (#[0-9a-f]{6}); \}/);
+  const rowHover = SESSIONS_HTML.match(/\.row:hover \{ background: (#[0-9a-f]{6}); \}/);
+  const rowActive = SESSIONS_HTML.match(/\.row\.active \{ background: (#[0-9a-f]{6}); \}/);
+  assert.ok(menuHover, '.action-row:hover пропал — у меню снова нет подсветки под мышью');
+  assert.ok(menuActive && rowHover && rowActive, 'правила фона переписаны — тест сторожит не то');
+  assert.strictEqual(menuHover[1], rowHover[1], 'наведение в меню и в списке — один цвет');
+  assert.strictEqual(menuActive[1], rowActive[1], 'выбор в меню и в списке — один цвет');
+  assert.ok(
+    menuHover.index < menuActive.index,
+    'выбор должен стоять ниже наведения: специфичность равная, решает порядок',
+  );
+});
+
 // ── Правая кнопка открывает то же меню, что и `^K` ─────────────────────────
 //
 // Обработчик вычитывается из страницы и выполняется в vm — как choose выше.
