@@ -33,11 +33,9 @@ test('пустой windowHost в конфиге — локально', () => {
 });
 
 test('менеджера нет или он без имени — локально', () => {
-  // Первый аргумент — уже разобранный менеджер (openManager из
-  // session-windows.js), а не состояние агрегатора целиком: отсюда и два
-  // разных пустых случая, а не один и тот же дважды. `null` — трекера нет
-  // вовсе; `{}` — трекер есть, но имени машины в записи нет (normHost(undefined)
-  // === '') — это отдельная ветка chooseOpenTransport, а не та же самая.
+  // `null` — трекера нет; `{}` — имя машины не задано. В chooseOpenTransport
+  // оба дают один результат — функция спрашивает только имя машины.
+  // Развилка между ними живёт в canOpenRemote.
   assert.equal(chooseOpenTransport(null, 'pc-win', true), 'local');
   assert.equal(chooseOpenTransport({}, 'pc-win', true), 'local');
 });
