@@ -1018,17 +1018,31 @@ test('стиль слота задаёт одну ширину всем стро
 // при первом ^K: меню обязано открываться уже с картинками, а не дорисовывать
 // их на глазах. Поймать это тестом поведения нельзя (страница целиком тут не
 // живёт), поэтому сторожится форма: вызов есть в обоих местах.
+//
+// Сравнивать позиции вызовов с одним индексом `listen('config-changed'` уже
+// нельзя: вызов внутри start() нарочно стоит после регистрации всех
+// подписок, включая config-changed (см. комментарий у вызова в
+// sessions.html) — раньше список ждал бы поход за иконками, которые нужны
+// только к первому ^K. Поэтому здесь вырезается сам блок слушателя
+// config-changed, и вызовы ищутся отдельно внутри него и отдельно снаружи —
+// в любом месте start(), а не в жёстко заданной позиции.
 test('иконки спрашиваются при старте и после смены конфига', () => {
-  const start = SESSIONS_HTML.indexOf('async function start()');
-  const configChanged = SESSIONS_HTML.indexOf("listen('config-changed'");
-  assert.ok(start !== -1 && configChanged !== -1, 'тест сторожит не то');
-  const calls = [...SESSIONS_HTML.matchAll(/await loadActionIcons\(\)/g)].map(m => m.index);
+  const startMatch = SESSIONS_HTML.match(/\n {2}async function start\(\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(startMatch, 'тест сторожит не то');
+  const startBody = startMatch[0];
+  const configChangedMatch = startBody.match(
+    /await listen\('config-changed', async \(\) => \{[\s\S]*?\n {4}\}\);\n/,
+  );
+  assert.ok(configChangedMatch, 'тест сторожит не то');
+  const blockStart = configChangedMatch.index;
+  const blockEnd = blockStart + configChangedMatch[0].length;
+  const calls = [...startBody.matchAll(/await loadActionIcons\(\)/g)].map(m => m.index);
   assert.ok(
-    calls.some(i => i > start && i < configChanged),
+    calls.some(i => i < blockStart || i >= blockEnd),
     'иконки не запрашиваются при старте',
   );
   assert.ok(
-    calls.some(i => i > configChanged),
+    calls.some(i => i >= blockStart && i < blockEnd),
     'после смены конфига иконки остались бы от прежних приложений',
   );
 });
