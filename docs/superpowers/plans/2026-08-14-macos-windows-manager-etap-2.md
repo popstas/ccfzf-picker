@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Три репозитория, коммиты в каждый свои.** Пикер `/home/popstas/projects/js/ccfzf-picker` (ветка `windows-mqtt-migrate`), агрегатор `/home/popstas/projects/shell/ccfzf` (ветка `main`), трекер `/home/popstas/projects/js/macos-windows-manager` (ветка `master`). Ни одна задача не трогает больше одного репозитория, кроме последней.
+- **Три репозитория, коммиты в каждый свои.** Пикер `~/projects/js/ccfzf-picker` (ветка `windows-mqtt-migrate`), агрегатор `~/projects/shell/ccfzf` (ветка `main`), трекер `~/projects/js/macos-windows-manager` (ветка `master`). Ни одна задача не трогает больше одного репозитория, кроме последней.
 - **Язык.** Всё, что видит человек, — по-английски. Комментарии, doc-комментарии, названия тестов и сообщения в `assert` — по-русски.
 - **Имён машин в репозиториях нет.** В примерах и тестах — только `remote-host`, `mac-host`, `windows-box`. Сторож: `test/no-private-data.test.js` в пикере.
 - **Тесты запускаются так и только так:** пикер — `npm test` (`node --test` на этих версиях Node не работает) и `cd src-tauri && cargo test`; агрегатор — `python3 tests/test_<имя>.py` по одному файлу; трекер — `cargo test -p mwm-core` и `cargo test -p macos-windows-manager`.
@@ -51,7 +51,7 @@
 
 ### Task 1: Агрегатор проносит `mqttBase` и `openSession`
 
-**Repo:** `/home/popstas/projects/shell/ccfzf`, ветка `main`
+**Repo:** `~/projects/shell/ccfzf`, ветка `main`
 
 **Files:**
 - Modify: `ccfzf` — `read_windows`, `read_window_sources`
@@ -271,7 +271,7 @@ EOF
 
 ### Task 2: Блок `mqtt:` в конфиге трекера
 
-**Repo:** `/home/popstas/projects/js/macos-windows-manager`, ветка `master`
+**Repo:** `~/projects/js/macos-windows-manager`, ветка `master`
 
 **Files:**
 - Modify: `crates/mwm-core/src/config.rs`
@@ -348,7 +348,7 @@ EOF
 
 - [ ] **Step 2: Прогнать и убедиться, что падает**
 
-Run: `cd /home/popstas/projects/js/macos-windows-manager && cargo test -p mwm-core`
+Run: `cd ~/projects/js/macos-windows-manager && cargo test -p mwm-core`
 Expected: FAIL — «no field `mqtt` on type `Config`».
 
 - [ ] **Step 3: Реализовать**
@@ -452,7 +452,7 @@ EOF
 
 ### Task 3: Файл окон называет адрес и умение открывать
 
-**Repo:** `/home/popstas/projects/js/macos-windows-manager`
+**Repo:** `~/projects/js/macos-windows-manager`
 
 **Files:**
 - Modify: `crates/mwm-core/src/publish.rs`
@@ -564,7 +564,7 @@ EOF
 
 ### Task 4: `mark_unread` в трекере
 
-**Repo:** `/home/popstas/projects/js/macos-windows-manager`
+**Repo:** `~/projects/js/macos-windows-manager`
 
 **Files:**
 - Modify: `crates/mwm-core/src/tracker.rs`
@@ -681,7 +681,7 @@ EOF
 
 ### Task 5: Разбор просьбы — `request.rs`
 
-**Repo:** `/home/popstas/projects/js/macos-windows-manager`
+**Repo:** `~/projects/js/macos-windows-manager`
 
 **Files:**
 - Create: `crates/mwm-core/src/request.rs`
@@ -863,7 +863,7 @@ EOF
 
 ### Task 6: Подписка на брокера
 
-**Repo:** `/home/popstas/projects/js/macos-windows-manager`
+**Repo:** `~/projects/js/macos-windows-manager`
 
 **Files:**
 - Create: `src-tauri/src/mqtt.rs`
@@ -1029,7 +1029,7 @@ EOF
 
 ### Task 7: `AXRaise` и активация приложения
 
-**Repo:** `/home/popstas/projects/js/macos-windows-manager`
+**Repo:** `~/projects/js/macos-windows-manager`
 
 **Files:**
 - Modify: `src-tauri/src/ax.rs`
@@ -1160,7 +1160,7 @@ EOF
 
 ### Task 8: Такт трекера исполняет просьбы
 
-**Repo:** `/home/popstas/projects/js/macos-windows-manager`
+**Repo:** `~/projects/js/macos-windows-manager`
 
 **Files:**
 - Modify: `src-tauri/src/main.rs`
@@ -1307,7 +1307,7 @@ EOF
 
 ### Task 9: Пикер знает адрес машины и её менеджера
 
-**Repo:** `/home/popstas/projects/js/ccfzf-picker`, ветка `windows-mqtt-migrate`
+**Repo:** `~/projects/js/ccfzf-picker`, ветка `windows-mqtt-migrate`
 
 **Files:**
 - Modify: `frontend-src/session-windows.js`
@@ -1457,7 +1457,7 @@ EOF
 
 ### Task 10: Транспорт спрашивает про менеджера, а не про верхнее поле
 
-**Repo:** `/home/popstas/projects/js/ccfzf-picker`
+**Repo:** `~/projects/js/ccfzf-picker`
 
 **Files:**
 - Modify: `frontend-src/open-transport.js`
@@ -1589,7 +1589,7 @@ EOF
 
 ### Task 11: Команды пикера принимают базу
 
-**Repo:** `/home/popstas/projects/js/ccfzf-picker`
+**Repo:** `~/projects/js/ccfzf-picker`
 
 **Files:**
 - Modify: `src-tauri/src/mqtt.rs`
@@ -1633,7 +1633,7 @@ EOF
         let b = broker("home/room/pc");
         assert_eq!(resolve_base(&b, "home/#"), "home/room/pc/windows");
         assert_eq!(resolve_base(&b, "home/+/windows"), "home/room/pc/windows");
-        assert_eq!(resolve_base(&b, "/home/room"), "home/room/pc/windows");
+        assert_eq!(resolve_base(&b, "/room/pc"), "home/room/pc/windows");
         assert_eq!(resolve_base(&b, "home//room"), "home/room/pc/windows");
         assert_eq!(resolve_base(&b, "home/room/$(whoami)"), "home/room/pc/windows");
     }
@@ -1770,7 +1770,7 @@ EOF
 
 ### Task 12: Страница передаёт адрес
 
-**Repo:** `/home/popstas/projects/js/ccfzf-picker`
+**Repo:** `~/projects/js/ccfzf-picker`
 
 **Files:**
 - Modify: `sessions.html`
@@ -1879,9 +1879,9 @@ EOF
 Выкатка первым шагом делает `git pull` на целевой машине — выкатывается запушенное, а не то, что в рабочем каталоге.
 
 ```bash
-cd /home/popstas/projects/shell/ccfzf && git push
-cd /home/popstas/projects/js/macos-windows-manager && git push
-cd /home/popstas/projects/js/ccfzf-picker && git push
+cd ~/projects/shell/ccfzf && git push
+cd ~/projects/js/macos-windows-manager && git push
+cd ~/projects/js/ccfzf-picker && git push
 ```
 
 - [ ] **Step 2: Дописать блок `mqtt:` в конфиг трекера на маке**
@@ -1892,7 +1892,7 @@ cd /home/popstas/projects/js/ccfzf-picker && git push
 
 - [ ] **Step 3: Собрать и выкатить на мак**
 
-Run: `cd /home/popstas/projects/js/macos-windows-manager && MWM_HOST=<хост мака> ./data/scripts/deploy-mac.sh`
+Run: `cd ~/projects/js/macos-windows-manager && MWM_HOST=<хост мака> ./data/scripts/deploy-mac.sh`
 Expected: сборка проходит, подпись проходит, задача перезапускается
 
 Ошибки компиляции macOS-ветки чинить по подсказкам компилятора (порядок проб — в задаче 7, шаг 2), коммитить и выкатывать заново. Помнить про грабли выкатки: одинарных кавычек внутрь `run()` не класть; `;` в удалённой команде не ставить; ждать подписи по результату, а не по часам.
@@ -1919,7 +1919,7 @@ Expected: две записи, у каждой свои `mqttBase`, `canFocus`, 
 
 - [ ] **Step 6: Выкатить пикер на Windows и проверить, что он не изменился**
 
-Run: `cd /home/popstas/projects/js/ccfzf-picker && ./data/scripts/deploy-win.sh`
+Run: `cd ~/projects/js/ccfzf-picker && ./data/scripts/deploy-win.sh`
 
 Проверить руками: Enter на строке с окном поднимает окно; `^N` заводит сессию; снимки (`^S`) открываются; проектные хоткеи работают; пункт «Open on <host>» на месте.
 
@@ -1950,9 +1950,9 @@ Run: `cd /home/popstas/projects/js/ccfzf-picker && ./data/scripts/deploy-win.sh`
 - [ ] **Step 10: Прогнать все тесты в трёх репозиториях**
 
 ```bash
-cd /home/popstas/projects/js/ccfzf-picker && npm test && (cd src-tauri && cargo test)
-cd /home/popstas/projects/js/macos-windows-manager && cargo test -p mwm-core && cargo test -p macos-windows-manager
-cd /home/popstas/projects/shell/ccfzf && python3 tests/test_windows_file.py && python3 tests/test_windows_merge.py
+cd ~/projects/js/ccfzf-picker && npm test && (cd src-tauri && cargo test)
+cd ~/projects/js/macos-windows-manager && cargo test -p mwm-core && cargo test -p macos-windows-manager
+cd ~/projects/shell/ccfzf && python3 tests/test_windows_file.py && python3 tests/test_windows_merge.py
 ```
 
 Expected: всё зелёное
@@ -1960,7 +1960,7 @@ Expected: всё зелёное
 - [ ] **Step 11: Коммит документации**
 
 ```bash
-cd /home/popstas/projects/js/macos-windows-manager
+cd ~/projects/js/macos-windows-manager
 git add README.md
 git commit -m "$(cat <<'EOF'
 docs: правила, добытые на выкатке подъёма окна
@@ -1969,7 +1969,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 EOF
 )"
 
-cd /home/popstas/projects/js/ccfzf-picker
+cd ~/projects/js/ccfzf-picker
 git add CLAUDE.md
 git commit -m "$(cat <<'EOF'
 docs: адрес просьбы называет трекер, а не конфиг пикера
