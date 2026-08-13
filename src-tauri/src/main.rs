@@ -1265,8 +1265,12 @@ mod tests {
     #[test]
     fn taken_command_runs_off_the_event_loop() {
         let src = include_str!("main.rs");
+        // Иголка склеена по той же причине, что и у соседа ниже: литерал лежал
+        // бы в файле, который `include_str!` и затягивает, и сторож находил бы
+        // себя же. Проверено: с синхронной командой он оставался зелёным.
+        let needle = format!("async fn {}", "project_hotkeys_taken");
         assert!(
-            src.contains("async fn project_hotkeys_taken"),
+            src.contains(&needle),
             "project_hotkeys_taken должна быть async — иначе взаимный замок с поллером"
         );
     }
