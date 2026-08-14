@@ -886,6 +886,41 @@
     return window.SessionWindows.openManager(lastState, CONFIG.windowHost);
   }
 
+  /** Запись снимка по его id — из отобранных, то есть только своей машины. */
+  function snapshotById(id) {
+    return snapshotRows.find(s => s && s.id === id) || null;
+  }
+
+  /**
+   * Машина, которой уходит просьба о восстановлении, — или `null`, если такой
+   * машины нет.
+   *
+   * Вопрос здесь не «чей это снимок»: снимки в списке и так только свои,
+   * `snapshotsHere` отобрала их по машине. Вопрос — «берётся ли менеджер этой
+   * машины за раскладку», и отвечает на него `openManager`: он же отбирает
+   * трекеры по полю `openSession`. Второй разбор того же списка разошёлся бы с
+   * ним на первой же правке.
+   *
+   * Мак снимки делает, а менеджера у него нет: трекер там объявляет
+   * `openSession: false`, `openManager` его отбрасывает и отвечает либо чужой
+   * машиной, либо `null` — в обоих случаях `chooseOpenTransport` даёт `local`,
+   * и восстановление уходит в местную ветку. Возьми мы `host` прямо у снимка,
+   * на маке вышло бы `manager`, и просьба уехала бы в топик, который никто не
+   * слушает: молча, потому что у публикации нет ответа.
+   *
+   * Адрес при этом берётся у снимка, а не у менеджера: у каждой машины свой
+   * префикс топиков, и просьба обязана уйти той, что снимок сняла. Пустая
+   * строка значит «спроси свой конфиг» — так её читает `resolve_base` в
+   * `src-tauri/src/mqtt.rs`.
+   */
+  function snapshotOwner(id) {
+    const snap = snapshotById(id);
+    if (!snap) return null;
+    const manager = window.SessionWindows.openManager(lastState, CONFIG.windowHost);
+    if (!manager) return null;
+    return { host: manager.host, mqttBase: window.PickerSnapshots.snapshotBase(snap) };
+  }
+
   /** Куда просить о подъёме окна этой строки. Пусто — спросим свой конфиг. */
   function focusBase(row) {
     return window.SessionWindows.mqttBaseFor(row, lastState);
@@ -936,7 +971,9 @@
     // покажет пустой список, и это честный ответ, а не поломка.
     projectRows = window.ProjectList.buildProjectList(state);
     // То же самое про снимки и режим /s.
-    snapshotRows = Array.isArray(state.snapshots) ? state.snapshots : [];
+    // Снимки соседних машин в списке не нужны: восстановить их раскладку на
+    // своём экране человеку нечего.
+    snapshotRows = window.PickerSnapshots.snapshotsHere(state, CONFIG.windowHost);
     lastState = state;
     regroup();
   }
@@ -1038,30 +1075,69 @@
   }
 
   /**
-   * Попросить поднять раскладку снимка.
+   * Поднять раскладку снимка.
+   *
+   * Две дороги, и выбирает между ними та же проверка, что у Enter на строке
+   * сессии. На машине с менеджером просьба уходит ему — как было всегда.
+   * На маке менеджера нет: там восстановление значит «открыть сессии снимка»,
+   * и открывает их сам пикер, а места им расставит оконный трекер, когда окна
+   * появятся. Знать о восстановлении трекеру для этого не нужно.
+   *
+   * Адрес просьбы берётся у снимка: у каждой машины свой префикс топиков, и
+   * уйти она обязана той, что снимок сняла.
    *
    * Пикер гасится до просьбы, как и на фокусе: окна поднимутся на том же
-   * экране, и держать поверх них список незачем. Итог не показывается —
-   * ответа у просьбы нет по замыслу, а не сработавшее видно на экране.
-   *
-   * База — `managerBase()`, а не `trackerHere`: снимки восстанавливает служба
-   * на машине менеджера (windows-mqtt), а не оконный трекер строки. На маке
-   * `trackerHere` вернул бы запись мака — тот разбирает только `claude-focus`
-   * и `claude-session-unread`, просьба о снимке уйдёт туда молча и потеряется.
+   * экране, и держать поверх них список незачем.
    *
    * Пустой `sessionIds` значит «весь снимок»: так просит заголовок раскладки.
    */
   async function restoreSnapshot(snapshotId, sessionIds) {
+    const owner = snapshotOwner(snapshotId);
+    const transport = window.OpenTransport.chooseOpenTransport(
+      owner, CONFIG.windowHost, CONFIG.mqtt.configured,
+    );
     await invoke('hide_picker');
+    if (transport !== 'manager') return restoreLocally(snapshotId, sessionIds);
     try {
       await invoke('restore_snapshot_mqtt', {
         id: snapshotId, sessionIds,
-        base: managerBase(),
+        base: (owner || {}).mqttBase || '',
       });
     } catch (e) {
       error = String(e);
       render();
       return;
+    }
+    error = '';
+  }
+
+  /**
+   * Восстановление своими силами: поднять сессии снимка по одной.
+   *
+   * Именно **поднять**, а не завести новые. Место запомнено за идентификатором
+   * сессии, и новая сессия получила бы новый id — трекеру было бы нечего
+   * искать, и окно осталось бы там, куда его положила система. Отсюда и форма
+   * строки: без `window`, `tmux` и `pid` `chooseOpenStrategy` отвечает
+   * `resume`, а это ровно то, что нужно.
+   *
+   * По одной и с паузой — не украшение. Два терминала, поднявшиеся разом,
+   * трекер не различит: у обоих заголовок ещё не устоялся, а привязка идёт
+   * именно по нему. Windows-сторона делает то же самое и по той же причине.
+   *
+   * Уже открытые пропускаются: второе окно той же сессии дралось бы с первым
+   * за один слот, и место досталось бы неизвестно какому.
+   */
+  async function restoreLocally(snapshotId, sessionIds) {
+    const snap = snapshotById(snapshotId);
+    if (!snap) return;
+    const wanted = new Set(sessionIds || []);
+    const open = window.PickerSnapshots.openIdsFromState(lastState);
+    const list = (Array.isArray(snap.sessions) ? snap.sessions : [])
+      .filter(s => s && s.id && !open.has(s.id))
+      .filter(s => !wanted.size || wanted.has(s.id));
+    for (const s of list) {
+      await openSession({ id: s.id, cwd: s.cwd || '', title: s.title || '', kind: 'snapshot-session' });
+      await new Promise(resolve => setTimeout(resolve, 1200));
     }
     error = '';
   }
