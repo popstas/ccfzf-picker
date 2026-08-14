@@ -20,6 +20,20 @@
             flex: 0 0 auto;
         }
         #list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 0; }
+        /* Широкий режим: блоки колонками, у каждого свой скролл. Свой
+           overflow у самого списка гасится — иначе скроллов два вложенных, и
+           колесо работает по тому, над которым курсор, то есть непредсказуемо. */
+        #list.blocks {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+            gap: 8px; overflow: hidden; align-items: start;
+        }
+        /* min-height: 0 — иначе элемент грида растёт под содержимое, и
+           скроллится не блок, а страница целиком. */
+        #list.blocks .block {
+            display: flex; flex-direction: column;
+            min-height: 0; max-height: 100%; overflow: hidden;
+        }
+        #list.blocks .block-rows { overflow-y: auto; min-height: 0; }
         #statusline {
             height: 28px; padding: 0 18px; display: flex; align-items: center; gap: 14px;
             font-size: 11px; color: #7d838c; border-top: 1px solid #3a3d42;
@@ -472,6 +486,11 @@
   // чекбоксы статуслайна. Пересчитывается из uiToggles одной функцией, чтобы
   // две формы не разъехались.
   let toggles = window.UiState.listColumns(uiToggles);
+  // Режим окна и развёрнутые блоки. Первый живёт в ui.json (отступление от
+  // умолчания запоминается, как сортировка и showAll), второе — только до
+  // перерисовки: свёрнутость истории это умолчание блока, а не настройка.
+  let fullscreen = false;
+  let expandedBlocks = [];
   let menuOpen = false;
   let menuActions = [];
   let menuActive = 0;
@@ -780,6 +799,72 @@
     }
   }
 
+  /** Строка свёрнутого блока: Enter на ней разворачивает блок. */
+  function blockToggleItem(row) {
+    const index = rows.length;
+    rows.push(row);
+    return {
+      key: `bt:${row.blockKey}`,
+      html: `<div class="row block-toggle" data-index="${index}">` +
+        `<div class="dot"></div>` +
+        `<div class="text"><div class="name">${escapeHtml(row.label)}</div></div>` +
+        `</div>`,
+    };
+  }
+
+  // Что нарисовано в каждом блоке. Своё состояние на блок, а не одно на весь
+  // список: planListSync сравнивает содержимое одного контейнера, и общая
+  // память заставляла бы его пересобирать все блоки на каждое изменение
+  // любого. Ключ — тот же key блока.
+  let renderedBlocks = new Map();
+  // Каркас, который сейчас в DOM: ключи и подписи блоков. Сменился — контейнеры
+  // пересобираются целиком; строки внутри правит planListSync, как и раньше.
+  //
+  // `null` значит «в списке не блоки»: пустая строка — законный каркас (блоков
+  // не нашлось ни одного), и, отмечая ею же уход в узкий режим, первая
+  // отрисовка блоков с пустым набором сочла бы каркас несменившимся и оставила
+  // бы на экране строки узкого списка. Дорога туда есть: `/s` на машине без
+  // трекера даёт непустой узкий список и ноль блоков.
+  let blocksShape = null;
+
+  function itemsOfBlock(block, nowSec) {
+    if (block.collapsed) return block.rows.map(blockToggleItem);
+    if (block.kind === 'projects') return block.rows.map(r => projectItem(r, nowSec));
+    if (block.kind === 'snapshots') return block.rows.map(r => snapshotItem(r, nowSec));
+    return block.rows.map(s => sessionItem(s, nowSec));
+  }
+
+  function renderBlocks(mode, query, nowSec) {
+    const blocks = window.PickerBlocks.buildBlocks({
+      groups, projects: projectRows, snapshots: snapshotItemsFor(query),
+      mode, query, trackerHere: trackerIsHere(), expanded: expandedBlocks,
+    });
+    const shape = blocks.map(b => `${b.key}|${b.label}`).join('\n');
+    if (shape !== blocksShape) {
+      list.innerHTML = blocks.map(b =>
+        `<div class="block" data-block="${escapeHtml(b.key)}">` +
+        `<div class="group-label">${escapeHtml(b.label)}</div>` +
+        `<div class="block-rows"></div></div>`).join('');
+      blocksShape = shape;
+      renderedBlocks = new Map();
+    }
+    blocks.forEach((block, i) => {
+      const items = itemsOfBlock(block, nowSec);
+      // Номер блока — на строке: по нему ходят стрелки (picker-blocks.js).
+      for (let n = rows.length - items.length; n < rows.length; n++) rows[n].block = i;
+      const body = list.children[i].querySelector('.block-rows');
+      const plan = window.PickerListSync.planListSync(
+        renderedBlocks.get(block.key), items, body.children.length);
+      if (plan.mode === 'rebuild') body.innerHTML = plan.html.join('');
+      else {
+        const nodes = Array.from(body.children);
+        for (const update of plan.updates) nodes[update.index].outerHTML = update.html;
+      }
+      renderedBlocks.set(block.key, { keys: plan.keys, html: plan.html });
+    });
+    return blocks.length;
+  }
+
   function render() {
     const nowSec = Math.floor(Date.now() / 1000);
     rows = [];
@@ -794,10 +879,21 @@
     // те же условия, что у ветки focus. Не выполнены — `/s` остаётся обычным
     // поиском по сессиям, и Enter делает привычное, а не молчит.
     const snapshotsMode = mode === 'snapshots' && trackerIsHere();
-    if (mode === 'projects') renderProjects(query, items, nowSec);
-    else if (snapshotsMode) renderSnapshots(query, items, nowSec);
-    else renderSessions(mode === 'snapshots' ? search.value.trim() : query, items, nowSec);
-    syncList(items);
+    list.classList.toggle('blocks', fullscreen);
+    if (fullscreen) {
+      // Узкое состояние отрисовки сбрасывается: вернувшись, planListSync
+      // сравнил бы новые строки со старым снимком чужой раскладки и правил бы
+      // не те элементы. Тот же сброс в обратную сторону — ниже.
+      rendered = { keys: [], html: [] };
+      renderBlocks(mode, mode === 'snapshots' ? search.value.trim() : query, nowSec);
+    } else {
+      blocksShape = null;
+      renderedBlocks = new Map();
+      if (mode === 'projects') renderProjects(query, items, nowSec);
+      else if (snapshotsMode) renderSnapshots(query, items, nowSec);
+      else renderSessions(mode === 'snapshots' ? search.value.trim() : query, items, nowSec);
+      syncList(items);
+    }
     // Отказ показывается и поверх непустого списка: строки в нём с прошлого
     // удачного опроса, и молчать о том, что свежих больше не приходит, нельзя.
     if (notice) {
