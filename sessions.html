@@ -58,10 +58,14 @@
             min-height: 0; overflow: hidden;
         }
         #list.blocks .block-rows { overflow-y: auto; min-height: 0; flex: 0 1 auto; }
-        /* Карточка: та же строка, другая вёрстка. Метаданные уходят под текст,
-           а не вправо — в колонке 420px правая группа отобрала бы у имени
-           почти всю ширину. */
-        #list.blocks .row {
+        /* Карточка — только у строки сессии (`.row.session`), не у голого
+           `.row`: тот же `.text`/`.meta`/`.name`/`.dot` носят и строка
+           проекта, и снимок (заголовок и его сессия), и свёрнутый блок —
+           карточку получать им не положено, спека держит их строками, у них
+           нет ни запроса, ни ответа, которые карточка и разворачивает.
+           Метаданные уходят под текст, а не вправо — в колонке 420px правая
+           группа отобрала бы у имени почти всю ширину. */
+        #list.blocks .row.session {
             align-items: flex-start; flex-wrap: wrap; gap: 8px;
             padding: 8px 12px; border-radius: 6px;
         }
@@ -73,21 +77,21 @@
            помещается на линию кружка, а всю оставшуюся ширину забирает уже
            ростом (flex-grow: 1). min-width: 0 — иначе длинный путь или id без
            пробелов распирал бы карточку вместо переноса. */
-        #list.blocks .text { flex: 1 1 0%; min-width: 0; }
-        #list.blocks .meta { flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; gap: 10px; }
+        #list.blocks .row.session .text { flex: 1 1 0%; min-width: 0; }
+        #list.blocks .row.session .meta { flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; gap: 10px; }
         /* Запрос и ответ — до трёх строк каждый, с обрезкой по последней.
            Ради этого режим и заведён: в строке от них видно первые слова, а
            узнают сессию как раз по тому, чем она занята. */
-        #list.blocks .prompt,
-        #list.blocks .summary {
+        #list.blocks .row.session .prompt,
+        #list.blocks .row.session .summary {
             white-space: normal; display: -webkit-box;
             -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
         }
         /* Имя переносится: обрезка многоточием оставляла бы от длинного имени
            сессии первые пару слов, а в карточке место под него есть. */
-        #list.blocks .name { white-space: normal; }
+        #list.blocks .row.session .name { white-space: normal; }
         /* Кружок стоит у первой строки имени, а не по центру карточки. */
-        #list.blocks .dot { margin-top: 5px; }
+        #list.blocks .row.session .dot { margin-top: 5px; }
         #statusline {
             height: 28px; padding: 0 18px; display: flex; align-items: center; gap: 14px;
             font-size: 11px; color: #7d838c; border-top: 1px solid #3a3d42;
@@ -809,7 +813,11 @@
     // стоял agentState, и обещание расходилось с делом на сессиях, которых
     // человек ещё не открывал.
     const markable = markToggleId(session) !== null;
-    const html = `<div class="row ${session.live ? '' : 'closed'}${markable ? ' markable' : ''}" data-index="${index}"${titleAttr(session)}>` +
+    // Класс `session` — маркер вида строки, как `project`/`snapshot` у
+    // соседей: карточка в широком режиме бьёт только по нему, иначе те же
+    // голые `.text`/`.meta`/`.name`/`.dot` внутри `#list.blocks` ловили бы и
+    // строку проекта, и снимок, и свёрнутый блок.
+    const html = `<div class="row session${session.live ? '' : ' closed'}${markable ? ' markable' : ''}" data-index="${index}"${titleAttr(session)}>` +
       statusDotHtml(session) +
       `<div class="text"><div class="name">${escapeHtml(session.label)}` +
       `${prBadgeHtml(session)}` +
