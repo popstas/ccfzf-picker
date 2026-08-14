@@ -107,6 +107,21 @@ fn hide_window(app: &tauri::AppHandle) {
 }
 
 fn toggle_picker(app: &tauri::AppHandle) {
+    toggle_window(app, false);
+}
+
+/// Второй хоткей: то же переключение, но открывшееся окно встаёт в режим
+/// проектов.
+///
+/// Переключение, а не «только показать»: повторное нажатие обязано погасить
+/// окно — того же ждут от любого хоткея пикера, и второй, ведущий себя иначе,
+/// был бы неожиданностью. Дребезг у обоих общий (`LastToggle`), поэтому два
+/// хоткея подряд не откроют окно дважды.
+fn toggle_projects(app: &tauri::AppHandle) {
+    toggle_window(app, true);
+}
+
+fn toggle_window(app: &tauri::AppHandle, projects: bool) {
     let state = app.state::<LastToggle>();
     {
         let mut last = state.0.lock().unwrap();
@@ -126,6 +141,12 @@ fn toggle_picker(app: &tauri::AppHandle) {
         .is_some_and(|t| Instant::now().duration_since(t) < DEBOUNCE);
     if picker_toggle(window.is_visible().unwrap_or(false), just_hidden) {
         show_picker(app);
+        if projects {
+            // Режим живёт префиксом в строке поиска, а не флагом, и выставить
+            // его может только страница — Rust про строку поиска не знает
+            // ничего. Отсюда два хода: показать окно и сказать, с чем открыться.
+            let _ = app.emit("picker-projects", ());
+        }
     } else {
         hide_window(app);
     }
@@ -147,16 +168,6 @@ fn show_picker(app: &tauri::AppHandle) {
     if let Some(poller) = app.try_state::<poller::Poller>() {
         poller.shown();
     }
-}
-
-/// Открыть пикер в режиме проектов.
-///
-/// Режим живёт префиксом в строке поиска, а не отдельным флагом, и выставить
-/// его может только страница — Rust про строку поиска не знает ничего.
-/// Поэтому здесь два хода: показать окно и сказать странице, с чем открыться.
-fn open_projects(app: &tauri::AppHandle) {
-    show_picker(app);
-    let _ = app.emit("picker-projects", ());
 }
 
 #[tauri::command]
@@ -582,7 +593,7 @@ fn register_projects_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) 
     let (shortcut, accelerator) = projects_hotkey(config);
     let registered = match app.global_shortcut().on_shortcut(shortcut, |app, _sc, event| {
         if event.state() == ShortcutState::Pressed {
-            open_projects(app);
+            toggle_projects(app);
         }
     }) {
         Ok(()) => true,
@@ -1242,7 +1253,7 @@ fn main() {
                     "show" => toggle_picker(app),
                     // Не toggle: пункт называется «показать проекты», и
                     // погасить окно по нему было бы не тем, что обещано.
-                    "show-projects" => open_projects(app),
+                    "show-projects" => toggle_projects(app),
                     // Через spawn, а не вызовом на месте: обработчик меню
                     // крутится в потоке цикла событий, а webview на Windows
                     // дозревает через этот же цикл. Занятый цикл — то самое
@@ -1521,6 +1532,26 @@ mod tests {
         assert_eq!(projects_item_label(true), "Show projects");
         assert_ne!(projects_item_label(false), projects_item_label(true));
         assert_ne!(projects_item_label(false), show_item_label(false));
+    }
+
+    /// Второй хоткей обязан переключать окно, а не только показывать.
+    ///
+    /// Сначала он был сделан показывающим, и на живом пикере это прочиталось
+    /// поломкой: от хоткея пикера ждут, что повторное нажатие погасит окно.
+    /// Поведением не поймать — нужен настоящий цикл событий и окно, — поэтому
+    /// сторожится форма, как у `tray_opens_settings_off_the_event_loop`.
+    #[test]
+    fn projects_hotkey_toggles_the_window() {
+        let src = include_str!("main.rs");
+        let body = src
+            .split_once("fn toggle_projects(app: &tauri::AppHandle) {")
+            .expect("toggle_projects пропал — тест сторожит не то")
+            .1;
+        let (body, _) = body.split_once("\n}").expect("тело toggle_projects не закрыто");
+        assert!(
+            body.contains("toggle_window"),
+            "второй хоткей обязан идти через общее переключение, а не показывать окно"
+        );
     }
 
     /// Второй хоткей читается из своего ключа и откатывается по тем же трём
