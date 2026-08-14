@@ -1308,3 +1308,24 @@ test('строка зелийной сессии доезжает до отри�
   // он с uuid сессии, список перерисовывался бы целиком.
   assert.ok(items.some(i => i.key === 's:zellij:home'), items.map(i => i.key));
 });
+
+// Маркер вида строки — самый хрупкий инвариант широкого режима: карточка в
+// `#list.blocks` бьёт по `.row.session`, и держится это на одном слове в
+// шаблоне sessionItem. Потеряй он `session` — карточки молча исчезнут; потеряй
+// `zellij` — зелийная псевдосессия молча станет карточкой, то есть вернётся
+// уже чинённый дефект. Ни то, ни другое не видно ни в одном другом assert:
+// ключи, колонки и подписи от подмены класса не меняются вовсе.
+test('вид строки назван классом: сессия — session, зелийная — zellij', () => {
+  const { items } = renderSessionRows({ ok: true, sessions: [aggregatorSession()] });
+  assert.ok(items.length, 'сессия не доехала до отрисовки');
+  const session = items.find(i => i.html.includes('class="row '));
+  assert.ok(/class="row session(?:[ "])/.test(session.html), session.html);
+
+  const { items: zellij } = renderSessionRows(
+    { ok: true, sessions: [], zellij: [{ name: 'home', created: 1785591360, agents: 0 }] });
+  const row = zellij.find(i => i.html.includes('class="row '));
+  assert.ok(/class="row zellij(?:[ "])/.test(row.html), row.html);
+  // И не «session» заодно: строка с двумя классами сразу поймалась бы обеими
+  // проверками, а карточкой всё равно стала бы.
+  assert.ok(!row.html.includes('row session'), row.html);
+});

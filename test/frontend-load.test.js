@@ -29,8 +29,8 @@ function loadAsBrowser(files) {
 
 test('порядок тегов таков, что каждый модуль находит своих соседей', () => {
   const ctx = loadAsBrowser(TAGS);
-  // Три модуля, которые берут соседа из globalThis на загрузке. Проверяются не
-  // существованием, а работой: undefined вместо соседа виден только в вызове.
+  // Четыре модуля, которые берут соседа из globalThis на загрузке. Проверяются
+  // не существованием, а работой: undefined вместо соседа виден только в вызове.
   // Разложить в свой массив обязательно: у значений из vm-контекста другие
   // прототипы, и deepStrictEqual сравнивает в том числе их.
   assert.deepStrictEqual(
@@ -66,6 +66,20 @@ test('порядок тегов таков, что каждый модуль н�
       [], 'projects/ccfzf',
     ).map(r => r.kind)],
     ['snapshot', 'snapshot-session'],
+  );
+  // picker-blocks берёт filterSessions/filterProjects у picker-filter на
+  // загрузке. Запрос обязан быть непустым по той же причине, что и у снимков:
+  // с пустым отбор коротит и до соседа не доходит. Переставь кто-нибудь тег
+  // picker-blocks выше picker-filter — buildBlocks бросил бы на первом же ^F,
+  // а весь набор остался бы зелёным: в picker-blocks.test.js сосед приезжает
+  // по require, и порядок тегов там не проверяется вовсе.
+  assert.deepStrictEqual(
+    [...ctx.PickerBlocks.buildBlocks({
+      groups: [{ label: 'Running', sessions: [{ id: 'a', label: 'ccfzf', cwd: '/home/user/projects/ccfzf' }] }],
+      projects: [{ label: 'other', cwd: '/home/user/projects/other' }],
+      query: 'ccfzf',
+    }).map(b => b.key)],
+    ['g:Running'],
   );
 });
 
