@@ -168,12 +168,27 @@
   }
 
   /**
-   * Живые сессии — одной группой или двумя, по машине окна.
+   * Живые сессии — своей группой и по группе на каждую чужую машину.
    *
    * «Своё/чужое» у строки одно: `windowHost`, который ставит buildSessionList,
    * — имя машины окна, и только когда она не наша. Тот же признак решает, что
    * сделает Enter (поднимет окно или откроет терминал), так что деление списка
-   * отвечает на тот же вопрос, что и главное действие строки.
+   * отвечает на тот же вопрос, что и главное действие строки. Сравнение с
+   * конфигом сделано там же, выше по течению: здесь достаточно самого поля —
+   * непустое оно только у чужих.
+   *
+   * Трекеров теперь несколько, и «чужое» перестало быть одним местом: сессия на
+   * соседнем маке и сессия на сервере отвечают на вопрос «где она» по-разному,
+   * а общая группа отвечала бы на него словом «не здесь». Отсюда группа на имя
+   * машины; порядок — своя первой всегда, дальше чужие по алфавиту, потому что
+   * никакого другого порядка у имён машин нет, а стабильный нужен: список
+   * перерисовывается раз в секунду.
+   *
+   * Имя машины в заголовке — данные, а не литерал: оно приезжает полем строки и
+   * в репозитории не лежит (`test/no-private-data.test.js`). Поэтому же чужая
+   * группа помечена полем `remote`, а не узнаётся по заголовку: широкий режим
+   * склеивает чужие группы обратно в один блок, и разбирай он текст — имя
+   * машины стало бы форматом, который нельзя менять.
    *
    * Сессия без окна считается своей: чужой её делает названная чужая машина, а
    * не отсутствие сведений. На маке, где трекера может не быть вовсе, иначе
@@ -187,14 +202,22 @@
   function activeGroups(open) {
     const remote = open.filter(s => s.windowHost);
     if (!remote.length) {
-      return [{ desktop: null, label: `Active sessions - ${open.length}`, sessions: open }];
+      return [{ desktop: null, label: `Active sessions - ${open.length}`, sessions: open, remote: false, host: '' }];
     }
     const local = open.filter(s => !s.windowHost);
     const groups = [];
     if (local.length) {
-      groups.push({ desktop: null, label: `Active local sessions - ${local.length}`, sessions: local });
+      groups.push({ desktop: null, label: `Active local sessions - ${local.length}`, sessions: local, remote: false, host: '' });
     }
-    groups.push({ desktop: null, label: `Active remote sessions - ${remote.length}`, sessions: remote });
+    const byHost = new Map();
+    for (const s of remote) {
+      if (!byHost.has(s.windowHost)) byHost.set(s.windowHost, []);
+      byHost.get(s.windowHost).push(s);
+    }
+    for (const host of [...byHost.keys()].sort((a, b) => a.localeCompare(b))) {
+      const sessions = byHost.get(host);
+      groups.push({ desktop: null, label: `Active on ${host} - ${sessions.length}`, sessions, remote: true, host });
+    }
     return groups;
   }
 

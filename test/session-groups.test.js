@@ -334,7 +334,7 @@ const TWO_HOSTS = {
 test('живые сессии делятся на свои и чужие по машине окна', () => {
   const payload = buildSessionsPayload(TWO_HOSTS, 'name', { configHost: 'win-host' });
   assert.deepStrictEqual(payload.groups.map(g => g.label),
-    ['Active local sessions - 2', 'Active remote sessions - 1']);
+    ['Active local sessions - 2', 'Active on mac-host - 1']);
   // Сессия без окна — своя: чужой её делает только названная чужая машина.
   const local = payload.groups[0].sessions.map(s => s.id).sort();
   assert.deepStrictEqual(local, ['here', 'nowhere']);
@@ -354,7 +354,54 @@ test('когда своих живых нет, пустая группа не з
     sessions: TWO_HOSTS.sessions.filter(s => s.id === 'there'),
   };
   const payload = buildSessionsPayload(onlyThere, 'name', { configHost: 'win-host' });
-  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active remote sessions - 1']);
+  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active on mac-host - 1']);
+});
+
+// Трекеров несколько, и «чужое» перестало быть одним местом: сессия на соседнем
+// маке и сессия на сервере — это два разных «дотуда», и общая группа отвечала
+// бы на вопрос «где она» словом «не здесь».
+const MANY_HOSTS = {
+  ok: true,
+  seen: {},
+  windowHost: 'win-host',
+  windowPid: 7,
+  sessions: [
+    { id: 'here', title: 'Тут', cwd: '/home/user/a', live: true,
+      window: { host: 'win-host', pid: 7 } },
+    // Порядок в ответе агрегатора — не алфавитный намеренно: сортировку групп
+    // проверяет как раз он.
+    { id: 'z1', title: 'Зета', cwd: '/home/user/b', live: true,
+      window: { host: 'zeta-host', pid: 9 } },
+    { id: 'a1', title: 'Альфа', cwd: '/home/user/c', live: true,
+      window: { host: 'alpha-host', pid: 10 } },
+    { id: 'z2', title: 'Зета вторая', cwd: '/home/user/d', live: true,
+      window: { host: 'zeta-host', pid: 11 } },
+  ],
+};
+
+test('чужие живые сессии делятся по машинам, своя группа впереди', () => {
+  const payload = buildSessionsPayload(MANY_HOSTS, 'name', { configHost: 'win-host' });
+  assert.deepStrictEqual(payload.groups.map(g => g.label),
+    ['Active local sessions - 1', 'Active on alpha-host - 1', 'Active on zeta-host - 2']);
+  assert.deepStrictEqual(payload.groups[2].sessions.map(s => s.id), ['z1', 'z2']);
+});
+
+test('чужая группа помечена полем, а не заголовком', () => {
+  // По этой пометке широкий режим склеивает чужие группы обратно в один блок.
+  // Разбирай он заголовок, имя машины в нём стало бы форматом, который нельзя
+  // менять, — а это данные, приехавшие с чужой машины.
+  const payload = buildSessionsPayload(MANY_HOSTS, 'name', { configHost: 'win-host' });
+  assert.deepStrictEqual(payload.groups.map(g => g.remote === true),
+    [false, true, true]);
+  assert.deepStrictEqual(payload.groups.map(g => g.host || ''),
+    ['', 'alpha-host', 'zeta-host']);
+});
+
+test('единственная группа живых чужой не считается', () => {
+  // Пометка идёт от деления: делить нечего — и склеивать в широком режиме
+  // нечего, блок остаётся тем же, что и группа.
+  const payload = buildSessionsPayload(RAW, 'name', { onlyLive: true, configHost: 'win-host' });
+  assert.strictEqual(payload.groups[0].remote, false);
 });
 
 test('мёртвые сессии делению не подлежат', () => {
