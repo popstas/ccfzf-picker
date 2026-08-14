@@ -306,6 +306,32 @@ test('ошибочный ответ агрегатора не доходит д�
 // писатель в DOM, а не его копия в тесте: копия разъехалась бы молча.
 const SESSIONS_HTML = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
 
+/**
+ * Вычитать со страницы функции по их точным сигнатурам и склеить в один кусок
+ * для vm.
+ *
+ * Рисовальщик теперь только обходит список, а разметку одной строки собирает
+ * вынесенная из него функция: узкий и широкий режимы обходят список
+ * по-разному, а разметка у них одна. Вынесенная функция осталась снаружи
+ * куска, вычитанного по сигнатуре рисовальщика, и в vm вызов упал бы на
+ * «projectItem is not defined». Поэтому достаются обе — и сторож от этого
+ * только крепче: настоящий сборщик разметки теперь как раз строчная функция, и
+ * шов, ради которого заведён этот файл, проходит через неё.
+ *
+ * Сигнатура сверяется целиком, как и раньше: переименованный параметр или
+ * лишний аргумент обязаны уронить тест, а не молча вычитать соседнюю функцию.
+ */
+function pageFunctions(...signatures) {
+  return signatures.map((signature) => {
+    // Экранируются только скобки: в сигнатурах других знаков регулярного
+    // выражения не бывает.
+    const head = signature.replace(/[()]/g, '\\$&');
+    const source = SESSIONS_HTML.match(new RegExp(`\\n {2}function ${head} \\{[\\s\\S]*?\\n {2}\\}\\n`));
+    assert.ok(source, `${signature} не найден в sessions.html — тест сторожит не то`);
+    return source[0];
+  }).join('\n');
+}
+
 // Форма — с живого ответа `ccfzf --state`, поля те же, что у project_rows.
 const AGGREGATOR_PROJECTS = [
   { path: '/home/user/projects/ccfzf', name: 'ccfzf', mark: true,
@@ -328,8 +354,7 @@ const PROJECTS_NOW = 1786045920; // минута после mtime первого
  * знает только эта машина.
  */
 function renderProjectRows(projects, query, toggles, taken) {
-  const source = SESSIONS_HTML.match(/\n {2}function renderProjects\(query, items, nowSec\) \{[\s\S]*?\n {2}\}\n/);
-  assert.ok(source, 'renderProjects не найден в sessions.html — тест сторожит не то');
+  const source = pageFunctions('projectItem(project, nowSec)', 'renderProjects(query, items, nowSec)');
   const projectRows = buildProjectList({ projects });
   markHotkeysTaken(projectRows, taken || []);
   const ctx = {
@@ -348,7 +373,7 @@ function renderProjectRows(projects, query, toggles, taken) {
     nowSec: PROJECTS_NOW,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${source[0]}\nrenderProjects(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
+  vm.runInContext(`${source}\nrenderProjects(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
   return { items: ctx.items, rows: ctx.rows };
 }
 
@@ -495,8 +520,10 @@ const AGGREGATOR_SNAPSHOTS = [{
 
 /** Пропустить снимки настоящим путём: buildSnapshotRows → renderSnapshots. */
 function renderSnapshotRows(snapshots, query, options) {
-  const source = SESSIONS_HTML.match(/\n {2}function renderSnapshots\(query, items, nowSec\) \{[\s\S]*?\n {2}\}\n/);
-  assert.ok(source, 'renderSnapshots не найден в sessions.html — тест сторожит не то');
+  // Строки снимков считает snapshotItemsFor — она вычитывается вместе с
+  // рисовальщиком по той же причине, что и snapshotItem: живёт снаружи его тела.
+  const source = pageFunctions(
+    'snapshotItem(row, nowSec)', 'snapshotItemsFor(query)', 'renderSnapshots(query, items, nowSec)');
   const opts = options || {};
   const ctx = {
     // Ровно то, чем renderSnapshots пользуется снаружи себя.
@@ -513,7 +540,7 @@ function renderSnapshotRows(snapshots, query, options) {
     nowSec: PROJECTS_NOW,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${source[0]}\nrenderSnapshots(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
+  vm.runInContext(`${source}\nrenderSnapshots(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
   return { items: ctx.items, rows: ctx.rows };
 }
 
@@ -1124,13 +1151,11 @@ test('при открытом меню правый клик ничего не �
  * renderSessions из sessions.html, а не вызовом отрисовщика по одному.
  */
 function renderSessionRows(state, query, toggles) {
-  const source = SESSIONS_HTML.match(/\n {2}function renderSessions\(query, items, nowSec\) \{[\s\S]*?\n {2}\}\n/);
-  assert.ok(source, 'renderSessions не найден в sessions.html — тест сторожит не то');
   // markToggleId вычитывается из той же страницы, а не подставляется заглушкой:
   // от неё зависит класс `markable`, то есть обещание про Shift+клик, и копия
   // разошлась бы с настоящим правилом молча.
-  const toggleSrc = SESSIONS_HTML.match(/\n {2}function markToggleId\(row\) \{[\s\S]*?\n {2}\}\n/);
-  assert.ok(toggleSrc, 'markToggleId не найден в sessions.html — тест сторожит не то');
+  const source = pageFunctions(
+    'markToggleId(row)', 'sessionItem(session, nowSec)', 'renderSessions(query, items, nowSec)');
   const ctx = {
     // Ровно то, чем renderSessions пользуется снаружи себя.
     window: {
@@ -1157,7 +1182,7 @@ function renderSessionRows(state, query, toggles) {
     nowSec: NOW,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${toggleSrc[0]}\n${source[0]}\nrenderSessions(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
+  vm.runInContext(`${source}\nrenderSessions(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
   return { items: ctx.items, rows: ctx.rows };
 }
 
