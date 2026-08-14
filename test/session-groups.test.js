@@ -311,3 +311,60 @@ test('отсев onlyLive и onlyWindow зелийных строк не кас�
   const out = buildSessionsPayload(res, 'recent', { onlyWindow: true });
   assert.ok(out.groups.some(g => g.label === 'Zellij - 1'));
 });
+
+// ── живые сессии делятся по машине окна ─────────────────────────────────────
+//
+// «Своё/чужое» у строки одно — машина её окна (поле windowHost, ставит
+// buildSessionList). Оно же решает, поднимет ли Enter окно или откроет
+// терминал, так что деление списка отвечает на тот же вопрос, что и Enter.
+const TWO_HOSTS = {
+  ok: true,
+  seen: {},
+  windowHost: 'win-host',
+  windowPid: 7,
+  sessions: [
+    { id: 'here', title: 'Тут', cwd: '/home/user/a', live: true,
+      window: { host: 'win-host', pid: 7 } },
+    { id: 'there', title: 'Там', cwd: '/home/user/b', live: true,
+      window: { host: 'mac-host', pid: 9 } },
+    { id: 'nowhere', title: 'Без окна', cwd: '/home/user/c', live: true },
+  ],
+};
+
+test('живые сессии делятся на свои и чужие по машине окна', () => {
+  const payload = buildSessionsPayload(TWO_HOSTS, 'name', { configHost: 'win-host' });
+  assert.deepStrictEqual(payload.groups.map(g => g.label),
+    ['Active local sessions - 2', 'Active remote sessions - 1']);
+  // Сессия без окна — своя: чужой её делает только названная чужая машина.
+  const local = payload.groups[0].sessions.map(s => s.id).sort();
+  assert.deepStrictEqual(local, ['here', 'nowhere']);
+  assert.deepStrictEqual(payload.groups[1].sessions.map(s => s.id), ['there']);
+});
+
+test('без единого чужого окна группа остаётся одна и называется как раньше', () => {
+  // На машине с одним трекером делить нечего, и «Active local sessions» без
+  // пары читалось бы вопросом «а где тогда остальные».
+  const payload = buildSessionsPayload(RAW, 'name', { onlyLive: true, configHost: 'win-host' });
+  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active sessions - 2']);
+});
+
+test('когда своих живых нет, пустая группа не заводится', () => {
+  const onlyThere = {
+    ...TWO_HOSTS,
+    sessions: TWO_HOSTS.sessions.filter(s => s.id === 'there'),
+  };
+  const payload = buildSessionsPayload(onlyThere, 'name', { configHost: 'win-host' });
+  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active remote sessions - 1']);
+});
+
+test('мёртвые сессии делению не подлежат', () => {
+  // Они группируются по рабочим столам, и это деление другого рода: там вопрос
+  // «где она стояла», а не «дотянусь ли я до неё сейчас».
+  const dead = {
+    ...TWO_HOSTS,
+    sessions: [{ id: 'gone', title: 'Ушла', cwd: '/home/user/a', live: false,
+      window: { host: 'mac-host', pid: 9 } }],
+  };
+  const payload = buildSessionsPayload(dead, 'name', { configHost: 'win-host' });
+  assert.ok(!payload.groups.some(g => /Active/.test(g.label)), payload.groups.map(g => g.label));
+});

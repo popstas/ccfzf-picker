@@ -164,8 +164,38 @@
 
     if (!open.length) return [...past, ...tail];
     sortGroupSessions(open, mode);
-    return [{ desktop: null, label: `Active sessions - ${open.length}`, sessions: open },
-            ...past, ...tail];
+    return [...activeGroups(open), ...past, ...tail];
+  }
+
+  /**
+   * Живые сессии — одной группой или двумя, по машине окна.
+   *
+   * «Своё/чужое» у строки одно: `windowHost`, который ставит buildSessionList,
+   * — имя машины окна, и только когда она не наша. Тот же признак решает, что
+   * сделает Enter (поднимет окно или откроет терминал), так что деление списка
+   * отвечает на тот же вопрос, что и главное действие строки.
+   *
+   * Сессия без окна считается своей: чужой её делает названная чужая машина, а
+   * не отсутствие сведений. На маке, где трекера может не быть вовсе, иначе
+   * весь список уехал бы в «remote».
+   *
+   * Ни одного чужого окна — группа остаётся одна и называется как раньше:
+   * делить нечего, а «Active local sessions» без пары читалось бы вопросом
+   * «а где тогда остальные». Пустая половина не заводится по тому же правилу,
+   * что и группа «Not running».
+   */
+  function activeGroups(open) {
+    const remote = open.filter(s => s.windowHost);
+    if (!remote.length) {
+      return [{ desktop: null, label: `Active sessions - ${open.length}`, sessions: open }];
+    }
+    const local = open.filter(s => !s.windowHost);
+    const groups = [];
+    if (local.length) {
+      groups.push({ desktop: null, label: `Active local sessions - ${local.length}`, sessions: local });
+    }
+    groups.push({ desktop: null, label: `Active remote sessions - ${remote.length}`, sessions: remote });
+    return groups;
   }
 
   /**
