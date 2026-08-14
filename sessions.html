@@ -820,11 +820,12 @@
   // Каркас, который сейчас в DOM: ключи и подписи блоков. Сменился — контейнеры
   // пересобираются целиком; строки внутри правит planListSync, как и раньше.
   //
-  // `null` значит «в списке не блоки»: пустая строка — законный каркас (блоков
-  // не нашлось ни одного), и, отмечая ею же уход в узкий режим, первая
-  // отрисовка блоков с пустым набором сочла бы каркас несменившимся и оставила
-  // бы на экране строки узкого списка. Дорога туда есть: `/s` на машине без
-  // трекера даёт непустой узкий список и ноль блоков.
+  // `null`, а не `''`, и это не придирка: пустая строка — законный каркас,
+  // ровно тот, что получается из пустого набора блоков. Отмечай она заодно и
+  // «в списке сейчас не блоки», первая же отрисовка пустого набора сравнила бы
+  // `'' !== ''`, сочла каркас несменившимся и оставила бы на экране строки
+  // узкого списка при пустом `rows`. `null` каркасом не бывает никогда,
+  // поэтому переход из узкого режима всегда пересобирает контейнеры.
   let blocksShape = null;
 
   function itemsOfBlock(block, nowSec) {
@@ -865,6 +866,29 @@
     return blocks.length;
   }
 
+  /**
+   * Режим и строка отбора, которые показаны на самом деле.
+   *
+   * Режим живёт в строке поиска, а не отдельным флагом: см. picker-mode.js. Но
+   * режим снимков предлагается только там, где восстановление выполнимо, — те
+   * же условия, что у ветки focus. Не выполнены — `/s` остаётся обычным
+   * поиском по сессиям, и Enter делает привычное, а не молчит; отбор при этом
+   * идёт по всей строке, вместе с префиксом: `/s` в таком поиске — то, что
+   * человек ищет, а не команда.
+   *
+   * Считается один раз на обе раскладки, узкую и широкую, и потому вынесено
+   * из render(): широкая ветка не может взять `mode` как есть — buildBlocks на
+   * `snapshots` без трекера не отдаёт ни одного блока, и вместо поиска по
+   * сессиям человек получил бы пустой экран без единого слова о том, почему.
+   * Две копии этого отката разошлись бы на первой же правке — они уже
+   * разъезжались ровно здесь.
+   */
+  function shownModeAndQuery() {
+    const { mode, query } = window.PickerMode.parseQuery(search.value);
+    if (mode !== 'snapshots' || trackerIsHere()) return { mode, query };
+    return { mode: 'sessions', query: search.value.trim() };
+  }
+
   function render() {
     const nowSec = Math.floor(Date.now() / 1000);
     rows = [];
@@ -873,25 +897,20 @@
     // агрегатора, а «встала ли клавиша» знает только эта машина, и меняется
     // отдельным событием — не в такт опросу, который перестраивает projectRows.
     window.ProjectList.markHotkeysTaken(projectRows, hotkeysTaken);
-    // Режим живёт в строке поиска, а не отдельным флагом: см. picker-mode.js.
-    const { mode, query } = window.PickerMode.parseQuery(search.value);
-    // Режим снимков предлагается только там, где восстановление выполнимо:
-    // те же условия, что у ветки focus. Не выполнены — `/s` остаётся обычным
-    // поиском по сессиям, и Enter делает привычное, а не молчит.
-    const snapshotsMode = mode === 'snapshots' && trackerIsHere();
+    const { mode, query } = shownModeAndQuery();
     list.classList.toggle('blocks', fullscreen);
     if (fullscreen) {
       // Узкое состояние отрисовки сбрасывается: вернувшись, planListSync
       // сравнил бы новые строки со старым снимком чужой раскладки и правил бы
       // не те элементы. Тот же сброс в обратную сторону — ниже.
       rendered = { keys: [], html: [] };
-      renderBlocks(mode, mode === 'snapshots' ? search.value.trim() : query, nowSec);
+      renderBlocks(mode, query, nowSec);
     } else {
       blocksShape = null;
       renderedBlocks = new Map();
       if (mode === 'projects') renderProjects(query, items, nowSec);
-      else if (snapshotsMode) renderSnapshots(query, items, nowSec);
-      else renderSessions(mode === 'snapshots' ? search.value.trim() : query, items, nowSec);
+      else if (mode === 'snapshots') renderSnapshots(query, items, nowSec);
+      else renderSessions(query, items, nowSec);
       syncList(items);
     }
     // Отказ показывается и поверх непустого списка: строки в нём с прошлого
@@ -923,7 +942,10 @@
           ? (projectRows.length ? 'Nothing matches.'
             : lastState.sessions ? 'No projects — is ccfzf on the host up to date?'
               : 'Loading…')
-          : snapshotsMode
+          // Тот же `mode`, что и у обеих раскладок выше: подсказка про
+          // недостающие снимки обязана быть одна на узкий список и на блоки, а
+          // откат `/s` в поиск по сессиям — не показывать её вовсе.
+          : mode === 'snapshots'
             ? (snapshotRows.length ? 'Nothing matches.'
               // Пустой список снимков почти всегда значит «трекер на той
               // стороне ещё не научился их публиковать» — на вид это не

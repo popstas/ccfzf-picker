@@ -613,6 +613,63 @@ test('выключенный чекбокс путей убирает путь �
   assert.ok(items[1].html.includes('title="/home/user/projects/ccfzf"'), items[1].html);
 });
 
+// ── Какой режим показан на самом деле ────────────────────────────────────────
+//
+// Развилка одна, а раскладок две: узкий список и блоки широкого режима. Пока
+// она стояла по месту, широкая ветка брала `mode` как есть — и `/s` на машине
+// без трекера давал там пустой экран, потому что buildBlocks на `snapshots`
+// без трекера не отдаёт ни одного блока, а узкий список в том же случае честно
+// искал по сессиям. Вычитывается со страницы тем же приёмом, что и
+// рисовальщики выше.
+const { parseQuery } = require('../frontend-src/picker-mode');
+
+function shownFor(value, trackerHere) {
+  const ctx = {
+    // Ровно то, чем shownModeAndQuery пользуется снаружи себя.
+    window: { PickerMode: { parseQuery } },
+    search: { value },
+    trackerIsHere: () => trackerHere,
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${pageFunctions('shownModeAndQuery()')}\nvar shown = shownModeAndQuery();`,
+    ctx, { filename: 'sessions.html' });
+  // Поля переписываются в свой объект: у сделанного внутри vm другой Object, и
+  // deepStrictEqual сравнивает ещё и прототип.
+  return { mode: ctx.shown.mode, query: ctx.shown.query };
+}
+
+test('без трекера `/s` откатывается в поиск по сессиям, а не показывает пустоту', () => {
+  // Ищется вся строка целиком, вместе с префиксом: в поиске по сессиям `/s` —
+  // то, что человек набрал, а не команда.
+  assert.deepStrictEqual(shownFor('/s foo', false), { mode: 'sessions', query: '/s foo' });
+  assert.deepStrictEqual(shownFor('/s', false), { mode: 'sessions', query: '/s' });
+});
+
+test('с трекером `/s` остаётся режимом снимков, и префикс из отбора уходит', () => {
+  assert.deepStrictEqual(shownFor('/s foo', true), { mode: 'snapshots', query: 'foo' });
+});
+
+test('режим проектов и обычный поиск от трекера не зависят', () => {
+  for (const here of [true, false]) {
+    assert.deepStrictEqual(shownFor('/a foo', here), { mode: 'projects', query: 'foo' });
+    assert.deepStrictEqual(shownFor('foo', here), { mode: 'sessions', query: 'foo' });
+  }
+});
+
+// Сторож на само устройство: обе раскладки обязаны брать режим у одной
+// функции. Посчитай его render() у себя — и широкая ветка снова разойдётся с
+// узкой, а поймать это будет нечем: пустой экран от зелёных тестов не отличим.
+test('обе раскладки берут режим из одного места, а не считают его порознь', () => {
+  const source = pageFunctions('render()');
+  assert.ok(source.includes('shownModeAndQuery()'),
+    'render() обязан спрашивать режим у shownModeAndQuery');
+  assert.ok(!source.includes('parseQuery'),
+    'render() снова разбирает строку поиска сам — раскладки разойдутся');
+  // Блоки получают ровно то же, что и узкий список: ни своего разбора строки,
+  // ни своей развилки по трекеру.
+  assert.ok(source.includes('renderBlocks(mode, query, nowSec)'), source);
+});
+
 // ── Куда Enter уводит строку снимка ──────────────────────────────────────────
 //
 // Единственное место, которое различает три исхода — поднять всю раскладку,
