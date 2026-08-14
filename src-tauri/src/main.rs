@@ -180,9 +180,51 @@ fn hide_picker(app: tauri::AppHandle) {
 /// Узкий обязан совпадать с `tauri.conf.json` — с ним пикер открывается, к
 /// нему же возвращается выход из широкого режима; сторожит это тест.
 /// Широкий — не весь экран намеренно: окно `alwaysOnTop`, и под ним должно
-/// остаться видно, что было.
+/// остаться видно, что было. По той же причине он ещё и зажимается по экрану:
+/// 1400×900 на тринадцатидюймовом маке (логические 1440×900) закрывают экран
+/// целиком и залезают под строку меню, а отступить некуда — окно без декораций
+/// и drag-region, мышью его не подвинуть вовсе. Отсюда `SCREEN_FILL`: желаемое
+/// или доля экрана, что меньше.
 const NARROW_SIZE: (f64, f64) = (900.0, 640.0);
 const WIDE_SIZE: (f64, f64) = (1400.0, 900.0);
+
+/// Доля экрана, больше которой широкое окно не берёт. Остаток — та самая
+/// полоса, по которой видно, что было под пикером.
+const SCREEN_FILL: f64 = 0.9;
+
+/// Зажать желаемый размер по логическому размеру экрана.
+///
+/// Чистая и отдельная от команды намеренно: монитора в тестах нет, а
+/// арифметику проверить и нужно, и можно.
+fn fit_to_screen(want: (f64, f64), screen: (f64, f64)) -> (f64, f64) {
+    (fit_axis(want.0, screen.0), fit_axis(want.1, screen.1))
+}
+
+/// Ноль, отрицательное и NaN значат «сторона экрана неизвестна»: зажимать не
+/// по чему, и отдать здесь долю такого экрана значило бы схлопнуть окно в
+/// точку. Желаемое в этом случае честнее.
+fn fit_axis(want: f64, screen: f64) -> f64 {
+    if !(screen > 0.0) {
+        return want;
+    }
+    want.min(screen * SCREEN_FILL)
+}
+
+/// Логический размер монитора, на котором стоит окно.
+///
+/// `current_monitor` отвечает `Result<Option<_>>` — монитора может не быть
+/// вовсе (окно скрыто, дисплей отключили), и это не ошибка, а «зажимать не по
+/// чему». `size()` физический, поэтому делится на `scale_factor()`:
+/// `set_size` ниже принимает логический.
+fn monitor_logical_size(window: &tauri::WebviewWindow) -> Option<(f64, f64)> {
+    let monitor = window.current_monitor().ok().flatten()?;
+    let scale = monitor.scale_factor();
+    if !(scale > 0.0) {
+        return None;
+    }
+    let size = monitor.size();
+    Some((size.width as f64 / scale, size.height as f64 / scale))
+}
 
 /// Размер окна под режим списка.
 ///
@@ -195,7 +237,14 @@ fn set_picker_size(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String
     let Some(window) = app.get_webview_window("picker") else {
         return Err("picker window is gone".into());
     };
-    let (w, h) = if fullscreen { WIDE_SIZE } else { NARROW_SIZE };
+    let (w, h) = if fullscreen {
+        match monitor_logical_size(&window) {
+            Some(screen) => fit_to_screen(WIDE_SIZE, screen),
+            None => WIDE_SIZE,
+        }
+    } else {
+        NARROW_SIZE
+    };
     window
         .set_size(tauri::LogicalSize::new(w, h))
         .map_err(|e| format!("cannot resize picker: {e}"))?;
@@ -1809,5 +1858,50 @@ actions:
     fn wide_size_is_wider_than_narrow() {
         assert!(WIDE_SIZE.0 > NARROW_SIZE.0);
         assert!(WIDE_SIZE.1 > NARROW_SIZE.1);
+    }
+
+    /// На большом экране зажимать нечего: человек просил широкое окно, он его
+    /// и получает. Зажми оно и здесь, широкий режим на внешнем мониторе стал
+    /// бы меньше, чем задумано, без всякой на то причины.
+    #[test]
+    fn big_screen_gives_the_wanted_size() {
+        assert_eq!(fit_to_screen(WIDE_SIZE, (2560.0, 1440.0)), WIDE_SIZE);
+    }
+
+    /// Тринадцатидюймовый мак: логические 1440×900 меньше желаемых 1400×900 по
+    /// высоте и почти равны по ширине. Окно обязано выйти строго меньше экрана
+    /// по обеим сторонам — иначе оно закроет экран целиком и залезет под
+    /// строку меню, а подвинуть его нечем.
+    #[test]
+    fn small_screen_leaves_something_visible() {
+        let screen = (1440.0, 900.0);
+        let (w, h) = fit_to_screen(WIDE_SIZE, screen);
+        assert!(w < screen.0, "ширина {w} не оставила полосы на экране {screen:?}");
+        assert!(h < screen.1, "высота {h} не оставила полосы на экране {screen:?}");
+        assert!(w > 0.0 && h > 0.0, "зажатое окно схлопнулось: {w}×{h}");
+    }
+
+    /// Зажимается каждая сторона своя: экран ниже желаемого, но шире, обязан
+    /// урезать только высоту. Считай мы по одной стороне, широкий режим на
+    /// низком широком мониторе терял бы ширину ни за что.
+    #[test]
+    fn axes_are_clamped_independently() {
+        let (w, h) = fit_to_screen(WIDE_SIZE, (3440.0, 800.0));
+        assert_eq!(w, WIDE_SIZE.0);
+        assert!(h < 800.0, "высота {h} не зажалась под экран 800");
+    }
+
+    /// Вырожденный экран — это «монитор не назвался», а не «экран нулевой».
+    /// Отдай мы тут долю такого экрана, окно схлопнулось бы в точку или ушло в
+    /// отрицательный размер, и пикер пропал бы с глаз без единой ошибки.
+    #[test]
+    fn degenerate_screen_falls_back_to_the_wanted_size() {
+        assert_eq!(fit_to_screen(WIDE_SIZE, (0.0, 0.0)), WIDE_SIZE);
+        assert_eq!(fit_to_screen(WIDE_SIZE, (-1920.0, -1080.0)), WIDE_SIZE);
+        assert_eq!(fit_to_screen(WIDE_SIZE, (f64::NAN, f64::NAN)), WIDE_SIZE);
+        // Одна сторона известна, другая нет — зажимается только известная.
+        let (w, h) = fit_to_screen(WIDE_SIZE, (1000.0, 0.0));
+        assert!(w < 1000.0, "известная сторона обязана зажаться: {w}");
+        assert_eq!(h, WIDE_SIZE.1);
     }
 }
