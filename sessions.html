@@ -625,7 +625,7 @@
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
     // Про `/s` рассказываем только там, где он работает: подсказка о режиме,
     // которого нет, обманывает ровно так же, как молчащий Enter.
-    menuHint.textContent = '^K / right click - Session menu, ^N - new session, ^A - all projects'
+    menuHint.textContent = '^K / right click - Session menu, ^N - new session, ^A - all projects, ^F - wide view'
       + (trackerIsHere() ? ', ^S - snapshots' : '');
   }
 
@@ -641,7 +641,7 @@
     // uiToggles, не toggles: тот плоский и не помнит ось statusline — запись
     // плоской картой обнулила бы её при первом же save_ui, включая тот, что
     // зовётся сменой сортировки (ниже, не только из чекбокса).
-    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles) })
+    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen) })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -1176,14 +1176,39 @@
     nodes.forEach((node, i) => node.classList.toggle('active', i === active));
   }
 
+  /** Каретка на краю запроса и ничего не выделено. */
+  function atQueryEdge(key) {
+    if (search.selectionStart !== search.selectionEnd) return false;
+    return key === 'ArrowLeft'
+      ? search.selectionStart === 0
+      : search.selectionStart === search.value.length;
+  }
+
   function move(delta) {
     if (!rows.length) return;
-    active = (active + delta + rows.length) % rows.length;
+    // В широком режиме — внутри своего блока, с упором в края; в узком — по
+    // кругу, как было: там список один, и круг возвращает к его началу.
+    active = fullscreen
+      ? window.PickerBlocks.moveInBlocks(rows, active, delta)
+      : (active + delta + rows.length) % rows.length;
     paint();
-    // Только здесь, не в paint: render() тикает раз в секунду с обновлением
-    // списка, и scrollIntoView каждый раз дёргал бы скролл к активной строке,
-    // даже когда пользователь сам ушёл вниз читать другие сессии.
+    scrollActiveIntoView();
+  }
+
+  function moveBlock(delta) {
+    if (!rows.length) return;
+    active = window.PickerBlocks.moveBetweenBlocks(rows, active, delta);
+    paint();
+    scrollActiveIntoView();
+  }
+
+  // Только на нажатие клавиши, не в paint: render() тикает раз в секунду, и
+  // scrollIntoView каждый раз дёргал бы скролл к активной строке, даже когда
+  // человек сам ушёл вниз читать другие сессии.
+  function scrollActiveIntoView() {
     const current = list.querySelectorAll('.row')[active];
+    // block: 'nearest' сам находит ближайший скроллящийся предок — в широком
+    // режиме это тело блока, в узком сам список.
     if (current) current.scrollIntoView({ block: 'nearest' });
   }
 
@@ -1480,6 +1505,14 @@
   function choose() {
     const row = rows[active];
     if (!row) return;
+    // Строка свёрнутого блока: Enter на ней не открывает ничего, а разворачивает
+    // блок. Стоит до разбора обычных видов строк: сессии за ней нет вовсе, и
+    // любая ветка ниже приняла бы её за строку без id.
+    if (row.kind === 'block-toggle') {
+      expandedBlocks = [...expandedBlocks, row.blockKey];
+      render();
+      return;
+    }
     // Заголовок снимка: поднять раскладку целиком.
     if (row.kind === 'snapshot') return restoreSnapshot(row.id, []);
     // Сессия из снимка: у открытой окно уже есть, и Enter должен поднять его,
@@ -1942,6 +1975,22 @@
       onSearchInput();
       return;
     }
+    if (plainCtrl && e.code === 'KeyF') {
+      // Режим окна — не префикс в строке поиска, в отличие от `^A` и `^S`: он
+      // меняет раскладку, а не то, что показано, и потому живёт флагом и
+      // помнится в ui.json.
+      e.preventDefault();
+      fullscreen = !fullscreen;
+      // Развёрнутые блоки — состояние одной раскладки: вернувшись в широкий
+      // режим, человек ждёт его умолчания, а не того, что разворачивал в
+      // прошлый раз.
+      expandedBlocks = [];
+      invoke('set_picker_size', { fullscreen })
+        .catch((err) => { error = String(err); });
+      saveUi();
+      render();
+      return;
+    }
     // ^P/^U/^I — те же три действия, что и в меню. preventDefault здесь
     // обязателен: иначе Ctrl+P в webview уйдёт в печать.
     if (plainCtrl) {
@@ -1963,6 +2012,15 @@
     }
     if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+    // ←/→ уходят в навигацию только в широком режиме и только когда каретка
+    // на краю запроса: внутри набранного текста они правят его, как раньше.
+    // Поле поиска сфокусировано всегда, и отнять у него стрелки насовсем
+    // значило бы лишить человека правки запроса — ту же цену уже заплатили за
+    // `^A`, второй раз она ни к чему.
+    else if (fullscreen && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && atQueryEdge(e.key)) {
+      e.preventDefault();
+      moveBlock(e.key === 'ArrowRight' ? 1 : -1);
+    }
     else if (e.key === 'Enter') { e.preventDefault(); choose(); }
     else if (e.key === 'Escape') { e.preventDefault(); invoke('hide_picker'); }
   });
@@ -2117,6 +2175,11 @@
       // toggles тут производная, а не источник: источник — uiToggles, и
       // именно его, а не эту плоскую карту, пишет saveUi().
       toggles = window.UiState.listColumns(uiToggles);
+      fullscreen = ui.fullscreen;
+      // Размер просим у Rust сразу: окно открывается с размером из
+      // tauri.conf.json, и без этого широкий режим помнился бы, а окно
+      // осталось бы узким.
+      if (fullscreen) invoke('set_picker_size', { fullscreen: true });
       // Набор вынесенных в статуслайн галок мог прийти из файла другим, чем
       // при первой отрисовке разметки (до загрузки uiToggles ещё нет) —
       // разметку чекбоксов надо пересобрать под то, что реально загружено.
@@ -2180,6 +2243,11 @@
         sortMode = ui.sort;
         uiToggles = ui.toggles;
         toggles = window.UiState.listColumns(uiToggles);
+        fullscreen = ui.fullscreen;
+        // Тот же размер, что и при первой загрузке: ui.json правит другое окно,
+        // и запомненный там широкий режим обязан доехать до окна, а не остаться
+        // одной раскладкой списка в узкой раме.
+        if (fullscreen) invoke('set_picker_size', { fullscreen: true });
       } catch (e) {
         error = String(e);
       }

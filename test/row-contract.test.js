@@ -689,6 +689,10 @@ function chooseWith(rows, active) {
   const ctx = {
     rows,
     active,
+    // Строка свёрнутого блока не открывает ничего, а разворачивает блок: имя
+    // блока копится в expandedBlocks, а список рисуется заново.
+    expandedBlocks: [],
+    render: () => calls.push(['render']),
     // Array.from — не украшение: массив, собранный внутри vm, приходит с
     // прототипом другого realm, и deepStrictEqual сравнивает в том числе его.
     restoreSnapshot: (id, sessionIds) => calls.push(['restoreSnapshot', id, Array.from(sessionIds)]),
@@ -698,7 +702,7 @@ function chooseWith(rows, active) {
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nchoose();`, ctx, { filename: 'sessions.html' });
-  return calls;
+  return { calls, expandedBlocks: Array.from(ctx.expandedBlocks) };
 }
 
 test('Enter на строке снимка уходит по трём разным веткам', () => {
@@ -709,17 +713,30 @@ test('Enter на строке снимка уходит по трём разны
 
   // Заголовок — вся раскладка. Пустой список сессий здесь значит «все», и
   // непустой на его месте поднял бы часть вместо целого.
-  assert.deepStrictEqual(chooseWith(rows, 0), [['restoreSnapshot', 'snap-1', []]]);
+  assert.deepStrictEqual(chooseWith(rows, 0).calls, [['restoreSnapshot', 'snap-1', []]]);
 
   // Открытая сессия — окно уже есть, Enter показывает его, а не заводит второе.
-  assert.deepStrictEqual(chooseWith(rows, 1), [['focusSession', 'aaa']]);
+  assert.deepStrictEqual(chooseWith(rows, 1).calls, [['focusSession', 'aaa']]);
 
   // Закрытая — просьба на один id, и адресована она снимку. `snapshotId` и
   // `id` здесь заведомо разные: подстановка одного вместо другого роняет
   // именно это сравнение.
   assert.strictEqual(rows[2].id, 'bbb');
   assert.strictEqual(rows[2].snapshotId, 'snap-1');
-  assert.deepStrictEqual(chooseWith(rows, 2), [['restoreSnapshot', 'snap-1', ['bbb']]]);
+  assert.deepStrictEqual(chooseWith(rows, 2).calls, [['restoreSnapshot', 'snap-1', ['bbb']]]);
+});
+
+// Строка свёрнутого блока приходит из buildBlocks и сессией не является вовсе:
+// у неё нет ни id, ни cwd. Не разбери её choose первой, она ушла бы в
+// openSession — в просьбу открыть сессию с `id: undefined`, а это молчаливый
+// отказ на той стороне: ответа у публикации нет.
+test('Enter на свёрнутом блоке разворачивает его, а не открывает сессию', () => {
+  const { collapsedRow } = require('../frontend-src/picker-blocks');
+  const row = collapsedRow({ key: 'g:Not running', rows: [aggregatorSession()] });
+  assert.strictEqual(row.kind, 'block-toggle');
+  const { calls, expandedBlocks } = chooseWith([row], 0);
+  assert.deepStrictEqual(calls, [['render']]);
+  assert.deepStrictEqual(expandedBlocks, ['g:Not running']);
 });
 
 // ── saveUi сохраняет достоверный uiToggles, а не плоскую toggles (C1, round 1 fix) ──
@@ -730,7 +747,7 @@ test('Enter на строке снимка уходит по трём разны
 // но и по смене сортировки. Тест вычитывает настоящий saveUi из страницы (тем
 // же приёмом, что renderProjects и choose выше) и проверяет, что сохранённый
 // объект правда двухосный и ось statusline из uiToggles никуда не делась.
-function saveUiWith(uiToggles) {
+function saveUiWith(uiToggles, fullscreen) {
   const source = SESSIONS_HTML.match(/\n {2}function saveUi\(\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'saveUi не найден в sessions.html — тест сторожит не то');
   const calls = [];
@@ -741,6 +758,9 @@ function saveUiWith(uiToggles) {
     render: () => {},
     sortMode: 'name',
     uiToggles,
+    // Режим окна — третий аргумент uiStateToSave: не передай его saveUi, и
+    // широкий режим забывался бы при первом же сохранении вида списка.
+    fullscreen: Boolean(fullscreen),
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nsaveUi();`, ctx, { filename: 'sessions.html' });
@@ -759,10 +779,18 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
       showPrompt: { list: true, statusline: true },
       showId: { list: false, statusline: false },
     },
-    // saveUi() в sessions.html ещё не передаёт третий аргумент (Task 6) —
-    // uiStateToSave честно нормализует отсутствующий режим в умолчание.
+    // Узкое окно — это и есть умолчание режима.
     fullscreen: false,
   });
+});
+
+test('saveUi запоминает и режим окна, а не только вид списка', () => {
+  // Третий аргумент uiStateToSave. Забудь его saveUi — и ^F помнился бы ровно
+  // до первого сохранения вида списка (смена сортировки, любая галка), после
+  // чего перезапуск открывал бы узкое окно, хотя человек его не просил.
+  const calls = saveUiWith({ showPrompt: { list: true, statusline: true } }, true);
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].ui.fullscreen, true);
 });
 
 // ── renderChecks рисует только галки с осью statusline (C2) ─────────────────

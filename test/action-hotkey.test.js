@@ -84,6 +84,11 @@ test('занятыми считаются встроенные клавиши о
   // значило бы увести `^S` в действие, а режим оставить только набором руками.
   assert.strictEqual(isReserved(parseHotkey('Ctrl+S')), true);
   assert.strictEqual(isReserved(parseHotkey('Cmd+S')), true);
+  // ^F — ярлык широкого режима, не действие. Не займи его окно, встроенная
+  // ветка съедала бы событие у действия, которое человек назначил на Ctrl+F,
+  // и оно молча перестало бы работать.
+  assert.strictEqual(isReserved(parseHotkey('Ctrl+F')), true);
+  assert.strictEqual(isReserved(parseHotkey('Cmd+F')), true);
   // Та же буква с добавленным модификатором свободна.
   assert.strictEqual(isReserved(parseHotkey('Ctrl+Shift+K')), false);
   assert.strictEqual(isReserved(parseHotkey('Ctrl+Alt+P')), false);
