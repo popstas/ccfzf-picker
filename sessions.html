@@ -1126,6 +1126,14 @@
    *
    * Уже открытые пропускаются: второе окно той же сессии дралось бы с первым
    * за один слот, и место досталось бы неизвестно какому.
+   *
+   * Цикл останавливается на первом отказе `openSession`, а не безусловно
+   * чистит `error` в конце. Раньше он это делал всегда — жалоба, которую
+   * `openSession` только что выставила, стиралась тут же, и на скрытом окне
+   * (такт опроса — минуты) человек не видел отказ ни сразу, ни при следующем
+   * открытии пикера. Прерывание к тому же честнее молчаливого перебора
+   * остатка: одна и та же сломанная ssh-сессия откажет и следующему
+   * терминалу, а дотягивать раскладку в этих условиях незачем.
    */
   async function restoreLocally(snapshotId, sessionIds) {
     const snap = snapshotById(snapshotId);
@@ -1136,7 +1144,9 @@
       .filter(s => s && s.id && !open.has(s.id))
       .filter(s => !wanted.size || wanted.has(s.id));
     for (const s of list) {
+      error = '';
       await openSession({ id: s.id, cwd: s.cwd || '', title: s.title || '', kind: 'snapshot-session' });
+      if (error) return;
       await new Promise(resolve => setTimeout(resolve, 1200));
     }
     error = '';
