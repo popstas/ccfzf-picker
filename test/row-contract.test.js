@@ -673,6 +673,9 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
       showPrompt: { list: true, statusline: true },
       showId: { list: false, statusline: false },
     },
+    // saveUi() в sessions.html ещё не передаёт третий аргумент (Task 6) —
+    // uiStateToSave честно нормализует отсутствующий режим в умолчание.
+    fullscreen: false,
   });
 });
 
