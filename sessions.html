@@ -60,9 +60,11 @@
         #list.blocks .block-rows { overflow-y: auto; min-height: 0; flex: 0 1 auto; }
         /* Карточка — только у строки сессии (`.row.session`), не у голого
            `.row`: тот же `.text`/`.meta`/`.name`/`.dot` носят и строка
-           проекта, и снимок (заголовок и его сессия), и свёрнутый блок —
-           карточку получать им не положено, спека держит их строками, у них
-           нет ни запроса, ни ответа, которые карточка и разворачивает.
+           проекта, и снимок (заголовок и его сессия), и свёрнутый блок, и
+           зелийная псевдосессия (`.row.zellij`) — карточку получать им не
+           положено, спека держит их строками: запроса с ответом, которые
+           карточка и разворачивает, нет ни у одной из них (у зелия в
+           частности — своих `agentPrompt`/`agentDescription` она не носит).
            Метаданные уходят под текст, а не вправо — в колонке 420px правая
            группа отобрала бы у имени почти всю ширину. */
         #list.blocks .row.session {
@@ -813,11 +815,18 @@
     // стоял agentState, и обещание расходилось с делом на сессиях, которых
     // человек ещё не открывал.
     const markable = markToggleId(session) !== null;
-    // Класс `session` — маркер вида строки, как `project`/`snapshot` у
-    // соседей: карточка в широком режиме бьёт только по нему, иначе те же
-    // голые `.text`/`.meta`/`.name`/`.dot` внутри `#list.blocks` ловили бы и
-    // строку проекта, и снимок, и свёрнутый блок.
-    const html = `<div class="row session${session.live ? '' : ' closed'}${markable ? ' markable' : ''}" data-index="${index}"${titleAttr(session)}>` +
+    // Маркер вида строки — как `project`/`snapshot`/`snapshot-session`/
+    // `block-toggle` у соседей: карточка в широком режиме бьёт только по
+    // `.session`, иначе те же голые `.text`/`.meta`/`.name`/`.dot` внутри
+    // `#list.blocks` ловили бы и строку проекта, и снимок, и свёрнутый блок.
+    // Зелийная псевдосессия (session-groups.js кладёт её в тот же массив,
+    // что и настоящие сессии, и рисует тем же sessionItem) карточкой тоже не
+    // должна становиться: запроса с ответом у неё нет (agentPrompt и
+    // agentDescription она не носит), карточка вышла бы пустой и всё равно
+    // выросла бы на строку — поэтому её вид назван своим классом `zellij`, а
+    // не `session`.
+    const rowKind = session.kind === 'zellij' ? 'zellij' : 'session';
+    const html = `<div class="row ${rowKind}${session.live ? '' : ' closed'}${markable ? ' markable' : ''}" data-index="${index}"${titleAttr(session)}>` +
       statusDotHtml(session) +
       `<div class="text"><div class="name">${escapeHtml(session.label)}` +
       `${prBadgeHtml(session)}` +
