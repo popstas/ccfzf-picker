@@ -57,6 +57,18 @@ test('голая буква без модификатора не комбина�
   assert.strictEqual(formatHotkey('constructor+E'), 'constructor+E');
 });
 
+// Прямые клавиши действий гасят событие через preventDefault, а поле поиска в
+// пикере сфокусировано всегда. Буква действия, совпавшая с правкой текста,
+// отобрала бы её насовсем: `^V` перестал бы вставлять то, что ищут. `^A` в этот
+// список не входит намеренно — он отдан ярлыку `/a` сознательно, цена записана
+// в docs/TODO.md.
+test('буква действия не отбирает у поиска буфер обмена', () => {
+  const editing = ['c', 'v', 'x', 'z'];
+  for (const [id, letter] of Object.entries(BUILTIN_ACTION_KEYS)) {
+    assert.ok(!editing.includes(letter), `действие ${id} забрало ^${letter.toUpperCase()}`);
+  }
+});
+
 test('занятыми считаются встроенные клавиши окна и только они', () => {
   for (const letter of Object.values(BUILTIN_ACTION_KEYS)) {
     assert.strictEqual(isReserved(parseHotkey(`Ctrl+${letter}`)), true, `Ctrl+${letter}`);

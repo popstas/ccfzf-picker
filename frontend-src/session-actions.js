@@ -68,6 +68,10 @@
     const num = prNumber((row || {}).pr_url);
     if (num) actions.push({ id: 'pr', label: `Open PR #${num}` });
     if (row && row.lastActivity && row.agentSeen) actions.push({ id: 'unread', label: 'Mark unread' });
+    // Зеркало предыдущего, и условие у него зеркальное же: отмечать
+    // просмотренным нечего у строки без записи агента и незачем у той, что уже
+    // просмотрена. Оба пункта разом не появляются никогда — это сторожит тест.
+    if (row && row.lastActivity && !row.agentSeen) actions.push({ id: 'seen', label: 'Mark seen' });
     // Переклейка предлагается только там, где ей есть за что тянуть: живая
     // сессия с известным pid. Пикер эту команду не выполняет — отдаёт человеку,
     // см. buildAttachCommand.

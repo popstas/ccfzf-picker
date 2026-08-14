@@ -69,6 +69,27 @@ test('вернуть в непрочитанное можно только то,
   assert.ok(!unread({ id: 'a', agentSeen: true, lastActivity: 0 }));
 });
 
+// Зеркало предыдущего: пометить просмотренным есть смысл ровно там, где
+// непрочитанное — то есть у строки с записью агента, которую ещё не читали.
+test('пометить просмотренным можно только непрочитанное', () => {
+  const seen = row => availableActions(row).some(x => x.id === 'seen');
+  assert.ok(seen({ id: 'a', agentSeen: false, lastActivity: 5 }));
+  assert.ok(!seen({ id: 'a', agentSeen: true, lastActivity: 5 }));
+  assert.ok(!seen({ id: 'a', agentSeen: false, lastActivity: 0 }));
+});
+
+// Два пункта об одном и том же и обязаны исключать друг друга: строка, где
+// предлагают оба сразу, значила бы, что условия разошлись.
+test('«просмотрено» и «непрочитано» не предлагаются вместе', () => {
+  for (const agentSeen of [true, false]) {
+    const ids = availableActions({ id: 'a', agentSeen, lastActivity: 5 }).map(a => a.id);
+    assert.strictEqual(
+      Number(ids.includes('seen')) + Number(ids.includes('unread')), 1,
+      `agentSeen=${agentSeen}: ровно один из пары`,
+    );
+  }
+});
+
 // Пункт меню и бейдж в строке разбирают одну и ту же ссылку. Пока номер им даёт
 // одна функция, разойтись они не могут — тест сторожит именно это: ссылка,
 // которая дала бейдж, обязана дать и пункт меню, и наоборот.

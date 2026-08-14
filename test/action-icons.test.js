@@ -11,7 +11,9 @@ const { availableActions } = require('../frontend-src/session-actions');
 // `open-remote` в неё уже пришлось дописывать руками), а прямым вызовом
 // availableActions на строке, у которой есть всё сразу: живая сессия с pid
 // (даёт attach), cwd (даёт new), pr_url с номером PR (даёт pr), lastActivity
-// и agentSeen (даёт unread) — info в списке всегда.
+// и agentSeen (даёт unread) — info в списке всегда. Строк две, потому что
+// `seen` и `unread` — пара взаимоисключающих: одна строка показала бы только
+// один из них, и второй приехал бы в меню без значка незамеченным.
 test('у каждого встроенного пункта есть свой значок', () => {
   const row = {
     kind: 'session',
@@ -22,7 +24,10 @@ test('у каждого встроенного пункта есть свой з
     lastActivity: 1785870255,
     agentSeen: 1785870300,
   };
-  const ids = availableActions(row).map(a => a.id);
+  const ids = [
+    ...availableActions(row),
+    ...availableActions({ ...row, agentSeen: false }),
+  ].map(a => a.id);
   assert.ok(ids.length > 1, 'availableActions вернул слишком мало — тест сторожит не то');
   // `open-remote` availableActions не отдаёт вовсе — этот пункт добавляет
   // страница (окно уже открыто на этой машине), а не сборка списка действий.

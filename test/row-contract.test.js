@@ -1122,6 +1122,11 @@ test('при открытом меню правый клик ничего не �
 function renderSessionRows(state, query, toggles) {
   const source = SESSIONS_HTML.match(/\n {2}function renderSessions\(query, items, nowSec\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'renderSessions не найден в sessions.html — тест сторожит не то');
+  // markToggleId вычитывается из той же страницы, а не подставляется заглушкой:
+  // от неё зависит класс `markable`, то есть обещание про Shift+клик, и копия
+  // разошлась бы с настоящим правилом молча.
+  const toggleSrc = SESSIONS_HTML.match(/\n {2}function markToggleId\(row\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(toggleSrc, 'markToggleId не найден в sessions.html — тест сторожит не то');
   const ctx = {
     // Ровно то, чем renderSessions пользуется снаружи себя.
     window: {
@@ -1147,9 +1152,26 @@ function renderSessionRows(state, query, toggles) {
     nowSec: NOW,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${source[0]}\nrenderSessions(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
+  vm.runInContext(`${toggleSrc[0]}\n${source[0]}\nrenderSessions(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
   return { items: ctx.items, rows: ctx.rows };
 }
+
+// Shift+клик один, а отметки две. Развилку решает markToggleId, и она же
+// решает, зажечь ли строке класс `markable` — то есть пообещать подсказкой то,
+// что клик и сделает.
+test('Shift выбирает отметку по состоянию строки', () => {
+  const src = SESSIONS_HTML.match(/\n {2}function markToggleId\(row\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(src, 'markToggleId не найден в sessions.html — тест сторожит не то');
+  const ctx = { window: { SessionActions: { availableActions } } };
+  vm.createContext(ctx);
+  vm.runInContext(`${src[0]}\nvar pick = markToggleId;`, ctx, { filename: 'sessions.html' });
+
+  assert.strictEqual(ctx.pick({ id: 'a', lastActivity: 5, agentSeen: true }), 'unread');
+  assert.strictEqual(ctx.pick({ id: 'a', lastActivity: 5, agentSeen: false }), 'seen');
+  // Сессия без записи агента: отматывать нечего и отмечать нечего, а промах по
+  // Shift не должен превращаться в открытие сессии.
+  assert.strictEqual(ctx.pick({ id: 'a', lastActivity: 0, agentSeen: false }), null);
+});
 
 test('строка зелийной сессии доезжает до отрисовки и не пустует', () => {
   // Строки проектов живут в своём режиме, а эта идёт в общий список сессий —
