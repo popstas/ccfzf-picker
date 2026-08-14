@@ -204,7 +204,7 @@ fn fit_to_screen(want: (f64, f64), screen: (f64, f64)) -> (f64, f64) {
 /// по чему, и отдать здесь долю такого экрана значило бы схлопнуть окно в
 /// точку. Желаемое в этом случае честнее.
 fn fit_axis(want: f64, screen: f64) -> f64 {
-    if !(screen > 0.0) {
+    if screen <= 0.0 || screen.is_nan() {
         return want;
     }
     want.min(screen * SCREEN_FILL)
@@ -214,12 +214,23 @@ fn fit_axis(want: f64, screen: f64) -> f64 {
 ///
 /// `current_monitor` отвечает `Result<Option<_>>` — монитора может не быть
 /// вовсе (окно скрыто, дисплей отключили), и это не ошибка, а «зажимать не по
-/// чему». `size()` физический, поэтому делится на `scale_factor()`:
+/// чему». Запасной ход на `primary_monitor` обязателен: окно пикера создаётся
+/// скрытым (`visible: false` в `tauri.conf.json`), а первая просьба о размере
+/// уходит со страницы при загрузке — то есть пока окно ещё скрыто. У tao на
+/// macOS `current_monitor` — это `ns_window.screen()`, а у невыведенного окна
+/// он `nil`: без запасного хода зажим на этом пути не срабатывал бы вовсе, и
+/// первое открытие после перезапуска с запомненным широким режимом снова
+/// закрывало бы экран целиком на маленьком маке — поймать это можно было бы
+/// только глазами. `size()` физический, поэтому делится на `scale_factor()`:
 /// `set_size` ниже принимает логический.
 fn monitor_logical_size(window: &tauri::WebviewWindow) -> Option<(f64, f64)> {
-    let monitor = window.current_monitor().ok().flatten()?;
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())?;
     let scale = monitor.scale_factor();
-    if !(scale > 0.0) {
+    if scale <= 0.0 || scale.is_nan() {
         return None;
     }
     let size = monitor.size();
