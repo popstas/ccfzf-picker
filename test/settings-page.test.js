@@ -76,6 +76,51 @@ function defaultsFromPage() {
   return ctx.out;
 }
 
+// ── таблица осей объясняет себя и отделена от таблицы колонок ───────────────
+//
+// Тем же приёмом, что и save(): настоящий axesTableHtml вычитывается из
+// страницы и выполняется в vm — копия разметки в тесте разошлась бы молча.
+function axesHtml() {
+  const src = ['TOGGLE_LABELS', 'FILTER_LABELS', 'AXIS_HINTS']
+    .map(name => sourceOf(new RegExp(`\\n {2}const ${name} = \\{[\\s\\S]*?\\n?(?: {2})?\\};\\n`), name))
+    .join('\n')
+    + sourceOf(/\n {2}function axesTableHtml\(\) \{[\s\S]*?\n {2}\}\n/, 'axesTableHtml');
+  const ctx = {
+    esc: s => String(s).replace(/[&<>"]/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+    ui: defaults(),
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${src}\nvar out = axesTableHtml();`, ctx, { filename: 'settings.html' });
+  return ctx.out;
+}
+
+test('у каждой галки осей есть подсказка', () => {
+  const html = axesHtml();
+  const boxes = html.match(/<input type="checkbox"[^>]*>/g) || [];
+  assert.ok(boxes.length > 0, 'галок не нашлось — тест сторожит не то');
+  for (const box of boxes) {
+    assert.match(box, /title="[^"]+"/, `галка без подсказки: ${box}`);
+  }
+});
+
+test('второй столбец фильтров объяснён иначе, чем у колонок', () => {
+  // Поле под ним то же самое (`list`), а значит разное: у колонки — «показывать
+  // колонку», у фильтра — «фильтр включён». Одинаковая подсказка врала бы.
+  const html = axesHtml();
+  const [columns, filters] = html.split('Filters');
+  const hintOf = part => (part.match(/data-axis="list"[^>]*title="([^"]+)"/) || [])[1];
+  assert.ok(hintOf(columns), 'подсказка у колонок не найдена');
+  assert.ok(hintOf(filters), 'подсказка у фильтров не найдена');
+  assert.notStrictEqual(hintOf(filters), hintOf(columns));
+});
+
+test('блок фильтров отбит от таблицы колонок', () => {
+  // Без отступа шапка второй таблицы читалась последней строкой первой — то
+  // есть колонкой `window`.
+  assert.match(axesHtml(), /class="field axes-group"/);
+});
+
 test('правка пикера переживает сохранение настроек', async () => {
   const snapshot = defaults();
   // Пикер, пока окно настроек было открыто: снял showId со статуслайна и

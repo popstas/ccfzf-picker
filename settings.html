@@ -27,6 +27,10 @@
   #status.bad { color: #ff7b72; }
   table.axes { border-collapse: collapse; }
   table.axes th, table.axes td { padding: 3px 12px 3px 0; text-align: left; font-weight: normal; }
+  /* Вторая таблица шла вплотную за первой, и её шапка читалась последней
+     строкой первой — то есть колонкой `window`. */
+  .field.axes-group { margin-top: 18px; }
+  table.axes th[title] { cursor: help; }
 </style>
 </head>
 <body>
@@ -118,18 +122,30 @@
       + `<input type="${type}" data-field="${field.id}" value="${esc(value)}">${hint}</div>`;
   }
 
+  // Обе оси называются одинаково у колонок и у фильтров, а значат разное:
+  // под столбцом `enabled` лежит то же поле `list`, что и под колонкой. Имя
+  // столбца этого не объясняет — объясняет подсказка.
+  const AXIS_HINTS = {
+    statusline: 'Show this toggle in the status line at the bottom of the picker',
+    list: 'Show this column in the list',
+    enabled: 'Apply this filter to the list',
+  };
+
   function axesTableHtml() {
-    const row = (key, label) => `<tr><td>${esc(label)}</td>`
+    const row = (key, label, secondAxisHint) => `<tr><td>${esc(label)}</td>`
       + `<td><input type="checkbox" data-axis="statusline" data-key="${key}"${
-        ui.toggles[key].statusline ? ' checked' : ''}></td>`
+        ui.toggles[key].statusline ? ' checked' : ''} title="${esc(AXIS_HINTS.statusline)}"></td>`
       + `<td><input type="checkbox" data-axis="list" data-key="${key}"${
-        ui.toggles[key].list ? ' checked' : ''}></td></tr>`;
-    return '<table class="axes"><tr><th>Column</th><th>statusline</th><th>list</th></tr>'
-      + Object.entries(TOGGLE_LABELS).map(([k, l]) => row(k, l)).join('')
+        ui.toggles[key].list ? ' checked' : ''} title="${esc(secondAxisHint)}"></td></tr>`;
+    const th = (label, hint) => `<th title="${esc(hint)}">${esc(label)}</th>`;
+    return '<table class="axes"><tr><th>Column</th>'
+      + th('statusline', AXIS_HINTS.statusline) + th('list', AXIS_HINTS.list) + '</tr>'
+      + Object.entries(TOGGLE_LABELS).map(([k, l]) => row(k, l, AXIS_HINTS.list)).join('')
       + '</table>'
-      + '<div class="field"><label>Filters</label><table class="axes">'
-      + '<tr><th></th><th>statusline</th><th>enabled</th></tr>'
-      + Object.entries(FILTER_LABELS).map(([k, l]) => row(k, l)).join('')
+      + '<div class="field axes-group"><label>Filters</label><table class="axes">'
+      + '<tr><th></th>' + th('statusline', AXIS_HINTS.statusline)
+      + th('enabled', AXIS_HINTS.enabled) + '</tr>'
+      + Object.entries(FILTER_LABELS).map(([k, l]) => row(k, l, AXIS_HINTS.enabled)).join('')
       + '</table><div class="hint">A filter decides which rows make it into the list, '
       + 'not which columns are visible.</div></div>';
   }
