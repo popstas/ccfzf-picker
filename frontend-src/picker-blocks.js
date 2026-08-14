@@ -95,5 +95,50 @@
     });
   }
 
-  return { buildBlocks, collapsedRow, collapsedLabel };
+  /** Индексы строк одного блока, в порядке показа. */
+  function blockIndexes(rows, block) {
+    const out = [];
+    for (let i = 0; i < rows.length; i++) if (rows[i].block === block) out.push(i);
+    return out;
+  }
+
+  /**
+   * `↑/↓` — внутри своего блока, с упором в края.
+   *
+   * Не по кругу, в отличие от узкого списка: там круг возвращает к началу
+   * единственного списка, а здесь он гонял бы по одной колонке из шести, и на
+   * глаз это неотличимо от «выбор застрял».
+   */
+  function moveInBlocks(rows, active, delta) {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return 0;
+    const current = list[active];
+    if (!current) return 0;
+    const indexes = blockIndexes(list, current.block);
+    const at = indexes.indexOf(active);
+    const next = Math.min(indexes.length - 1, Math.max(0, at + delta));
+    return indexes[next];
+  }
+
+  /**
+   * `←/→` — в соседний блок, на строку с тем же порядковым номером.
+   *
+   * Сосед короче — берётся его последняя строка: прыжок в начало сбивал бы
+   * глаз, который держится за высоту строки, а не за её номер.
+   */
+  function moveBetweenBlocks(rows, active, delta) {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return 0;
+    const current = list[active];
+    if (!current) return 0;
+    const blocks = [...new Set(list.map(r => r.block))];
+    const at = blocks.indexOf(current.block);
+    const target = blocks[at + delta];
+    if (target === undefined) return active;
+    const offset = blockIndexes(list, current.block).indexOf(active);
+    const indexes = blockIndexes(list, target);
+    return indexes[Math.min(offset, indexes.length - 1)];
+  }
+
+  return { buildBlocks, collapsedRow, collapsedLabel, moveInBlocks, moveBetweenBlocks };
 });

@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { buildBlocks } = require('../frontend-src/picker-blocks');
+const { buildBlocks, moveInBlocks, moveBetweenBlocks } = require('../frontend-src/picker-blocks');
 
 /** Живая сессия в том объёме, в каком её читают блоки. */
 function session(id, extra) {
@@ -82,4 +82,43 @@ test('живые блоки свёрнутыми не приходят', () => {
   // раньше» не должно оттеснять вниз «что работает сейчас».
   const blocks = buildBlocks(base());
   assert.strictEqual(blocks[0].collapsed, false);
+});
+
+// Три блока подряд в одном плоском массиве: 0-1 в первом, 2-3-4 во втором,
+// 5 в третьем. Ровно так строки и лежат в rows у страницы.
+const ROWS = [
+  { block: 0 }, { block: 0 },
+  { block: 1 }, { block: 1 }, { block: 1 },
+  { block: 2 },
+];
+
+test('стрелки вверх-вниз ходят внутри блока', () => {
+  assert.strictEqual(moveInBlocks(ROWS, 2, 1), 3);
+  assert.strictEqual(moveInBlocks(ROWS, 3, -1), 2);
+});
+
+test('вниз в конце блока упирается, а не заворачивается', () => {
+  // Круг по одной колонке из шести читался бы как «список кончился и начался
+  // заново», а конец блока в широком режиме виден глазом.
+  assert.strictEqual(moveInBlocks(ROWS, 4, 1), 4);
+  assert.strictEqual(moveInBlocks(ROWS, 2, -1), 2);
+});
+
+test('вправо переводит в соседний блок на ту же позицию', () => {
+  assert.strictEqual(moveBetweenBlocks(ROWS, 1, 1), 3);
+  assert.strictEqual(moveBetweenBlocks(ROWS, 3, -1), 1);
+});
+
+test('в коротком соседе выбирается последняя строка', () => {
+  assert.strictEqual(moveBetweenBlocks(ROWS, 4, 1), 5);
+});
+
+test('за крайним блоком стоять некуда — выбор не двигается', () => {
+  assert.strictEqual(moveBetweenBlocks(ROWS, 5, 1), 5);
+  assert.strictEqual(moveBetweenBlocks(ROWS, 0, -1), 0);
+});
+
+test('пустой список никуда не ведёт', () => {
+  assert.strictEqual(moveInBlocks([], 0, 1), 0);
+  assert.strictEqual(moveBetweenBlocks([], 0, 1), 0);
 });
