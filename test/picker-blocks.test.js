@@ -12,7 +12,16 @@ function session(id, extra) {
 const AUG_12 = Math.floor(new Date(2026, 7, 12, 12, 0).getTime() / 1000);
 
 const GROUPS = [
-  { label: 'Active local sessions - 2', sessions: [session('a'), session('b')] },
+  { label: 'Active local sessions - 2', sessions: [session('a'), session('b')], remote: false },
+  { label: 'Not running', sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
+];
+
+// Список с двумя чужими машинами: в узком списке это две группы, в широком —
+// один блок. Пометка `remote` приезжает из groupSessions.
+const REMOTE_GROUPS = [
+  { label: 'Active local sessions - 1', sessions: [session('a')], remote: false },
+  { label: 'Active on alpha-host - 1', sessions: [session('x')], remote: true, host: 'alpha-host' },
+  { label: 'Active on zeta-host - 2', sessions: [session('y'), session('z')], remote: true, host: 'zeta-host' },
   { label: 'Not running', sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
 ];
 const PROJECTS = [{ id: 'p1', kind: 'project', label: 'picker', cwd: '/home/user/picker' }];
@@ -31,6 +40,51 @@ test('каждая группа сессий становится блоком, 
     'Active local sessions - 2', 'Not running', 'Projects', 'Snapshots',
   ]);
   assert.deepStrictEqual(blocks.map(b => b.kind), ['sessions', 'sessions', 'projects', 'snapshots']);
+});
+
+test('чужие машины склеиваются в один блок', () => {
+  // Блок занимает колонку, и пять машин дали бы пять узких колонок. Деление по
+  // машинам живёт в узком списке, где строки идут сверху вниз и лишний
+  // заголовок ничего не стоит.
+  const blocks = buildBlocks(base({ groups: REMOTE_GROUPS }));
+  assert.deepStrictEqual(blocks.map(b => b.label), [
+    'Active local sessions - 1', 'Active remote sessions - 3', 'Not running',
+    'Projects', 'Snapshots',
+  ]);
+  // Строки — все чужие подряд, в порядке групп: сортировка внутри группы уже
+  // сделана, а порядок машин задан алфавитом их имён.
+  assert.deepStrictEqual(blocks[1].rows.map(r => r.id), ['x', 'y', 'z']);
+});
+
+test('склейка идёт по пометке группы, а не по её заголовку', () => {
+  // Заголовок чужой группы носит имя машины — данные с той стороны. Разбирай
+  // склейка текст, имя машины стало бы форматом, который нельзя менять; тут
+  // заголовок такой же, а пометки нет — и блок остаётся своим.
+  const groups = [
+    { label: 'Active on ghost-host - 1', sessions: [session('g')] },
+    { label: 'Active on alpha-host - 1', sessions: [session('x')], remote: true, host: 'alpha-host' },
+  ];
+  const blocks = buildBlocks(base({ groups, projects: [], snapshots: [] }));
+  assert.deepStrictEqual(blocks.map(b => b.label),
+    ['Active on ghost-host - 1', 'Active remote sessions - 1']);
+});
+
+test('единственная чужая машина тоже становится общим блоком', () => {
+  // Колонка одна на все машины, и её заголовок не может называть одну из них:
+  // с приездом второй он молча стал бы враньём.
+  const groups = REMOTE_GROUPS.filter(g => g.host !== 'zeta-host');
+  const blocks = buildBlocks(base({ groups, projects: [], snapshots: [] }));
+  assert.deepStrictEqual(blocks.map(b => b.label),
+    ['Active local sessions - 1', 'Active remote sessions - 1', 'Not running']);
+});
+
+test('ключ склеенного блока не зависит от набора машин', () => {
+  // По ключу блока помнится его отрисовка (renderedBlocks) и его развёрнутость.
+  // Считайся ключ от заголовка со счётом или от имён машин — уснувшая на
+  // соседней машине сессия пересобирала бы блок целиком.
+  const one = buildBlocks(base({ groups: REMOTE_GROUPS }))[1];
+  const few = buildBlocks(base({ groups: REMOTE_GROUPS.filter(g => g.host !== 'zeta-host') }))[1];
+  assert.strictEqual(one.key, few.key);
 });
 
 test('пустой блок не заводится', () => {
