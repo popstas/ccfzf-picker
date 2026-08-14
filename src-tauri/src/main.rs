@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
@@ -857,6 +858,37 @@ pub(crate) fn picker_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
     )
 }
 
+/// Время сборки этого бинаря, если оно в него вшито.
+///
+/// `None` у релизной сборки: её называет версия, а штамп там лишний. Ноль в
+/// штампе значит именно это — см. `build.rs`.
+fn build_time() -> Option<NaiveDateTime> {
+    let secs: i64 = env!("CCFZF_BUILD_UNIX").parse().ok()?;
+    if secs == 0 {
+        return None;
+    }
+    Some(Local.timestamp_opt(secs, 0).single()?.naive_local())
+}
+
+/// Подпись неактивного пункта меню: какая сборка сейчас запущена.
+///
+/// Дата опускается, когда сборка сегодняшняя, — чаще всего так и есть, а
+/// повторять сегодняшнее число в трее незачем. «Сегодня» считается от запуска
+/// пикера, а не от открытия меню: меню строится один раз при старте, и у
+/// процесса, прожившего в трее сутки, подпись устареет — покажет время без
+/// даты у вчерашней сборки. Цена известна и принята: пикер, проживший сутки,
+/// перезапускали не сегодня, и вопрос «то ли собралось» к нему не стоит.
+fn version_item_label(version: &str, built: Option<NaiveDateTime>, today: NaiveDate) -> String {
+    let Some(built) = built else {
+        return format!("v{version}");
+    };
+    if built.date() == today {
+        format!("v{version} · {}", built.format("%H:%M"))
+    } else {
+        format!("v{version} · {}", built.format("%Y-%m-%d %H:%M"))
+    }
+}
+
 /// Подпись пункта «показать» в меню трея.
 ///
 /// Про занятый хоткей говорит подпись, а не правая колонка: колонка — нативный
@@ -998,7 +1030,24 @@ fn main() {
             let settings_item =
                 MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&show_item, &settings_item, &quit_item])?;
+            // Неактивный пункт: он не действие, а подпись. Стоит последним,
+            // под «Quit», — читают его редко, а два верхних пункта нажимают
+            // каждый день, и сдвигать их ради подписи нельзя.
+            let version_item = MenuItem::with_id(
+                app,
+                "version",
+                version_item_label(
+                    env!("CARGO_PKG_VERSION"),
+                    build_time(),
+                    Local::now().date_naive(),
+                ),
+                false,
+                None::<&str>,
+            )?;
+            let tray_menu = Menu::with_items(
+                app,
+                &[&show_item, &settings_item, &quit_item, &version_item],
+            )?;
             TrayIconBuilder::new()
                 .icon(tray_icon())
                 // Иконка одноцветная и просвечивает фоном: система сама красит
@@ -1051,6 +1100,41 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn at(y: i32, m: u32, d: u32, hh: u32, mm: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(y, m, d)
+            .unwrap()
+            .and_hms_opt(hh, mm, 0)
+            .unwrap()
+    }
+
+    /// Релизную сборку называет версия — штампа у неё нет вовсе.
+    #[test]
+    fn version_item_names_the_release_by_version_alone() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        assert_eq!(version_item_label("0.1.0", None, today), "v0.1.0");
+    }
+
+    /// Сегодняшняя сборка — без даты: повторять сегодняшнее число незачем.
+    #[test]
+    fn version_item_drops_todays_date() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        assert_eq!(
+            version_item_label("0.1.0", Some(at(2026, 8, 14, 14, 32)), today),
+            "v0.1.0 · 14:32"
+        );
+    }
+
+    /// Вчерашняя — с датой: без неё «14:32» читалось бы как сегодняшнее время,
+    /// то есть врало бы ровно в том случае, ради которого пункт и заведён.
+    #[test]
+    fn version_item_keeps_an_older_date() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        assert_eq!(
+            version_item_label("0.1.0", Some(at(2026, 8, 13, 14, 32)), today),
+            "v0.1.0 · 2026-08-13 14:32"
+        );
+    }
 
     /// Свой каталог во временной директории на каждый тест: `write_config`
     /// трогает реальную файловую систему, и тесты не должны видеть файлы друг
