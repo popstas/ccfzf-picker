@@ -175,6 +175,35 @@ fn hide_picker(app: tauri::AppHandle) {
     hide_window(&app);
 }
 
+/// Размеры окна пикера.
+///
+/// Узкий обязан совпадать с `tauri.conf.json` — с ним пикер открывается, к
+/// нему же возвращается выход из широкого режима; сторожит это тест.
+/// Широкий — не весь экран намеренно: окно `alwaysOnTop`, и под ним должно
+/// остаться видно, что было.
+const NARROW_SIZE: (f64, f64) = (900.0, 640.0);
+const WIDE_SIZE: (f64, f64) = (1400.0, 900.0);
+
+/// Размер окна под режим списка.
+///
+/// Размер меняет Rust, а не страница: у окна нет декораций
+/// (`decorations: false`), и `window.resizeTo` в webview на таком окне не
+/// работает. Центровка после смены размера обязательна — без неё окно
+/// растёт вправо и вниз от прежнего угла и уезжает за край экрана.
+#[tauri::command]
+fn set_picker_size(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("picker") else {
+        return Err("picker window is gone".into());
+    };
+    let (w, h) = if fullscreen { WIDE_SIZE } else { NARROW_SIZE };
+    window
+        .set_size(tauri::LogicalSize::new(w, h))
+        .map_err(|e| format!("cannot resize picker: {e}"))?;
+    window
+        .center()
+        .map_err(|e| format!("cannot center picker: {e}"))
+}
+
 /// Иконка трея.
 ///
 /// Отдельная от иконки приложения: `default_window_icon` — это `icon.png`
@@ -1075,7 +1104,7 @@ fn main() {
         // шлёт событие, и перепутать их нечем.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            hide_picker, poll_now, spawn_detached, load_seen, save_seen, load_config,
+            hide_picker, set_picker_size, poll_now, spawn_detached, load_seen, save_seen, load_config,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, open_session_mqtt, open_project_mqtt, new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons
@@ -1761,5 +1790,24 @@ actions:
         assert!(err.contains("config.yaml"), "{err}");
         assert!(check_ssh_host("example-host").is_ok());
         assert!(check_ssh_host("  ").is_err(), "пробелы — тот же пустой хост");
+    }
+
+    /// Узкий размер обязан совпадать с тем, что стоит в tauri.conf.json:
+    /// разойдись они, выход из режима давал бы окно не того размера, с
+    /// которым пикер открылся, и поймать это можно было бы только глазами.
+    #[test]
+    fn narrow_size_matches_the_window_config() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = &conf["app"]["windows"][0];
+        assert_eq!(window["width"].as_f64().unwrap(), NARROW_SIZE.0);
+        assert_eq!(window["height"].as_f64().unwrap(), NARROW_SIZE.1);
+    }
+
+    /// Широкий шире узкого — иначе режим не делает того, ради чего заведён.
+    #[test]
+    fn wide_size_is_wider_than_narrow() {
+        assert!(WIDE_SIZE.0 > NARROW_SIZE.0);
+        assert!(WIDE_SIZE.1 > NARROW_SIZE.1);
     }
 }
