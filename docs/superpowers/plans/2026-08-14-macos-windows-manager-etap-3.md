@@ -66,7 +66,7 @@
 
 **Контекст:** раскладка мониторов меняется — ноутбук отключили от дока, внешний экран сменился местами. Окно, поставленное по вчерашним координатам, уезжает за границу видимого и теряется насовсем: вернуть его мышкой нельзя.
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты**
 
 Создать `crates/mwm-core/src/geometry.rs` с шапкой, типами, `todo!()` в теле функции и тестами:
 
@@ -201,12 +201,12 @@ mod tests {
 
 В `crates/mwm-core/src/lib.rs` дописать `pub mod geometry;`.
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `cd ~/projects/js/macos-windows-manager && cargo test -p mwm-core`
 Expected: FAIL — паника `not yet implemented` в тестах геометрии.
 
-- [ ] **Step 3: Реализовать**
+- [x] **Step 3: Реализовать**
 
 Заменить `todo!()` на:
 
@@ -252,12 +252,12 @@ fn overlap(a: &Bounds, b: &Bounds) -> i64 {
 }
 ```
 
-- [ ] **Step 4: Прогнать**
+- [x] **Step 4: Прогнать**
 
 Run: `cargo test -p mwm-core`
 Expected: PASS
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add crates/mwm-core/src/geometry.rs crates/mwm-core/src/lib.rs
@@ -293,7 +293,7 @@ EOF
 
 **Контекст:** у трекера сейчас нет ни одного файла, кроме конфига. Атомарная запись с `fsync` — правило, оплаченное на Windows: переименование журналируется, а данные — нет, и без `fsync` потеря питания оставляет рваный файл.
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты**
 
 Создать `crates/mwm-core/src/state.rs` с шапкой, типами, `todo!()` в телах и тестами:
 
@@ -434,12 +434,12 @@ mod tests {
 
 В `crates/mwm-core/src/lib.rs` дописать `pub mod state;`.
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `cargo test -p mwm-core`
 Expected: FAIL — паника `not yet implemented`.
 
-- [ ] **Step 3: Реализовать**
+- [x] **Step 3: Реализовать**
 
 ```rust
 /// Версия формата. Пишется, но не проверяется: читатель здесь один и тот же
@@ -539,12 +539,12 @@ pub fn write_atomic(path: &Path, value: &serde_json::Value) -> Result<(), String
 }
 ```
 
-- [ ] **Step 4: Прогнать**
+- [x] **Step 4: Прогнать**
 
 Run: `cargo test -p mwm-core`
 Expected: PASS
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add crates/mwm-core/src/state.rs crates/mwm-core/src/lib.rs
@@ -578,7 +578,7 @@ EOF
 
 **Внимание:** смена типа ломает вызов в `tracker.rs` и все существующие тесты этого файла. Тесты правятся в этой же задаче: они распаковывают `Some(&A.to_string())`, а станут распаковывать `SessionRef`. `tracker.rs` в этой задаче правится ровно настолько, чтобы собраться — там `index.get(&key)` даёт теперь `SessionRef`, и берётся у него `.id`; всё остальное про трекер — задача 4.
 
-- [ ] **Step 1: Переписать тесты под новый тип**
+- [x] **Step 1: Переписать тесты под новый тип**
 
 В `mod tests` файла `index.rs` заменить обращения вида `idx.get("ccfzf")` на сравнение с `SessionRef`. Помощник рядом с тестами:
 
@@ -631,12 +631,12 @@ EOF
     }
 ```
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `cargo test -p mwm-core`
 Expected: FAIL — `SessionRef` не объявлен.
 
-- [ ] **Step 3: Реализовать**
+- [x] **Step 3: Реализовать**
 
 Над `parse_index` добавить тип и поправить тело:
 
@@ -684,7 +684,7 @@ pub fn parse_index(json: &str) -> BTreeMap<String, SessionRef> {
 
 Doc-комментарий функции поправить: «заголовок → id сессии» становится «заголовок → сессия: id и каталог».
 
-- [ ] **Step 4: Починить вызов в `tracker.rs`**
+- [x] **Step 4: Починить вызов в `tracker.rs`**
 
 Тип параметра `index` в `Tracker::tick` меняется на `&BTreeMap<String, SessionRef>`; строка `t.session_id = Some(sid.clone());` становится `t.session_id = Some(sid.id.clone());`. Помощник `index(...)` в тестах `tracker.rs` меняет тип значения:
 
@@ -701,12 +701,12 @@ Doc-комментарий функции поправить: «заголово
 
 Больше в `tracker.rs` на этом шаге ничего не трогать.
 
-- [ ] **Step 5: Прогнать**
+- [x] **Step 5: Прогнать**
 
 Run: `cargo test -p mwm-core && cargo test -p macos-windows-manager`
 Expected: PASS оба
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add crates/mwm-core/src/index.rs crates/mwm-core/src/tracker.rs
@@ -743,7 +743,7 @@ EOF
 
 **Контекст:** это сердце этапа. Три правила, и каждое стоит починенной поломки, если его нарушить: ставится окно, которое **появилось** (а не любое незнакомое); первый такт не ставит ничего; новое положение попадает в слот только когда устоялось.
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты**
 
 Дописать в `mod tests` файла `tracker.rs`:
 
@@ -902,12 +902,12 @@ EOF
 
 В шапку `mod tests` дописать `use crate::geometry::Bounds;` и `use crate::state::SlotState;`. Существующий помощник `seen(id, title)` дополнить полем: `Seen { id, title: title.to_string(), focused: false, bounds: None }`, а все места, где `Seen` строится в тестах литералом (`Seen { id: 1, title: "ccfzf".into(), focused: true }`), дополнить `bounds: None`.
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `cargo test -p mwm-core`
 Expected: FAIL — у `Seen` нет поля `bounds`, у `Tracker` нет `placements`.
 
-- [ ] **Step 3: Реализовать**
+- [x] **Step 3: Реализовать**
 
 Шапка файла — дописать `use crate::geometry::Bounds;`, `use crate::index::SessionRef;`, `use crate::state::SlotState;`, `use std::collections::HashSet;`.
 
@@ -1114,12 +1114,12 @@ pub struct Tracker {
         self.dirty = true;
 ```
 
-- [ ] **Step 4: Прогнать**
+- [x] **Step 4: Прогнать**
 
 Run: `cargo test -p mwm-core && cargo test -p macos-windows-manager`
 Expected: FAIL у второго — `ax.rs` строит `Seen` без поля `bounds`. Починить там одной строкой: в `list_windows` в `out.push(Seen { id, focused, title })` дописать `bounds: None` (настоящая геометрия — задача 7). Прогнать снова: PASS оба.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add crates/mwm-core/src/tracker.rs src-tauri/src/ax.rs
@@ -1164,7 +1164,7 @@ EOF
 
 **Контекст:** это перенос уже отстоявшейся логики из `windows11-manager/src/claude-wt/snapshot-helpers.js`. Умолчания те же и это не совпадение: списки лежат рядом в одном режиме пикера, и разное поведение читалось бы как поломка.
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты**
 
 Создать `crates/mwm-core/src/snapshots.rs` — шапка, типы, константы, `todo!()` в телах, тесты:
 
@@ -1409,12 +1409,12 @@ mod tests {
 
 В `crates/mwm-core/src/lib.rs` дописать `pub mod snapshots;`.
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `cargo test -p mwm-core`
 Expected: FAIL — паника `not yet implemented`.
 
-- [ ] **Step 3: Реализовать**
+- [x] **Step 3: Реализовать**
 
 ```rust
 /// Ключ состава: отсортированные id через разделитель.
@@ -1560,12 +1560,12 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 ```
 
-- [ ] **Step 4: Прогнать**
+- [x] **Step 4: Прогнать**
 
 Run: `cargo test -p mwm-core`
 Expected: PASS
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add crates/mwm-core/src/snapshots.rs crates/mwm-core/src/lib.rs
@@ -1597,7 +1597,7 @@ EOF
   - `build_file(bound, host, pid, now_ms, can_focus, mqtt_base, snapshots: &[Snapshot]) -> serde_json::Value`
   - `Config` получает поля `pub state_path: String`, `pub snapshots_path: String`, `pub snapshots_keep: usize`, `pub snapshots_debounce_ms: u64`
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты**
 
 В `mod tests` файла `publish.rs` дописать помощник и тесты:
 
@@ -1689,12 +1689,12 @@ EOF
     }
 ```
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `cargo test -p mwm-core`
 Expected: FAIL — `build_file` принимает шесть аргументов, у `Config` нет полей состояния.
 
-- [ ] **Step 3: Реализовать в `publish.rs`**
+- [x] **Step 3: Реализовать в `publish.rs`**
 
 Дописать параметр и сериализацию:
 
@@ -1742,7 +1742,7 @@ pub fn build_file(
 
 Doc-комментарий функции поправить: `snapshots` больше не пуст, и перечисление отличий от Windows-формата это учитывает.
 
-- [ ] **Step 4: Реализовать в `config.rs`**
+- [x] **Step 4: Реализовать в `config.rs`**
 
 В `Config` добавить поля:
 
@@ -1800,16 +1800,16 @@ Doc-комментарий функции поправить: `snapshots` бол
 
 Добавить новые поля в возвращаемый `Config`.
 
-- [ ] **Step 5: Починить вызов `build_file` в `main.rs`**
+- [x] **Step 5: Починить вызов `build_file` в `main.rs`**
 
 Единственный вызов получает седьмым аргументом пустой срез: `&[]`. Настоящие снимки приедут в задаче 8.
 
-- [ ] **Step 6: Прогнать**
+- [x] **Step 6: Прогнать**
 
 Run: `cargo test -p mwm-core && cargo test -p macos-windows-manager`
 Expected: PASS оба
 
-- [ ] **Step 7: Коммит**
+- [x] **Step 7: Коммит**
 
 ```bash
 git add crates/mwm-core/src/publish.rs crates/mwm-core/src/config.rs src-tauri/src/main.rs
@@ -1843,7 +1843,7 @@ EOF
 
 **Контекст и предупреждение:** этот файл тестами не покрыт намеренно, и на машине разработки **macOS-ветка не компилируется вовсе**. Ошибки в именах методов `accessibility` всплывут только на выкатке (задача 12); так было дважды — с `CFType::from` и с `NSRunningApplication::activate`. Поэтому: минимум кода, никакой логики, только вызовы платформы.
 
-- [ ] **Step 1: Чтение геометрии окна**
+- [x] **Step 1: Чтение геометрии окна**
 
 В `mod imp` (macOS-ветка) дописать рядом с `title_of`:
 
@@ -1876,7 +1876,7 @@ EOF
 2. `core_graphics` не в зависимостях → добавить `core-graphics = "0.24"` в `[target.'cfg(target_os = "macos")'.dependencies]` файла `src-tauri/Cargo.toml`, версию согласовать с той, что уже тянет `core-foundation`;
 3. `AXAttribute::position()`/`size()` называются иначе → искать в крейте `accessibility` константы `kAXPositionAttribute`/`kAXSizeAttribute` и строить атрибут через `AXAttribute::new(&CFString::from_static_string("AXPosition"))`.
 
-- [ ] **Step 2: Установка геометрии**
+- [x] **Step 2: Установка геометрии**
 
 В `mod imp` дописать:
 
@@ -1919,7 +1919,7 @@ EOF
 2. `is_attribute_settable` отсутствует → звать `accessibility_sys::AXUIElementIsAttributeSettable` напрямую, как уже зовётся `AXUIElementPerformAction` в `raise`;
 3. `set_attribute` требует другой формы значения → посмотреть сигнатуру в крейте и передать то, что она просит.
 
-- [ ] **Step 3: Список экранов**
+- [x] **Step 3: Список экранов**
 
 В `mod imp` дописать:
 
@@ -1960,7 +1960,7 @@ EOF
 1. `NSScreen::screens` требует `MainThreadMarker` иначе или не требует вовсе → взять форму, которую предлагает компилятор; поток здесь главный не всегда, и если API это запрещает — перейти к пробе 2;
 2. заменить на Core Graphics: `core_graphics::display::CGDisplay::active_displays()` и `CGDisplay::new(id).bounds()` — они уже в координатах Accessibility и главного потока не требуют. **Это предпочтительный вариант, если проба 1 упрётся в поток**: такт трекера идёт в своём потоке, а не в главном.
 
-- [ ] **Step 4: Заглушки для не-macOS**
+- [x] **Step 4: Заглушки для не-macOS**
 
 В `mod imp` под `#[cfg(not(target_os = "macos"))]` дописать:
 
@@ -1973,12 +1973,12 @@ EOF
 
 и добавить `use mwm_core::geometry::{Bounds, Display};` в шапку файла (рядом с `use mwm_core::tracker::Seen;`), а `place` и `displays` — в общий `pub use imp::{…}`.
 
-- [ ] **Step 5: Собрать не-macOS ветку**
+- [x] **Step 5: Собрать не-macOS ветку**
 
 Run: `cargo test -p mwm-core && cargo test -p macos-windows-manager`
 Expected: PASS оба (собираются заглушки; macOS-ветка проверится только на выкатке)
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src-tauri/src/ax.rs
@@ -2011,7 +2011,7 @@ EOF
 
 **Контекст:** задача-сшивка. Логики в ней нет — вся она уже написана и покрыта тестами; здесь только порядок вызовов. Тестами такт не покрывается намеренно: `run_tracker` — бесконечный цикл с платформенными вызовами.
 
-- [ ] **Step 1: Поднять состояние при старте**
+- [x] **Step 1: Поднять состояние при старте**
 
 В `run_tracker`, после `let mut tracker = Tracker::new(2);`, дописать:
 
@@ -2027,7 +2027,7 @@ EOF
     let mut pending_since_ms = 0u64;
 ```
 
-- [ ] **Step 2: Расставить появившиеся окна**
+- [x] **Step 2: Расставить появившиеся окна**
 
 В теле такта, сразу после `tracker.tick(&seen, &index, now);`, дописать:
 
@@ -2046,7 +2046,7 @@ EOF
         }
 ```
 
-- [ ] **Step 3: Вести снимки**
+- [x] **Step 3: Вести снимки**
 
 Ниже, после сбора `window_of` и до `should_write`, дописать:
 
@@ -2090,7 +2090,7 @@ EOF
         }
 ```
 
-- [ ] **Step 4: Писать состояние, когда оно изменилось**
+- [x] **Step 4: Писать состояние, когда оно изменилось**
 
 Ниже, рядом с публикацией файла окон, дописать:
 
@@ -2109,7 +2109,7 @@ EOF
 
 Вызов `build_file` получает снимки: `build_file(&bound, &cfg.host, pid, now, link.is_live(), &cfg.mqtt.base, &snaps)`.
 
-- [ ] **Step 5: Дописать чтение и запись снимков**
+- [x] **Step 5: Дописать чтение и запись снимков**
 
 Рядом с `run_tracker` в том же файле:
 
@@ -2189,12 +2189,12 @@ fn save_snapshots(path: &std::path::Path, snaps: &[mwm_core::snapshots::Snapshot
 }
 ```
 
-- [ ] **Step 6: Собрать и прогнать**
+- [x] **Step 6: Собрать и прогнать**
 
 Run: `cargo test -p mwm-core && cargo test -p macos-windows-manager`
 Expected: PASS оба
 
-- [ ] **Step 7: Коммит**
+- [x] **Step 7: Коммит**
 
 ```bash
 git add src-tauri/src/main.rs
@@ -2225,7 +2225,7 @@ EOF
 
 **Контекст:** сейчас снимки всех трекеров складываются в один плоский список (`snaps += sn`) без указания владельца. Пока снимки делала одна машина, это работало. Начни их делать мак — пикер не отличил бы, чей снимок, и восстановил бы не там: молча, потому что у публикации нет ответа. Тот же класс, что этап 2 чинил для окон.
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 Помощник `_file(host, windows, pid=42, focus=None, projects=None, snapshots=None, open_session=None, mqtt_base=None)` в `tests/test_windows_merge.py` уже умеет принимать `snapshots` и `mqtt_base`. Дописать тест:
 
@@ -2250,12 +2250,12 @@ def test_snapshot_carries_the_machine_that_took_it():
     assert by_id["2026-08-14T02-00-00"]["mqttBase"] == "home/room/mac/windows", snaps
 ```
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `cd ~/projects/shell/ccfzf && python3 tests/test_windows_merge.py`
 Expected: FAIL — `KeyError: 'host'`.
 
-- [ ] **Step 3: Реализовать**
+- [x] **Step 3: Реализовать**
 
 В `read_window_sources` заменить `snaps += sn` на:
 
@@ -2274,12 +2274,12 @@ Expected: FAIL — `KeyError: 'host'`.
     у публикации нет ответа.
 ```
 
-- [ ] **Step 4: Прогнать оба файла**
+- [x] **Step 4: Прогнать оба файла**
 
 Run: `python3 tests/test_windows_file.py && python3 tests/test_windows_merge.py`
 Expected: PASS оба
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add ccfzf tests/test_windows_merge.py
@@ -2312,7 +2312,7 @@ EOF
 
 **Контекст:** старый агрегатор владельца не пишет. Отбросив такие снимки, пикер после обновления показал бы пустой список там, где режим работал, — а обновляются пикер и агрегатор порознь, и порядок нам не подвластен.
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты**
 
 Дописать в `test/picker-snapshots.test.js` (форма файла — как у соседних тестов там же):
 
@@ -2361,12 +2361,12 @@ test('снимок старого агрегатора адреса не наз�
 });
 ```
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `npm test`
 Expected: FAIL — `PickerSnapshots.snapshotsHere is not a function`
 
-- [ ] **Step 3: Реализовать**
+- [x] **Step 3: Реализовать**
 
 В `frontend-src/picker-snapshots.js`, рядом с `openIdsFromState`:
 
@@ -2415,12 +2415,12 @@ Expected: FAIL — `PickerSnapshots.snapshotsHere is not a function`
 
 и в возврат модуля добавить `snapshotsHere, snapshotBase`.
 
-- [ ] **Step 4: Прогнать**
+- [x] **Step 4: Прогнать**
 
 Run: `npm test`
 Expected: PASS
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add frontend-src/picker-snapshots.js test/picker-snapshots.test.js
@@ -2452,7 +2452,7 @@ EOF
 
 **Контекст:** задача-сшивка. На машине с менеджером снимок восстанавливается как сегодня — публикацией. На маке менеджера нет, и восстановление там значит «открыть сессии снимка», что пикер уже умеет: этап 2 на этом стоит и не отменяется.
 
-- [ ] **Step 1: Отобрать снимки своей машины**
+- [x] **Step 1: Отобрать снимки своей машины**
 
 В `sessions.html` найти строку `snapshotRows = Array.isArray(state.snapshots) ? state.snapshots : [];` (около 939) и заменить на:
 
@@ -2462,7 +2462,7 @@ EOF
       snapshotRows = window.PickerSnapshots.snapshotsHere(state, CONFIG.windowHost);
 ```
 
-- [ ] **Step 2: Завести помощника «где этот снимок сняли»**
+- [x] **Step 2: Завести помощника «где этот снимок сняли»**
 
 Рядом с `openManagerHere` дописать:
 
@@ -2503,7 +2503,7 @@ EOF
   }
 ```
 
-- [ ] **Step 3: Разветвить `restoreSnapshot`**
+- [x] **Step 3: Разветвить `restoreSnapshot`**
 
 Заменить тело `restoreSnapshot` (около 1054) целиком:
 
@@ -2577,7 +2577,7 @@ EOF
   }
 ```
 
-- [ ] **Step 4: Сверить форму строки с тем, что её читает**
+- [x] **Step 4: Сверить форму строки с тем, что её читает**
 
 Строка, которую `restoreLocally` собирает сама, проходит через `chooseOpenStrategy` (`frontend-src/open-strategy.js`) и `chooseEnterAction` (`frontend-src/open-transport.js`). Прочитать обе и убедиться:
 
@@ -2587,7 +2587,7 @@ EOF
 
 Если какое-то из трёх не сходится — чинить строку, а не эти функции: у них есть тесты на каждый вид строки, и правка там аукнется в Enter на строке списка.
 
-- [ ] **Step 5: Сторож развилки**
+- [x] **Step 5: Сторож развилки**
 
 Развилка молчащая: у публикации в MQTT нет ответа, и просьба, уехавшая в топик, который никто не слушает, выглядит как сработавший Enter. Сторож проверяет настоящий код страницы, а не его копию.
 
@@ -2677,14 +2677,14 @@ test('снимок без адреса уводит просьбу на свой
 });
 ```
 
-- [ ] **Step 6: Прогнать**
+- [x] **Step 6: Прогнать**
 
 Run: `npm test && (cd src-tauri && cargo test)`
 Expected: PASS оба
 
 Если падает сторож порядка `test/hide-before-request.test.js` — читать и чинить: гашение обязано идти до просьбы, и в новой форме оно идёт до обеих веток. Это регрессия, а не устаревший тест.
 
-- [ ] **Step 7: Коммит**
+- [x] **Step 7: Коммит**
 
 ```bash
 git add sessions.html test/restore-branches.test.js
@@ -2713,7 +2713,7 @@ EOF
 
 **Контекст:** здесь впервые компилируется macOS-ветка задачи 7. Ошибки в именах методов `accessibility` — ожидаемая часть этой задачи, а не сюрприз: так было дважды.
 
-- [ ] **Step 1: Запушить все три репозитория**
+- [x] **Step 1: Запушить все три репозитория**
 
 Выкатка первым шагом делает `git pull` на целевой машине — выкатывается запушенное, а не то, что в рабочем каталоге.
 
@@ -2723,7 +2723,7 @@ cd ~/projects/js/macos-windows-manager && git push
 cd ~/projects/js/ccfzf-picker && git push
 ```
 
-- [ ] **Step 2: Выкатить пикер — раньше трекера, и это важно**
+- [x] **Step 2: Выкатить пикер — раньше трекера, и это важно**
 
 Run: `cd ~/projects/js/ccfzf-picker && ./data/scripts/deploy-win.sh && ./data/scripts/deploy-mac.sh --all`
 
@@ -2739,7 +2739,7 @@ Run: `cd ~/projects/js/ccfzf-picker && ./data/scripts/deploy-win.sh && ./data/sc
 считается своим) и со старым трекером (пустой `mqttBase` читается как «спроси
 свой конфиг»). Значит выкатывать его первым безопасно, а вторым — нет.
 
-- [ ] **Step 3: Собрать и выкатить трекер на оба мака**
+- [x] **Step 3: Собрать и выкатить трекер на оба мака**
 
 Run: `cd ~/projects/js/macos-windows-manager && MWM_HOST=<хост мака> ./data/scripts/deploy-mac.sh`
 Expected: сборка проходит, подпись проходит, задача перезапускается
@@ -2748,7 +2748,7 @@ Expected: сборка проходит, подпись проходит, зад
 
 Ошибки компиляции macOS-ветки чинить по подсказкам компилятора (порядок проб — в задаче 7), коммитить и выкатывать заново. Помнить про грабли: одинарных кавычек внутрь `run()` не класть; `;` в удалённой команде не ставить; ждать подписи по результату, а не по часам. **Выкатка выходит с кодом 0, даже когда сборка упала** — смотреть вывод, а не код возврата.
 
-- [ ] **Step 4: Проверить файлы состояния**
+- [x] **Step 4: Проверить файлы состояния**
 
 На маке:
 
@@ -2790,7 +2790,7 @@ Expected: хотя бы один снимок с нужным числом се�
 
 Пикер там уже выкачен шагом 2. На Windows проверить руками: `^S` открывается и показывает свои снимки; Enter на снимке восстанавливает раскладку, как раньше; Enter на строке с окном поднимает окно; `^N` заводит сессию.
 
-- [ ] **Step 10: Записать добытое**
+- [x] **Step 10: Записать добытое**
 
 В `macos-windows-manager/README.md`, в раздел «Правила, за которые уже заплачено», дописать то, что выяснилось на этой выкатке. Кандидаты — писать только подтвердившееся:
 
@@ -2801,7 +2801,7 @@ Expected: хотя бы один снимок с нужным числом се�
 
 В `ccfzf-picker/CLAUDE.md`, в тот же раздел, дописать про снимки: почему владелец приписывается снимку в агрегаторе, а не в трекере; почему восстановление на маке — это открытие сессий, а не просьба; почему открываются они по одной с паузой.
 
-- [ ] **Step 11: Прогнать все тесты в трёх репозиториях**
+- [x] **Step 11: Прогнать все тесты в трёх репозиториях**
 
 ```bash
 cd ~/projects/js/ccfzf-picker && npm test && (cd src-tauri && cargo test)
@@ -2811,7 +2811,7 @@ cd ~/projects/shell/ccfzf && python3 tests/test_windows_file.py && python3 tests
 
 Expected: всё зелёное
 
-- [ ] **Step 12: Коммит документации**
+- [x] **Step 12: Коммит документации**
 
 ```bash
 cd ~/projects/js/macos-windows-manager
