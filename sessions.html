@@ -686,16 +686,28 @@
   // здесь остаётся только запись в DOM.
   let rendered = { keys: [], html: [] };
 
+  /**
+   * Записать в DOM решение planListSync.
+   *
+   * Одна на обе раскладки: узкий список пишет в `#list`, широкий — в
+   * `.block-rows` каждого блока, а сама запись у них слово в слово одна и та
+   * же. Вторая её копия разошлась бы с первой молча — правку заметили бы
+   * только в той раскладке, где её сделали.
+   */
+  function applyPlan(container, plan) {
+    if (plan.mode === 'rebuild') {
+      container.innerHTML = plan.html.join('');
+      return;
+    }
+    // Снимок детей до правок: outerHTML заменяет элемент, а живая коллекция
+    // container.children отдала бы уже новый узел на следующей итерации.
+    const nodes = Array.from(container.children);
+    for (const update of plan.updates) nodes[update.index].outerHTML = update.html;
+  }
+
   function syncList(items) {
     const plan = window.PickerListSync.planListSync(rendered, items, list.children.length);
-    if (plan.mode === 'rebuild') {
-      list.innerHTML = plan.html.join('');
-    } else {
-      // Снимок детей до правок: outerHTML заменяет элемент, а живая коллекция
-      // list.children отдала бы уже новый узел на следующей итерации.
-      const nodes = Array.from(list.children);
-      for (const update of plan.updates) nodes[update.index].outerHTML = update.html;
-    }
+    applyPlan(list, plan);
     rendered = { keys: plan.keys, html: plan.html };
   }
 
@@ -927,11 +939,7 @@
       const body = list.children[i].querySelector('.block-rows');
       const plan = window.PickerListSync.planListSync(
         renderedBlocks.get(block.key), items, body.children.length);
-      if (plan.mode === 'rebuild') body.innerHTML = plan.html.join('');
-      else {
-        const nodes = Array.from(body.children);
-        for (const update of plan.updates) nodes[update.index].outerHTML = update.html;
-      }
+      applyPlan(body, plan);
       renderedBlocks.set(block.key, { keys: plan.keys, html: plan.html });
     });
     return blocks.length;
