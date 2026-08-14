@@ -11,12 +11,15 @@
   const listApi = typeof module === 'object' && module.exports
     ? require('./session-list')
     : globalThis.SessionList;
+  const zellijApi = typeof module === 'object' && module.exports
+    ? require('./zellij-list')
+    : globalThis.ZellijList;
 
   // Сессия с неизвестным столом сортируется перед всеми настоящими.
   const DESKTOP_UNKNOWN = -1;
 
   const SORT_MODES = ['cost', 'oldest', 'newest', 'recent', 'name'];
-  const DEFAULT_SORT = 'cost';
+  const DEFAULT_SORT = 'recent';
 
   function normalizeSort(mode) {
     return SORT_MODES.includes(mode) ? mode : DEFAULT_SORT;
@@ -63,6 +66,34 @@
     return nameOf(a).localeCompare(nameOf(b)) || String(a.id).localeCompare(String(b.id));
   }
 
+  /**
+   * Ключ сортировки `recent` — минута последней активности, а не секунда.
+   *
+   * `lastActivity` двигает каждый вызов инструмента, а их десятки в минуту.
+   * Подача тикает раз в секунду, и две работающие сессии на секундном ключе
+   * менялись первым местом непрерывно — попасть по такой строке нельзя. С
+   * округлением обе попадают в одну корзину, дальше их разводит tieBreak по
+   * имени, и порядок перестаёт зависеть от того, кто дёрнулся последним.
+   *
+   * Округление до **абсолютной** минуты, а не до возраста ((now - t) / 60):
+   * ключ не зависит от часов, и функция остаётся чистой.
+   *
+   * Ноль остаётся нулём — missingLast топит такие строки вниз, и делить их с
+   * настоящей минутой было бы нечем. А вот `Math.max(1, …)` не для красоты:
+   * деление само делает ноль из всякой метки моложе минуты, и без нижней
+   * границы сессия, работавшая полминуты назад, притворилась бы строкой без
+   * активности вовсе и утонула бы к ним в конец.
+   *
+   * В строке возраст по-прежнему с секундами: округление живёт только здесь,
+   * ageHtml его не знает.
+   */
+  const MINUTE = 60;
+
+  function recentKey(s) {
+    const t = (s || {}).lastActivity ?? 0;
+    return t ? Math.max(1, Math.floor(t / MINUTE)) : 0;
+  }
+
   function compareSessions(a, b, mode) {
     const sort = normalizeSort(mode);
     let primary = 0;
@@ -73,7 +104,7 @@
     } else if (sort === 'newest') {
       primary = missingLast(a.agentStarted ?? 0, b.agentStarted ?? 0, false);
     } else if (sort === 'recent') {
-      primary = missingLast(a.lastActivity ?? 0, b.lastActivity ?? 0, false);
+      primary = missingLast(recentKey(a), recentKey(b), false);
     } else if (sort === 'name') {
       primary = nameOf(a).localeCompare(nameOf(b));
     }
@@ -102,6 +133,14 @@
    */
   function groupSessions(sessions, sort = DEFAULT_SORT) {
     const mode = normalizeSort(sort);
+    // Зелийные строки отбираются до всего остального: у них live: true, и
+    // живая группа всосала бы их к работающим агентам, где им не место.
+    // Своя группа стоит последней — это справочник «что ещё открыто на
+    // машине», а не то, к чему возвращаются в первую очередь.
+    const zellij = [];
+    const rest = [];
+    for (const s of sessions) (s.kind === 'zellij' ? zellij : rest).push(s);
+    sessions = rest;
     const open = [];
     const groups = new Map();
     for (const s of sessions) {
@@ -119,9 +158,44 @@
     for (const g of past) sortGroupSessions(g.sessions, mode);
     past.sort((a, b) => (a.desktop ?? DESKTOP_UNKNOWN) - (b.desktop ?? DESKTOP_UNKNOWN));
 
-    if (!open.length) return past;
+    const tail = zellij.length
+      ? [{ desktop: null, label: `Zellij - ${zellij.length}`, sessions: sortGroupSessions(zellij, mode) }]
+      : [];
+
+    if (!open.length) return [...past, ...tail];
     sortGroupSessions(open, mode);
-    return [{ desktop: null, label: `Active sessions - ${open.length}`, sessions: open }, ...past];
+    return [...activeGroups(open), ...past, ...tail];
+  }
+
+  /**
+   * Живые сессии — одной группой или двумя, по машине окна.
+   *
+   * «Своё/чужое» у строки одно: `windowHost`, который ставит buildSessionList,
+   * — имя машины окна, и только когда она не наша. Тот же признак решает, что
+   * сделает Enter (поднимет окно или откроет терминал), так что деление списка
+   * отвечает на тот же вопрос, что и главное действие строки.
+   *
+   * Сессия без окна считается своей: чужой её делает названная чужая машина, а
+   * не отсутствие сведений. На маке, где трекера может не быть вовсе, иначе
+   * весь список уехал бы в «remote».
+   *
+   * Ни одного чужого окна — группа остаётся одна и называется как раньше:
+   * делить нечего, а «Active local sessions» без пары читалось бы вопросом
+   * «а где тогда остальные». Пустая половина не заводится по тому же правилу,
+   * что и группа «Not running».
+   */
+  function activeGroups(open) {
+    const remote = open.filter(s => s.windowHost);
+    if (!remote.length) {
+      return [{ desktop: null, label: `Active sessions - ${open.length}`, sessions: open }];
+    }
+    const local = open.filter(s => !s.windowHost);
+    const groups = [];
+    if (local.length) {
+      groups.push({ desktop: null, label: `Active local sessions - ${local.length}`, sessions: local });
+    }
+    groups.push({ desktop: null, label: `Active remote sessions - ${remote.length}`, sessions: remote });
+    return groups;
   }
 
   /**
@@ -143,15 +217,26 @@
    * `window` приезжает уже в ответе агрегатора и приписывается строке в
    * buildSessionList — здесь остаётся только отсев.
    *
+   * `opts.configHost` — имя своей машины из конфига. Нужно строке, чтобы
+   * назвать машину чужого окна и промолчать про своё.
+   *
    * Pure: берёт уже полученный `res`, сама ничего не читает.
    */
   function buildSessionsPayload(res, sort = DEFAULT_SORT, opts = {}) {
     const mode = normalizeSort(sort);
     if (!res.ok) return { ok: false, reason: res.reason };
-    let rows = listApi.buildSessionList({ sessions: res.sessions, seen: res.seen });
+    // `state: res` — ради машины окна: на старом агрегаторе она названа только
+    // верхними полями ответа, и по одной записи окна её не узнать.
+    let rows = listApi.buildSessionList({
+      sessions: res.sessions, seen: res.seen, state: res, configHost: opts.configHost,
+    });
     if (opts.onlyLive) rows = rows.filter(r => r.live);
     if (opts.onlyWindow) rows = rows.filter(r => r.window);
-    return { ok: true, groups: groupSessions(labelSessions(rows), mode), sort: mode };
+    // Отсевы выше — про сессии агента, и на зелийные строки они не
+    // распространяются: окна у зелийной сессии нет никогда, и onlyWindow
+    // вычистил бы весь режим целиком. Поэтому строки подмешиваются после.
+    const zellij = zellijApi.buildZellijList({ zellij: res.zellij });
+    return { ok: true, groups: groupSessions([...labelSessions(rows), ...zellij], mode), sort: mode };
   }
 
   return {

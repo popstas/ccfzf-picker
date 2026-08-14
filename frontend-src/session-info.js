@@ -46,12 +46,19 @@
       ['seen', s.agentState ? (s.agentSeen ? 'yes' : 'no') : ''],
       ['prompt', s.agentPrompt ?? ''],
       ['summary', s.agentDescription ?? ''],
-      ['cost', s.agentCostUsd ? `$${s.agentCostUsd}` : ''],
-      ['context', s.agentContextPct ? `${s.agentContextPct}%` : ''],
+      // Ноль печатается, как и в строке списка (usageHtml в session-glyph.js):
+      // пустая клетка там читалась как поломка, а не как «данных нет».
+      ['cost', `$${s.agentCostUsd || 0}`],
+      ['context', `${s.agentContextPct || 0}%`],
       ['branch', s.branch ?? ''],
       ['pr_url', s.pr_url ?? ''],
       ['agent', s.agentBackground && s.agentSessionId ? `background · ${s.agentSessionId}` : ''],
       ['started', stamp(s.agentStarted ?? 0, nowSec)],
+      // Три отметки времени отвечают на три разных вопроса: когда сессия
+      // поднялась, сколько идёт текущий ход, когда она в последний раз
+      // дёрнулась. Без средней колонка возраста в строке необъяснима — у
+      // работающей сессии она не совпадает ни с одной строкой карточки.
+      ['turn', stamp(s.agentTurnAt ?? 0, nowSec)],
       ['last activity', stamp(s.lastActivity ?? 0, nowSec)],
       ['focused', stamp(s.focusedAt ?? 0, nowSec)],
     ];

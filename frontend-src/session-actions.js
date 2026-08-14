@@ -11,6 +11,9 @@
   const openApi = typeof module === 'object' && module.exports
     ? require('./open-strategy')
     : globalThis.OpenStrategy;
+  const pathApi = typeof module === 'object' && module.exports
+    ? require('./path-map')
+    : globalThis.PathMap;
 
   // Номер PR берётся у отрисовщика строки, а не разбирается здесь вторым
   // регэкспом. Два разбора одной ссылки разъезжаются молча: строка показала бы
@@ -29,18 +32,57 @@
    *
    * Открытия сессии в списке нет намеренно: оно висит на Enter и на клике, а не
    * прячется в меню.
+   *
+   * Настроенные действия открытия папки идут первыми: они самые частые, а
+   * встроенные — про случай (есть PR, есть pid). Появляются они только там, где
+   * путь сессии удалось перевести на эту машину: пункт, открывающий несуществующую
+   * папку, хуже отсутствующего.
+   *
+   * `config` необязателен — без него список прежний. Так вызов остаётся годным
+   * и там, где конфига под рукой нет (тесты формы строки).
    */
-  function availableActions(row) {
+  function availableActions(row, config) {
     const actions = [];
+    const cfg = config || {};
+    // Строка проекта — это каталог, и всё, что держится за сессию, ей не
+    // подходит: у неё нет ни записи агента, ни pid, ни истории. Ветка стоит
+    // до всего остального, чтобы это правило было видно одним куском.
+    if ((row || {}).kind === 'project') {
+      const forProject = [{ id: 'new', label: 'New session' }];
+      if (pathApi.mapPath(row.cwd, cfg.pathMap) !== null) {
+        for (const a of cfg.actions || []) {
+          forProject.push({ id: a.id, label: a.label, hotkey: a.hotkey });
+        }
+      }
+      return forProject;
+    }
+    // Зелийная сессия — терминал, а не работа агента: записи агента, pid и
+    // истории у неё нет, а каталог у её панелей может быть разный. Сейчас её
+    // отсеял бы и пустой cwd, но держаться на этом нельзя: первое же действие,
+    // не спрашивающее каталога, утекло бы в строку, которой оно ничего не
+    // сделает. Открытие в меню не значится намеренно — оно висит на Enter.
+    if ((row || {}).kind === 'zellij') return [{ id: 'info', label: 'Session info' }];
+    if (pathApi.mapPath((row || {}).cwd, cfg.pathMap) !== null) {
+      for (const a of cfg.actions || []) actions.push({ id: a.id, label: a.label, hotkey: a.hotkey });
+    }
     const num = prNumber((row || {}).pr_url);
     if (num) actions.push({ id: 'pr', label: `Open PR #${num}` });
     if (row && row.lastActivity && row.agentSeen) actions.push({ id: 'unread', label: 'Mark unread' });
+    // Зеркало предыдущего, и условие у него зеркальное же: отмечать
+    // просмотренным нечего у строки без записи агента и незачем у той, что уже
+    // просмотрена. Оба пункта разом не появляются никогда — это сторожит тест.
+    if (row && row.lastActivity && !row.agentSeen) actions.push({ id: 'seen', label: 'Mark seen' });
     // Переклейка предлагается только там, где ей есть за что тянуть: живая
     // сессия с известным pid. Пикер эту команду не выполняет — отдаёт человеку,
     // см. buildAttachCommand.
     if (row && row.live && openApi.buildAttachCommand(row)) {
       actions.push({ id: 'attach', label: 'Copy reptyr command' });
     }
+    // Новая сессия в том же каталоге: «начать заново рядом» — обычный ход,
+    // когда в текущей сессии кончился контекст. Только там, где каталог
+    // известен: пункт, который ничего не сделает, хуже отсутствующего — то же
+    // правило, что и у действий папки выше.
+    if (row && row.cwd) actions.push({ id: 'new', label: 'New session' });
     actions.push({ id: 'info', label: 'Session info' });
     return actions;
   }

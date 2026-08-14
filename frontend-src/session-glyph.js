@@ -137,7 +137,7 @@
   /**
    * Пометка «у этой сессии уже открыто окно терминала».
    *
-   * Данные приходят от оконного трекера соседа, и это единственное в строке,
+   * Данные приходят от оконного трекера (windows11-manager), и это единственное в строке,
    * чего не знает `ccfzf --state`: он видит живые процессы, а не окна. Без
    * пометки живая сессия и живая сессия с окном выглядят одинаково, и Enter на
    * второй заводит второй процесс на том же транскрипте.
@@ -155,6 +155,25 @@
     if (!win) return '<div class="win"></div>';
     const desktop = Number.isFinite(win.desktop) ? ` title="Desktop ${win.desktop}"` : '';
     return `<div class="win open"${desktop}>▣</div>`;
+  }
+
+  /**
+   * Машина, на которой стоит окно этой сессии.
+   *
+   * Пометка ▣ одинакова у своего окна и у окна соседней машины, и по строке
+   * было не понять, где оно стоит и почему Enter ведёт себя иначе: своё окно
+   * поднимается, чужое — нет.
+   *
+   * Решение «чужая ли машина» принято раньше, при сборке строки: сюда приезжает
+   * либо имя, которое стоит назвать, либо пустая строка. Пустой элемент вместо
+   * пропуска — по той же причине, что у `win` и `hk`: правые колонки стоят друг
+   * за другом, и дырка сдвинула бы соседние строки.
+   */
+  function windowHostHtml(session, showWindowHost = true) {
+    if (!showWindowHost) return '';
+    const host = session?.windowHost;
+    if (!host) return '<div class="winhost"></div>';
+    return `<div class="winhost" title="Window is on ${escapeHtml(host)}">${escapeHtml(host)}</div>`;
   }
 
   /**
@@ -181,7 +200,10 @@
    */
   function hotkeyHtml(session, showHotkey = true) {
     if (!showHotkey) return '';
-    return `<div class="hk">${escapeHtml(session?.hotkey ?? '')}</div>`;
+    // Занятую комбинацию гасим, а не прячем: человеку нужно видеть, какая
+    // именно клавиша не сработала, а не только то, что что-то не сработало.
+    const taken = session?.hotkeyTaken ? ' taken' : '';
+    return `<div class="hk${taken}">${escapeHtml(session?.hotkey ?? '')}</div>`;
   }
 
   // Пороги подсветки контекста. До тридцати процентов заполненность ничего не
@@ -206,9 +228,11 @@
    * заставлял бы перечитывать. Подсвечены только проценты: по ним решают, не
    * пора ли начинать заново, а стоимость — справка.
    *
-   * Ноль означает «данных нет», а не «ничего не потратила»: перехват
-   * статуслайна стоит не у каждой сессии (см. claude-wt-statusline.sh). Такая
-   * часть просто не показывается.
+   * Ноль показывается как ноль. Раньше он значил «данных нет» — перехват
+   * статуслайна стоит не у каждой сессии (см. claude-wt-statusline.sh), — и
+   * такая часть просто не рисовалась. На глаз это читалось не как «неизвестно»,
+   * а как поломка отрисовки: у соседних строк цифры есть, у этой пусто.
+   * Различать два случая всё равно нечем, и «0%» честнее пустоты.
    */
   function usageHtml(session, { showCost = true, showContext = true } = {}) {
     // Обе величины выключены — колонки нет вовсе; см. stateHtml о том, почему
@@ -218,8 +242,8 @@
     const cost = Number.isFinite(session?.agentCostUsd) ? session.agentCostUsd : 0;
     const parts = [];
     const level = contextLevel(pct);
-    if (showCost && cost > 0) parts.push(`<span class="cost">$${cost}</span>`);
-    if (showContext && pct > 0) parts.push(`<span class="ctx${level ? ` ${level}` : ''}">${pct}%</span>`);
+    if (showCost) parts.push(`<span class="cost">$${cost}</span>`);
+    if (showContext) parts.push(`<span class="ctx${level ? ` ${level}` : ''}">${pct}%</span>`);
     // Разделитель тот же, что у stateText: это две независимые величины, а не
     // одно число из двух частей, и пробела для такого мало.
     //
@@ -343,7 +367,7 @@
 
   return {
     statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
-    sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml,
+    sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml, windowHostHtml,
     shortPath, rowTitle, titleAttr, escapeHtml,
     prNumber, prBadgeHtml,
   };

@@ -1,6 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { validateState } = require('../frontend-src/state-shape');
+const { validateState, projectProblems, snapshotProblems } = require('../frontend-src/state-shape');
+const { buildProjectList } = require('../frontend-src/project-list');
+const { buildSessionsPayload } = require('../frontend-src/session-groups');
 
 const good = {
   generated: 1785858452.9,
@@ -44,4 +46,138 @@ test('agent проверяется только когда он не null', () =
   const withAgent = JSON.parse(JSON.stringify(good));
   withAgent.sessions[0].agent = { updated: 'вчера' };
   assert.ok(validateState(withAgent).some(m => m.includes('agent.updated')));
+});
+
+test('записи проектов проверяются отдельным списком', () => {
+  const state = {
+    generated: 1, sessions: [],
+    projects: [{ path: '/p', name: 'p', sessions: '3', live: 0, mtime: 0 }],
+  };
+  // Претензия к записи проекта — не претензия к ответу: опрос принимается.
+  assert.deepStrictEqual(validateState(state), []);
+  assert.deepStrictEqual(projectProblems(state), ['projects[0].sessions is not a number']);
+
+  const ok = {
+    generated: 1, sessions: [],
+    projects: [{ path: '/p', name: 'p', sessions: 3, live: 1, mtime: 100 }],
+  };
+  assert.deepStrictEqual(validateState(ok), []);
+  assert.deepStrictEqual(projectProblems(ok), []);
+});
+
+test('строка проекта с хоткеем проходит проверку', () => {
+  const state = {
+    generated: 1, sessions: [],
+    projects: [{ path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 5,
+      hotkey: 'Ctrl+F11' }],
+  };
+  assert.deepEqual(validateState(state), []);
+});
+
+// Старый агрегатор про хоткеи не знает, и это не ошибка: пикер и агрегатор
+// обновляются порознь.
+test('строка проекта без хоткея — не ошибка', () => {
+  const state = {
+    generated: 1, sessions: [],
+    projects: [{ path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 5 }],
+  };
+  assert.deepEqual(validateState(state), []);
+});
+
+test('хоткей не строкой — ошибка', () => {
+  const state = {
+    generated: 1, sessions: [],
+    projects: [{ path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 5,
+      hotkey: 11 }],
+  };
+  // Претензия к полю записи, а не к форме ответа: та же дорожка, что у
+  // остальных полей проекта, — validateState такую порчу молча пропускает.
+  assert.equal(projectProblems(state).length, 1);
+});
+
+// Перенос проверки в projectProblems сторожится и с положительной стороны:
+// валидный строковый хоткей не должен всплыть претензией у соседа.
+test('строка проекта с валидным хоткеем не жалуется в projectProblems', () => {
+  const state = {
+    generated: 1, sessions: [],
+    projects: [{ path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 5,
+      hotkey: 'Ctrl+F11' }],
+  };
+  assert.deepEqual(projectProblems(state), []);
+});
+
+test('порченый проект не отбирает у человека список сессий', () => {
+  // Суть правки: агрегатор — отдельная программа на отдельной машине, и
+  // переименованное там поле проекта не должно замораживать сессии. Здесь
+  // повторён тот же порядок, что и в refresh(): сначала ворота validateState,
+  // потом сборка обоих списков.
+  const state = {
+    generated: 1,
+    sessions: [{
+      id: 'a', cwd: '/home/user/projects/x', title: 'x',
+      mtime: 100, live: false, kind: 'interactive',
+    }],
+    projects: [
+      { path: 42, name: 'без пути' },
+      { path: '/home/user/projects/x', name: 'x', sessions: 1, live: 0, mtime: 100 },
+    ],
+  };
+  assert.deepStrictEqual(validateState(state), []);
+  // Молча терять строки нельзя: о выброшенной записи есть что показать.
+  assert.ok(projectProblems(state).some(m => m.includes('projects[0].path')));
+  // Уцелевшие проекты собираются, а сессии из того же ответа доезжают до
+  // читателя целиком.
+  assert.deepStrictEqual(buildProjectList(state).map(p => p.id), ['/home/user/projects/x']);
+  const payload = buildSessionsPayload({ ok: true, sessions: state.sessions, seen: {} }, 'name');
+  assert.strictEqual(payload.ok, true);
+  assert.deepStrictEqual(payload.groups.flatMap(g => g.sessions).map(s => s.id), ['a']);
+});
+
+test('ответ без проектов — рабочее состояние, а не поломка', () => {
+  // Агрегатор живёт на другой машине и обновляется отдельно от пикера. Старый
+  // ответ без projects обязан открывать список сессий как ни в чём не бывало:
+  // уронить его значило бы лишить человека пикера из-за не приехавшей фичи.
+  assert.deepStrictEqual(validateState({ generated: 1, sessions: [] }), []);
+});
+
+test('проекты не массивом — это поломка', () => {
+  assert.deepStrictEqual(
+    validateState({ generated: 1, sessions: [], projects: {} }),
+    ['projects is not an array'],
+  );
+});
+
+test('ответ без snapshots — не поломка', () => {
+  // Агрегатор стоит на другой машине и обновляется отдельно. Старый ответ без
+  // поля значит «режим /s ничего не покажет» — честный ответ, а не повод
+  // гасить список сессий.
+  assert.deepEqual(validateState({ generated: 1, sessions: [] }), []);
+});
+
+test('snapshots не массив — поломка', () => {
+  // Случай дешёвый и однозначный, а перебирать такое поле нечем.
+  const problems = validateState({ generated: 1, sessions: [], snapshots: 'нет' });
+  assert.ok(problems.includes('snapshots is not an array'), problems);
+});
+
+test('кривая запись снимка — претензия, а не отказ опроса', () => {
+  // Тот же размен, что у projects: переименованное на той стороне поле не
+  // должно замораживать список сессий, к снимкам отношения не имеющий.
+  const state = { generated: 1, sessions: [], snapshots: [{ id: 42, created: 'вчера' }] };
+  assert.deepEqual(validateState(state), []);
+  const problems = snapshotProblems(state);
+  assert.ok(problems.some(p => p.includes('snapshots[0].id')), problems);
+});
+
+test('снимок без sessions — претензия', () => {
+  const problems = snapshotProblems({
+    snapshots: [{ id: 'snap-1', created: 10 }],
+  });
+  assert.ok(problems.some(p => p.includes('snapshots[0].sessions')), problems);
+});
+
+test('целый снимок претензий не вызывает', () => {
+  assert.deepEqual(snapshotProblems({
+    snapshots: [{ id: 'snap-1', created: 10, sessions: [{ id: 'a', cwd: '/p', title: 't' }] }],
+  }), []);
 });

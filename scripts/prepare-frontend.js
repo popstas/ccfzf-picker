@@ -14,20 +14,31 @@ const FILES = [
   'frontend-src/session-agent.js',
   'frontend-src/session-list.js',
   'frontend-src/session-windows.js',
+  'frontend-src/open-transport.js',
   'frontend-src/session-groups.js',
   'frontend-src/ui-state.js',
   'frontend-src/session-glyph.js',
   'frontend-src/session-info.js',
+  'frontend-src/path-map.js',
+  'frontend-src/action-hotkey.js',
   'frontend-src/session-actions.js',
   'frontend-src/config-shape.js',
   'frontend-src/picker-filter.js',
+  'frontend-src/picker-snapshots.js',
+  'frontend-src/picker-mode.js',
+  'frontend-src/project-list.js',
+  'frontend-src/zellij-list.js',
   'frontend-src/picker-list-sync.js',
   'frontend-src/open-strategy.js',
+  'frontend-src/session-name.js',
+  'frontend-src/settings-form.js',
+  'frontend-src/action-icons.js',
 ];
 
 fs.mkdirSync(OUT, { recursive: true });
 fs.copyFileSync(path.join(ROOT, 'sessions.html'), path.join(OUT, 'index.html'));
+fs.copyFileSync(path.join(ROOT, 'settings.html'), path.join(OUT, 'settings.html'));
 for (const src of FILES) {
   fs.copyFileSync(path.join(ROOT, src), path.join(OUT, path.basename(src)));
 }
-console.log(`prepared ${FILES.length + 1} files`);
+console.log(`prepared ${FILES.length + 2} files`);

@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const {
   escapeHtml, statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
   sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
-  shortPath, rowTitle, titleAttr,
+  shortPath, rowTitle, titleAttr, windowHostHtml,
   prNumber, prBadgeHtml,
 } = require('../frontend-src/session-glyph');
 
@@ -302,13 +302,37 @@ test('usageHtml puts the cost before the highlighted context', () => {
   assert.ok(usageHtml({ agentContextPct: 47, agentCostUsd: 2 }).includes('class="ctx hot"'));
 });
 
-test('usageHtml leaves out what nobody measured, but keeps the column', () => {
-  // Ноль — это «данных нет»: перехват статуслайна стоит не у каждой сессии, и
-  // «$0» утверждало бы, что она обошлась бесплатно.
+test('usageHtml печатает ноль, а не прячет его', () => {
+  // Раньше ноль значил «данных нет» и колонка у такой сессии пустовала. На
+  // глаз это читалось как поломка отрисовки: у соседей цифры есть, тут пусто.
+  // Различить «ноль» и «неизвестно» всё равно нечем, и «0%» честнее пустоты.
   assert.strictEqual(usageHtml({ agentContextPct: 0, agentCostUsd: 2 }),
-    '<div class="usage"><span class="cost">$2</span></div>');
-  assert.strictEqual(usageHtml({}), '<div class="usage"></div>');
-  assert.strictEqual(usageHtml(undefined), '<div class="usage"></div>');
+    '<div class="usage"><span class="cost">$2</span> · <span class="ctx">0%</span></div>');
+  assert.strictEqual(usageHtml({}),
+    '<div class="usage"><span class="cost">$0</span> · <span class="ctx">0%</span></div>');
+  assert.strictEqual(usageHtml(undefined),
+    '<div class="usage"><span class="cost">$0</span> · <span class="ctx">0%</span></div>');
+});
+
+test('нули показываются, а не прячутся', () => {
+  // Раньше ноль значил «данных нет»: перехват статуслайна стоит не у каждой
+  // сессии, и колонка у такой строки была пуста. Решение поменялось — ноль
+  // это ноль, а пустая колонка выглядела как поломка отрисовки.
+  const html = usageHtml({ agentCostUsd: 0, agentContextPct: 0 });
+  assert.match(html, /\$0/);
+  assert.match(html, /0%/);
+});
+
+test('нулевой контекст не подсвечивается', () => {
+  const html = usageHtml({ agentCostUsd: 0, agentContextPct: 0 });
+  assert.doesNotMatch(html, /ctx warn|ctx hot/);
+});
+
+test('выключенный чекбокс по-прежнему убирает свою величину', () => {
+  const noCost = usageHtml({ agentCostUsd: 0, agentContextPct: 0 }, { showCost: false });
+  assert.doesNotMatch(noCost, /\$/);
+  assert.match(noCost, /0%/);
+  assert.strictEqual(usageHtml({}, { showCost: false, showContext: false }), '');
 });
 
 test('stateText shows the state and the event that produced it', () => {
@@ -409,6 +433,20 @@ test('hotkeyHtml is a column of its own, empty when the project has no key', () 
   assert.strictEqual(hotkeyHtml({ hotkey: '^F12' }, false), '');
 });
 
+// Занятый хоткей обязан быть виден: до этой правки отказ регистрации стоил
+// строки в stderr, которого у приложения из трея не читает никто, — и клавиша,
+// отобранная соседом по системе, выглядела как сломанный конфиг.
+test('незарегистрированный хоткей помечен в колонке', () => {
+  const html = hotkeyHtml({ hotkey: 'Ctrl+F11', hotkeyTaken: true });
+  assert.match(html, /class="hk taken"/);
+  assert.match(html, /Ctrl\+F11/);
+});
+
+test('обычный хоткей рисуется без пометки', () => {
+  const html = hotkeyHtml({ hotkey: 'Ctrl+F11' });
+  assert.match(html, /class="hk"/);
+});
+
 test('shortSessionId names the agent that is writing, not the one it forked from', () => {
   assert.strictEqual(shortSessionId({ id: 'parent-id', agentSessionId: 'child-id-1234' }), 'chil');
   assert.strictEqual(shortSessionId({ id: 'parent-id-9999' }), 'pare');
@@ -456,4 +494,25 @@ test('prBadgeHtml renders the badge only for sessions with a pull request', () =
   );
   assert.strictEqual(prBadgeHtml({ pr_url: '' }), '');
   assert.strictEqual(prBadgeHtml({}), '');
+});
+
+// ── колонка с машиной чужого окна ───────────────────────────────────────────
+test('машина чужого окна выводится с подсказкой', () => {
+  const html = windowHostHtml({ windowHost: 'mac-host' });
+  assert.match(html, /mac-host/);
+  assert.match(html, /title="Window is on mac-host"/);
+});
+
+test('без чужой машины остаётся пустой элемент, а не пропуск', () => {
+  // Правые колонки стоят друг за другом, и дырка сдвинула бы соседние строки.
+  assert.strictEqual(windowHostHtml({ windowHost: '' }), '<div class="winhost"></div>');
+});
+
+test('выключенная галка убирает колонку целиком', () => {
+  assert.strictEqual(windowHostHtml({ windowHost: 'mac-host' }, false), '');
+});
+
+test('имя машины экранируется', () => {
+  // Строка приезжает из файла, написанного на чужой машине.
+  assert.ok(!windowHostHtml({ windowHost: '<b>x' }).includes('<b>'));
 });

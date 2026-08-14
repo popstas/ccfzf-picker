@@ -42,6 +42,7 @@
         .status-checks {
             display: flex; align-items: center; gap: 12px; margin-left: auto;
         }
+        #settings-button { margin-left: auto; cursor: pointer; padding: 0 2px; }
         .status-check {
             display: flex; align-items: center; gap: 6px;
             cursor: pointer; color: #7d838c;
@@ -61,6 +62,15 @@
             display: flex; align-items: center; gap: 12px;
             padding: 7px 18px; cursor: pointer;
         }
+        /* Строка под курсором мыши. Тусклее выбранной намеренно: выбор один и
+           решает, что откроет Enter, а подсветка под мышью обещает только то,
+           что сделает клик. Одинаковый фон у обеих превратил бы список в
+           картинку с двумя одинаково выбранными строками.
+
+           Стоит перед `.row.active`: специфичность у правил равная (два
+           селектора класса против класса с псевдоклассом), и спор решает
+           порядок — иначе наведение на выбранную строку гасило бы выбор. */
+        .row:hover { background: #26282d; }
         .row.active { background: #31343a; }
         .row.active .cwd { color: #9aa0a8; }
         .dot {
@@ -73,7 +83,9 @@
         .dot.question { background: #d29922; }
         /* Агент закончил, результат ещё не смотрели. */
         .dot.review { background: #db6d28; }
-        /* Простаивает: закончил и постоял, считается проверенным. */
+        /* Простаивает: закончил и постоял, считается проверенным. Серый здесь
+           остаётся: он отличает живую сессию от закрытой, у которой кружка нет
+           вовсе, — а это и есть главный вопрос к строке. Гасили и вернули. */
         .dot.idle { background: #6e7681; }
         /* Закрытая сессия — кружка нет, но место под него остаётся,
            иначе текст закрытых строк съезжает относительно живых. */
@@ -87,7 +99,22 @@
             background: transparent;
             box-shadow: inset 0 0 0 2px #db6d28;
         }
-        .row.closed .name { color: #a8adb5; }
+        /* Тусклое имя — там, где строка есть, а дела до неё сейчас нет:
+           закрытая сессия и сессия снимка, чьё окно уже на экране (её
+           восстановление пропустит). Случая два, цвет один — правило одно. */
+        .row.closed .name,
+        .row.snapshot-session.on-screen .name { color: #a8adb5; }
+        /* Заголовок раскладки. Не group-label: у него есть своё действие —
+           Enter поднимает снимок целиком, — поэтому это строка, а не подпись.
+           Отличается от строки сессии разрядкой и цветом подписи, как группа. */
+        .row.snapshot .name {
+            font-size: 11px; letter-spacing: .06em; color: #9aa0a8;
+        }
+        /* У заголовка снимка кружка нет: состояния у раскладки не бывает, и
+           серая точка там ничего не значила — в отличие от строк сессий под
+           ним, где серый значит «не открыта». Место остаётся: колонка общая со
+           строками сессий, и выброшенный элемент сдвинул бы их текст. */
+        .row.snapshot .dot { background: transparent; }
         .text { min-width: 0; }
         .name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .cwd { font-size: 11px; color: #868c95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -126,6 +153,10 @@
             flex: 0 0 auto; padding-left: 10px;
             font-size: 11px; color: #7d838c; white-space: nowrap;
         }
+        /* Клавиша, которую забрал сосед по системе: видна, но погашена — по
+           ней узнают, какая именно комбинация не сработала, а не только то,
+           что что-то не сработало. */
+        .hk.taken { opacity: .45; text-decoration: line-through; }
         /* Пометка «окно терминала уже открыто». Ширина задана жёстко: у сессий
            без окна элемент пустой, и без ширины колонка дышала бы от строки к
            строке. Цвет как у живого статуса — это признак того же рода: сессия,
@@ -133,6 +164,14 @@
         .win {
             flex: 0 0 auto; width: 10px; padding-left: 10px;
             font-size: 11px; color: #3fb950; text-align: center;
+        }
+        /* Машина чужого окна. Ширины не задано намеренно, в отличие от `.win`:
+           там элемент либо пуст, либо в один знак, а имена машин разной длины,
+           и жёсткая ширина резала бы их. Пустой элемент при этом схлопывается
+           и строк не сдвигает. */
+        .winhost {
+            flex: 0 0 auto; padding-left: 10px;
+            font-size: 11px; color: #7d838c; white-space: nowrap;
         }
         /* Контекст и деньги, между статусом и возрастом. */
         .usage {
@@ -150,6 +189,18 @@
             flex: 0 0 auto; padding-left: 10px; min-width: 34px; text-align: right;
             font-size: 11px; color: #7d838c; font-variant-numeric: tabular-nums;
         }
+        /* Сколько у проекта сессий и сколько из них живых. Рядом с возрастом,
+           поэтому цифры моноширинные — колонки не должны разъезжаться. */
+        .count {
+            flex: 0 0 auto; padding-left: 10px; min-width: 48px; text-align: right;
+            font-size: 11px; color: #7d838c; font-variant-numeric: tabular-nums;
+            /* nowrap, как у соседних колонок: `123 · 45●` шире min-width, а `●`
+               под tabular-nums не попадает — на WebView2 метрики этого знака
+               наименее предсказуемы, и без запрета строка переносилась бы. */
+            white-space: nowrap;
+        }
+        /* Отметка проекта в ccfzf (★ в его собственном списке). */
+        .mark { color: #d29922; }
         #message { padding: 24px 18px; color: #868c95; font-size: 13px; flex: 0 0 auto; }
         /* Ctrl+K actions overlay — sits above the session list, same palette. */
         #actions-backdrop {
@@ -176,7 +227,27 @@
             display: flex; align-items: center;
             padding: 10px 16px; font-size: 13px; cursor: pointer;
         }
+        /* Наведение и выбор — те же два фона и в том же порядке, что у строки
+           списка (см. `.row:hover`): меню открывается поверх него, и второй
+           набор цветов читался бы как другое окно. Порядок решает так же —
+           специфичность у правил равная. */
+        .action-row:hover { background: #26282d; }
         .action-row.active { background: #31343a; }
+        /* Слот значка. Ширина фиксированная и одинаковая у всех строк, включая
+           глифовые: без неё подпись на строке без иконки съезжает влево, и
+           меню читается как два списка в одном окне.
+
+           16 px при иконке 32×32 из WinAPI — ровно вдвое; на масштабе 150%,
+           который стоит на машине, это 24 устройственных точки, то есть
+           картинку ужимают, а не растягивают. */
+        .action-icon {
+            flex: 0 0 16px; width: 16px; height: 16px;
+            display: flex; align-items: center; justify-content: center;
+            margin-right: 10px; font-size: 12px; color: #7d838c;
+        }
+        .action-icon img { width: 16px; height: 16px; }
+        /* Тем же оранжевым горит непросмотренная сессия в списке. */
+        .action-icon.unread { color: #db6d28; }
         .action-label {
             flex: 1 1 auto; min-width: 0; overflow: hidden;
             text-overflow: ellipsis; white-space: nowrap;
@@ -219,10 +290,13 @@
 <div id="message">Loading…</div>
 <div id="statusline">
   <span id="sort-control" title="Click to change sort"><span class="icon">⇅</span><span id="sort-label">cost</span></span>
-  <span id="menu-hint">^K - Session menu, ^R - copy reptyr command</span>
+  <!-- Пусто: текст ставит paintToggles — хвост про `^S` зависит от ответа. -->
+  <span id="menu-hint"></span>
   <!-- Наполняется из TOGGLE_CHECKS: разметка и обработчики не должны
        расходиться в именах ключей. -->
   <span class="status-checks" id="status-checks"></span>
+  <!-- Справа и последним: это не часть ряда галок, а выход в другое окно. -->
+  <span id="settings-button" title="Settings (Ctrl+,)"><span class="icon">⚙</span></span>
 </div>
 <div id="actions-backdrop" aria-hidden="true">
   <div id="actions-menu" role="menu">
@@ -239,27 +313,47 @@
 </div>
 <script src="state-shape.js"></script>
 <script src="session-agent.js"></script>
-<script src="session-list.js"></script>
+<!-- session-windows до session-list: тот берёт оттуда windowOf в момент
+     загрузки, чтобы приписать строке машину её окна. -->
 <script src="session-windows.js"></script>
+<script src="session-list.js"></script>
+<script src="zellij-list.js"></script>
+<script src="open-transport.js"></script>
 <script src="session-groups.js"></script>
 <!-- ui-state после session-groups: он берёт оттуда normalizeSort в момент
      загрузки, и в обратном порядке ему достался бы undefined. -->
 <script src="ui-state.js"></script>
 <script src="session-glyph.js"></script>
 <script src="session-info.js"></script>
+<!-- session-name до open-strategy: тот берёт из него uniqueSessionName в
+     момент загрузки, и в обратном порядке ему достался бы undefined. -->
+<script src="session-name.js"></script>
 <!-- open-strategy до session-actions: тот берёт из него buildAttachCommand в
      момент загрузки, и в обратном порядке ему достался бы undefined. Тесты
      этого не поймают — там require, а он от порядка тегов не зависит. -->
 <script src="open-strategy.js"></script>
+<!-- path-map до session-actions, action-hotkey до config-shape: оба берут
+     соседа из globalThis в момент загрузки, и в обратном порядке им достался бы
+     undefined. Тесты этого не поймают — там require, а он от порядка тегов не
+     зависит; ловит порядок test/frontend-load.test.js. -->
+<script src="path-map.js"></script>
+<script src="action-hotkey.js"></script>
 <script src="session-actions.js"></script>
 <script src="config-shape.js"></script>
 <script src="picker-filter.js"></script>
+<script src="picker-snapshots.js"></script>
+<script src="picker-mode.js"></script>
+<script src="project-list.js"></script>
 <script src="picker-list-sync.js"></script>
+<script src="action-icons.js"></script>
 <script>
   let groups = [];
   let rows = [];
   let active = 0;
-  let sortMode = 'cost';
+  // Умолчание — из session-groups, а не литералом: иначе список открывался бы
+  // в одном порядке, а ui.json без сохранённой сортировки нормализовался бы в
+  // другой.
+  let sortMode = window.SessionGroups.DEFAULT_SORT;
   // Прочитанное живёт на этой машине: трекера окон здесь нет, отметку ставит
   // само открытие сессии. Читается из ~/.config/ccfzf-picker/seen.json один
   // раз за загрузку окна — см. start().
@@ -272,6 +366,13 @@
   // же сессии, а не ждёт следующего опроса: ждать пришлось бы до секунды, и
   // клик выглядел бы не сработавшим.
   let lastSessions = [];
+  // Проекты последнего ответа, уже разложенные в строки. Отдельно от сессий:
+  // они не группируются, не сортируются здесь и не фильтруются по onlyLive.
+  let projectRows = [];
+  // Снимки раскладки окон из последнего ответа, как приехали. В строки их
+  // раскладывает buildSnapshotRows на каждой отрисовке: отбор запросом и
+  // пометка «окно открыто» считаются по свежему ответу, а не по прошлому.
+  let snapshotRows = [];
   // Текст отказа: не смогли спросить удалённый хост или ответ пришёл не той формы.
   // Держится до первого удачного опроса, а не до следующей отрисовки, — иначе
   // он мигал бы раз в секунду.
@@ -281,6 +382,13 @@
   // мелькнула бы и исчезла раньше, чем её успели прочитать.
   let notice = '';
   let noticeTimer = null;
+  // Клавиши, которые не встали: записи `{cwd, hotkey, reason}`. Приезжает от
+  // Rust — событием project-hotkeys и разовым опросом project_hotkeys_taken на
+  // старте — и только оттуда: со страницы не видно, что регистрирует система,
+  // а что нет. Причина едет вместе с записью, потому что причин несколько, и
+  // называть все занятостью значило бы отправлять человека искать чужое
+  // приложение там, где хоткей просто назван дважды.
+  let hotkeysTaken = [];
 
   function showNotice(text) {
     notice = text;
@@ -289,13 +397,14 @@
     render();
   }
 
-  // check_ssh_host в src-tauri/src/main.rs закрывает только fetch_state.
-  // Запуск терминала идёт мимо неё, через spawn_detached, и без этой
-  // проверки ненастроенный конфиг показал бы сырую ошибку ssh в отдельном
-  // окне — там, где её никто не связывает с конфигом пикера.
+  // check_ssh_host в src-tauri/src/main.rs закрывает только опрос: её зовёт
+  // фоновый поток (poller.rs), и ответ его виден в списке. Запуск терминала
+  // идёт мимо неё, через spawn_detached, и без этой проверки ненастроенный
+  // конфиг показал бы сырую ошибку ssh в отдельном окне — там, где её никто
+  // не связывает с конфигом пикера.
   function sshHostMissing() {
     if (CONFIG.sshHost && CONFIG.sshHost.trim()) return false;
-    error = 'sshHost не задан: скопируйте config.example.yml в ~/.config/ccfzf-picker/config.yaml';
+    error = 'sshHost is not set: copy config.example.yml to ~/.config/ccfzf-picker/config.yaml';
     render();
     return true;
   }
@@ -320,30 +429,55 @@
     { key: 'showCost', label: 'cost', side: 'right' },
     { key: 'showContext', label: 'context', side: 'right' },
     { key: 'showWindow', label: 'window', side: 'right' },
+    { key: 'showWindowHost', label: 'window host', side: 'right' },
     { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
+    { key: 'showAll', label: 'show all', side: 'filter' },
   ];
-  // Умолчания. Выключены те колонки, что отвечают на вопрос «как эта сессия
-  // дошла до жизни такой», а не «стоит ли в неё заходить»: событие и цена
-  // интересны разбирательству постфактум, а в списке они каждую строку
-  // удлиняют. Включаются чекбоксом, и выбор переживает перезапуск (ui.json).
-  let toggles = {
-    showPrompt: true,
-    showAnswer: true,
-    showPaths: true,
-    showHotkey: true,
-    showEvent: false,
-    showId: false,
-    showCost: false,
-    showContext: true,
-    showWindow: true,
+  // Ключи фильтров — из той же таблицы, а не вторым списком: разойдясь, новый
+  // фильтр молча стал бы колонкой, то есть галкой, которая не отбирает строки.
+  const FILTER_KEYS = new Set(TOGGLE_CHECKS.filter(c => c.side === 'filter').map(c => c.key));
+  // Умолчания. Ось `list` — как было: выключены те колонки, что отвечают на
+  // вопрос «как эта сессия дошла до жизни такой», а не «стоит ли в неё
+  // заходить». Ось `statusline` решает, попадёт ли галка в строку внизу; там
+  // место кончилось, и по умолчанию вынесены только пять самых частых.
+  // Остальные правятся в окне настроек.
+  //
+  // Это достоверное состояние — то, что уходит в `save_ui` и приходит из
+  // `load_ui`.
+  let uiToggles = {
+    showPrompt: { list: true, statusline: true },
+    showAnswer: { list: true, statusline: true },
+    showPaths: { list: true, statusline: true },
+    showHotkey: { list: true, statusline: false },
+    showEvent: { list: false, statusline: false },
+    showId: { list: false, statusline: true },
+    showCost: { list: false, statusline: false },
+    showContext: { list: true, statusline: true },
+    showWindow: { list: true, statusline: false },
+    // Включена, хотя у одного трекера пустует всегда: имя машины появляется
+    // ровно тогда, когда оно нужно, — у окна, стоящего не здесь. Выключенной
+    // её бы никто и не нашёл, а лишней ширины она не занимает.
+    showWindowHost: { list: true, statusline: false },
     // Выключен: список без трекера и так весь без окон, и включённый фильтр
     // показал бы пустоту вместо сессий — с виду неотличимо от сломанного ssh.
-    onlyWindow: false,
+    onlyWindow: { list: false, statusline: false },
+    // Выключен, но вынесен в статуслайн. Ось `list` у фильтра значит
+    // «включён», и выключенный showAll оставляет решение за `onlyLive` из
+    // config.yaml: галка — это отступление от настройки, а не вторая
+    // настройка. Отступление запоминается в ui.json, как и все остальные.
+    showAll: { list: false, statusline: true },
   };
+  // Плоская карта «показывать ли колонку»: её читают рисовальщики строк и
+  // чекбоксы статуслайна. Пересчитывается из uiToggles одной функцией, чтобы
+  // две формы не разъехались.
+  let toggles = window.UiState.listColumns(uiToggles);
   let menuOpen = false;
   let menuActions = [];
   let menuActive = 0;
   let menuSessionId = null;
+  // Иконки приложений: id действия → data-URI. Заполняется один раз при
+  // старте и на config-changed, см. loadActionIcons.
+  let actionIcons = {};
   let infoOpen = false;
 
   // Одна таблица «id действия ⇄ клавиша» на всё: подписи в меню Ctrl+K и
@@ -352,10 +486,9 @@
   // литералами рядом — эти две записи могли разъехаться, и меню обещало бы
   // клавишу, которая на деле не работает (или наоборот).
   //
-  // Ключи — те же три, что перечисляет availableActions. Действия `terminal`
-  // здесь больше нет: на маке открытие сессии и есть открытие терминала, оно
-  // висит на Enter и на клике, и пунктом меню было бы вторым именем того же.
-  const ACTION_KEYS = { pr: 'p', unread: 'u', attach: 'r', info: 'i' };
+  // Сама таблица переехала в action-hotkey.js: с ней сверяется разбор конфига,
+  // чтобы настроенному действию не досталась уже занятая окном комбинация.
+  const { BUILTIN_ACTION_KEYS: ACTION_KEYS, matchesHotkey, formatHotkey } = window.ActionHotkey;
   // Обработчики сверяют e.code, а не e.key: key — это напечатанный знак, и в
   // русской раскладке ^R приходит как «к», ^K как «л». Физическая клавиша от
   // раскладки не зависит, и подпись в меню остаётся честной в любой из них.
@@ -370,6 +503,8 @@
   const sortControl = document.getElementById('sort-control');
   const sortLabel = document.getElementById('sort-label');
   const statusChecks = document.getElementById('status-checks');
+  const settingsButton = document.getElementById('settings-button');
+  const menuHint = document.getElementById('menu-hint');
   const actionsBackdrop = document.getElementById('actions-backdrop');
   const actionsTitle = document.getElementById('actions-title');
   const actionsList = document.getElementById('actions-list');
@@ -389,33 +524,65 @@
 
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml,
-    windowHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml,
+    windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
   // чекбоксу не должен всплывать до statusline: там висит смена сортировки.
+  //
+  // Строится функцией, а не один раз при загрузке: набор вынесенных галок
+  // меняется из окна настроек, и разметка обязана перестраиваться на месте —
+  // иначе новая галка появлялась бы только после перезапуска.
   const toggleInputs = new Map();
-  // Отбивка между группами — на первом чекбоксе каждой следующей: отдельный
-  // пустой элемент-разделитель пришлось бы ещё и прятать, когда группа пуста.
-  statusChecks.innerHTML = TOGGLE_CHECKS.map(({ key, label, side }, i) => {
-    const gap = i > 0 && TOGGLE_CHECKS[i - 1].side !== side ? ' gap' : '';
-    return `<label class="status-check${gap}"><input type="checkbox" data-toggle="${key}"> ${escapeHtml(label)}</label>`;
-  }).join('');
-  for (const input of statusChecks.querySelectorAll('input[data-toggle]')) {
-    const key = input.dataset.toggle;
-    toggleInputs.set(key, input);
-    input.addEventListener('click', (e) => {
-      e.stopPropagation();
-    });
-    input.addEventListener('change', () => {
-      toggles[key] = input.checked;
-      render();
-      saveUi();
-    });
+
+  function renderChecks() {
+    toggleInputs.clear();
+    const shown = TOGGLE_CHECKS.filter(({ key }) => (uiToggles[key] || {}).statusline);
+    // Отбивка между группами — на первом чекбоксе каждой следующей: отдельный
+    // пустой элемент-разделитель пришлось бы ещё и прятать, когда группа пуста.
+    statusChecks.innerHTML = shown.map(({ key, label, side }, i) => {
+      const gap = i > 0 && shown[i - 1].side !== side ? ' gap' : '';
+      return `<label class="status-check${gap}"><input type="checkbox" data-toggle="${key}"> ${escapeHtml(label)}</label>`;
+    }).join('');
+    for (const input of statusChecks.querySelectorAll('input[data-toggle]')) {
+      const key = input.dataset.toggle;
+      toggleInputs.set(key, input);
+      input.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+      const isFilter = FILTER_KEYS.has(key);
+      input.addEventListener('change', () => {
+        // Галка в статуслайне правит ось list: она и значит «показывать
+        // колонку». Второй осью распоряжается только окно настроек.
+        uiToggles[key] = { ...uiToggles[key], list: input.checked };
+        toggles = window.UiState.listColumns(uiToggles);
+        // Фильтр решает состав списка, а состав считает regroup — render
+        // рисует уже отобранное. С одним только render галка сработала бы
+        // лишь к следующему ответу агрегатора, а тот может не прийти вовсе:
+        // на скрытом окне такт уходит в минуты, а неизменившееся состояние
+        // отсекается по отпечатку. Выглядело бы это мёртвым чекбоксом.
+        if (isFilter) regroup();
+        else render();
+        saveUi();
+      });
+    }
   }
+
+  renderChecks();
+
+  // Клик по шестерёнке не должен всплывать до statusline: там висит смена
+  // сортировки, и открытие настроек заодно крутило бы её.
+  settingsButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    invoke('open_settings').catch((err) => { error = String(err); render(); });
+  });
 
   function paintToggles() {
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
+    // Про `/s` рассказываем только там, где он работает: подсказка о режиме,
+    // которого нет, обманывает ровно так же, как молчащий Enter.
+    menuHint.textContent = '^K / right click - Session menu, ^N - new session, ^A - all projects'
+      + (trackerIsHere() ? ', ^S - snapshots' : '');
   }
 
   /**
@@ -427,7 +594,10 @@
    * решил бы, что вид запомнен, и удивился бы после перезапуска.
    */
   function saveUi() {
-    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, toggles) })
+    // uiToggles, не toggles: тот плоский и не помнит ось statusline — запись
+    // плоской картой обнулила бы её при первом же save_ui, включая тот, что
+    // зовётся сменой сортировки (ниже, не только из чекбокса).
+    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles) })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -449,12 +619,101 @@
     rendered = { keys: plan.keys, html: plan.html };
   }
 
-  function render() {
-    const nowSec = Math.floor(Date.now() / 1000);
-    rows = [];
-    const items = [];
+  /**
+   * Строки проектов.
+   *
+   * Ни групп, ни сортировки: порядок задаёт агрегатор (свежие сверху), а
+   * переключатель sort — про сессии. Правые колонки (usage, window, id, hk)
+   * пусты не по недосмотру: у каталога нет ни записи агента, ни окна.
+   */
+  function renderProjects(query, items, nowSec) {
+    for (const project of window.PickerFilter.filterProjects(projectRows, query)) {
+      const index = rows.length;
+      rows.push(project);
+      // Зелёная точка у проекта, где кто-то работает прямо сейчас: тот же
+      // словарь цветов, что и у сессии, и та же ширина левой колонки. Без
+      // живых — обычная серая точка, а не `closed`: прозрачная задумана для
+      // закрытой сессии, чтобы место осталось пустым, а у проекта «сейчас
+      // никто не работает» — обычное состояние, а не отсутствие строки.
+      const dotClass = project.liveCount ? 'dot active' : 'dot';
+      // Подсказка — через тот же titleAttr, что у сессий: иначе в ней висел бы
+      // полный путь, а строкой ниже, в теле строки, — тот же путь через
+      // shortPath, и одна строка показывала бы каталог двумя разными видами.
+      const html = `<div class="row project" data-index="${index}"${titleAttr(project)}>` +
+        `<div class="${dotClass}"></div>` +
+        `<div class="text"><div class="name">` +
+        (project.mark ? '<span class="mark">★</span> ' : '') +
+        `${escapeHtml(project.label)}</div>` +
+        (toggles.showPaths
+          ? `<div class="cwd">${escapeHtml(shortPath(project.cwd))}</div>` : '') +
+        `</div>` +
+        `<div class="meta">` +
+        `<div class="count">${project.sessionCount}` +
+        (project.liveCount ? ` · ${project.liveCount}●` : '') +
+        `</div>` +
+        // Колонка `hk` у проекта — та же самая колонка, что и у сессии, и
+        // рисует её та же hotkeyHtml: второй способ рисовать то же самое
+        // разошёлся бы с первым на первой же правке (ровно то, что уже
+        // произошло — задачи 4 и 7 доводили hotkey/hotkeyTaken до строки
+        // проекта, а на экран это не попадало, потому что здесь функция не
+        // звалась вовсе). Порядок — как у строки сессии (698-704): hotkeyHtml
+        // перед ageHtml.
+        hotkeyHtml(project, toggles.showHotkey) +
+        ageHtml(project, nowSec) +
+        `</div></div>`;
+      items.push({ key: `p:${project.id}`, html });
+    }
+  }
 
-    const visible = window.PickerFilter.filterSessions(groups, search.value);
+  /**
+   * Строки снимков: заголовок раскладки и её сессии одним потоком.
+   *
+   * Заголовок в `rows` не кладётся вместе с сессиями по одному правилу с
+   * группами сессий — но здесь кладётся: у него есть своё действие, Enter
+   * поднимает раскладку целиком. Поэтому и класс `row`, а не `group-label`.
+   */
+  // `nowSec` в сигнатуре — ради единообразия с соседями: строки снимков
+  // возраста не показывают, и считать его здесь не из чего.
+  function renderSnapshots(query, items, nowSec) {
+    const open = window.PickerSnapshots.openIdsFromState(lastState);
+    for (const row of window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query)) {
+      const index = rows.length;
+      rows.push(row);
+      if (row.kind === 'snapshot') {
+        const missing = row.missing
+          ? `${row.missing} not open`
+          : 'all on screen';
+        items.push({
+          key: row.key,
+          html: `<div class="row snapshot" data-index="${index}">` +
+            `<div class="dot"></div>` +
+            `<div class="text"><div class="name">${escapeHtml(row.label)}</div></div>` +
+            `<div class="meta"><div class="count">${row.total} · ${escapeHtml(missing)}</div>` +
+            `</div></div>`,
+        });
+        continue;
+      }
+      // Открытая сессия — тусклая: восстановление её всё равно пропустит, а
+      // Enter на ней поднимет уже существующее окно. Класс `on-screen`, а не
+      // `closed`: в этом файле `closed` значит «сессии больше нет», а здесь
+      // всё наоборот — окно есть, и именно поэтому строка тусклая.
+      items.push({
+        key: row.key,
+        html: `<div class="row snapshot-session${row.open ? ' on-screen' : ''}" data-index="${index}"` +
+          ` title="${escapeHtml(row.cwd)}">` +
+          `<div class="dot${row.open ? ' active' : ''}"></div>` +
+          `<div class="text"><div class="name">${escapeHtml(row.label)}</div>` +
+          (toggles.showPaths
+            ? `<div class="cwd">${escapeHtml(shortPath(row.cwd))}</div>` : '') +
+          `</div>` +
+          `<div class="meta"><div class="count">${row.open ? '▣ open' : ''}</div>` +
+          `</div></div>`,
+      });
+    }
+  }
+
+  function renderSessions(query, items, nowSec) {
+    const visible = window.PickerFilter.filterSessions(groups, query);
     // Одна отметка времени на всю отрисовку: иначе строки одного и того же
     // списка считали бы возраст от чуть разных «сейчас».
     for (const group of visible) {
@@ -466,10 +725,10 @@
         const index = rows.length;
         rows.push(session);
         // Подсказка про Shift+клик — ровно у тех строк, которые Shift+клик и
-        // пометит: спрашиваем то же availableActions, что и меню Ctrl+K.
-        // Раньше здесь стоял agentState, и обещание расходилось с делом на
-        // сессиях, которых человек ещё не открывал.
-        const markable = window.SessionActions.availableActions(session).some(a => a.id === 'unread');
+        // пометит: спрашиваем ту же markToggleId, что и сам клик. Раньше здесь
+        // стоял agentState, и обещание расходилось с делом на сессиях, которых
+        // человек ещё не открывал.
+        const markable = markToggleId(session) !== null;
         const html = `<div class="row ${session.live ? '' : 'closed'}${markable ? ' markable' : ''}" data-index="${index}"${titleAttr(session)}>` +
           statusDotHtml(session) +
           `<div class="text"><div class="name">${escapeHtml(session.label)}` +
@@ -491,6 +750,7 @@
           // чекбокс, как всё съезжало к названию сессии.
           `<div class="meta">` +
           windowHtml(session, toggles.showWindow) +
+          windowHostHtml(session, toggles.showWindowHost) +
           stateHtml(session, toggles.showEvent) +
           sessionIdHtml(session, toggles.showId) +
           hotkeyHtml(session, toggles.showHotkey) +
@@ -500,6 +760,25 @@
         items.push({ key: `s:${session.id}`, html });
       }
     }
+  }
+
+  function render() {
+    const nowSec = Math.floor(Date.now() / 1000);
+    rows = [];
+    const items = [];
+    // Признак ставится здесь, а не в buildProjectList: тот про ответ
+    // агрегатора, а «встала ли клавиша» знает только эта машина, и меняется
+    // отдельным событием — не в такт опросу, который перестраивает projectRows.
+    window.ProjectList.markHotkeysTaken(projectRows, hotkeysTaken);
+    // Режим живёт в строке поиска, а не отдельным флагом: см. picker-mode.js.
+    const { mode, query } = window.PickerMode.parseQuery(search.value);
+    // Режим снимков предлагается только там, где восстановление выполнимо:
+    // те же условия, что у ветки focus. Не выполнены — `/s` остаётся обычным
+    // поиском по сессиям, и Enter делает привычное, а не молчит.
+    const snapshotsMode = mode === 'snapshots' && trackerIsHere();
+    if (mode === 'projects') renderProjects(query, items, nowSec);
+    else if (snapshotsMode) renderSnapshots(query, items, nowSec);
+    else renderSessions(mode === 'snapshots' ? search.value.trim() : query, items, nowSec);
     syncList(items);
     // Отказ показывается и поверх непустого списка: строки в нём с прошлого
     // удачного опроса, и молчать о том, что свежих больше не приходит, нельзя.
@@ -511,9 +790,34 @@
     } else if (error) {
       message.style.display = 'block';
       message.textContent = error;
+    } else if (hotkeysTaken.length) {
+      message.style.display = 'block';
+      // Единственное место, где человек узнаёт про не вставшую клавишу.
+      // Формулировку складывает тот же помощник, что помечает строки: две
+      // копии разошлись бы на первой же правке.
+      message.textContent = window.ProjectList.hotkeysTakenMessage(hotkeysTaken);
     } else {
       message.style.display = rows.length ? 'none' : 'block';
-      if (!rows.length) message.textContent = groups.length ? 'Nothing matches.' : 'No claude sessions yet.';
+      if (!rows.length) {
+        message.textContent = mode === 'projects'
+          // Пустой список проектов почти всегда значит «агрегатор на той
+          // стороне ещё не отдаёт projects», и молчать об этом нельзя: на вид
+          // это не отличить от «ничего не нашлось». Но на холодном окне и
+          // после неудачного опроса projectRows пуст просто потому, что ответа
+          // ещё не было, — винить хост, который не успел ответить, нечестно.
+          // Признак ответа тот же, что и у окон: непустой lastState.
+          ? (projectRows.length ? 'Nothing matches.'
+            : lastState.sessions ? 'No projects — is ccfzf on the host up to date?'
+              : 'Loading…')
+          : snapshotsMode
+            ? (snapshotRows.length ? 'Nothing matches.'
+              // Пустой список снимков почти всегда значит «трекер на той
+              // стороне ещё не научился их публиковать» — на вид это не
+              // отличить от «раскладок ещё не запоминали».
+              : lastState.sessions ? 'No snapshots — is the window tracker up to date?'
+                : 'Loading…')
+            : (groups.length ? 'Nothing matches.' : 'No claude sessions yet.');
+      }
     }
     if (active >= rows.length) active = Math.max(0, rows.length - 1);
     paint();
@@ -529,19 +833,47 @@
    */
   function regroup() {
     const payload = window.SessionGroups.buildSessionsPayload(
-      { ok: true, sessions: lastSessions, seen }, sortMode,
-      { onlyLive: CONFIG.onlyLive, onlyWindow: toggles.onlyWindow },
+      // Верхние поля ответа переезжают сюда поимённо: на старом агрегаторе
+      // только они и называют машину окна, а пересобранный ответ их терял.
+      {
+        ok: true, sessions: lastSessions, seen,
+        windowHost: lastState.windowHost, windowPid: lastState.windowPid,
+      },
+      sortMode,
+      // showAll перекрывает onlyLive, а не заменяет его: конфиг задаёт, с чем
+      // пикер открывается, галка — разовое «покажи и мёртвые тоже». Обратной
+      // галки нет намеренно: включённый onlyLive и есть умолчание, а вторая
+      // галка «только живые» поверх настройки читалась бы как второй фильтр.
+      {
+        onlyLive: CONFIG.onlyLive && !toggles.showAll,
+        onlyWindow: toggles.onlyWindow,
+        configHost: CONFIG.windowHost,
+      },
     );
     groups = payload.groups;
     sortMode = payload.sort;
     paintSort();
+    // Подсказка зависит от ответа (trackerIsHere), а красится не на каждый
+    // опрос: без этого вызова хвост про `^S` появлялся бы только после клика
+    // по чекбоксу.
+    paintToggles();
     render();
   }
 
-  // Один запрос за раз. Опрос тикает раз в секунду, а ssh на удалённый хост
-  // столько же и стоит: без сторожа медленный ответ копил бы очередь вызовов, и каждый
-  // следующий отставал бы сильнее предыдущего.
-  let inFlight = false;
+  /**
+   * Принять свежий список занятых комбинаций — общий код для события
+   * project-hotkeys и разового опроса project_hotkeys_taken на старте.
+   *
+   * Один помощник, а не две копии `hotkeysTaken = [...]; regroup();`:
+   * подписка ловит только то, что случится после неё, а клавиши вешаются в
+   * Rust ещё в setup(), раньше, чем догрузилась эта страница, — без разового
+   * опроса тем же кодом первый отказ, случившийся до подписки, не показался
+   * бы никогда.
+   */
+  function applyHotkeysTaken(taken) {
+    hotkeysTaken = Array.isArray(taken) ? taken : [];
+    regroup();
+  }
 
   // Хвост последнего ответа агрегатора, кроме самих сессий: на какой машине
   // открыты окна и какому процессу они принадлежат. Пустой объект — рабочее
@@ -549,35 +881,98 @@
   let lastState = {};
 
   /**
-   * Можно ли поднимать окно вместо открытия терминала.
+   * Жив ли трекер на этой машине и умеет ли он поднимать окна.
    *
-   * Решает совпадение имён машин. На маке агрегатор рассказывает про окна
-   * Windows-машины: пометка о них полезна — сессия где-то открыта, — а подъём
-   * ничего не дал бы человеку перед экраном и отнял бы у Enter привычное
-   * открытие терминала.
-   *
-   * Настроенный брокер — не второе решение, а условие выполнимости: просьба о
-   * подъёме уходит только публикацией, и без брокера её некуда отправить.
-   * Предложить ветку, у которой нет транспорта, значит подарить человеку
-   * молчащий Enter — ровно то, чего избегает и проверка pid.
+   * Вопрос про машину целиком, а не про строку: доступен ли режим снимков и
+   * показывать ли подсказку о нём. Настроенный брокер — не второе решение, а
+   * условие выполнимости: просьба уходит только публикацией, и без брокера её
+   * некуда отправить. Предложить режим, у которого нет транспорта, значит
+   * подарить человеку молчащий Enter.
    */
-  function canFocusWindows() {
+  function trackerIsHere() {
     return CONFIG.mqtt.configured
-      && window.SessionWindows.canFocus(lastState, CONFIG.windowHost);
+      && !!window.SessionWindows.trackerHere(lastState, CONFIG.windowHost);
   }
 
-  async function refresh() {
-    if (inFlight) return;
-    inFlight = true;
-    let state;
-    try {
-      state = await invoke('fetch_state', { sshHost: CONFIG.sshHost });
-    } catch (e) {
-      error = String(e);
+  /**
+   * Поднимать ли окно этой строки.
+   *
+   * Раньше на этот вопрос отвечала машина целиком, и другого ответа быть не
+   * могло: трекер был один. Теперь окно строки может стоять на соседней
+   * машине, и подъём его отсюда ничего не дал бы человеку перед экраном.
+   */
+  function rowCanFocus(row) {
+    return CONFIG.mqtt.configured
+      && window.SessionWindows.canFocusRow(row, lastState, CONFIG.windowHost);
+  }
+
+  /**
+   * Трекер, чей менеджер откроет сессию. Ответ на вопрос про машину, а не про
+   * строку: у строки проекта окна нет вовсе.
+   */
+  function openManagerHere() {
+    return window.SessionWindows.openManager(lastState, CONFIG.windowHost);
+  }
+
+  /** Запись снимка по его id — из отобранных, то есть только своей машины. */
+  function snapshotById(id) {
+    return snapshotRows.find(s => s && s.id === id) || null;
+  }
+
+  /**
+   * Машина, которой уходит просьба о восстановлении, — или `null`, если такой
+   * машины нет.
+   *
+   * Вопрос здесь не «чей это снимок»: снимки в списке и так только свои,
+   * `snapshotsHere` отобрала их по машине. Вопрос — «берётся ли менеджер этой
+   * машины за раскладку», и отвечает на него `openManager`: он же отбирает
+   * трекеры по полю `openSession`. Второй разбор того же списка разошёлся бы с
+   * ним на первой же правке.
+   *
+   * Мак снимки делает, а менеджера у него нет: трекер там объявляет
+   * `openSession: false`, `openManager` его отбрасывает и отвечает либо чужой
+   * машиной, либо `null` — в обоих случаях `chooseOpenTransport` даёт `local`,
+   * и восстановление уходит в местную ветку. Возьми мы `host` прямо у снимка,
+   * на маке вышло бы `manager`, и просьба уехала бы в топик, который никто не
+   * слушает: молча, потому что у публикации нет ответа.
+   *
+   * Адрес при этом берётся у снимка, а не у менеджера: у каждой машины свой
+   * префикс топиков, и просьба обязана уйти той, что снимок сняла. Пустая
+   * строка значит «спроси свой конфиг» — так её читает `resolve_base` в
+   * `src-tauri/src/mqtt.rs`.
+   */
+  function snapshotOwner(id) {
+    const snap = snapshotById(id);
+    if (!snap) return null;
+    const manager = window.SessionWindows.openManager(lastState, CONFIG.windowHost);
+    if (!manager) return null;
+    return { host: manager.host, mqttBase: window.PickerSnapshots.snapshotBase(snap) };
+  }
+
+  /** Куда просить о подъёме окна этой строки. Пусто — спросим свой конфиг. */
+  function focusBase(row) {
+    return window.SessionWindows.mqttBaseFor(row, lastState);
+  }
+
+  /** Куда просить об открытии сессии. Пусто — спросим свой конфиг. */
+  function managerBase() {
+    return (openManagerHere() || {}).mqttBase || '';
+  }
+
+  /**
+   * Ответ агрегатора приехал.
+   *
+   * Опрос идёт в Rust: у скрытого окна webview тормозит таймеры, а WebView2 у
+   * свёрнутого умеет усыплять страницу целиком — фон на setInterval замолчал
+   * бы молча. Здесь остаётся только разбор ответа, тот же, что был.
+   */
+  function applyState(payload) {
+    const state = payload && payload.state;
+    if (!state) {
+      // Отказ без единого удачного ответа — показывать нечего, кроме отказа.
+      if (payload && payload.error) error = String(payload.error);
       render();
       return;
-    } finally {
-      inFlight = false;
     }
     const problems = window.StateShape.validateState(state);
     if (problems.length) {
@@ -585,26 +980,36 @@
       render();
       return;
     }
-    error = '';
+    // Претензии к записям projects опрос не отбрасывают: агрегатор обновляется
+    // сам по себе, и переименованное там поле проекта заморозило бы список
+    // сессий, к проектам отношения не имеющий. Кривые записи выбросит
+    // buildProjectList, а человек узнаёт о потере из той же строки отказа, что
+    // и обо всём остальном, — она показывается и поверх непустого списка.
+    //
+    // Претензии к записям снимков — по той же причине и в ту же строку. Первая
+    // непустая строка отказа побеждает: показывается всё равно одна.
+    //
+    // Отказ ssh стоит первым: он про то, что список устарел целиком, а
+    // остальные — про отдельные записи в нём.
+    error = (payload && payload.error ? String(payload.error) : '')
+      || window.StateShape.projectProblems(state)[0]
+      || window.StateShape.snapshotProblems(state)[0] || '';
     lastSessions = state.sessions;
+    // Поля может не быть — старый агрегатор на той стороне. Тогда режим /a
+    // покажет пустой список, и это честный ответ, а не поломка.
+    projectRows = window.ProjectList.buildProjectList(state);
+    // То же самое про снимки и режим /s.
+    // Снимки соседних машин в списке не нужны: восстановить их раскладку на
+    // своём экране человеку нечего.
+    snapshotRows = window.PickerSnapshots.snapshotsHere(state, CONFIG.windowHost);
     lastState = state;
     regroup();
   }
 
-  // Опрос идёт, только пока окно на экране: закрытый пикер спрашивать незачем,
-  // а каждый вызов — это ssh на другую машину. Границы показа приходят из Rust
-  // событиями picker-shown/picker-hidden; visibilitychange для этого не годится
-  // — скрытому окну Tauri он не приходит.
-  let timer = null;
-
-  function startPolling() {
-    refresh();
-    if (timer === null) timer = setInterval(refresh, 1000);
-  }
-
-  function stopPolling() {
-    if (timer !== null) { clearInterval(timer); timer = null; }
-  }
+  // Опрос идёт в Rust и не останавливается вместе с показом: он же держит
+  // свежим дамп агрегатора, с которого живёт панель openHASP. Границы показа
+  // приходят туда же событиями picker-shown/picker-hidden — они меняют такт,
+  // а не включают и выключают опрос.
 
   function paint() {
     const nodes = list.querySelectorAll('.row');
@@ -630,16 +1035,99 @@
   }
 
   /**
+   * Вернуть сессию в непрочитанное.
+   *
+   * Отметок о просмотре две, и отмотать нужно обе. Своя отматывается на секунду
+   * раньше записи агента — ровно настолько, чтобы seenSinceUpdate снова сказал
+   * «не видел». Вторую ставит оконный трекер, когда на окно сессии переводят
+   * взгляд; она приезжает полем `focusedAt` внутри `window` и в строке
+   * побеждает по максимуму, так что без отмотки у трекера местная не значила бы
+   * ничего: следующий же опрос вернул бы кружок в «просмотрено».
+   *
+   * Просьба уходит независимо от `rowCanFocus()`: там речь о подъёме окна,
+   * который на чужом экране бессмысленен, а отметка о просмотре приезжает в
+   * список на любой машине. Не настроен брокер — остаётся местная отметка, как
+   * было до появления трекерной.
+   *
+   * Отказ публикации местную отметку не отменяет: она уже стоит, кружок уже
+   * оранжевый, и откатывать его обратно значило бы отвечать на неудачу тем же,
+   * чем на успех. Пикер при этом не гаснет — список перерисовывается раз в
+   * секунду, и перекраску видно на глазах.
+   *
+   * Адрес берётся у машины окна, а не у своего конфига: отметку ставит тот
+   * трекер, который видел взгляд, а он может стоять на соседней машине.
+   * Строка без окна адреса не назовёт — тогда просьба уходит по своей базе,
+   * как раньше: слот в windows11-manager переживает закрытие окна, и такую
+   * сессию он всё ещё может знать по id.
+   */
+  function markUnread(row) {
+    // Перерисовка — из последнего ответа, без похода на удалённый хост:
+    // изменились отметки, а не сессии.
+    markSeen(row.id, row.lastActivity - 1).then(regroup);
+    if (!CONFIG.mqtt.configured) return;
+    invoke('unread_session_mqtt', { id: row.id, base: focusBase(row) })
+      .catch((e) => { error = String(e); render(); });
+  }
+
+  /**
+   * Пометить сессию просмотренной, не открывая её окна.
+   *
+   * Зеркало markUnread, но короче ровно на публикацию: отметки складываются по
+   * максимуму, и местная, поставленная «сейчас», перекрывает трекерный
+   * `focusedAt` сама. Отмотке же максимум мешает — оттого markUnread и обязан
+   * просить трекер, а этот ход обходится без брокера вовсе и работает
+   * одинаково на любой машине.
+   */
+  function markSeenNow(row) {
+    markSeen(row.id, Math.floor(Date.now() / 1000)).then(regroup);
+  }
+
+  /**
+   * Какую отметку Shift переставит у этой строки — или `null`, если никакую.
+   *
+   * Спрашивается availableActions, а не поля строки: условия у пары пунктов
+   * уже описаны там, и второй их разбор здесь разошёлся бы с меню ^K молча —
+   * подсказка обещала бы одно, клик делал бы другое.
+   *
+   * Конфиг сюда не передаётся намеренно: спрашивают про встроенные пункты, а
+   * настроенное действие с тем же id зажгло бы подсказку про Shift+клик там,
+   * где Shift+клик ничего не сделает.
+   */
+  /**
+   * Открыть список проектов: поставить `/a ` в начало строки поиска.
+   *
+   * Входов два и код у них общий: `^A` внутри окна и глобальный хоткей,
+   * приезжающий событием `picker-projects` от Rust. Режим живёт префиксом в
+   * тексте, а не отдельным флагом, поэтому «открыть в режиме проектов» — это
+   * правка строки поиска, и сделать её может только страница.
+   */
+  function showProjects() {
+    search.value = window.PickerMode.withProjectPrefix(search.value);
+    search.focus();
+    search.setSelectionRange(search.value.length, search.value.length);
+    onSearchInput();
+  }
+
+  function markToggleId(row) {
+    const ids = window.SessionActions.availableActions(row).map(a => a.id);
+    if (ids.includes('unread')) return 'unread';
+    if (ids.includes('seen')) return 'seen';
+    return null;
+  }
+
+  /**
    * Поднять окно, которое у сессии уже есть.
    *
    * Ветка `focus`: терминал не запускается вовсе, окно поднимает оконный
    * трекер на своей стороне.
    *
    * Пикер гасится **до** просьбы, а не после. Windows отдаёт передний план
-   * только владельцу либо тому, кто получил последнее событие ввода; трекеру
-   * это право выдаёт `focus_window_mqtt` на стороне Rust, и выдать его надо,
-   * пока последнее нажатие ещё наше. Гасить после значило бы отбирать у окна
-   * фокус сразу после того, как оно его получило.
+   * только владельцу либо тому, кто получил последнее событие ввода; это право
+   * выдаёт `focus_window_mqtt` на стороне Rust, и выдать его надо, пока
+   * последнее нажатие ещё наше. Гасить после значило бы отбирать у окна фокус
+   * сразу после того, как оно его получило. То же правило — у трёх остальных
+   * просьб, кончающихся окном: `openProjectRow`, `newSessionHere`,
+   * `openViaManager`.
    *
    * Просьба уходит публикацией в MQTT: брокер в этой установке слышат обе
    * машины. Ответа у неё нет — приёмник отчитывается в свой лог, а не нам, — и
@@ -649,9 +1137,7 @@
   async function focusSession(row) {
     await invoke('hide_picker');
     try {
-      await invoke('focus_window_mqtt', {
-        id: row.id, pid: window.SessionWindows.focusPid(lastState),
-      });
+      await invoke('focus_window_mqtt', { id: row.id, base: focusBase(row) });
     } catch (e) {
       error = String(e);
       render();
@@ -660,6 +1146,84 @@
     error = '';
     // Та же отметка «посмотрел», что и у открытия: сессию человек увидел.
     await markSeen(row.id, Math.floor(Date.now() / 1000));
+  }
+
+  /**
+   * Поднять раскладку снимка.
+   *
+   * Две дороги, и выбирает между ними та же проверка, что у Enter на строке
+   * сессии. На машине с менеджером просьба уходит ему — как было всегда.
+   * На маке менеджера нет: там восстановление значит «открыть сессии снимка»,
+   * и открывает их сам пикер, а места им расставит оконный трекер, когда окна
+   * появятся. Знать о восстановлении трекеру для этого не нужно.
+   *
+   * Адрес просьбы берётся у снимка: у каждой машины свой префикс топиков, и
+   * уйти она обязана той, что снимок сняла.
+   *
+   * Пикер гасится до просьбы, как и на фокусе: окна поднимутся на том же
+   * экране, и держать поверх них список незачем.
+   *
+   * Пустой `sessionIds` значит «весь снимок»: так просит заголовок раскладки.
+   */
+  async function restoreSnapshot(snapshotId, sessionIds) {
+    const owner = snapshotOwner(snapshotId);
+    const transport = window.OpenTransport.chooseOpenTransport(
+      owner, CONFIG.windowHost, CONFIG.mqtt.configured,
+    );
+    await invoke('hide_picker');
+    if (transport !== 'manager') return restoreLocally(snapshotId, sessionIds);
+    try {
+      await invoke('restore_snapshot_mqtt', {
+        id: snapshotId, sessionIds,
+        base: (owner || {}).mqttBase || '',
+      });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    error = '';
+  }
+
+  /**
+   * Восстановление своими силами: поднять сессии снимка по одной.
+   *
+   * Именно **поднять**, а не завести новые. Место запомнено за идентификатором
+   * сессии, и новая сессия получила бы новый id — трекеру было бы нечего
+   * искать, и окно осталось бы там, куда его положила система. Отсюда и форма
+   * строки: без `window`, `tmux` и `pid` `chooseOpenStrategy` отвечает
+   * `resume`, а это ровно то, что нужно.
+   *
+   * По одной и с паузой — не украшение. Два терминала, поднявшиеся разом,
+   * трекер не различит: у обоих заголовок ещё не устоялся, а привязка идёт
+   * именно по нему. Windows-сторона делает то же самое и по той же причине.
+   *
+   * Уже открытые пропускаются: второе окно той же сессии дралось бы с первым
+   * за один слот, и место досталось бы неизвестно какому.
+   *
+   * Цикл останавливается на первом отказе `openSession`, а не безусловно
+   * чистит `error` в конце. Раньше он это делал всегда — жалоба, которую
+   * `openSession` только что выставила, стиралась тут же, и на скрытом окне
+   * (такт опроса — минуты) человек не видел отказ ни сразу, ни при следующем
+   * открытии пикера. Прерывание к тому же честнее молчаливого перебора
+   * остатка: одна и та же сломанная ssh-сессия откажет и следующему
+   * терминалу, а дотягивать раскладку в этих условиях незачем.
+   */
+  async function restoreLocally(snapshotId, sessionIds) {
+    const snap = snapshotById(snapshotId);
+    if (!snap) return;
+    const wanted = new Set(sessionIds || []);
+    const open = window.PickerSnapshots.openIdsFromState(lastState);
+    const list = (Array.isArray(snap.sessions) ? snap.sessions : [])
+      .filter(s => s && s.id && !open.has(s.id))
+      .filter(s => !wanted.size || wanted.has(s.id));
+    for (const s of list) {
+      error = '';
+      await openSession({ id: s.id, cwd: s.cwd || '', title: s.title || '', kind: 'snapshot-session' });
+      if (error) return;
+      await new Promise(resolve => setTimeout(resolve, 1200));
+    }
+    error = '';
   }
 
   /**
@@ -674,9 +1238,22 @@
   async function openSession(row) {
     if (!row) return;
     const strategy = window.OpenStrategy.chooseOpenStrategy(
-      row, CONFIG.caps, { canFocus: canFocusWindows() },
+      row, CONFIG.caps, { canFocus: rowCanFocus(row) },
     );
-    if (strategy === 'focus') return focusSession(row);
+    // Развилку целиком решает chooseEnterAction (open-transport.js), а не
+    // условия по месту: у неё есть тесты на каждый вид строки и на все
+    // состояния трекера, а у пары if-ов в этом файле их не было — отсюда и
+    // взялись подъём окна мимо права на передний план и Enter, не сделавший
+    // ничего у незнакомой трекеру сессии.
+    const action = window.OpenTransport.chooseEnterAction(
+      row, strategy, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
+    );
+    // Окно уже открыто, и поднять его умеет только эта дорога: она гасит пикер
+    // до публикации и выдаёт трекеру право на передний план.
+    if (action === 'focus') return focusSession(row);
+    // Менеджер знает профиль Windows Terminal для этого проекта; собранная
+    // здесь команда его теряет.
+    if (action === 'manager') return openViaManager(row);
     if (sshHostMissing()) return;
     const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, {
       sshHost: CONFIG.sshHost, terminal: CONFIG.terminal,
@@ -684,9 +1261,9 @@
     if (!cmd) return;
     if (cmd.destructive) {
       const ok = confirm(
-        `Перехватить сессию «${sessionName(row)}»?\n\n`
-        + `Процесс ${row.pid} на ${CONFIG.sshHost} получит SIGHUP и завершится, окно на Windows закроется.\n`
-        + `Фоновые задачи, запущенные в её шелле, умрут вместе с ней.`,
+        `Take over session "${sessionName(row)}"?\n\n`
+        + `Process ${row.pid} on ${CONFIG.sshHost} will get SIGHUP and exit, and its window on Windows will close.\n`
+        + `Background jobs started in its shell will die with it.`,
       );
       if (!ok) return;
     }
@@ -702,8 +1279,60 @@
     invoke('hide_picker');
   }
 
+  /**
+   * Попросить трекер открыть сессию у себя.
+   *
+   * Один вход на два повода: Enter на машине самого трекера (ветка `manager`
+   * в openSession выше) и пункт меню «Open on <host>» с чужой машины. Publish
+   * в MQTT дойдёт до демона одинаково независимо от того, откуда он
+   * отправлен, и тело просьбы у обоих одно — разводить их значило бы завести
+   * два места, где отметка «посмотрел» и гашение пикера ставятся по-разному.
+   *
+   * Пикер гасится до просьбы: она кончается окном — поднятым, восстановленным
+   * или новым, — и гашение после отбирало бы у него передний план. Право на
+   * передний план выдаёт сама команда `open_session_mqtt`; кому именно, ей
+   * знать не нужно (`allow_any_foreground` в main.rs).
+   *
+   * Каталог проекта едет рядом с id, и без него просьба часто не сработала бы
+   * вовсе: менеджер ищет сессию среди своих слотов, а список пикера приезжает
+   * от ccfzf с ssh-хоста и знает сессии, которых на Windows не открывали ни
+   * разу. По каталогу менеджер открывает терминал с профилем из
+   * `claudeWt.projects` — ровно то, чего собранная здесь команда `wt.exe` не
+   * умеет.
+   */
+  async function openViaManager(row) {
+    await invoke('hide_picker');
+    try {
+      await invoke('open_session_mqtt', {
+        id: row.id, cwd: window.OpenTransport.rowProjectDir(row), base: managerBase(),
+      });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    error = '';
+    // Отметка «посмотрел» — та же, что и у местного открытия: сессию человек
+    // сейчас увидит.
+    await markSeen(row.id, Math.floor(Date.now() / 1000));
+  }
+
   function choose() {
-    return openSession(rows[active]);
+    const row = rows[active];
+    if (!row) return;
+    // Заголовок снимка: поднять раскладку целиком.
+    if (row.kind === 'snapshot') return restoreSnapshot(row.id, []);
+    // Сессия из снимка: у открытой окно уже есть, и Enter должен поднять его,
+    // а не заводить второе — восстановление её всё равно пропустило бы.
+    if (row.kind === 'snapshot-session') {
+      return row.open ? focusSession(row) : restoreSnapshot(row.snapshotId, [row.id]);
+    }
+    // У строки проекта нет id сессии — есть только каталог, и что с ним
+    // делать, решает менеджер: поднять окно этого проекта или завести сессию с
+    // его профилем. Enter здесь значит «покажи мне проект», а не «дай ещё один
+    // терминал» — вторая просьба живёт под `^N`.
+    if (row.kind === 'project') return openProjectRow(row);
+    return openSession(row);
   }
 
   function onSearchInput() {
@@ -765,17 +1394,53 @@
       actionsEmpty.style.display = 'none';
       // Клавиша справа — из ACTION_KEYS (единая таблица, см. её объявление
       // выше): нет записи для id — ничего не рисуем, пустой элемент не нужен.
+      //
+      // Комбинация приводится к одному виду — formatHotkey (action-hotkey.js).
+      // Раньше настроенное действие показывало строку из конфига как есть, и в
+      // одном списке стояли `^K` и `Ctrl+Shift+E`. Встроенная клавиша идёт
+      // через тот же форматтер: `Ctrl+K` он и даёт `^K`.
       actionsList.innerHTML = menuActions.map((action, index) => {
         const key = ACTION_KEYS[action.id];
-        const hotkey = key ? `<span class="action-hotkey">^${escapeHtml(key.toUpperCase())}</span>` : '';
+        const shown = formatHotkey(key ? `Ctrl+${key}` : (action.hotkey || ''));
+        const hotkey = shown ? `<span class="action-hotkey">${escapeHtml(shown)}</span>` : '';
+        // Значок: картинка приложения, если Rust её отдал, иначе глиф.
+        // Экранируется здесь, вместе с остальной строкой: data-URI приходит
+        // из Rust, но правило одно на всю сборку разметки.
+        const icon = window.ActionIcons.actionIcon(action, actionIcons);
+        const iconHtml = icon.kind === 'img'
+          ? `<span class="action-icon"><img src="${escapeHtml(icon.src)}" alt=""></span>`
+          : `<span class="action-icon${icon.cls ? ` ${icon.cls}` : ''}">${escapeHtml(icon.text)}</span>`;
         return `<div class="action-row${index === 0 ? ' active' : ''}" data-index="${index}" role="menuitem">` +
-          `<span class="action-label">${escapeHtml(action.label)}</span>${hotkey}</div>`;
+          `${iconHtml}<span class="action-label">${escapeHtml(action.label)}</span>${hotkey}</div>`;
       }).join('');
     }
     menuOpen = true;
     actionsBackdrop.classList.add('open');
     actionsBackdrop.setAttribute('aria-hidden', 'false');
     search.blur();
+  }
+
+  /**
+   * Действия для строки: availableActions плюс пункт, который availableActions
+   * дать не может — «открыть на трекере» зависит от машины-менеджера
+   * (openManagerHere()), а не от самой строки, и availableActions её не видит.
+   * Общая функция для openMenu и runAction: список меню и то, что runAction
+   * готов выполнить, должны быть одним и тем же списком, а не двумя похожими.
+   *
+   * Применимость пункта решает canOpenRemote (open-transport.js) — не здесь:
+   * она проверена тестами на каждый вид строки и все четыре состояния
+   * трекера, а инлайновая проверка в этом файле такой проверки не имеет
+   * вовсе.
+   */
+  function actionsFor(row) {
+    const actions = window.SessionActions.availableActions(row, CONFIG);
+    if (window.OpenTransport.canOpenRemote(row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured)) {
+      actions.push({
+        id: 'open-remote',
+        label: `Open on ${(openManagerHere() || {}).host}`,
+      });
+    }
+    return actions;
   }
 
   function openMenu() {
@@ -787,8 +1452,172 @@
       id: session.id,
       label: session.label,
       cwd: session.cwd,
-      actions: window.SessionActions.availableActions(session),
+      actions: actionsFor(session),
     });
+  }
+
+  /**
+   * Имена, которые сейчас нельзя занимать.
+   *
+   * Две части. Первая — заголовки живых сессий из последнего ответа: имя
+   * сессии и есть заголовок её окна, по нему оконный трекер привязывает
+   * сессию к слоту, и мешают друг другу именно живые тёзки.
+   *
+   * Вторая — имена, которые пикер выдал сам за последнюю минуту. Без неё два
+   * `^N` подряд, быстрее опроса, дали бы одно имя дважды: ответ агрегатора
+   * ещё не знает о первой сессии. Минута — с запасом: `^N` жмут при открытом
+   * окне, а открытому окну опрос идёт раз в секунду (`VISIBLE_TICK` в
+   * src-tauri/src/poller.rs), да и сам показ окна даёт опрос немедленно.
+   * Фоновый такт (от минуты до восьми) сюда не входит вовсе — в фоне `^N` и
+   * не нажать.
+   */
+  const issuedNames = new Map();
+  const ISSUED_TTL_MS = 60_000;
+
+  function takenSessionNames() {
+    const now = Date.now();
+    for (const [name, at] of issuedNames) {
+      if (now - at > ISSUED_TTL_MS) issuedNames.delete(name);
+    }
+    const live = lastSessions
+      .filter(s => s && s.live)
+      .map(s => s && s.title)
+      .filter(t => typeof t === 'string' && t);
+    return live.concat(Array.from(issuedNames.keys()));
+  }
+
+  /**
+   * Поднять новую сессию в каталоге строки самому.
+   *
+   * Запасная дорога: и Enter на строке проекта, и «New session» сначала
+   * спрашивают `chooseProjectOpenAction`, и сюда попадают там, где менеджера
+   * нет — на чужой машине и без настроенного брокера. Профиль Windows Terminal
+   * по каталогу здесь теряется, и иначе быть не может: соответствие живёт в
+   * `claudeWt.projects` у windows11-manager, а на такой машине его нет вовсе.
+   *
+   * Отметки «просмотрено» здесь нет: смотреть ещё нечего, сессия только что
+   * началась.
+   */
+  async function newSession(cwd) {
+    if (!cwd || sshHostMissing()) return;
+    const taken = takenSessionNames();
+    // Пустая команда — отказ OpenStrategy, а не поломка: путь с `;` Windows
+    // Terminal порежет на панели ещё до шелла. Сказать об этом обязательно —
+    // иначе кнопка молча ничего не делает.
+    const remote = window.OpenStrategy.newSessionCommand(cwd, taken);
+    if (!remote) {
+      error = `The path contains ";", there is nothing to open such a directory with: ${cwd}`;
+      render();
+      return;
+    }
+    const argv = [
+      CONFIG.terminal.file, ...CONFIG.terminal.args,
+      'ssh', '-t', CONFIG.sshHost,
+      remote,
+    ];
+    try {
+      await invoke('spawn_detached', { argv });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    // Имя запоминается только после удачного запуска: занять его на отказе
+    // значило бы отдать следующей сессии `-2` без всякой первой.
+    const name = window.OpenStrategy.newSessionName(cwd, taken);
+    if (name) issuedNames.set(name, Date.now());
+    invoke('hide_picker');
+  }
+
+  /**
+   * Enter на строке проекта: попросить менеджера открыть проект.
+   *
+   * Развилку «поднять окно этого каталога или завести сессию» принимает он:
+   * правило «последняя открытая сессия проекта» написано и покрыто тестами у
+   * него (`pickOpenProjectSession`), и профиль Windows Terminal по каталогу
+   * знает тоже только он. Та же просьба, что уходит от проектного хоткея.
+   *
+   * Отметки «просмотрено» здесь нет и быть не может: у строки проекта нет id
+   * сессии, отмечать нечего.
+   *
+   * Гасимся до просьбы, как `focusSession`, и по той же причине: у менеджера
+   * оба исхода кончаются окном, которому нужен передний план, — поднятым или
+   * только что открытым. Гашение после отбирало бы у него фокус сразу после
+   * того, как окно его получило, и выглядело это свернувшимся терминалом раз
+   * от раза: кто успел последним, тот передним планом и владеет. Цена — отказ
+   * публикации человек увидит не сразу, а когда откроет пикер снова; у ветки
+   * подъёма окна эта цена уплачена давно.
+   */
+  async function openProjectRow(row) {
+    const dir = window.OpenTransport.rowProjectDir(row);
+    const action = window.OpenTransport.chooseProjectOpenAction(
+      row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
+    );
+    if (action !== 'manager') return newSession(row.cwd);
+    await invoke('hide_picker');
+    try {
+      await invoke('open_project_mqtt', { cwd: dir, base: managerBase() });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    error = '';
+    // Enter здесь может и завести сессию: менеджер сам решает — поднять
+    // открытую или заново вызвать `claude -n <basename>`. Занимаем базовое
+    // имя каталога заранее, а не следующее свободное (`taken: []`, а не
+    // `takenSessionNames()`) — именно его получит новая сессия, если решение
+    // окажется таким. Занимать безопасно и во втором исходе: если менеджер
+    // поднял уже открытую сессию, это имя и так занято её заголовком, и
+    // отметка лишь задержится в issuedNames до TTL без всякого вреда. Без
+    // этой отметки следующий `^N`, нажатый раньше, чем дамп ccfzf увидит
+    // новую сессию, взял бы то же имя ещё раз.
+    const name = window.OpenStrategy.newSessionName(dir, []);
+    if (name) issuedNames.set(name, Date.now());
+  }
+
+  /**
+   * «New session» — всегда новая, но профиль знает менеджер.
+   *
+   * Отличается от `openProjectRow` ровно тем, что просит не искать открытую:
+   * `^N` человек нажимает, когда сессия уже есть и нужна ещё одна.
+   *
+   * Имя считается здесь, а не на той стороне: менеджер списка занятых имён не
+   * ведёт и взял бы basename каталога — то самое имя, которое уже занято, — а
+   * два окна с одним заголовком трекер привязал бы к одной сессии. Пустое имя
+   * значит отказ `OpenStrategy` (путь с `;`), и тогда местная дорога скажет об
+   * этом человеку — своей копии того же сообщения здесь не надо.
+   *
+   * Гасится до просьбы — то же правило и та же цена, что у `openProjectRow`.
+   */
+  async function newSessionHere(row) {
+    const dir = window.OpenTransport.rowProjectDir(row);
+    const action = window.OpenTransport.chooseProjectOpenAction(
+      row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
+    );
+    if (action !== 'manager') return newSession(row.cwd);
+    const taken = takenSessionNames();
+    const name = window.OpenStrategy.newSessionName(dir, taken);
+    if (!name) return newSession(row.cwd);
+    // Имя занимается до отправки, а не после — в отличие от местной
+    // newSession, где имя ждёт лишь миллисекунды локального spawn, здесь
+    // invoke ждёт публикацию в брокер (таймаут до 5 с). Пикер эти секунды
+    // уже погашен, но хоткей поднимает его обратно в любую из них: второй
+    // `^N` увидел бы то же самое issuedNames, что и первый. Заняв имя
+    // заранее, закрываем гонку, а не документируем её как отсутствующую.
+    issuedNames.set(name, Date.now());
+    await invoke('hide_picker');
+    try {
+      await invoke('new_session_mqtt', { cwd: dir, name, base: managerBase() });
+    } catch (e) {
+      // Отказ — имя не занято: сессия не поднялась, и следующая попытка
+      // вправе получить то же самое.
+      issuedNames.delete(name);
+      error = String(e);
+      render();
+      return;
+    }
+    error = '';
   }
 
   /**
@@ -801,7 +1630,25 @@
    */
   function runAction(row, id) {
     if (!row) return;
-    if (!window.SessionActions.availableActions(row).some(a => a.id === id)) return;
+    if (!actionsFor(row).some(a => a.id === id)) return;
+    // Настроенные действия проверяются первыми: встроенных id немного, но
+    // конфиг им не подчинён, и одинаковое имя не должно молча уводить в
+    // встроенную ветку. Путь уже переведён — иначе действия не было бы в списке.
+    const configured = CONFIG.actions.find(a => a.id === id);
+    if (configured) {
+      const argv = window.PathMap.buildActionArgv(configured, {
+        localPath: window.PathMap.mapPath(row.cwd, CONFIG.pathMap),
+        remotePath: row.cwd,
+      });
+      invoke('spawn_detached', { argv })
+        .then(() => invoke('hide_picker'))
+        .catch((e) => { error = String(e); render(); });
+      return;
+    }
+    if (id === 'new') {
+      newSessionHere(row);
+      return;
+    }
     if (id === 'pr') {
       // Форму ссылки уже проверил availableActions — до сюда доходит только
       // https://github.com/<owner>/<repo>/pull/<число>.
@@ -810,10 +1657,15 @@
       return;
     }
     if (id === 'unread') {
-      // Отматывается на секунду раньше записи агента: ровно настолько, чтобы
-      // seenSinceUpdate снова сказал «не видел». Перерисовка — из последнего
-      // ответа, без похода на удалённый хост: изменились отметки, а не сессии.
-      markSeen(row.id, row.lastActivity - 1).then(regroup);
+      markUnread(row);
+      return;
+    }
+    if (id === 'seen') {
+      markSeenNow(row);
+      return;
+    }
+    if (id === 'open-remote') {
+      openViaManager(row);
       return;
     }
     if (id === 'attach') {
@@ -825,7 +1677,7 @@
       // повторном переносе. В буфер уходит команда целиком.
       const shown = cmd.split(' || ')[0];
       invoke('copy_to_clipboard', { text: cmd })
-        .then(() => showNotice(`Скопировано: ${shown} — вставь в терминал на ${CONFIG.sshHost}, куда нужна сессия`))
+        .then(() => showNotice(`Copied: ${shown} — paste it into a terminal on ${CONFIG.sshHost}, wherever you want the session`))
         .catch((e) => { error = String(e); render(); });
       return;
     }
@@ -889,20 +1741,65 @@
       else if (!(e.ctrlKey || e.metaKey || e.altKey)) { e.preventDefault(); }
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyK') {
+    // `,` вместе с Ctrl или Cmd — общесистемная привычка открывать настройки.
+    // Сверяется e.code: в русской раскладке на этой клавише «б», и e.key
+    // пришёл бы им.
+    if ((e.ctrlKey || e.metaKey) && e.code === 'Comma') {
+      e.preventDefault();
+      invoke('open_settings').catch((err) => { error = String(err); render(); });
+      return;
+    }
+    // Shift и Alt исключены во всех трёх встроенных ветках ниже: isReserved в
+    // action-hotkey.js занимает за окном только форму «один Ctrl или Cmd плюс
+    // буква», то есть `Ctrl+Shift+A` человек вправе назначить своему действию.
+    // Без этой оговорки встроенная ветка съедала бы событие первой, и
+    // настроенный хоткей молча не работал бы.
+    const plainCtrl = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
+    if (plainCtrl && e.code === 'KeyK') {
       e.preventDefault();
       openMenu();
       return;
     }
+    if (plainCtrl && e.code === 'KeyA') {
+      // Ставит `/a ` в начало строки поиска. Не режим и не переключатель:
+      // состояние живёт в самом тексте, и стирание префикса возвращает к
+      // сессиям. Цена — `^A` больше не «выделить всё» в поле поиска.
+      e.preventDefault();
+      showProjects();
+      return;
+    }
+    if (plainCtrl && e.code === 'KeyS') {
+      // Ставит `/s ` в начало строки поиска — как `^A` ставит `/a `. Режим
+      // живёт в самом тексте, стирание префикса возвращает к сессиям.
+      //
+      // Молча ничего не делает там, где восстановление невыполнимо: тот же
+      // отказ, что и у подсказки, и лучше молчащего режима с молчащим Enter.
+      e.preventDefault();
+      if (!trackerIsHere()) return;
+      search.value = window.PickerMode.withSnapshotPrefix(search.value);
+      search.focus();
+      search.setSelectionRange(search.value.length, search.value.length);
+      onSearchInput();
+      return;
+    }
     // ^P/^U/^I — те же три действия, что и в меню. preventDefault здесь
     // обязателен: иначе Ctrl+P в webview уйдёт в печать.
-    if (e.ctrlKey || e.metaKey) {
+    if (plainCtrl) {
       const directActionId = CODE_TO_ACTION[e.code];
       if (directActionId) {
         e.preventDefault();
         runAction(rows[active], directActionId);
         return;
       }
+    }
+    // Настроенные действия — после встроенных: разбор конфига уже снял клавишу
+    // у того, кто целился в занятую комбинацию, но порядок проверки оставляет
+    // это правило верным и без него.
+    const configured = CONFIG.actions.find(a => matchesHotkey(e, a.parsedHotkey));
+    if (configured) {
+      e.preventDefault();
+      runAction(rows[active], configured.id);
+      return;
     }
     if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
@@ -915,14 +1812,38 @@
     const row = e.target.closest('.row');
     if (!row) return;
     active = Number(row.dataset.index);
-    // Shift+клик помечает непрочитанным вместо открытия. Промах по Shift не
+    // Shift+клик переключает отметку вместо открытия: прочитанную строку
+    // возвращает в непрочитанное, непрочитанную помечает просмотренной. Какое
+    // из двух действий подходит строке, решает не клик, а availableActions —
+    // те же условия, по которым пункты попадают в меню ^K. Промах по Shift не
     // должен превращаться в открытие сессии, поэтому строка без записи агента
     // (сессия без хука) просто ничего не делает.
     if (e.shiftKey) {
-      runAction(rows[active], 'unread');
+      runAction(rows[active], markToggleId(rows[active]));
       return;
     }
     choose();
+  });
+
+  // Правая кнопка по строке — тот же `^K`: меню действий у мыши другого входа
+  // не имело вовсе, а клавиатурный `^K` работает по активной строке, до
+  // которой мышью ещё надо доехать стрелками.
+  //
+  // preventDefault стоит до всех проверок и на весь список: родное меню
+  // WebView2 («Назад», «Обновить», «Сохранить как») в пикере не делает ничего
+  // осмысленного, а поверх нашего оно и вовсе перекрыло бы его. В поле поиска
+  // родное меню остаётся — там из него берут «Вставить».
+  list.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (menuOpen) return;
+    const row = e.target.closest('.row');
+    if (!row) return;
+    active = Number(row.dataset.index);
+    // paint, а не render: подсветке надо переехать на строку, по которой
+    // щёлкнули, а список ради этого перерисовывать незачем — openMenu читает
+    // rows[active], а не DOM.
+    paint();
+    openMenu();
   });
 
   actionsList.addEventListener('click', (e) => {
@@ -950,10 +1871,12 @@
     saveUi();
   });
 
-  // Reset the palette for a show and (re)start the feed. Called both from the
-  // 'picker-shown' listener (every show after the window has finished
-  // loading) and, once, directly from start() to cover the show that raced
-  // ahead of this webview finishing DOMContentLoaded (see start()).
+  // Reset the palette for a show. Feed itself doesn't (re)start here — it
+  // runs continuously in Rust, see the comment above applyState. Called both
+  // from the 'picker-shown' listener (every show after the window has
+  // finished loading) and, once, directly from start() to cover the show
+  // that raced ahead of this webview finishing DOMContentLoaded (see
+  // start()).
   function beginShow() {
     closeMenu();
     closeInfo();
@@ -979,7 +1902,22 @@
     // Первый показ за загрузку страницы: рисовать нечего, и «Loading…» стоит
     // вместо пустоты. Дальше сюда не попадаем — список уже есть.
     if (!rows.length && !error) message.textContent = 'Loading…';
-    startPolling();
+  }
+
+  /**
+   * Иконки приложений для меню.
+   *
+   * Отказ не событие: пустая карта значит «у всех пунктов глифы», и это
+   * рабочее состояние — на маке оно единственное.
+   */
+  async function loadActionIcons() {
+    try {
+      actionIcons = await invoke('action_icons', {
+        specs: window.ActionIcons.iconSpecs(CONFIG),
+      }) || {};
+    } catch (e) {
+      actionIcons = {};
+    }
   }
 
   async function start() {
@@ -1007,31 +1945,104 @@
     // Вид списка — до первой отрисовки: иначе первый показ рисуется чужой
     // сортировкой и перекладывается на глазах.
     try {
+      // Умолчания — из uiToggles, не из плоской toggles: иначе normalizeUiState
+      // увидела бы булевы умолчания вместо {list, statusline}, и уже сама
+      // считала бы, что statusline у всех ключей по умолчанию false (что
+      // сегодня и так верно, но с сохранением объекта, а не булевой карты).
       const ui = window.UiState.normalizeUiState(await invoke('load_ui'), {
-        sort: sortMode, toggles,
+        sort: sortMode, toggles: uiToggles,
       });
       sortMode = ui.sort;
-      toggles = ui.toggles;
+      uiToggles = ui.toggles;
+      // toggles тут производная, а не источник: источник — uiToggles, и
+      // именно его, а не эту плоскую карту, пишет saveUi().
+      toggles = window.UiState.listColumns(uiToggles);
+      // Набор вынесенных в статуслайн галок мог прийти из файла другим, чем
+      // при первой отрисовке разметки (до загрузки uiToggles ещё нет) —
+      // разметку чекбоксов надо пересобрать под то, что реально загружено.
+      renderChecks();
     } catch (e) {
       error = String(e);
     }
 
-    // Проектный хоткей открывает новую сессию, а не продолжает старую:
-    // продолжать нечего — сессии у него нет, есть только каталог.
+    // Запасная дорога: обычно нажатие проектного хоткея вообще сюда не
+    // доходит, а уходит из Rust просьбой менеджеру поднять окно (`press` в
+    // `project_hotkeys.rs`). Это событие ловит только ненастроенный брокер —
+    // и тогда открывает новую сессию, а не продолжает старую: продолжать
+    // нечего — сессии у него нет, есть только каталог.
+    //
+    // Через ту же newSession, в которую при том же ненастроенном брокере
+    // откатываются и Enter (openProjectRow), и ^N (newSessionHere) — не
+    // «как всегда», а именно в этом случае: при настроенном брокере оба идут
+    // через менеджера, а сюда событие вообще не долетает. Раньше здесь
+    // поднимался голый `claude`, без имени: сессия проектного хоткея
+    // оставалась безымянной, и оконный трекер не мог найти её по заголовку
+    // окна.
     await listen('project-hotkey', (event) => {
-      if (sshHostMissing()) return;
-      const argv = [
-        CONFIG.terminal.file, ...CONFIG.terminal.args,
-        'ssh', '-t', CONFIG.sshHost,
-        // Через ту же обёртку, что и открытие сессии: и кавычки вокруг пути из
-        // конфига, и интерактивный шелл, без которого агент поднимается мимо
-        // .zshrc — то есть без хука chpwd и без project= в телеметрии.
-        window.OpenStrategy.inDir(event.payload, 'claude'),
-      ];
-      invoke('spawn_detached', { argv }).catch((e) => {
+      newSession(event.payload);
+    });
+
+    // Второй глобальный хоткей: Rust показывает окно и говорит, с каким
+    // режимом открыться. Показать он может и сам, а вот префикс в строке
+    // поиска — дело страницы: режим живёт в тексте, а не флагом.
+    await listen('picker-projects', () => {
+      showProjects();
+    });
+
+    // Какие клавиши не встали. Приезжает от Rust на каждое применение списка:
+    // судить об этом со страницы нельзя — регистрирует не она.
+    await listen('project-hotkeys', (event) => {
+      applyHotkeysTaken(event.payload?.taken);
+    });
+
+    // Подписка ловит только то, что случится после неё; хоткеи вешаются в
+    // Rust ещё в setup(), раньше, чем догрузилась эта страница. Тем же
+    // приёмом, что и poll_now ниже, — разовый опрос забирает то, что Rust
+    // успел решить до подписки.
+    try {
+      applyHotkeysTaken(await invoke('project_hotkeys_taken'));
+    } catch (e) {
+      error = String(e);
+    }
+
+    // Ответ агрегатора приезжает событием: опросом распоряжается Rust.
+    await listen('state', (event) => applyState(event.payload));
+
+    // Настройки правит другое окно, и своего ui.json пикер сам не перечитает.
+    await listen('ui-changed', async () => {
+      try {
+        // Умолчания — из uiToggles, а не из плоской toggles: та же причина,
+        // что и при первой загрузке — иначе ось statusline у нетронутых
+        // человеком ключей молча обнулилась бы при следующем saveUi().
+        const ui = window.UiState.normalizeUiState(await invoke('load_ui'), {
+          sort: sortMode, toggles: uiToggles,
+        });
+        sortMode = ui.sort;
+        uiToggles = ui.toggles;
+        toggles = window.UiState.listColumns(uiToggles);
+      } catch (e) {
         error = String(e);
-        render();
-      });
+      }
+      // Набор вынесенных в статуслайн галок мог измениться — разметку чекбоксов
+      // надо собрать заново, а не просто проставить отметки.
+      renderChecks();
+      regroup();
+    });
+
+    // Хоткеи и хост опроса Rust уже переставил сам; здесь остаётся то, что
+    // читает страница, — терминал, пути, действия, caps.
+    await listen('config-changed', async () => {
+      try {
+        CONFIG = window.ConfigShape.normalizeConfig(await invoke('load_config'));
+      } catch (e) {
+        error = String(e);
+      }
+      // regroup() иконок не читает — их читает только renderMenu; список не
+      // обязан ждать похода за иконками, чтобы перерисоваться.
+      regroup();
+      // Настроенные действия могли смениться вместе с конфигом: иконки от
+      // прежних приложений остались бы висеть у новых пунктов.
+      await loadActionIcons();
     });
 
     // Fired by Rust every time the window is shown.
@@ -1040,8 +2051,11 @@
     await listen('picker-hidden', () => {
       closeMenu();
       closeInfo();
-      stopPolling();
     });
+
+    // Подписка готова — забрать то, что поток успел узнать до неё, и
+    // подтолкнуть свежий опрос.
+    applyState(await invoke('poll_now'));
 
     paintSort();
     paintToggles();
@@ -1052,12 +2066,23 @@
     // picker without a 'picker-shown' event ever reaching a listener that
     // didn't exist yet. Cover that first-show race by checking whether the
     // window is already visible right now; if so, this is that race and the
-    // feed needs to be started here instead of waiting for an event that
+    // palette needs to be reset here instead of waiting for an event that
     // already fired.
     const alreadyVisible = await getCurrentWindow().isVisible().catch(() => false);
     if (alreadyVisible) {
       beginShow();
     }
+
+    // Не раньше poll_now: список важнее — иначе окно ждало бы поход за
+    // иконками, а их читает только renderMenu, никак не render(). Не раньше
+    // и ветки alreadyVisible — тот случай ровно про человека, который уже
+    // смотрит на открытый пикер: пока идёт холодная инициализация COM и до
+    // пяти вызовов SHGetFileInfoW, поле поиска остаётся расфокусированным,
+    // висит прежний запрос, а галки статуслайна не перерисованы. Спека при
+    // этом не нарушается — «меню открывается уже с картинками» про момент
+    // первого ^K, а до него заведомо больше времени, чем занимает поход за
+    // парой иконок.
+    await loadActionIcons();
   }
 
   window.addEventListener('DOMContentLoaded', () => { start(); });

@@ -3,11 +3,24 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.ConfigShape = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
+  // globalThis, а не `root`: тот виден только внешней функции шима, а внутрь
+  // factory не передаётся.
+  const hotkeyApi = typeof module === 'object' && module.exports
+    ? require('./action-hotkey')
+    : globalThis.ActionHotkey;
+
   const DEFAULTS = {
     // Умолчания нет намеренно: любое значение здесь — либо чужое имя машины,
     // либо ложь. Пустой хост пикер показывает как ненастроенный конфиг.
     sshHost: '',
     hotkey: 'Cmd+Shift+C',
+    // Пусто, а не комбинация: у второго хоткея умолчание своё на каждой
+    // системе (`Win+Shift+F10` против `Option+Cmd+Shift+C`), и одной строкой,
+    // как `Super` у первого, они не сходятся. Умолчание живёт в Rust, где
+    // видно систему; пустое поле здесь значит «взять встроенное». Запиши сюда
+    // одну из двух комбинаций — и окно настроек, сохранившись на другой
+    // системе, увезло бы в конфиг чужую клавишу.
+    projectsHotkey: '',
     // Прямой запуск бинаря, а не `open -na kitty --args`. Обе формы доводят
     // команду до kitty (проверено), но `open -n` каждый раз поднимает новый
     // экземпляр приложения, а --single-instance отдаёт окно уже запущенному
@@ -27,6 +40,14 @@
     // здесь оно описано затем же, зачем и остальные: чтобы форма конфига была
     // в одном месте и проверялась одним тестом.
     hideOnBlur: true,
+    // Опрос продолжается при закрытом окне. Он не только держит список тёплым
+    // к следующему открытию: `ccfzf --state` переписывает свой дамп, а с того
+    // дампа живёт экспорт в Home Assistant и панель openHASP. Закрытый пикер,
+    // который перестал спрашивать, останавливает и панель.
+    //
+    // Выключать это стоит там, где панели нет: на маке фон — ssh раз в минуту
+    // без выгоды.
+    backgroundRefresh: true,
     // Имя машины, на которой работает этот пикер. Сверяется с `windowHost` из
     // ответа агрегатора и отвечает ровно на один вопрос: окна, о которых он
     // рассказал, — на этом экране или на чужом. Совпало — Enter поднимает окно;
@@ -41,6 +62,16 @@
     // или нет»: сами настройки читает Rust из того же файла, чтобы пароль не
     // ездил через мост в webview на каждое нажатие.
     mqtt: { configured: false },
+    // Одно дерево каталогов, видное с двух сторон: слева путь на удалённом
+    // хосте, справа — как та же папка примонтирована здесь. Умолчания нет и
+    // быть не может: примонтировано у всех по-своему, а угаданный корень увёл
+    // бы действия открытия не туда молча. Пусто — действий открытия нет вовсе.
+    pathMap: { remote: '', local: '' },
+    // Чем открывать папку сессии. Пикер не знает ни одного приложения по
+    // имени: он подставляет путь в argv и запускает. Знание «чем открыть
+    // папку» принадлежит машине, а не программе — пикер работает и на маке, и
+    // на Windows, а конфиг всё равно свой на каждой из них.
+    actions: [],
   };
 
   /**
@@ -54,15 +85,69 @@
     return typeof value === 'string' && value.trim() !== '';
   }
 
+  /** Маппинг годен только целиком: половина пары ведёт в никуда. */
+  function normalizePathMap(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    if (!nonEmpty(src.remote) || !nonEmpty(src.local)) return { ...DEFAULTS.pathMap };
+    return { remote: src.remote.trim(), local: src.local.trim() };
+  }
+
+  /**
+   * Действия открытия из конфига.
+   *
+   * Правило то же, что и у проектных хоткеев: испорченная запись выбрасывается,
+   * а не роняет весь файл. Действие без `id` не отличить от соседнего, без
+   * `argv` — нечего запускать; такую запись пропускаем целиком.
+   *
+   * Клавиша — дело отдельное: неразобранная комбинация обнуляется, но само
+   * действие остаётся в меню. Опечатка в хоткее не повод прятать пункт, до
+   * которого человек и так дойдёт через ^K.
+   *
+   * Столкновения решаются в одну сторону и всегда одинаково: встроенная
+   * клавиша окна выигрывает у настроенной, а из двух настроенных — первая по
+   * порядку. Иначе комбинация досталась бы тому, кто ниже в файле, и подпись в
+   * меню обещала бы клавишу, которая ведёт в другое место.
+   */
+  function normalizeActions(raw) {
+    const seenIds = new Set();
+    const seenHotkeys = new Set();
+    const out = [];
+    for (const item of Array.isArray(raw) ? raw : []) {
+      if (!item || typeof item !== 'object') continue;
+      if (!nonEmpty(item.id) || seenIds.has(item.id.trim())) continue;
+      const argv = Array.isArray(item.argv) ? item.argv.filter(a => typeof a === 'string') : [];
+      if (!argv.length || argv.length !== (item.argv || []).length) continue;
+
+      const id = item.id.trim();
+      seenIds.add(id);
+      const parsed = hotkeyApi.parseHotkey(item.hotkey);
+      // Сверяются разобранные комбинации, а не строки из файла: `Ctrl+Shift+E`
+      // и `Shift+Ctrl+E` — одна и та же клавиша, записанная двумя способами.
+      const combo = parsed && `${parsed.code}/${parsed.ctrl}${parsed.meta}${parsed.alt}${parsed.shift}`;
+      const taken = !parsed || hotkeyApi.isReserved(parsed) || seenHotkeys.has(combo);
+      if (!taken) seenHotkeys.add(combo);
+      out.push({
+        id,
+        label: nonEmpty(item.label) ? item.label.trim() : id,
+        hotkey: taken ? '' : item.hotkey.trim(),
+        parsedHotkey: taken ? null : parsed,
+        // Откуда брать иконку пункта. Пусто — берётся argv[0]; ключ нужен
+        // там, где argv[0] не приложение: `cmd /c start` у проводника.
+        icon: nonEmpty(item.icon) ? item.icon.trim() : '',
+        argv,
+      });
+    }
+    return out;
+  }
+
   function normalizeConfig(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
-    const projects = (Array.isArray(src.projects) ? src.projects : [])
-      .filter(p => p && typeof p === 'object' && typeof p.path === 'string' && p.path)
-      .map(p => ({ path: p.path, hotkey: typeof p.hotkey === 'string' ? p.hotkey : '' }));
 
     return {
       sshHost: typeof src.sshHost === 'string' && src.sshHost ? src.sshHost : DEFAULTS.sshHost,
       hotkey: typeof src.hotkey === 'string' && src.hotkey ? src.hotkey : DEFAULTS.hotkey,
+      projectsHotkey: typeof src.projectsHotkey === 'string'
+        ? src.projectsHotkey : DEFAULTS.projectsHotkey,
       terminal: src.terminal && typeof src.terminal === 'object' && src.terminal.file
         ? { file: src.terminal.file, args: Array.isArray(src.terminal.args) ? src.terminal.args : [] }
         : DEFAULTS.terminal,
@@ -74,6 +159,9 @@
       // договорились», а не «показывай две сотни транскриптов».
       onlyLive: typeof src.onlyLive === 'boolean' ? src.onlyLive : DEFAULTS.onlyLive,
       hideOnBlur: typeof src.hideOnBlur === 'boolean' ? src.hideOnBlur : DEFAULTS.hideOnBlur,
+      backgroundRefresh: typeof src.backgroundRefresh === 'boolean'
+        ? src.backgroundRefresh
+        : DEFAULTS.backgroundRefresh,
       windowHost: typeof src.windowHost === 'string'
         ? src.windowHost.trim()
         : DEFAULTS.windowHost,
@@ -82,7 +170,8 @@
       // префикс нельзя. Разойтись им не дадут заметно: фронтенд предложил бы
       // ветку, которую Rust тут же отклонил бы с «mqtt не настроен».
       mqtt: { configured: Boolean(nonEmpty((src.mqtt || {}).host) && nonEmpty((src.mqtt || {}).base)) },
-      projects,
+      pathMap: normalizePathMap(src.pathMap),
+      actions: normalizeActions(src.actions),
     };
   }
 

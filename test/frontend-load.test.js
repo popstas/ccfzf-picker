@@ -44,9 +44,28 @@ test('порядок тегов таков, что каждый модуль н�
     1,
   );
   assert.strictEqual(ctx.ConfigShape.normalizeConfig(null).onlyLive, true);
+  // С непустым actions — иначе разбор конфига до ActionHotkey не доходит вовсе
+  // и порядок этой пары тегов остался бы непроверенным.
+  assert.strictEqual(
+    ctx.ConfigShape.normalizeConfig({
+      actions: [{ id: 'open', hotkey: 'Ctrl+Shift+E', argv: ['x', '{localPath}'] }],
+    }).actions[0].hotkey,
+    'Ctrl+Shift+E',
+  );
   assert.strictEqual(
     ctx.UiState.normalizeUiState({ sort: 'нет такой' }, { toggles: {} }).sort,
-    'cost',
+    ctx.SessionGroups.DEFAULT_SORT,
+  );
+  // С непустым запросом — иначе отбор коротит на `!q` и до соседа не доходит.
+  // Сосед у picker-snapshots обязателен: searchableCwd срезает `/home` из
+  // пути, и без него отбор по снимкам молча начал бы находить каждую строку
+  // по слову «home».
+  assert.deepStrictEqual(
+    [...ctx.PickerSnapshots.buildSnapshotRows(
+      [{ id: 's1', created: 1, sessions: [{ id: 'a', cwd: '/home/user/projects/ccfzf', title: 'ccfzf' }] }],
+      [], 'projects/ccfzf',
+    ).map(r => r.kind)],
+    ['snapshot', 'snapshot-session'],
   );
 });
 
@@ -62,6 +81,17 @@ test('обратный порядок ломается — то есть тес�
   late.push('session-groups.js');
   const ctx2 = loadAsBrowser(late);
   assert.throws(() => ctx2.UiState.normalizeUiState({}, { toggles: {} }));
+
+  // И третья: picker-snapshots берёт searchableCwd у picker-filter на
+  // загрузке. Отбор с непустым запросом — единственное место, где недостача
+  // видна: с пустым он коротит и до соседа не доходит.
+  const filterLast = TAGS.filter(f => f !== 'picker-filter.js');
+  filterLast.push('picker-filter.js');
+  const ctx3 = loadAsBrowser(filterLast);
+  assert.throws(() => ctx3.PickerSnapshots.buildSnapshotRows(
+    [{ id: 's1', created: 1, sessions: [{ id: 'a', cwd: '/home/user/x', title: 'x' }] }],
+    [], 'x',
+  ));
 });
 
 // Буквенные хоткеи сверяются по физической клавише. `e.key` — это
@@ -83,4 +113,23 @@ test('каждый тег из sessions.html копируется в frontend/',
   for (const file of TAGS) {
     assert.ok(copied.includes(file), `${file} есть в sessions.html, но не в prepare-frontend.js`);
   }
+});
+
+test('settings.html грузит те же модули, что и зовёт', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  // Модуль, забытый в разметке, даёт пустую страницу настроек и ошибку в
+  // консоли, которую в отдельном окне никто не видит.
+  for (const src of ['settings-form.js', 'ui-state.js', 'session-groups.js', 'action-hotkey.js']) {
+    assert.ok(html.includes(`src="${src}"`), `нет тега ${src}`);
+  }
+  // Вкладки и контейнер страницы — по ним рисование находит своё место.
+  assert.ok(html.includes('id="tabs"'));
+  assert.ok(html.includes('id="page"'));
+});
+
+test('settings.html попадает в сборку', () => {
+  const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'prepare-frontend.js'), 'utf8');
+  // Страница, не попавшая в frontend/, откроется пустым окном в собранном
+  // приложении, а npm test при этом останется зелёным.
+  assert.ok(script.includes('settings.html'), 'settings.html не копируется');
 });

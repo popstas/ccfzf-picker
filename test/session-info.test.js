@@ -18,6 +18,7 @@ const session = {
   agentBackground: false,
   agentSessionId: 'abc-123',
   lastActivity: 3400,
+  agentTurnAt: 3160,
   focusedAt: 3000,
   agentSeen: false,
   branch: 'feat/x',
@@ -51,6 +52,19 @@ test('buildSessionInfoRows prints timestamps as clock plus age', () => {
   const rows = buildSessionInfoRows(session, 3460);
   // 3400 — минута назад относительно 3460.
   assert.match(valueOf(rows, 'last activity'), /^\d{2}:\d{2} · 1m$/);
+});
+
+test('buildSessionInfoRows tells the running turn apart from the session start', () => {
+  const rows = buildSessionInfoRows(session, 3460);
+  // 3160 — пять минут назад, 1000 — сорок одна: колонка возраста в строке
+  // показывает первое, и без этой строки в карточке её нечем объяснить.
+  assert.match(valueOf(rows, 'turn'), /^\d{2}:\d{2} · 5m$/);
+  assert.match(valueOf(rows, 'started'), /^\d{2}:\d{2} · 41m$/);
+});
+
+test('buildSessionInfoRows skips the turn row for a session older than the hook change', () => {
+  const rows = buildSessionInfoRows({ ...session, agentTurnAt: 0 }, 3460);
+  assert.ok(!rows.map(r => r.label).includes('turn'));
 });
 
 test('buildSessionInfoRows skips fields the session does not have', () => {
@@ -97,6 +111,7 @@ test('buildSessionInfoRows skips zero timestamps', () => {
       live: false,
       agentStarted: 0,
       lastActivity: 0,
+      agentTurnAt: 0,
       focusedAt: 0,
     },
     100,
@@ -104,6 +119,7 @@ test('buildSessionInfoRows skips zero timestamps', () => {
   const labels = rows.map(r => r.label);
   assert.ok(!labels.includes('started'));
   assert.ok(!labels.includes('last activity'));
+  assert.ok(!labels.includes('turn'));
   assert.ok(!labels.includes('focused'));
 });
 

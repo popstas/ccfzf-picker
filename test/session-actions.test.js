@@ -3,9 +3,41 @@ const assert = require('node:assert');
 const { availableActions, prNumber } = require('../frontend-src/session-actions');
 const { prBadgeHtml } = require('../frontend-src/session-glyph');
 
+// Конфиг с одним настроенным действием открытия. UNC вместо буквы диска — см.
+// комментарий в test/path-map.test.js.
+const CONFIGURED = {
+  pathMap: { remote: '/home/user', local: '\\\\nas\\home' },
+  actions: [{ id: 'explorer', label: 'Open in Explorer', hotkey: 'Ctrl+Shift+E', argv: ['x'] }],
+};
+
 test('информация о сессии есть всегда', () => {
   const ids = availableActions({ id: 'a' }).map(a => a.id);
   assert.deepStrictEqual(ids, ['info']);
+});
+
+test('без конфига список действий прежний', () => {
+  // Второй аргумент необязателен: вызов остаётся годным там, где конфига под
+  // рукой нет.
+  const row = { id: 'a', cwd: '/home/user/x' };
+  assert.deepStrictEqual(availableActions(row).map(a => a.id), ['new', 'info']);
+  assert.deepStrictEqual(availableActions(row, {}).map(a => a.id), ['new', 'info']);
+});
+
+test('настроенные действия идут первыми, когда путь переводится', () => {
+  const ids = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED).map(a => a.id);
+  assert.deepStrictEqual(ids, ['explorer', 'new', 'info']);
+});
+
+test('сессия вне общего дерева настроенных действий не получает', () => {
+  // Пункт, открывающий несуществующую папку, хуже отсутствующего.
+  const ids = availableActions({ id: 'a', cwd: '/etc/nginx' }, CONFIGURED).map(a => a.id);
+  assert.deepStrictEqual(ids, ['new', 'info']);
+});
+
+test('настроенное действие доносит до меню свою подпись и клавишу', () => {
+  const [action] = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED);
+  assert.strictEqual(action.label, 'Open in Explorer');
+  assert.strictEqual(action.hotkey, 'Ctrl+Shift+E');
 });
 
 test('переклейку предлагают только живой сессии с pid', () => {
@@ -37,6 +69,27 @@ test('вернуть в непрочитанное можно только то,
   assert.ok(!unread({ id: 'a', agentSeen: true, lastActivity: 0 }));
 });
 
+// Зеркало предыдущего: пометить просмотренным есть смысл ровно там, где
+// непрочитанное — то есть у строки с записью агента, которую ещё не читали.
+test('пометить просмотренным можно только непрочитанное', () => {
+  const seen = row => availableActions(row).some(x => x.id === 'seen');
+  assert.ok(seen({ id: 'a', agentSeen: false, lastActivity: 5 }));
+  assert.ok(!seen({ id: 'a', agentSeen: true, lastActivity: 5 }));
+  assert.ok(!seen({ id: 'a', agentSeen: false, lastActivity: 0 }));
+});
+
+// Два пункта об одном и том же и обязаны исключать друг друга: строка, где
+// предлагают оба сразу, значила бы, что условия разошлись.
+test('«просмотрено» и «непрочитано» не предлагаются вместе', () => {
+  for (const agentSeen of [true, false]) {
+    const ids = availableActions({ id: 'a', agentSeen, lastActivity: 5 }).map(a => a.id);
+    assert.strictEqual(
+      Number(ids.includes('seen')) + Number(ids.includes('unread')), 1,
+      `agentSeen=${agentSeen}: ровно один из пары`,
+    );
+  }
+});
+
 // Пункт меню и бейдж в строке разбирают одну и ту же ссылку. Пока номер им даёт
 // одна функция, разойтись они не могут — тест сторожит именно это: ссылка,
 // которая дала бейдж, обязана дать и пункт меню, и наоборот.
@@ -55,4 +108,41 @@ test('пункт меню и бейдж PR судят по ссылке один
     assert.strictEqual(inMenu, inRow, `расходятся на ${pr_url || '(пусто)'}`);
     assert.strictEqual(inMenu, prNumber(pr_url) !== '');
   }
+});
+
+test('новая сессия предлагается и сессии, и проекту', () => {
+  const forSession = availableActions({ id: 'a', cwd: '/p', live: true, pid: 42 })
+    .map(a => a.id);
+  assert.ok(forSession.includes('new'), forSession);
+
+  const forProject = availableActions({ kind: 'project', id: '/p', cwd: '/p' })
+    .map(a => a.id);
+  assert.deepStrictEqual(forProject, ['new']);
+});
+
+test('строке проекта не предлагают того, чему нужна сессия', () => {
+  // PR, «прочитано» и reptyr держатся за запись агента и за pid — у каталога
+  // нет ни того, ни другого. Карточка сессии у проекта тоже пуста.
+  const ids = availableActions({
+    kind: 'project', id: '/p', cwd: '/p',
+    pr_url: 'https://github.com/o/r/pull/3', live: true, pid: 42,
+    lastActivity: 1, agentSeen: true,
+  }).map(a => a.id);
+  assert.deepStrictEqual(ids, ['new']);
+});
+
+test('у проекта есть действия папки, когда путь переводится', () => {
+  const ids = availableActions(
+    { kind: 'project', id: '/remote/p', cwd: '/remote/p' },
+    { pathMap: { remote: '/remote', local: '/local' },
+      actions: [{ id: 'explorer', label: 'Open in Explorer', hotkey: 'Ctrl+Shift+E' }] },
+  ).map(a => a.id);
+  assert.deepStrictEqual(ids, ['new', 'explorer']);
+});
+
+test('строке зелийной сессии предлагается только информация', () => {
+  // Ни записи агента, ни pid, ни каталога — всё сессионное ей не подходит, а
+  // присоединение висит на Enter и в меню не прячется.
+  const actions = availableActions({ kind: 'zellij', id: 'zellij:home', zellij: 'home', live: true });
+  assert.deepStrictEqual(actions, [{ id: 'info', label: 'Session info' }]);
 });

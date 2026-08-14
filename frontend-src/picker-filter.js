@@ -12,14 +12,36 @@
     return String(cwd ?? '').replace(/^\/home(?=\/|$)/i, '');
   }
 
+  // Id участвует в отборе только началом, в отличие от имени и пути: он
+  // длинный и случайный, и вхождение посередине давало бы ложные попадания.
+  function matchesId(id, q) {
+    return String(id ?? '').toLowerCase().startsWith(q);
+  }
+
   function filterSessions(groups, query) {
     const q = String(query ?? '').trim().toLowerCase();
     if (!q) return groups;
     return groups
       .map(g => ({ ...g, sessions: g.sessions.filter(s =>
-        `${s.label} ${searchableCwd(s.cwd)}`.toLowerCase().includes(q)) }))
+        `${s.label} ${searchableCwd(s.cwd)}`.toLowerCase().includes(q)
+        || matchesId(s.id, q)) }))
       .filter(g => g.sessions.length > 0);
   }
 
-  return { filterSessions, searchableCwd };
+  /**
+   * Отбор проектов. Тот же searchableCwd, что и у сессий: `/home` из пути
+   * выброшен, иначе «home» совпадает со всем сразу.
+   *
+   * Плоский список, а не группы: у проектов группировки нет — их порядок задаёт
+   * агрегатор (свежие сверху), и переставлять его здесь незачем.
+   */
+  function filterProjects(rows, query) {
+    const list = Array.isArray(rows) ? rows : [];
+    const q = String(query ?? '').trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(r =>
+      `${r.label} ${searchableCwd(r.cwd)}`.toLowerCase().includes(q));
+  }
+
+  return { filterSessions, filterProjects, searchableCwd };
 });

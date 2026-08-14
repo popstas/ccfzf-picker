@@ -2,6 +2,12 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.OpenStrategy = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
+  // globalThis, а не `root`: тот виден только внешней функции шима, а внутрь
+  // factory не передаётся.
+  const nameApi = typeof module === 'object' && module.exports
+    ? require('./session-name')
+    : globalThis.SessionName;
+
   /** Одинарные кавычки в POSIX-строке: закрыть, экранировать, открыть заново. */
   function q(s) {
     return `'${String(s == null ? '' : s).replace(/'/g, `'\\''`)}'`;
@@ -29,11 +35,18 @@
    * адресе, то есть окна на той же машине, что и пикер. Проверку адреса делает
    * вызывающий и передаёт готовой (`opts.canFocus`): здесь она была бы вторым
    * разбором url, а разбирать его дважды — верный способ разойтись.
+   *
+   * Мультиплексоров два, и оба стоят до reptyr по одной причине: присоединение
+   * ничего не трогает. Между собой решает не сохранность — она одинаковая, — а
+   * то, что tmux-ветка была здесь раньше; менять её поведение эта правка не
+   * должна. Одно и то же поле `zellij` обслуживает и строку агента, живущего
+   * внутри zellij, и строку самой зелийной сессии: у второй в нём её
+   * собственное имя, и разбирать `kind` тут не приходится.
    */
   function chooseOpenStrategy(row, caps, opts) {
     if (!row) return 'resume';
     if (row.window && (opts || {}).canFocus) return 'focus';
-    if (row.tmux) return 'attach';
+    if (row.tmux || row.zellij) return 'attach';
     // Ни переносить, ни перехватывать нечего без pid: живой сессию мог назвать
     // и эвристический разбор /proc, который процесс так и не нашёл.
     if (row.live && row.pid) {
@@ -73,6 +86,44 @@
   }
 
   /**
+   * Поднять в каталоге нового агента, названного по каталогу.
+   *
+   * Имя ставится сразу, а не оставляется на `/rename`: по заголовку окна
+   * оконный трекер привязывает сессию к слоту, и безымянная в его индексе не
+   * находится вовсе. Форма взята у ccfzf — там `claude -n $(basename "$dir")`
+   * ровно по этой причине.
+   *
+   * Через inDir, как и resume: `ssh host cmd` даёт неинтерактивный шелл, zsh
+   * читает только `.zshenv`, и хук `chpwd` не ставит `project=` в
+   * OTEL_RESOURCE_ATTRIBUTES — телеметрия уходит без имени проекта.
+   *
+   * Путь с `;` — отказ, пустая строка. Для шелла такой путь безопасен, `q`
+   * отрабатывает; но команда идёт через Windows Terminal, а тот разбирает свою
+   * командную строку **до** всякого шелла и режет её по `;` на панели —
+   * кавычки ему не указ. Путь с `;` в Linux легален, а каталоги приезжают из
+   * закладок человека, так что случай не выдуманный. Вычистить знак нельзя:
+   * получилась бы сессия в чужом каталоге, и молча. Вызывающий на пустую
+   * строку показывает отказ — как и при незаданном ssh-хосте.
+   *
+   * Тёзки различаются суффиксом: имя занятой живой сессии получает `-2`,
+   * следующее `-3`. Занятые приходят аргументом — знать, что сейчас живо,
+   * может только вызывающий.
+   */
+  function newSessionName(cwd, taken) {
+    const path = String(cwd == null ? '' : cwd).replace(/\/+$/, '');
+    if (path.includes(';')) return '';
+    const base = path.split('/').pop() || path;
+    return nameApi.uniqueSessionName(base, taken);
+  }
+
+  function newSessionCommand(cwd, taken) {
+    const path = String(cwd == null ? '' : cwd).replace(/\/+$/, '');
+    if (path.includes(';')) return '';
+    const name = newSessionName(path, taken);
+    return inDir(path, `claude -n ${q(name)}`);
+  }
+
+  /**
    * argv для запуска терминала. Ввод-вывод делает вызывающий.
    *
    * `destructive` поднимается только у перехвата: это единственная ветка, где
@@ -90,7 +141,7 @@
     let destructive = false;
 
     if (strategy === 'attach') {
-      remote = `tmux attach -t ${q(row.tmux)}`;
+      remote = row.tmux ? `tmux attach -t ${q(row.tmux)}` : `zellij attach ${q(row.zellij)}`;
     } else if (strategy === 'reptyr') {
       // `exec` не для красоты: он делает reptyr единственным процессом своей
       // группы. Без него шелл, запущенный ssh, остаётся рядом в той же группе,
@@ -174,5 +225,8 @@
   // собрать удалённую команду (проектные хоткеи в sessions.html), обязан звать
   // именно её, а не писать replace по месту — второй экземпляр этого правила
   // рано или поздно разойдётся с первым.
-  return { q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand };
+  return {
+    q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
+    newSessionCommand, newSessionName,
+  };
 });

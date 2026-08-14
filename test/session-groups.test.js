@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   normalizeSort, cycleSort, compareSessions, groupSessions, labelSessions, SORT_MODES,
-  buildSessionsPayload,
+  DEFAULT_SORT, buildSessionsPayload,
 } = require('../frontend-src/session-groups');
 
 // Сырые сессии — то, что отдаёт `ccfzf --state`, а не строки списка.
@@ -64,8 +64,14 @@ function order(rows, mode) {
 }
 
 test('незнакомый режим сортировки сводится к предусмотренному', () => {
-  assert.strictEqual(normalizeSort('чепуха'), 'cost');
+  assert.strictEqual(normalizeSort('чепуха'), DEFAULT_SORT);
   assert.strictEqual(normalizeSort('newest'), 'newest');
+});
+
+test('умолчание сортировки — recent', () => {
+  // Список открывают, чтобы вернуться к тому, чем занимались только что;
+  // стоимость для этого не отвечает ни на один вопрос.
+  assert.strictEqual(DEFAULT_SORT, 'recent');
 });
 
 test('перебор режимов зациклен', () => {
@@ -120,6 +126,42 @@ test('recent: свежее — выше', () => {
   assert.deepStrictEqual(order(rows, 'recent'), ['fresh', 'mid', 'old']);
 });
 
+test('recent: секунды внутри одной минуты порядок не двигают', () => {
+  // Ровно та гонка, из-за которой ключ и округляется: у двух работающих сессий
+  // lastActivity дёргается на каждый вызов инструмента, подача тикает раз в
+  // секунду, и на секундном ключе строки менялись местами непрерывно.
+  const at = (t) => [
+    row({ id: 'aaa', label: 'aaa', lastActivity: t.aaa }),
+    row({ id: 'bbb', label: 'bbb', lastActivity: t.bbb }),
+  ];
+  // 10:00:05 против 10:00:55 — минута одна, порядок по имени.
+  assert.deepStrictEqual(order(at({ aaa: 600, bbb: 655 }), 'recent'), ['aaa', 'bbb']);
+  // Через секунду вперёд ушла другая — порядок обязан остаться прежним.
+  assert.deepStrictEqual(order(at({ aaa: 656, bbb: 655 }), 'recent'), ['aaa', 'bbb']);
+  assert.deepStrictEqual(order(at({ aaa: 600, bbb: 659 }), 'recent'), ['aaa', 'bbb']);
+});
+
+test('recent: через границу минуты порядок всё-таки меняется', () => {
+  // Округление не должно превращаться в «порядок не меняется никогда»: минутой
+  // позже сессия обязана всплыть.
+  const rows = [
+    row({ id: 'aaa', label: 'aaa', lastActivity: 659 }),  // 10:00:59
+    row({ id: 'bbb', label: 'bbb', lastActivity: 661 }),  // 10:01:01
+  ];
+  assert.deepStrictEqual(order(rows, 'recent'), ['bbb', 'aaa']);
+});
+
+test('recent: сессия без активности остаётся внизу', () => {
+  const rows = [
+    row({ id: 'never', label: 'never', lastActivity: 0 }),
+    row({ id: 'none', label: 'none' }),                    // поля нет вовсе
+    row({ id: 'some', label: 'some', lastActivity: 30 }),  // меньше минуты — но было
+  ];
+  // Ключ 'some' округляется в ноль, но нулём быть не должен: иначе строка с
+  // активностью утонула бы к тем, у кого её не было вовсе.
+  assert.deepStrictEqual(order(rows, 'recent'), ['some', 'never', 'none']);
+});
+
 test('newest и oldest — обратные друг другу порядки по началу сессии', () => {
   const rows = [
     row({ id: 'b', label: 'b', agentStarted: 200 }),
@@ -158,9 +200,10 @@ test('пустые и нулевые значения тонут в конец �
   assert.deepStrictEqual(order(oldest, 'oldest'), ['early', 'late', 'none']);
 });
 
-test('поля без источника оставляют порядок устойчивым, а не случайным', () => {
-  // agentStarted не отдаёт ни одна сторона (см. row-contract.test.js): oldest и
-  // newest вырождаются в общий порядок по имени и id, но остаются порядком.
+test('строка без отметки старта оставляет порядок устойчивым, а не случайным', () => {
+  // Отметку пишет хук в `<id>.meta.json`, и у сессий, поднятых до его
+  // появления, её нет. У таких oldest и newest вырождаются в общий порядок по
+  // имени и id, но остаются порядком.
   const rows = [
     row({ id: 'y', label: 'b' }),
     row({ id: 'x', label: 'a' }),
@@ -182,13 +225,13 @@ test('равные значения разводятся именем, а оди
   assert.strictEqual(compareSessions(twins[0], twins[1], 'cost'), 0);
 });
 
-test('незнакомый режим сортирует как cost, а не как попало', () => {
+test('незнакомый режим сортирует умолчанием, а не как попало', () => {
   const rows = [
-    row({ id: 'cheap', label: 'cheap', agentCostUsd: 1 }),
-    row({ id: 'rich', label: 'rich', agentCostUsd: 9 }),
+    row({ id: 'old', label: 'old', lastActivity: 100 }),
+    row({ id: 'fresh', label: 'fresh', lastActivity: 900 }),
   ];
-  assert.deepStrictEqual(order(rows, 'чепуха'), order(rows, 'cost'));
-  assert.deepStrictEqual(order(rows, undefined), ['rich', 'cheap']);
+  assert.deepStrictEqual(order(rows, 'чепуха'), order(rows, DEFAULT_SORT));
+  assert.deepStrictEqual(order(rows, undefined), ['fresh', 'old']);
 });
 
 test('режим сортировки действует внутри каждой группы', () => {
@@ -207,4 +250,121 @@ test('labelSessions даёт имя каждой строке и не трога
   assert.strictEqual(out.label, 'Тема');
   assert.strictEqual(out.agentCostUsd, 3);
   assert.strictEqual(out.id, 'a');
+});
+
+// Фильтр `only windowed` живёт на одном лишь наличии поля `window` и о машинах
+// не знает ничего: `rows.filter(r => r.window)` в buildSessionsPayload. Сторож
+// на то, что окно с чужой машины он считает окном — этим и чинится «чекбокс
+// only windowed на macOS»: не правкой фильтра, а появлением источника.
+test('onlyWindow считает окном и окно на соседней машине', () => {
+  const raw = {
+    ok: true,
+    seen: {},
+    sessions: [
+      { id: 'mac-1', title: 'На маке', cwd: '/home/user/a', live: true,
+        window: { title: 'На маке', host: 'macbook', pid: 7, canFocus: false, lastSeen: 1 } },
+      { id: 'win-1', title: 'На Windows', cwd: '/home/user/b', live: true,
+        window: { title: 'На Windows', host: 'desktop-box', pid: 42, canFocus: true, lastSeen: 1 } },
+      { id: 'none-1', title: 'Без окна', cwd: '/home/user/c', live: true },
+    ],
+  };
+  assert.deepStrictEqual(
+    idsOf(buildSessionsPayload(raw, 'name', { onlyWindow: true })),
+    ['mac-1', 'win-1'],
+  );
+});
+
+test('зелийные сессии идут своей группой, и она последняя', () => {
+  const res = {
+    ok: true,
+    sessions: [
+      { id: 'a', title: 'жив', live: true, agent: { state: 'active', updated: 100 } },
+      { id: 'b', title: 'мёртв', live: false },
+    ],
+    zellij: [{ name: 'home', created: 50, agents: 0 }],
+  };
+  const out = buildSessionsPayload(res, 'recent');
+  const labels = out.groups.map(g => g.label);
+  assert.strictEqual(labels[labels.length - 1], 'Zellij - 1');
+  const last = out.groups[out.groups.length - 1].sessions;
+  assert.strictEqual(last.length, 1);
+  assert.strictEqual(last[0].kind, 'zellij');
+  // Живая группа не должна их всосать: у строки live: true, и без явной
+  // ветки она встала бы среди работающих агентов.
+  assert.ok(!out.groups[0].sessions.some(s => s.kind === 'zellij'));
+});
+
+test('без зелийных сессий группы не появляется вовсе', () => {
+  const res = { ok: true, sessions: [{ id: 'a', title: 'жив', live: true }], zellij: [] };
+  const out = buildSessionsPayload(res, 'recent');
+  assert.ok(!out.groups.some(g => g.label.startsWith('Zellij')));
+});
+
+test('отсев onlyLive и onlyWindow зелийных строк не касается', () => {
+  // Оба отсева про сессии агента: у зелийной строки окна нет никогда, и
+  // onlyWindow вычистил бы весь режим.
+  const res = {
+    ok: true,
+    sessions: [{ id: 'a', title: 'жив', live: true }],
+    zellij: [{ name: 'home', created: 50 }],
+  };
+  const out = buildSessionsPayload(res, 'recent', { onlyWindow: true });
+  assert.ok(out.groups.some(g => g.label === 'Zellij - 1'));
+});
+
+// ── живые сессии делятся по машине окна ─────────────────────────────────────
+//
+// «Своё/чужое» у строки одно — машина её окна (поле windowHost, ставит
+// buildSessionList). Оно же решает, поднимет ли Enter окно или откроет
+// терминал, так что деление списка отвечает на тот же вопрос, что и Enter.
+const TWO_HOSTS = {
+  ok: true,
+  seen: {},
+  windowHost: 'win-host',
+  windowPid: 7,
+  sessions: [
+    { id: 'here', title: 'Тут', cwd: '/home/user/a', live: true,
+      window: { host: 'win-host', pid: 7 } },
+    { id: 'there', title: 'Там', cwd: '/home/user/b', live: true,
+      window: { host: 'mac-host', pid: 9 } },
+    { id: 'nowhere', title: 'Без окна', cwd: '/home/user/c', live: true },
+  ],
+};
+
+test('живые сессии делятся на свои и чужие по машине окна', () => {
+  const payload = buildSessionsPayload(TWO_HOSTS, 'name', { configHost: 'win-host' });
+  assert.deepStrictEqual(payload.groups.map(g => g.label),
+    ['Active local sessions - 2', 'Active remote sessions - 1']);
+  // Сессия без окна — своя: чужой её делает только названная чужая машина.
+  const local = payload.groups[0].sessions.map(s => s.id).sort();
+  assert.deepStrictEqual(local, ['here', 'nowhere']);
+  assert.deepStrictEqual(payload.groups[1].sessions.map(s => s.id), ['there']);
+});
+
+test('без единого чужого окна группа остаётся одна и называется как раньше', () => {
+  // На машине с одним трекером делить нечего, и «Active local sessions» без
+  // пары читалось бы вопросом «а где тогда остальные».
+  const payload = buildSessionsPayload(RAW, 'name', { onlyLive: true, configHost: 'win-host' });
+  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active sessions - 2']);
+});
+
+test('когда своих живых нет, пустая группа не заводится', () => {
+  const onlyThere = {
+    ...TWO_HOSTS,
+    sessions: TWO_HOSTS.sessions.filter(s => s.id === 'there'),
+  };
+  const payload = buildSessionsPayload(onlyThere, 'name', { configHost: 'win-host' });
+  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active remote sessions - 1']);
+});
+
+test('мёртвые сессии делению не подлежат', () => {
+  // Они группируются по рабочим столам, и это деление другого рода: там вопрос
+  // «где она стояла», а не «дотянусь ли я до неё сейчас».
+  const dead = {
+    ...TWO_HOSTS,
+    sessions: [{ id: 'gone', title: 'Ушла', cwd: '/home/user/a', live: false,
+      window: { host: 'mac-host', pid: 9 } }],
+  };
+  const payload = buildSessionsPayload(dead, 'name', { configHost: 'win-host' });
+  assert.ok(!payload.groups.some(g => /Active/.test(g.label)), payload.groups.map(g => g.label));
 });

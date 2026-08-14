@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
@@ -10,8 +12,12 @@ use tauri::{Emitter, Manager};
 // не резолвится.
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+mod config_file;
+mod icons;
 mod mqtt;
+mod poller;
 mod proc;
+mod project_hotkeys;
 mod state_source;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
@@ -22,6 +28,16 @@ struct LastToggle(Mutex<Option<Instant>>);
 
 /// Когда окно погасло в последний раз. См. `picker_toggle`.
 struct LastHidden(Mutex<Option<Instant>>);
+
+/// Гасить ли пикер по потере фокуса — текущее значение `hideOnBlur`.
+///
+/// Живёт в разделяемом состоянии, а не в замыкании обработчика, потому что
+/// снять уже зарегистрированный `on_window_event` в Tauri нечем. Обработчик
+/// ставится один раз и навсегда, а решение принимает по этому флагу, который
+/// переставляет `apply_config`. Регистрируй его по условию — и переключатель в
+/// окне настроек молчал бы до перезапуска: выключение не сняло бы уже
+/// поставленный обработчик, включение не добавило бы недостающий.
+struct HideOnBlur(AtomicBool);
 
 /// Показывать ли окно по нажатию.
 ///
@@ -37,6 +53,31 @@ struct LastHidden(Mutex<Option<Instant>>);
 /// — встречается на каждом клике.
 fn picker_toggle(visible: bool, just_hidden: bool) -> bool {
     !visible && !just_hidden
+}
+
+/// `hideOnBlur` из конфига. Умолчание — «гасить»: так пикер вёл себя всегда, и
+/// отсутствие ключа не должно оставлять окно висеть поверх чужой работы.
+fn hide_on_blur(config: &serde_json::Value) -> bool {
+    config
+        .get("hideOnBlur")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+/// То же значение, но действующее прямо сейчас.
+///
+/// Спрашивается в обработчике потери фокуса, а не при его регистрации, потому
+/// что снять уже поставленный `on_window_event` в Tauri нечем: решай при
+/// регистрации — и переключатель в окне настроек молчал бы до перезапуска.
+/// Обработчик поэтому стоит всегда и на каждое событие смотрит на флаг, который
+/// переставляет `apply_config` (см. `HideOnBlur`).
+///
+/// Состояния может не быть только до конца `setup`; тогда действует то же
+/// умолчание, что и у конфига, — «гасить».
+fn hide_on_blur_now(app: &tauri::AppHandle) -> bool {
+    app.try_state::<HideOnBlur>()
+        .map(|s| s.0.load(Ordering::Relaxed))
+        .unwrap_or(true)
 }
 
 /// Окно скрыто — сказать об этом фронтенду.
@@ -60,9 +101,27 @@ fn hide_window(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<LastHidden>() {
         *state.0.lock().unwrap() = Some(Instant::now());
     }
+    if let Some(poller) = app.try_state::<poller::Poller>() {
+        poller.hidden();
+    }
 }
 
 fn toggle_picker(app: &tauri::AppHandle) {
+    toggle_window(app, false);
+}
+
+/// Второй хоткей: то же переключение, но открывшееся окно встаёт в режим
+/// проектов.
+///
+/// Переключение, а не «только показать»: повторное нажатие обязано погасить
+/// окно — того же ждут от любого хоткея пикера, и второй, ведущий себя иначе,
+/// был бы неожиданностью. Дребезг у обоих общий (`LastToggle`), поэтому два
+/// хоткея подряд не откроют окно дважды.
+fn toggle_projects(app: &tauri::AppHandle) {
+    toggle_window(app, true);
+}
+
+fn toggle_window(app: &tauri::AppHandle, projects: bool) {
     let state = app.state::<LastToggle>();
     {
         let mut last = state.0.lock().unwrap();
@@ -81,13 +140,33 @@ fn toggle_picker(app: &tauri::AppHandle) {
         .and_then(|s| *s.0.lock().unwrap())
         .is_some_and(|t| Instant::now().duration_since(t) < DEBOUNCE);
     if picker_toggle(window.is_visible().unwrap_or(false), just_hidden) {
-        let _ = window.show();
-        let _ = window.set_focus();
-        // Список обновляется на показе: между открытиями он устаревает, а
-        // опрашивать закрытый пикер незачем.
-        let _ = app.emit("picker-shown", ());
+        show_picker(app);
+        if projects {
+            // Режим живёт префиксом в строке поиска, а не флагом, и выставить
+            // его может только страница — Rust про строку поиска не знает
+            // ничего. Отсюда два хода: показать окно и сказать, с чем открыться.
+            let _ = app.emit("picker-projects", ());
+        }
     } else {
         hide_window(app);
+    }
+}
+
+/// Показать окно, не спрашивая, показано ли оно уже.
+///
+/// Отдельно от `toggle_picker` ради второго хоткея: тот открывает пикер сразу
+/// в режиме проектов, и переключение там было бы неверным — нажатие на уже
+/// открытом пикере обязано сменить режим, а не погасить окно, которое только
+/// что открыли первым хоткеем.
+fn show_picker(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("picker") else { return };
+    let _ = window.show();
+    let _ = window.set_focus();
+    // Список обновляется на показе: между открытиями он устаревает, а
+    // опрашивать закрытый пикер незачем.
+    let _ = app.emit("picker-shown", ());
+    if let Some(poller) = app.try_state::<poller::Poller>() {
+        poller.shown();
     }
 }
 
@@ -105,7 +184,7 @@ fn hide_picker(app: tauri::AppHandle) {
 /// пропадала бы в собранном приложении.
 fn tray_icon() -> tauri::image::Image<'static> {
     tauri::image::Image::from_bytes(include_bytes!("../icons/favicon.png"))
-        .expect("icons/favicon.png не разбирается как изображение")
+        .expect("icons/favicon.png does not parse as an image")
 }
 
 /// Хост берётся из конфига, а не зашит: список и открытие сессии обязаны
@@ -115,50 +194,68 @@ fn tray_icon() -> tauri::image::Image<'static> {
 fn check_ssh_host(ssh_host: &str) -> Result<(), String> {
     if ssh_host.trim().is_empty() {
         return Err(
-            "sshHost не задан: скопируйте config.example.yml в ~/.config/ccfzf-picker/config.yaml"
+            "sshHost is not set: copy config.example.yml to ~/.config/ccfzf-picker/config.yaml"
                 .to_string(),
         );
     }
     Ok(())
 }
 
-/// Спросить агрегатор.
+/// Отдать фронтенду то, что уже известно, и подтолкнуть опрос.
 ///
-/// `async` и `spawn_blocking` здесь не украшение. Синхронную команду Tauri
-/// исполняет в главном потоке, а внутри — ssh на другую машину секунд на
-/// полсекунды: окно замирало на это время каждый опрос, то есть раз в секунду.
-/// `async` уводит вызов в рантайм, `spawn_blocking` — на поток для блокирующей
-/// работы, чтобы не занимать им рабочий поток рантайма.
+/// Зовётся один раз, сразу после подписки на событие `state`: поток мог
+/// ответить раньше, чем фронтенд успел подписаться, и без этого толчка первый
+/// кадр ждал бы целого такта.
 #[tauri::command]
-async fn fetch_state(ssh_host: String) -> Result<serde_json::Value, String> {
-    check_ssh_host(&ssh_host)?;
-    tauri::async_runtime::spawn_blocking(move || state_source::fetch(&ssh_host))
-        .await
-        .map_err(|e| format!("fetch_state task failed: {e}"))?
+fn poll_now(poller: tauri::State<poller::Poller>) -> serde_json::Value {
+    poller.nudge();
+    poller.snapshot()
 }
 
-/// Выдать процессу трекера право занять передний план.
+/// Отдать право занять передний план тому, кто выполнит просьбу.
 ///
 /// Windows позволяет вызвать `SetForegroundWindow` только процессу, который
-/// передним планом уже владеет либо получил последнее событие ввода. Демон
-/// трекера — не тот и не другой: к моменту просьбы он просто слушает брокера.
-/// Право ему передаёт пикер, и именно сейчас: нажатие, из-за которого мы здесь,
-/// было последним событием ввода, и оно наше. Без этого `bringToTop()` на той
-/// стороне отчитается об успехе, а на экране мигнёт кнопка на таскбаре.
+/// передним планом уже владеет либо получил последнее событие ввода. Ни один из
+/// тех, кто исполняет наши просьбы, не таков: к этому моменту они просто слушают
+/// брокера. Право передаёт пикер, и именно сейчас: нажатие, из-за которого мы
+/// здесь, было последним событием ввода, и оно наше.
 ///
-/// `pid` приезжает полем `windowPid` в ответе агрегатора: трекер кладёт свой pid
-/// в файл, который тот читает. Отказ не фатален и значит ровно то же, что и
-/// отсутствие грамоты, — окно не поднимется.
+/// Право уходит всем (`ASFW_ANY`), а не названному pid, и это исправление, а не
+/// послабление. Названный pid у нас был один — `windowPid` из ответа
+/// агрегатора, — но кладёт его в файл трекера демон `claude-wt watch`, а окна
+/// поднимает и терминал запускает служба MQTT: с переезда claude-wt из
+/// windows-mqtt в windows11-manager это два разных дочерних процесса трея, и
+/// грамота по pid всё это время уходила не тому. Третьего же — только что
+/// запущенный `wt.exe` — по pid не назвать вовсе: в момент выдачи его не
+/// существует, а свернувшееся окно нового терминала было именно его отказом.
+/// Правка действует до следующего ввода человека, то есть секунды.
+///
+/// Отказ не фатален и значит ровно то же, что и отсутствие грамоты, — окно не
+/// поднимется само. Уже открытое окно менеджер поднимает и без неё:
+/// `bringToTop()` в node-window-manager подцепляет свой ввод к потоку переднего
+/// окна (`AttachThreadInput`), а такой подъём Windows не запрещает.
 #[cfg(target_os = "windows")]
-fn allow_tracker_foreground(pid: u32) {
-    use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
-    if let Err(e) = unsafe { AllowSetForegroundWindow(pid) } {
-        eprintln!("ccfzf-picker: cannot grant foreground to pid {pid}: {e}");
+fn allow_any_foreground() {
+    use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+    if let Err(e) = unsafe { AllowSetForegroundWindow(ASFW_ANY) } {
+        eprintln!("ccfzf-picker: cannot grant foreground: {e}");
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn allow_tracker_foreground(_pid: u32) {}
+fn allow_any_foreground() {}
+
+/// Брокер из конфига или внятный отказ.
+///
+/// Общий для всех команд, публикующих просьбы: шесть копий одной проверки
+/// разошлись бы в тексте отказа, а его читает человек в строке ошибки пикера.
+fn configured_broker() -> Result<mqtt::Broker, String> {
+    let broker = mqtt::broker_from_config(&load_config()?);
+    if !broker.is_configured() {
+        return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
+    }
+    Ok(broker)
+}
 
 /// Поднять окно сессии через MQTT.
 ///
@@ -171,18 +268,140 @@ fn allow_tracker_foreground(_pid: u32) {}
 /// на той стороне, — но цена оказалась мала: отказ («сессия неизвестна», «окна
 /// нет») человек и так увидел бы уже после того, как пикер погас.
 #[tauri::command]
-async fn focus_window_mqtt(id: String, pid: u32) -> Result<(), String> {
-    // До публикации, а не после: право должно быть у трекера к моменту, когда
-    // он дойдёт до подъёма окна.
-    allow_tracker_foreground(pid);
-    let raw = load_config()?;
-    let broker = mqtt::broker_from_config(&raw);
-    if !broker.is_configured() {
-        return Err("mqtt не настроен: нужны host и base в config.yaml".to_string());
-    }
-    tauri::async_runtime::spawn_blocking(move || mqtt::focus(&broker, &id))
+async fn focus_window_mqtt(id: String, base: Option<String>) -> Result<(), String> {
+    // До публикации, а не после: право должно быть на той стороне к моменту,
+    // когда там дойдут до подъёма окна.
+    allow_any_foreground();
+    let broker = configured_broker()?;
+    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
+    // запасной ход для трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::focus(&broker, &base, &id))
         .await
         .map_err(|e| format!("focus_window_mqtt task failed: {e}"))?
+}
+
+/// Вернуть сессию в непрочитанное у оконного трекера.
+///
+/// Отметок о просмотре две: своя, в `seen.json`, и трекерная — она приезжает
+/// полем `focusedAt` внутри `window` и в списке побеждает по максимуму. Отмотать
+/// только свою бесполезно: у сессии с открытым окном трекерная почти всегда
+/// свежее и вернула бы кружок в «просмотрено» на следующем же опросе.
+///
+/// Права на передний план здесь не выдаётся: окно никто не поднимает. Пикер по
+/// этой команде не гаснет — список перерисовывается раз в секунду, и кружок
+/// оранжевеет на глазах.
+#[tauri::command]
+async fn unread_session_mqtt(id: String, base: Option<String>) -> Result<(), String> {
+    let broker = configured_broker()?;
+    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
+    // запасной ход для трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::unread(&broker, &base, &id))
+        .await
+        .map_err(|e| format!("unread_session_mqtt task failed: {e}"))?
+}
+
+/// Попросить поднять раскладку снимка.
+///
+/// Пустой `session_ids` значит «весь снимок». Права на передний план здесь не
+/// выдаётся: восстановление открывает новые окна, а не поднимает существующее,
+/// и `AllowSetForegroundWindow` тут не при чём.
+#[tauri::command]
+async fn restore_snapshot_mqtt(
+    id: String,
+    session_ids: Vec<String>,
+    base: Option<String>,
+) -> Result<(), String> {
+    let broker = configured_broker()?;
+    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
+    // запасной ход для трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::restore(&broker, &base, &id, &session_ids))
+        .await
+        .map_err(|e| format!("restore_snapshot_mqtt task failed: {e}"))?
+}
+
+/// Попросить трекер открыть сессию у себя.
+///
+/// Зовётся и с машины, которая не является трекером — пункт меню «Open on
+/// <host>» появляется только там, где `canOpenRemote` разрешил, — и со своей же
+/// машины, где Enter вызывает эту же команду напрямую, когда `chooseEnterAction`
+/// отдал `manager`. Транспорт один и тот же в обоих случаях: HTTP здесь не
+/// сработал бы даже на своей машине — webview Tauri режет такой запрос как
+/// cross-origin ещё до отправки. Ответа у просьбы нет по той же причине, что и
+/// у фокуса: приёмник отчитывается в свой лог, а не нам.
+///
+/// Право на передний план выдаётся и здесь: просьба кончается либо подъёмом
+/// окна, либо новым терминалом, и оба на той стороне упираются в одно и то же
+/// разрешение Windows. Раньше его тут не выдавали, потому что выдавали по pid, а
+/// pid эта команда не принимает; `allow_any_foreground` никакого pid и не ждёт.
+/// Разводит подъём и открытие `chooseEnterAction` во фронтенде — по причинам,
+/// которые с грамотой не связаны вовсе.
+///
+/// `cwd` — каталог проекта строки, и он необязателен только по форме: без него
+/// менеджер умеет открыть лишь сессию, которую сам же и помнит слотом, а
+/// список пикера приезжает от ccfzf с ssh-хоста и знает сессии, которых на
+/// Windows не открывали ни разу. `Option` — чтобы непереданный ключ значил
+/// «каталога нет», а не рушил вызов на мосту: у `String` его отсутствие стало
+/// бы ошибкой разбора, и Enter отчитался бы человеку про аргументы команды.
+#[tauri::command]
+async fn open_session_mqtt(
+    id: String,
+    cwd: Option<String>,
+    base: Option<String>,
+) -> Result<(), String> {
+    allow_any_foreground();
+    let broker = configured_broker()?;
+    let cwd = cwd.unwrap_or_default().trim().to_string();
+    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
+    // запасной ход для трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &base, &id, &cwd))
+        .await
+        .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
+}
+
+/// Попросить менеджера открыть проект по каталогу.
+///
+/// `id` в теле нет вовсе: у строки проекта сессии ещё не существует, есть
+/// только каталог, и что с ним делать — поднять окно этого проекта или завести
+/// сессию с его профилем — решает `openClaudeProject` на той стороне. Ту же
+/// просьбу шлёт проектный хоткей из `project_hotkeys.rs`; здесь она нужна
+/// затем, что у страницы своего входа к ней не было.
+///
+/// Грамота — как у хоткея, и по той же причине: оба исхода просьбы кончаются
+/// окном, которому нужен передний план.
+#[tauri::command]
+async fn open_project_mqtt(cwd: String, base: Option<String>) -> Result<(), String> {
+    allow_any_foreground();
+    let broker = configured_broker()?;
+    // У строки проекта окна нет вовсе: адрес называет трекер машины
+    // менеджера, а не машины окна. Свой из конфига — запасной ход для
+    // трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::open_project(&broker, &base, &cwd))
+        .await
+        .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
+}
+
+/// Попросить менеджера завести новую сессию в каталоге.
+///
+/// Отдельная команда, а не флаг у `open_project_mqtt`: на мосту в webview флаг
+/// стал бы необязательным аргументом, а различает он две разные просьбы с
+/// разными телами. Имя считает пикер и присылает готовым — менеджер списка
+/// занятых имён не ведёт.
+#[tauri::command]
+async fn new_session_mqtt(cwd: String, name: String, base: Option<String>) -> Result<(), String> {
+    allow_any_foreground();
+    let broker = configured_broker()?;
+    // Окна ещё нет — сессия только заводится: адрес называет трекер машины
+    // менеджера, а не машины окна. Свой из конфига — запасной ход для
+    // трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::open_new(&broker, &base, &cwd, &name))
+        .await
+        .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
 }
 
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
@@ -197,18 +416,347 @@ fn home_dir() -> Option<std::ffi::OsString> {
     std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
 }
 
+/// Путь к config.yaml.
+///
+/// Общий для чтения (`load_config`) и записи (`save_config`/`write_config`):
+/// разойдись они в построении пути двумя копиями, один читал бы не тот файл,
+/// что другой пишет.
+fn config_path() -> Result<std::path::PathBuf, String> {
+    let home = home_dir().ok_or("neither HOME nor USERPROFILE is set")?;
+    Ok(std::path::Path::new(&home).join(".config/ccfzf-picker/config.yaml"))
+}
+
 #[tauri::command]
 fn load_config() -> Result<serde_json::Value, String> {
-    let Some(home) = home_dir() else {
+    // Нет ни HOME, ни USERPROFILE — не ошибка, а работа на умолчаниях, как и
+    // раньше: без этого предохранителя пикер на такой системе не поднялся бы
+    // вовсе.
+    let Ok(path) = config_path() else {
         return Ok(serde_json::Value::Null);
     };
-    let path = std::path::Path::new(&home).join(".config/ccfzf-picker/config.yaml");
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(serde_json::Value::Null),
         Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
     };
     serde_yaml::from_str(&text).map_err(|e| format!("bad yaml in {}: {e}", path.display()))
+}
+
+/// Патч, обнуляющий ключ, отклоняется явно — на любой глубине.
+///
+/// `merge_patch` вложенные отображения сливает по ключам, а `null` считает
+/// «не отображением» и подменяет блок целиком — так пропал бы `mqtt.password`,
+/// которого форма настроек никогда не загружает и не присылает обратно.
+/// Сегодняшняя форма такого патча не пришлёт, но если пришлёт когда-нибудь —
+/// лучше внятный отказ здесь, чем молча стёртый пароль.
+///
+/// Проверка рекурсивная именно из-за пароля: страшен не столько `mqtt: null`
+/// на верхнем уровне, сколько `{"mqtt": {"password": null}}` — тот стирает
+/// ровно тот ключ, ради которого всё слияние и написано.
+fn reject_null_values(patch: &serde_json::Value) -> Result<(), String> {
+    if let Some(fields) = patch.as_object() {
+        for (key, value) in fields {
+            if value.is_null() {
+                return Err(format!(
+                    "patch cannot null out key {key}: null would replace the whole block and wipe what the form did not send (mqtt.password, for one)"
+                ));
+            }
+            reject_null_values(value)?;
+        }
+    }
+    Ok(())
+}
+
+/// Закрыть файл от всех, кроме владельца.
+///
+/// В конфиге лежит `mqtt.password`, а заводит файл теперь не человек своими
+/// руками, а окно настроек: с обычным umask пароль оказался бы читаем всей
+/// машине. Отказ не фатален — сохранить настройки важнее, чем выставить
+/// режим, — но и молчать о нём нельзя.
+///
+/// На Windows этого API нет, и права там устроены иначе: файл лежит в профиле
+/// пользователя, куда посторонний и так не ходит.
+#[cfg(unix)]
+fn restrict_permissions(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+        eprintln!("ccfzf-picker: cannot restrict {}: {e}", path.display());
+    }
+}
+
+#[cfg(not(unix))]
+fn restrict_permissions(_path: &std::path::Path) {}
+
+/// Слить патч в config.yaml на диске.
+///
+/// Отдельно от `save_config`: чистая файловая операция без `AppHandle`, её
+/// можно накрыть тестами во временном каталоге, не поднимая Tauri.
+///
+/// Бэкап кладётся один раз, перед первой перезаписью: комментарии человека
+/// после неё не восстановить ничем, а класть `.bak` на каждое сохранение
+/// значило бы затирать его же вчерашним состоянием.
+fn write_config(path: &std::path::Path, patch: &serde_json::Value) -> Result<(), String> {
+    reject_null_values(patch)?;
+
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    let existing = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+
+    let mut doc: serde_yaml::Value = if existing.trim().is_empty() {
+        serde_yaml::Value::Null
+    } else {
+        serde_yaml::from_str(&existing).map_err(|e| format!("bad yaml in {}: {e}", path.display()))?
+    };
+    config_file::merge_patch(&mut doc, patch)?;
+
+    // Тем же условием, что и разбор чуть выше: файл из одних пробелов и
+    // переводов строки тоже «был пустым», и бэкапить в нём нечего — иначе он
+    // занял бы единственный слот `.bak` навсегда.
+    let backup = path.with_extension("yaml.bak");
+    if !existing.trim().is_empty() && !backup.exists() {
+        std::fs::write(&backup, &existing)
+            .map_err(|e| format!("cannot write {}: {e}", backup.display()))?;
+        restrict_permissions(&backup);
+    }
+
+    // Через временный файл и переименование, как save_json: читатель никогда
+    // не видит половину файла.
+    let text = format!("{}{}", config_file::HEADER, config_file::render(&doc)?);
+    let tmp = path.with_extension("yaml.tmp");
+    std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+    // До переименования, а не после: иначе у конфига был бы промежуток, в
+    // который пароль уже на месте, а права ещё общие.
+    restrict_permissions(&tmp);
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        // Rename не удался — не оставлять временный файл валяться на диске.
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("cannot rename onto {}: {e}", path.display()));
+    }
+    Ok(())
+}
+
+/// Сохранить настройки, присланные окном настроек.
+///
+/// Патч, а не файл целиком: окно знает не про все ключи (`actions` оно только
+/// показывает), и перезапись целиком стёрла бы остальное. Слияние — в
+/// `config_file::merge_patch`, файловая часть — в `write_config`.
+///
+/// Возвращает, встал ли хоткей пикера после применения и на какой
+/// комбинации: форма настроек (задача C6) обязана показать отказ на месте,
+/// если новую комбинацию уже занял кто-то другой. Событие `config-changed`
+/// этот факт нарочно не несёт — на его прежнее тело рассчитывает задача C7.
+#[tauri::command]
+fn save_config(app: tauri::AppHandle, patch: serde_json::Value) -> Result<serde_json::Value, String> {
+    let path = config_path()?;
+    write_config(&path, &patch)?;
+    let out = apply_config(&app);
+    Ok(serde_json::json!({
+        "hotkeyRegistered": out.picker_registered,
+        "hotkeyAccelerator": out.picker_accelerator,
+        "projectsHotkeyRegistered": out.projects_registered,
+        "projectsHotkeyAccelerator": out.projects_accelerator,
+    }))
+}
+
+/// Поставить хоткей пикера из конфига.
+///
+/// Общая для старта (`setup`) и для сохранения настроек (`apply_config`):
+/// раньше это были две независимые копии с разной обработкой отказа, и
+/// правка одной не факт что дошла бы до другой.
+fn register_picker_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) -> (bool, String) {
+    let (picker_shortcut, accelerator) = picker_hotkey(config);
+    let registered = match app.global_shortcut().on_shortcut(picker_shortcut, |app, _sc, event| {
+        if event.state() == ShortcutState::Pressed {
+            toggle_picker(app);
+        }
+    }) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("ccfzf-picker: cannot register picker hotkey: {e}");
+            false
+        }
+    };
+    (registered, accelerator)
+}
+
+/// Поставить хоткей режима проектов.
+///
+/// Отдельная функция, а не второй аргумент к `register_picker_hotkey`:
+/// обработчики у них разные по существу — один переключает окно, другой
+/// открывает его в режиме и переключением быть не может.
+fn register_projects_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) -> (bool, String) {
+    let (shortcut, accelerator) = projects_hotkey(config);
+    let registered = match app.global_shortcut().on_shortcut(shortcut, |app, _sc, event| {
+        if event.state() == ShortcutState::Pressed {
+            toggle_projects(app);
+        }
+    }) {
+        Ok(()) => true,
+        Err(e) => {
+            // Отказ не фатален и обязан быть виден — то же правило, что у
+            // проектных хоткеев: молчащая клавиша выглядит сломанным конфигом.
+            eprintln!("ccfzf-picker: cannot register projects hotkey: {e}");
+            false
+        }
+    };
+    (registered, accelerator)
+}
+
+/// Пункт трея «показать»: хранится в состоянии приложения, чтобы
+/// `apply_config` мог поправить его подпись и акселератор после смены
+/// хоткея из окна настроек. Без этого трей продолжал бы обещать комбинацию,
+/// которая уже не слушается.
+struct ShowMenuItem(MenuItem<tauri::Wry>);
+
+/// Пункт трея «проекты» — по той же причине и с той же судьбой.
+struct ProjectsMenuItem(MenuItem<tauri::Wry>);
+
+/// Подпись и акселератор пункта трея — по тому же правилу, что и на старте:
+/// акселератор — украшение и показывается всегда, а работает ли клавиша на
+/// самом деле, говорит подпись (`show_item_label`).
+fn update_show_item(item: &MenuItem<tauri::Wry>, registered: bool, accelerator: &str) {
+    update_menu_item(item, show_item_label(registered), accelerator);
+}
+
+/// Общая часть на два пункта трея: подпись и акселератор.
+///
+/// Отказ здесь не роняет ничего: акселератор — украшение, и строку, которую
+/// не понял muda, пункт переживает без правой колонки.
+fn update_menu_item(item: &MenuItem<tauri::Wry>, label: &str, accelerator: &str) {
+    if let Err(e) = item.set_text(label) {
+        eprintln!("ccfzf-picker: cannot update tray label: {e}");
+    }
+    if let Err(e) = item.set_accelerator(Some(accelerator)) {
+        eprintln!("ccfzf-picker: cannot show hotkey {accelerator} in tray menu: {e}");
+    }
+}
+
+/// Что делает свежий конфиг действующим прямо сейчас.
+///
+/// Перезапуск ради настройки — плохая цена, а хоткеи и хост опроса меняются
+/// без него. Хоткеи снимаются все разом: следить, какой именно из них поменял
+/// человек, значило бы держать вторую копию списка рядом с конфигом.
+///
+/// Возвращает то же, что и `register_picker_hotkey`: встал ли хоткей пикера
+/// и на какой комбинации — этим отчитывается `save_config` перед формой
+/// настроек.
+/// Чем кончилась постановка глобальных хоткеев: по паре «встал ли» и «на какой
+/// комбинации» на каждый. Структурой, а не четырьмя значениями в кортеже:
+/// перепутать местами два `bool` и две строки — вопрос времени, а форма
+/// настроек по этим полям красит отказ.
+struct HotkeyOutcome {
+    picker_registered: bool,
+    picker_accelerator: String,
+    projects_registered: bool,
+    projects_accelerator: String,
+}
+
+fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
+    let config = match load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            // Прежде здесь молча подставлялся Null: пустой sshHost уводит
+            // поток опроса в простой, а хоткеи откатываются на умолчания —
+            // и без этой строки узнать о причине можно было бы только по
+            // внезапно замолчавшему списку.
+            eprintln!("ccfzf-picker: bad config.yaml, falling back to defaults: {e}");
+            serde_json::Value::Null
+        }
+    };
+
+    if let Some(poller) = app.try_state::<poller::Poller>() {
+        let ssh_host = config
+            .get("sshHost")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let background = config
+            .get("backgroundRefresh")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        poller.set_config(ssh_host, background);
+    }
+
+    // Гашение по потере фокуса — тоже без перезапуска: обработчик стоит всегда
+    // и смотрит на этот флаг (см. `HideOnBlur`).
+    if let Some(state) = app.try_state::<HideOnBlur>() {
+        state.0.store(hide_on_blur(&config), Ordering::Relaxed);
+    }
+
+    let _ = app.global_shortcut().unregister_all();
+    let (registered, accelerator) = register_picker_hotkey(app, &config);
+    let (projects_registered, projects_accelerator) = register_projects_hotkey(app, &config);
+    project_hotkeys::reapply(app);
+
+    if let Some(item) = app.try_state::<ShowMenuItem>() {
+        update_show_item(&item.0, registered, &accelerator);
+    }
+    if let Some(item) = app.try_state::<ProjectsMenuItem>() {
+        update_menu_item(
+            &item.0,
+            projects_item_label(projects_registered),
+            &projects_accelerator,
+        );
+    }
+
+    let _ = app.emit("config-changed", ());
+    HotkeyOutcome {
+        picker_registered: registered,
+        picker_accelerator: accelerator,
+        projects_registered,
+        projects_accelerator,
+    }
+}
+
+/// Открыть окно настроек.
+///
+/// Создаётся лениво: второй webview на старте стоил бы памяти каждому, кто в
+/// настройки не заходит. `hideOnBlur` к нему не привязан намеренно — в
+/// настройках переключаются между окнами, и гаснущая форма теряла бы
+/// незаписанное.
+///
+/// `async` здесь не украшение и не задел на будущее. Синхронную команду Tauri
+/// выполняет прямо в потоке цикла событий, а создание webview на Windows этот
+/// же цикл и ждёт: `build()` возвращает Ok, окно появляется, а страница в нём
+/// не загружается никогда — белый прямоугольник с рамкой и без содержимого.
+/// `async` уводит команду в пул, цикл остаётся свободен, и webview
+/// дозревает. Заодно это единственная причина, по которой команда не может
+/// брать `&AppHandle`.
+///
+/// Пикер гасится первым и всегда. Он `alwaysOnTop` и центрирован, окно
+/// настроек тоже центрируется и выходит чуть меньше — то есть ложится ровно
+/// под пикер и целиком им закрывается: ни прочитать, ни нажать крестик.
+/// Гашение идёт до создания окна, пока фокус ещё наш, — иначе система отдала
+/// бы передний план не настройкам. К `hideOnBlur` это отношения не имеет: тот
+/// про потерю фокуса, а здесь пикер уходит по своей же команде.
+#[tauri::command]
+async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
+    hide_window(&app);
+    if let Some(window) = app.get_webview_window("settings") {
+        // Свёрнутое окно один `show()` с `set_focus()` на Windows не
+        // поднимает — надо явно снять минимизацию.
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "settings",
+        tauri::WebviewUrl::App("settings.html".into()),
+    )
+    .title("ccfzf-picker Settings")
+    .inner_size(820.0, 600.0)
+    .center()
+    .resizable(true)
+    .build()
+    .map_err(|e| format!("cannot open settings window: {e}"))?;
+    Ok(())
 }
 
 /// Запуск терминала. Открепляется сразу: пикер не ждёт, пока человек
@@ -275,7 +823,7 @@ fn state_path(name: &str) -> Result<std::path::PathBuf, String> {
 
 /// Отсутствующий файл — пустой объект, а не отказ: до первого сохранения его и
 /// не должно быть.
-fn load_json(name: &str) -> Result<serde_json::Value, String> {
+pub(crate) fn load_json(name: &str) -> Result<serde_json::Value, String> {
     let path = state_path(name)?;
     match std::fs::read_to_string(&path) {
         Ok(t) => serde_json::from_str(&t).map_err(|e| format!("bad json in {}: {e}", path.display())),
@@ -286,7 +834,7 @@ fn load_json(name: &str) -> Result<serde_json::Value, String> {
 
 /// Запись через временный файл и переименование: читатель никогда не видит
 /// половину файла.
-fn save_json(name: &str, value: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn save_json(name: &str, value: &serde_json::Value) -> Result<(), String> {
     let path = state_path(name)?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
@@ -306,6 +854,45 @@ fn load_seen() -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn save_seen(seen: serde_json::Value) -> Result<(), String> {
     save_json("seen.json", &seen)
+}
+
+/// Какие проектные хоткеи не встали — то же тело, что несёт событие
+/// `project-hotkeys`, но спрошенное один раз при загрузке страницы.
+///
+/// Клавиши вешаются в `setup()`, раньше, чем webview исполнил свой JS, а
+/// `emit` не буферизуется для слушателя, который подпишется позже: без этой
+/// команды первый отказ, случившийся до подписки, не показался бы никогда —
+/// а следующий `project-hotkeys` придёт только при смене списка, то есть,
+/// возможно, никогда за весь запуск. Пустое состояние (ничего ещё не
+/// применялось) — пустой список, не ошибка: `Registered::default()` уже
+/// такой.
+///
+/// `async` здесь по той же причине, что и у `open_settings`, но с обратной
+/// стороны: синхронную команду Tauri исполняет прямо в потоке цикла событий, а
+/// эта команда ждёт мьютекс, который в это же время может держать поток
+/// поллера, вешающий клавиши. Плагин хоткеев вешает их через главный поток —
+/// и цикл замкнулся бы: страница спросила бы «что не встало», главный поток
+/// встал бы на мьютексе, а державший мьютекс — на главном потоке. Приложение
+/// при этом не падает, а тихо перестаёт отвечать на что бы то ни было.
+#[tauri::command]
+async fn project_hotkeys_taken(
+    state: tauri::State<'_, project_hotkeys::Registered>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let taken = state.state.lock().unwrap().taken.clone();
+    Ok(project_hotkeys::taken_json(&taken))
+}
+
+/// Иконки пунктов меню. Список собирает страница: Rust про меню не знает.
+///
+/// `async` — по той же причине, что и у `project_hotkeys_taken`: синхронная
+/// команда выполняется в потоке цикла событий, а тут поход в файловую систему
+/// за четырьмя иконками.
+#[tauri::command]
+async fn action_icons(
+    specs: Vec<icons::IconSpec>,
+    cache: tauri::State<'_, icons::Cache>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    Ok(icons::icons_for(&specs, &cache))
 }
 
 /// Вид списка: сортировка и чекбоксы statusline.
@@ -343,6 +930,36 @@ fn default_picker_shortcut() -> Shortcut {
 /// комбинация, сторожит тест.
 const DEFAULT_HOTKEY_ACCELERATOR: &str = "Super+Shift+C";
 
+/// Умолчание второго хоткея — открыть пикер сразу в режиме проектов.
+///
+/// Развилка по системам здесь есть, в отличие от первого хоткея: `SUPER`
+/// объединяет Cmd и Win, но объединять тут нечего — комбинации выбраны разные
+/// (`Win+Shift+F10` против `Option+Cmd+Shift+C`), и одной записью они не
+/// сходятся. Что обе половины развилки не разъехались с записями для меню,
+/// сторожит тест — но только на своей системе: другая ветка на ней не
+/// собирается вовсе.
+#[cfg(target_os = "macos")]
+fn default_projects_shortcut() -> Shortcut {
+    Shortcut::new(
+        Some(Modifiers::ALT | Modifiers::SUPER | Modifiers::SHIFT),
+        Code::KeyC,
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn default_projects_shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::F10)
+}
+
+/// То же умолчание записью для меню трея — и по той же причине рядом:
+/// разойдись они, меню обещало бы одну клавишу, а слушалась бы другая. Что
+/// это одна и та же комбинация, сторожит тест.
+#[cfg(target_os = "macos")]
+const DEFAULT_PROJECTS_ACCELERATOR: &str = "Alt+Super+Shift+C";
+
+#[cfg(not(target_os = "macos"))]
+const DEFAULT_PROJECTS_ACCELERATOR: &str = "Super+Shift+F10";
+
 /// Действующий хоткей пикера и запись, которой его показывать в меню.
 ///
 /// Запись нельзя взять у самого `Shortcut`: его `Display` печатает
@@ -350,7 +967,7 @@ const DEFAULT_HOTKEY_ACCELERATOR: &str = "Super+Shift+C";
 /// идёт строка из конфига как написана, а при откате к умолчанию — запись
 /// умолчания. Показывается именно действующий хоткей: непонятая строка в меню
 /// обещала бы клавишу, которой никто не слушает.
-fn picker_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
+pub(crate) fn picker_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
     if let Some(s) = config.get("hotkey").and_then(|v| v.as_str()) {
         match s.parse::<Shortcut>() {
             Ok(sc) => return (sc, s.to_string()),
@@ -363,6 +980,64 @@ fn picker_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
     )
 }
 
+/// Действующий хоткей режима проектов и запись для меню.
+///
+/// Тем же устройством, что и `picker_hotkey`, и по тем же причинам: строка из
+/// конфига идёт наружу как написана, непонятая — откатывается на умолчание,
+/// а показывается всегда действующая.
+/// Пустая строка читается как «ключа нет», а не как испорченная комбинация:
+/// умолчание здесь своё на каждой системе и живёт только тут, поэтому в
+/// `config.yaml` и в окне настроек пустое поле значит «взять встроенное». У
+/// первого хоткея такой развилки нет — там умолчание одно на обе системы, и
+/// окно настроек пишет его строкой.
+pub(crate) fn projects_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
+    if let Some(s) = config
+        .get("projectsHotkey")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+    {
+        match s.parse::<Shortcut>() {
+            Ok(sc) => return (sc, s.to_string()),
+            Err(_) => eprintln!("ccfzf-picker: cannot parse projectsHotkey {s}, using default"),
+        }
+    }
+    (
+        default_projects_shortcut(),
+        DEFAULT_PROJECTS_ACCELERATOR.to_string(),
+    )
+}
+
+/// Время сборки этого бинаря, если оно в него вшито.
+///
+/// `None` у релизной сборки: её называет версия, а штамп там лишний. Ноль в
+/// штампе значит именно это — см. `build.rs`.
+fn build_time() -> Option<NaiveDateTime> {
+    let secs: i64 = env!("CCFZF_BUILD_UNIX").parse().ok()?;
+    if secs == 0 {
+        return None;
+    }
+    Some(Local.timestamp_opt(secs, 0).single()?.naive_local())
+}
+
+/// Подпись неактивного пункта меню: какая сборка сейчас запущена.
+///
+/// Дата опускается, когда сборка сегодняшняя, — чаще всего так и есть, а
+/// повторять сегодняшнее число в трее незачем. «Сегодня» считается от запуска
+/// пикера, а не от открытия меню: меню строится один раз при старте, и у
+/// процесса, прожившего в трее сутки, подпись устареет — покажет время без
+/// даты у вчерашней сборки. Цена известна и принята: пикер, проживший сутки,
+/// перезапускали не сегодня, и вопрос «то ли собралось» к нему не стоит.
+fn version_item_label(version: &str, built: Option<NaiveDateTime>, today: NaiveDate) -> String {
+    let Some(built) = built else {
+        return format!("v{version}");
+    };
+    if built.date() == today {
+        format!("v{version} · {}", built.format("%H:%M"))
+    } else {
+        format!("v{version} · {}", built.format("%Y-%m-%d %H:%M"))
+    }
+}
+
 /// Подпись пункта «показать» в меню трея.
 ///
 /// Про занятый хоткей говорит подпись, а не правая колонка: колонка — нативный
@@ -371,9 +1046,21 @@ fn picker_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
 /// сработала, а не только то, что что-то не сработало.
 fn show_item_label(hotkey_registered: bool) -> &'static str {
     if hotkey_registered {
-        "Показать список"
+        "Show sessions"
     } else {
-        "Хоткей занят, жмите сюда"
+        "Hotkey is taken, click here"
+    }
+}
+
+/// Подпись пункта «проекты» — по тому же правилу, что и у «показать»: отказ
+/// регистрации называет подпись, а комбинация остаётся в правой колонке.
+/// Своя строка, а не общая с `show_item_label`: у двух хоткеев отказ разный,
+/// и «Hotkey is taken» под обоими пунктами не сказало бы, какой именно.
+fn projects_item_label(hotkey_registered: bool) -> &'static str {
+    if hotkey_registered {
+        "Show projects"
+    } else {
+        "Projects hotkey is taken, click here"
     }
 }
 
@@ -388,8 +1075,10 @@ fn main() {
         // шлёт событие, и перепутать их нечем.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            hide_picker, fetch_state, spawn_detached, load_seen, save_seen, load_config,
-            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt
+            hide_picker, poll_now, spawn_detached, load_seen, save_seen, load_config,
+            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
+            restore_snapshot_mqtt, open_session_mqtt, open_project_mqtt, new_session_mqtt,
+            save_config, open_settings, project_hotkeys_taken, action_icons
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
@@ -406,27 +1095,54 @@ fn main() {
             // и печатает ошибку в статуслайн.
             let config = load_config().unwrap_or(serde_json::Value::Null);
 
+            // Опросом владеет Rust, а не страница: у скрытого окна webview
+            // тормозит таймеры, а WebView2 у свёрнутого умеет усыплять
+            // страницу целиком. Фон на setInterval замолчал бы, и узнать об
+            // этом было бы неоткуда — панель просто перестала бы обновляться.
+            let ssh_host = config
+                .get("sshHost")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let background = config
+                .get("backgroundRefresh")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            app.manage(poller::Poller::start(app.handle().clone(), ssh_host, background));
+
             // Клик мимо окна закрывает пикер. Окно безрамочное и всегда
             // поверх: не закрывшись само, оно осталось бы висеть над той
             // работой, ради которой его и открывали. Ключ в конфиге на случай,
             // когда список нужен рядом с терминалом — например, чтобы читать
             // из него pid, пока набираешь команду в другом окне.
-            let hide_on_blur = config
-                .get("hideOnBlur")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-            if hide_on_blur {
-                if let Some(window) = app.get_webview_window("picker") {
-                    let handle = app.handle().clone();
-                    window.on_window_event(move |event| {
-                        if let tauri::WindowEvent::Focused(false) = event {
+            //
+            // Обработчик ставится всегда, а решает по флагу: см. `HideOnBlur`.
+            app.manage(HideOnBlur(AtomicBool::new(hide_on_blur(&config))));
+            // Список хоткеев приезжает ответом агрегатора, а не из конфига:
+            // единственный его источник — claudeWt.projects у
+            // windows11-manager. До первого ответа висит список прошлого
+            // запуска.
+            app.manage(project_hotkeys::Registered::default());
+            // Иконки меню читаются из exe на первый показ и держатся до
+            // перезапуска: ключ кеша знает mtime, так что обновившийся exe
+            // перечитается сам.
+            app.manage(icons::Cache::default());
+            if let Some(window) = app.get_webview_window("picker") {
+                let handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(false) = event {
+                        if hide_on_blur_now(&handle) {
                             hide_window(&handle);
                         }
-                    });
-                }
+                    }
+                });
             }
 
-            let (picker_shortcut, hotkey_accelerator) = picker_hotkey(&config);
+            // Хоткей пикера ставится общей с `apply_config` функцией: раньше
+            // здесь была вторая копия того же кода со своей обработкой
+            // отказа, и любая будущая правка регистрации требовала бы двух
+            // правок.
+            //
             // Занятый хоткей — не повод не запуститься. Клавишу мог отобрать и
             // сосед по системе, и сама система (так Windows держит за собой
             // `Win+Shift+T`, прежнее умолчание пикера), а
@@ -437,21 +1153,10 @@ fn main() {
             // или окно осталось только на иконке. Сообщение в stderr эту
             // разницу тоже пишет, но stderr у приложения из Finder не читает
             // никто.
-            let hotkey_registered = match app
-                .global_shortcut()
-                .on_shortcut(picker_shortcut, |app, _sc, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        toggle_picker(app);
-                    }
-                }) {
-                Ok(()) => true,
-                Err(e) => {
-                    eprintln!(
-                        "ccfzf-picker: cannot register picker hotkey: {e}; окно поднимается из трея"
-                    );
-                    false
-                }
-            };
+            let (hotkey_registered, hotkey_accelerator) =
+                register_picker_hotkey(app.handle(), &config);
+            let (projects_registered, projects_accelerator) =
+                register_projects_hotkey(app.handle(), &config);
 
             // Меню трея строится здесь, а не в начале setup: ему нужны и
             // хоткей, и то, чем кончилась его регистрация.
@@ -477,8 +1182,62 @@ fn main() {
                     MenuItem::with_id(app, "show", label, true, None::<&str>)?
                 }
             };
-            let quit_item = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            // Сохраняется в состоянии, чтобы `apply_config` мог поправить эту
+            // же подпись и акселератор после сохранения настроек — без
+            // пересборки всего меню на каждое сохранение.
+            app.manage(ShowMenuItem(show_item.clone()));
+            // Второй пункт — вход в режим проектов, тем же устройством, что и
+            // первый: подпись говорит об отказе, акселератор показывается
+            // всегда, а строку, которую muda не понял, пункт переживает без
+            // правой колонки.
+            let projects_label = projects_item_label(projects_registered);
+            let projects_item = match MenuItem::with_id(
+                app,
+                "show-projects",
+                projects_label,
+                true,
+                Some(projects_accelerator.as_str()),
+            ) {
+                Ok(item) => item,
+                Err(e) => {
+                    eprintln!(
+                        "ccfzf-picker: cannot show hotkey {projects_accelerator} in tray menu: {e}"
+                    );
+                    MenuItem::with_id(app, "show-projects", projects_label, true, None::<&str>)?
+                }
+            };
+            app.manage(ProjectsMenuItem(projects_item.clone()));
+            // Настройки — второй пункт, между показом и выходом. Из трея они
+            // достижимы и тогда, когда до шестерёнки в статуслайне не добраться:
+            // хоткей не встал, а пикер не открывается по той самой настройке,
+            // которую надо и поправить.
+            let settings_item =
+                MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            // Неактивный пункт: он не действие, а подпись. Стоит последним,
+            // под «Quit», — читают его редко, а два верхних пункта нажимают
+            // каждый день, и сдвигать их ради подписи нельзя.
+            let version_item = MenuItem::with_id(
+                app,
+                "version",
+                version_item_label(
+                    env!("CARGO_PKG_VERSION"),
+                    build_time(),
+                    Local::now().date_naive(),
+                ),
+                false,
+                None::<&str>,
+            )?;
+            let tray_menu = Menu::with_items(
+                app,
+                &[
+                    &show_item,
+                    &projects_item,
+                    &settings_item,
+                    &quit_item,
+                    &version_item,
+                ],
+            )?;
             TrayIconBuilder::new()
                 .icon(tray_icon())
                 // Иконка одноцветная и просвечивает фоном: система сама красит
@@ -492,6 +1251,23 @@ fn main() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => toggle_picker(app),
+                    // Не toggle: пункт называется «показать проекты», и
+                    // погасить окно по нему было бы не тем, что обещано.
+                    "show-projects" => toggle_projects(app),
+                    // Через spawn, а не вызовом на месте: обработчик меню
+                    // крутится в потоке цикла событий, а webview на Windows
+                    // дозревает через этот же цикл. Занятый цикл — то самое
+                    // окно настроек, которое появляется белым прямоугольником и
+                    // не загружает страницу никогда; ровно ради этого
+                    // `open_settings` и сделан `async`.
+                    "settings" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = open_settings(app).await {
+                                eprintln!("ccfzf-picker: {e}");
+                            }
+                        });
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -507,33 +1283,7 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Проектный хоткей открывает новую сессию мимо списка, поэтому
-            // окно пикера не поднимается: наружу уходит только событие.
-            let projects = config
-                .get("projects")
-                .and_then(|p| p.as_array())
-                .cloned()
-                .unwrap_or_default();
-            for item in projects {
-                let (Some(path), Some(hotkey)) = (
-                    item.get("path").and_then(|v| v.as_str()),
-                    item.get("hotkey").and_then(|v| v.as_str()),
-                ) else { continue };
-                if hotkey.is_empty() { continue }
-                let Ok(sc) = hotkey.parse::<Shortcut>() else {
-                    eprintln!("ccfzf-picker: cannot parse hotkey {hotkey}");
-                    continue;
-                };
-                let handle = app.handle().clone();
-                let path = path.to_string();
-                if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        let _ = handle.emit("project-hotkey", path.clone());
-                    }
-                }) {
-                    eprintln!("ccfzf-picker: cannot register hotkey {hotkey}: {e}");
-                }
-            }
+            project_hotkeys::apply_cached(app.handle());
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -543,6 +1293,160 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn at(y: i32, m: u32, d: u32, hh: u32, mm: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(y, m, d)
+            .unwrap()
+            .and_hms_opt(hh, mm, 0)
+            .unwrap()
+    }
+
+    /// Релизную сборку называет версия — штампа у неё нет вовсе.
+    #[test]
+    fn version_item_names_the_release_by_version_alone() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        assert_eq!(version_item_label("0.1.0", None, today), "v0.1.0");
+    }
+
+    /// Сегодняшняя сборка — без даты: повторять сегодняшнее число незачем.
+    #[test]
+    fn version_item_drops_todays_date() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        assert_eq!(
+            version_item_label("0.1.0", Some(at(2026, 8, 14, 14, 32)), today),
+            "v0.1.0 · 14:32"
+        );
+    }
+
+    /// Вчерашняя — с датой: без неё «14:32» читалось бы как сегодняшнее время,
+    /// то есть врало бы ровно в том случае, ради которого пункт и заведён.
+    #[test]
+    fn version_item_keeps_an_older_date() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        assert_eq!(
+            version_item_label("0.1.0", Some(at(2026, 8, 13, 14, 32)), today),
+            "v0.1.0 · 2026-08-13 14:32"
+        );
+    }
+
+    /// Свой каталог во временной директории на каждый тест: `write_config`
+    /// трогает реальную файловую систему, и тесты не должны видеть файлы друг
+    /// друга при параллельном запуске.
+    fn temp_config_path(tag: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir()
+            .join(format!("ccfzf-picker-test-{}-{tag}-{n}", std::process::id()))
+            .join("config.yaml")
+    }
+
+    /// Конфига нет вовсе — `write_config` создаёт и каталог, и файл, а не
+    /// падает на отсутствующем `.config/ccfzf-picker`.
+    #[test]
+    fn write_config_creates_missing_directory_and_file() {
+        let path = temp_config_path("missing-dir");
+        assert!(!path.parent().unwrap().exists());
+        write_config(&path, &serde_json::json!({"sshHost": "host"})).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("host"), "{text}");
+    }
+
+    /// Нетронутое (в том числе `actions`, для которого редактора ещё нет)
+    /// переживает запись через `write_config` — не только через голый
+    /// `merge_patch`, который тестирует C3.
+    #[test]
+    fn write_config_keeps_untouched_keys() {
+        let path = temp_config_path("untouched");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "sshHost: old\nactions:\n  - id: finder\n    argv: ['open']\n").unwrap();
+        write_config(&path, &serde_json::json!({"sshHost": "new"})).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("new"), "{text}");
+        assert!(!text.contains("old"), "{text}");
+        assert!(text.contains("finder"), "чужой ключ пережил запись: {text}");
+    }
+
+    /// Бэкап кладётся один раз и не затирается вторым сохранением: иначе
+    /// второе сохранение стёрло бы единственную копию исходного файла
+    /// собственным, уже применённым, состоянием.
+    #[test]
+    fn write_config_backs_up_once() {
+        let path = temp_config_path("backup-once");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "sshHost: original\n").unwrap();
+
+        write_config(&path, &serde_json::json!({"sshHost": "first"})).unwrap();
+        let backup = path.with_extension("yaml.bak");
+        let backup_text = std::fs::read_to_string(&backup).unwrap();
+        assert!(backup_text.contains("original"), "{backup_text}");
+
+        write_config(&path, &serde_json::json!({"sshHost": "second"})).unwrap();
+        let backup_text = std::fs::read_to_string(&backup).unwrap();
+        assert!(
+            backup_text.contains("original"),
+            "второе сохранение не должно тронуть бэкап: {backup_text}"
+        );
+    }
+
+    /// Файл из одних пробелов — тоже «был пустым»: бэкап ему не полагается,
+    /// как и файлу, которого нет вовсе.
+    #[test]
+    fn write_config_does_not_back_up_whitespace_only_file() {
+        let path = temp_config_path("whitespace-only");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "   \n\n").unwrap();
+        write_config(&path, &serde_json::json!({"sshHost": "host"})).unwrap();
+        assert!(!path.with_extension("yaml.bak").exists());
+    }
+
+    /// `mqtt: null` в патче отклоняется, а не подменяет блок целиком — иначе
+    /// `merge_patch` стёр бы `mqtt.password` молча.
+    #[test]
+    fn write_config_rejects_null_top_level_value() {
+        let path = temp_config_path("null-patch");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "mqtt:\n  host: broker\n  password: secret\n").unwrap();
+        let err = write_config(&path, &serde_json::json!({"mqtt": null})).unwrap_err();
+        assert!(err.contains("mqtt"), "{err}");
+        // Файл не тронут отказавшимся патчем — пароль на месте.
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("secret"), "{text}");
+    }
+
+    /// `null` во вложенном ключе отклоняется так же, как в верхнем.
+    ///
+    /// Проверка верхнего уровня пропускала `{"mqtt": {"password": null}}` —
+    /// патч, который стирает ровно тот ключ, ради которого написано слияние по
+    /// ключам. Сегодняшняя форма такого не собирает, но цена ошибки — пароль.
+    #[test]
+    fn write_config_rejects_null_at_any_depth() {
+        let path = temp_config_path("null-nested");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "mqtt:\n  host: broker\n  password: secret\n").unwrap();
+        let err = write_config(&path, &serde_json::json!({"mqtt": {"password": null}})).unwrap_err();
+        assert!(err.contains("password"), "{err}");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("secret"), "пароль пережил отказ: {text}");
+    }
+
+    /// Конфиг и его бэкап читает только владелец: в файле лежит
+    /// `mqtt.password`, а заводит файл теперь окно настроек, а не человек.
+    #[cfg(unix)]
+    #[test]
+    fn write_config_keeps_files_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = temp_config_path("permissions");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // Права нарочно шире нужных: сохранение обязано их сузить, а не
+        // унаследовать.
+        std::fs::write(&path, "mqtt:\n  password: secret\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_config(&path, &serde_json::json!({"sshHost": "host"})).unwrap();
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600, "config.yaml");
+        assert_eq!(mode(&path.with_extension("yaml.bak")), 0o600, "config.yaml.bak");
+    }
 
     /// Клик по иконке в трее гасит пикер, а не мигает им.
     ///
@@ -559,6 +1463,21 @@ mod tests {
         // Видимое окно, погасшее «только что», — состояние противоречивое
         // (гашение отмечается уже после hide), но решение то же: не показывать.
         assert!(!picker_toggle(true, true));
+    }
+
+    /// `hideOnBlur` читается одной функцией — той же на старте и в
+    /// `apply_config`.
+    ///
+    /// Раньше значение читалось только в `setup`, и переключатель в окне
+    /// настроек молчал до перезапуска. Теперь его читают дважды, и разойтись
+    /// эти чтения не должны: умолчание «гасить», а не «оставить окно висеть».
+    #[test]
+    fn hide_on_blur_defaults_to_hiding() {
+        assert!(hide_on_blur(&serde_json::json!({})));
+        assert!(hide_on_blur(&serde_json::Value::Null));
+        assert!(hide_on_blur(&serde_json::json!({"hideOnBlur": "нет"})));
+        assert!(hide_on_blur(&serde_json::json!({"hideOnBlur": true})));
+        assert!(!hide_on_blur(&serde_json::json!({"hideOnBlur": false})));
     }
 
     /// Хоткеи из конфига разбираются той же строкой, какой их пишет человек.
@@ -587,6 +1506,82 @@ mod tests {
         );
     }
 
+    /// То же про второй хоткей, и сторож нужен ему сильнее: у него умолчаний
+    /// два, по одному на систему, и собирается на каждой из них только своё —
+    /// разъехавшуюся пару увидит лишь та машина, где её и завели.
+    #[test]
+    fn default_projects_accelerator_matches_default_shortcut() {
+        assert_eq!(
+            DEFAULT_PROJECTS_ACCELERATOR.parse::<Shortcut>().unwrap(),
+            default_projects_shortcut()
+        );
+    }
+
+    /// Два умолчания не совпадают: второй хоткей открывает другой режим, и
+    /// одна комбинация на оба означала бы, что один из них не работает вовсе.
+    #[test]
+    fn two_global_hotkeys_do_not_collide() {
+        assert_ne!(default_projects_shortcut(), default_picker_shortcut());
+    }
+
+    /// Про занятый второй хоткей меню тоже говорит подписью, и подпись эта
+    /// своя: «Hotkey is taken» под обоими пунктами не сказало бы, какой из
+    /// двух не встал.
+    #[test]
+    fn tray_label_tells_which_hotkey_is_taken() {
+        assert_eq!(projects_item_label(true), "Show projects");
+        assert_ne!(projects_item_label(false), projects_item_label(true));
+        assert_ne!(projects_item_label(false), show_item_label(false));
+    }
+
+    /// Второй хоткей обязан переключать окно, а не только показывать.
+    ///
+    /// Сначала он был сделан показывающим, и на живом пикере это прочиталось
+    /// поломкой: от хоткея пикера ждут, что повторное нажатие погасит окно.
+    /// Поведением не поймать — нужен настоящий цикл событий и окно, — поэтому
+    /// сторожится форма, как у `tray_opens_settings_off_the_event_loop`.
+    #[test]
+    fn projects_hotkey_toggles_the_window() {
+        let src = include_str!("main.rs");
+        let body = src
+            .split_once("fn toggle_projects(app: &tauri::AppHandle) {")
+            .expect("toggle_projects пропал — тест сторожит не то")
+            .1;
+        let (body, _) = body.split_once("\n}").expect("тело toggle_projects не закрыто");
+        assert!(
+            body.contains("toggle_window"),
+            "второй хоткей обязан идти через общее переключение, а не показывать окно"
+        );
+    }
+
+    /// Второй хоткей читается из своего ключа и откатывается по тем же трём
+    /// развилкам, что и первый.
+    #[test]
+    fn projects_hotkey_shows_what_is_listened_to() {
+        let own = serde_json::json!({ "projectsHotkey": "Cmd+Shift+T" });
+        let (sc, accel) = projects_hotkey(&own);
+        assert_eq!(sc, "Cmd+Shift+T".parse::<Shortcut>().unwrap());
+        assert_eq!(accel, "Cmd+Shift+T");
+
+        for config in [
+            serde_json::json!({ "projectsHotkey": "не хоткей" }),
+            serde_json::json!({}),
+            serde_json::Value::Null,
+            // Пустое поле в окне настроек значит «взять встроенное»: умолчание
+            // здесь своё на каждой системе, и записать его строкой окно не
+            // может — оно не знает, на какой системе окажется конфиг.
+            serde_json::json!({ "projectsHotkey": "" }),
+            serde_json::json!({ "projectsHotkey": "   " }),
+            // Ключ соседа второму хоткею не указ: перепутай их местами — и оба
+            // повисли бы на одной комбинации.
+            serde_json::json!({ "hotkey": "Cmd+Shift+T" }),
+        ] {
+            let (sc, accel) = projects_hotkey(&config);
+            assert_eq!(sc, default_projects_shortcut(), "конфиг {config}");
+            assert_eq!(accel, DEFAULT_PROJECTS_ACCELERATOR, "конфиг {config}");
+        }
+    }
+
     /// В меню показывается тот хоткей, который слушается на самом деле.
     ///
     /// Развилок три, и врать нельзя ни в одной: своя строка из конфига, откат к
@@ -613,8 +1608,69 @@ mod tests {
     /// Про занятый хоткей меню говорит подписью, и подписи эти разные.
     #[test]
     fn tray_label_tells_when_hotkey_is_taken() {
-        assert_eq!(show_item_label(true), "Показать список");
+        assert_eq!(show_item_label(true), "Show sessions");
         assert_ne!(show_item_label(false), show_item_label(true));
+    }
+
+    /// Пункт «Настройки…» из трея не открывает окно в потоке цикла событий.
+    ///
+    /// `on_menu_event` вызывается из этого потока, а webview на Windows
+    /// дозревает через него же: вызов `open_settings` на месте вернул бы белый
+    /// прямоугольник без страницы — ровно ту поломку, ради которой команда и
+    /// сделана `async`. Поведением это не поймать: окно есть только на Windows
+    /// и только в настоящем цикле событий, а `build()` в обоих случаях
+    /// отвечает `Ok`. Поэтому сторожится форма — как у `hidden_command` ниже.
+    #[test]
+    fn tray_opens_settings_off_the_event_loop() {
+        let src = include_str!("main.rs");
+        let handler = src
+            .split_once("\"settings\" => {")
+            .expect("пункт settings пропал из меню трея — тест сторожит не то")
+            .1;
+        let (handler, _) = handler.split_once("\"quit\" =>").expect("обработчик settings не закрыт");
+        assert!(
+            handler.contains("async_runtime::spawn"),
+            "открытие настроек из трея должно уходить в пул, а не в цикл событий"
+        );
+    }
+
+    /// Команда о занятых клавишах обязана быть `async`.
+    ///
+    /// Синхронную Tauri исполняет в потоке цикла событий, а она ждёт мьютекс
+    /// проектных хоткеев — тот самый, который держит поток поллера, пока
+    /// плагин вешает клавиши через главный поток. Синхронной она замыкала бы
+    /// круг: страница спросила бы «что не встало», главный поток встал бы на
+    /// мьютексе, державший мьютекс — на главном потоке, и приложение
+    /// перестало бы отвечать целиком. Поведением это не поймать без живого
+    /// приложения, поэтому сторожится форма.
+    #[test]
+    fn taken_command_runs_off_the_event_loop() {
+        let src = include_str!("main.rs");
+        // Иголка склеена по той же причине, что и у соседа ниже: литерал лежал
+        // бы в файле, который `include_str!` и затягивает, и сторож находил бы
+        // себя же. Проверено: с синхронной командой он оставался зелёным.
+        let needle = format!("async fn {}", "project_hotkeys_taken");
+        assert!(
+            src.contains(&needle),
+            "project_hotkeys_taken должна быть async — иначе взаимный замок с поллером"
+        );
+    }
+
+    /// Извлечение иконок не должно ехать в потоке цикла событий: там же
+    /// дозревает webview, и синхронная команда, полезшая в четыре exe за
+    /// иконками, придержала бы отрисовку окна. Поведением это не поймать —
+    /// на быстрой машине разницы не видно, — поэтому сторожится форма.
+    #[test]
+    fn action_icons_runs_off_the_event_loop() {
+        let src = include_str!("main.rs");
+        // Иголка склеена, а не написана литералом: `include_str!` затягивает и
+        // сам этот файл, и сторож с литералом находил бы себя же — зелёный без
+        // команды. Проверено: до появления `action_icons` он так и проходил.
+        let needle = format!("async fn {}", "action_icons");
+        assert!(
+            src.contains(&needle),
+            "action_icons должна быть async — иначе извлечение держит цикл событий"
+        );
     }
 
     /// Опрос агрегатора не поднимает процессов мимо `proc::hidden_command`.
@@ -642,6 +1698,27 @@ mod tests {
         );
     }
 
+    /// Опрос агрегатора не виснет на ssh навсегда.
+    ///
+    /// С тех пор как опрос переехал в фоновый поток (`poller.rs`), это
+    /// единственный поток, который его крутит: повисший `ssh` не просто
+    /// задерживает кадр, а не даёт разобрать ни одного сигнала (показ,
+    /// скрытие, смену настроек), пока сам не отвалится. Проверить таймаут
+    /// поведением здесь дорого — пришлось бы правда вешать соединение;
+    /// сторожится форма, как и у `hidden_command` выше.
+    #[test]
+    fn state_poll_has_ssh_timeouts() {
+        let src = include_str!("state_source.rs");
+        for opt in [
+            "BatchMode=yes",
+            "ConnectTimeout=5",
+            "ServerAliveInterval=5",
+            "ServerAliveCountMax=2",
+        ] {
+            assert!(src.contains(opt), "у ssh должна быть опция {opt}");
+        }
+    }
+
     /// Конфиг доезжает до фронтенда теми же типами, какими написан.
     ///
     /// Разбирает его serde_yaml, а решения по нему принимает normalizeConfig в
@@ -658,18 +1735,21 @@ caps:
 terminal:
   file: open
   args: ['-na', 'kitty', '--args']
-projects:
-  - path: /home/user/projects/demo
-    hotkey: Cmd+Shift+1
+actions:
+  - label: Open folder
+    hotkey: Ctrl+O
+    file: open
 "#;
         let v: serde_json::Value = serde_yaml::from_str(text).unwrap();
         assert_eq!(v["sshHost"].as_str(), Some("example-host"));
         assert_eq!(v["caps"]["reptyr"].as_bool(), Some(true));
         assert_eq!(v["terminal"]["file"].as_str(), Some("open"));
         assert_eq!(v["terminal"]["args"].as_array().unwrap().len(), 3);
-        let projects = v["projects"].as_array().unwrap();
-        assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0]["hotkey"].as_str(), Some("Cmd+Shift+1"));
+        // Массив объектов — образцом взяты `actions`: проектные хоткеи из
+        // конфига ушли к менеджеру, и ключа `projects` здесь больше нет.
+        let actions = v["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0]["hotkey"].as_str(), Some("Ctrl+O"));
     }
 
     /// Пустой `sshHost` — это ненастроенный конфиг, а не «сходи в никуда».

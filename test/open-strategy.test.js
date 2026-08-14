@@ -1,7 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const {
-  q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
+  q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand, newSessionCommand,
+  newSessionName,
 } = require('../frontend-src/open-strategy');
 
 const ATTACH_42 = `reptyr -T 42 || reptyr "$(pgrep -x -f 'reptyr -T 42' | head -1)"`;
@@ -196,4 +197,97 @@ test('кавычки в пути не разрывают команду', () => 
 
 test('незнакомая стратегия не даёт команды', () => {
   assert.strictEqual(buildOpenCommand(row(), 'нет такой', OPTS), null);
+});
+
+test('новая сессия называется по каталогу проекта', () => {
+  // Имя не для красоты: по нему оконный трекер находит сессию в заголовке
+  // окна, не дожидаясь /rename. Форма взята у ccfzf.
+  assert.strictEqual(
+    newSessionCommand('/home/user/projects/ccfzf'),
+    `exec $SHELL -ic 'cd -- '\\''/home/user/projects/ccfzf'\\'' && claude -n '\\''ccfzf'\\'''`,
+  );
+});
+
+test('имя новой сессии берётся у последнего сегмента пути', () => {
+  const withSlash = newSessionCommand('/home/user/projects/ccfzf/');
+  assert.match(withSlash, /claude -n '\\''ccfzf'\\''/);
+});
+
+test('кавычка в имени каталога не разваливает команду', () => {
+  // Единственный барьер между придуманным человеком путём и чужим шеллом — q.
+  const cmd = newSessionCommand("/home/user/pro'ject");
+  assert.match(cmd, /claude -n /);
+});
+
+test('точка с запятой в пути — отказ, а не команда', () => {
+  // Проверка гоняется на пути, в котором `;` действительно есть: для шелла он
+  // безопасен (q отработала), но Windows Terminal режет по нему свою
+  // командную строку на панели ещё до всякого шелла. Вызывающий на пустую
+  // строку показывает отказ — молча открыть сессию в чужом каталоге хуже.
+  assert.strictEqual(newSessionCommand('/home/user/a;b'), '');
+  assert.strictEqual(newSessionCommand('/home/user/a;b/'), '');
+  assert.strictEqual(newSessionCommand(';'), '');
+  // Соседний путь по-прежнему собирается, и `;` в готовой команде не заводится.
+  const ok = newSessionCommand('/home/user/projects/ccfzf');
+  assert.ok(ok && !ok.includes(';'), ok);
+});
+
+test('новая сессия в занятом имени получает суффикс', () => {
+  // Кавычки навешиваются дважды (см. inDir), поэтому и в готовой команде имя
+  // ищем в экранированном виде — как в соседних тестах этого файла.
+  const cmd = newSessionCommand('/home/user/projects/api', ['api']);
+  assert.match(cmd, /claude -n '\\''api-2'\\''/);
+});
+
+test('свободное имя остаётся без суффикса', () => {
+  const cmd = newSessionCommand('/home/user/projects/api', ['другая']);
+  assert.match(cmd, /claude -n '\\''api'\\''/);
+});
+
+test('без списка занятых поведение прежнее', () => {
+  // Аргумент необязателен: вызов без него не должен ломаться — так зовут из
+  // тестов соседних функций и из старого кода.
+  assert.match(newSessionCommand('/home/user/projects/api'), /claude -n '\\''api'\\''/);
+});
+
+test('newSessionName отдаёт то же имя, что попадает в команду', () => {
+  // Имя нужно вызывающему отдельно: он помнит выданные имена, чтобы два ^N
+  // подряд не дали тёзок. Разойтись этим двум нельзя.
+  const taken = ['api'];
+  const name = newSessionName('/home/user/projects/api', taken);
+  assert.strictEqual(name, 'api-2');
+  assert.ok(newSessionCommand('/home/user/projects/api', taken).includes(`-n '\\''${name}'\\'''`));
+});
+
+test('путь с точкой с запятой отказывает и по имени тоже', () => {
+  // Отказ остаётся первым: Windows Terminal порежет такую команду на панели
+  // ещё до шелла, и никакое имя этого не спасает.
+  assert.strictEqual(newSessionCommand('/home/user/a;b', ['a;b']), '');
+  assert.strictEqual(newSessionName('/home/user/a;b', []), '');
+});
+
+test('строка внутри zellij открывается присоединением, а не вторым процессом', () => {
+  const row = { id: 'a', live: true, pid: 42, zellij: 'obsidian-agent-base' };
+  assert.strictEqual(chooseOpenStrategy(row, { reptyr: true }, {}), 'attach');
+  const cmd = buildOpenCommand(row, 'attach', { sshHost: 'user@example-host', terminal: { file: 'wt', args: [] } });
+  assert.ok(cmd.argv.includes("zellij attach 'obsidian-agent-base'"), cmd.argv);
+  assert.strictEqual(cmd.destructive, false);
+});
+
+test('при обоих мультиплексорах выигрывает tmux', () => {
+  // Порядок веток — по убыванию сохранности, и между двумя одинаково
+  // сохранными решает то, что было раньше: менять привычное поведение
+  // tmux-строк эта правка не должна.
+  const row = { id: 'a', live: true, tmux: 'main:0.1', zellij: 'home' };
+  const cmd = buildOpenCommand(row, 'attach', { sshHost: 'user@example-host', terminal: { file: 'wt', args: [] } });
+  assert.ok(cmd.argv.includes("tmux attach -t 'main:0.1'"), cmd.argv);
+});
+
+test('строка зелийной сессии присоединяется своим же именем', () => {
+  // У строки kind: 'zellij' нет ни pid, ни живой сессии — только имя, и его
+  // хватает: поле одно и то же, ветка одна и та же.
+  const row = { id: 'zellij:home', kind: 'zellij', zellij: 'home' };
+  assert.strictEqual(chooseOpenStrategy(row, {}, {}), 'attach');
+  const cmd = buildOpenCommand(row, 'attach', { sshHost: 'user@example-host', terminal: { file: 'wt', args: [] } });
+  assert.ok(cmd.argv.includes("zellij attach 'home'"), cmd.argv);
 });

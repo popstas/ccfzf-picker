@@ -19,11 +19,89 @@ test('пустой конфиг даёт рабочие значения по у
   assert.strictEqual(c.onlyLive, true);
   assert.strictEqual(c.hideOnBlur, true);
   assert.deepStrictEqual(c.terminal, { file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] });
-  assert.deepStrictEqual(c.projects, []);
   // Пустое имя машины — фокуса не бывает. Умолчания у него нет по той же
   // причине, что и у sshHost: любое значение было бы чужим именем машины.
   assert.strictEqual(c.windowHost, '');
   assert.deepStrictEqual(c.mqtt, { configured: false });
+  // Умолчания у маппинга нет по той же причине: примонтировано у всех
+  // по-своему, а угаданный корень увёл бы действия открытия не туда молча.
+  assert.deepStrictEqual(c.pathMap, { remote: '', local: '' });
+  assert.deepStrictEqual(c.actions, []);
+});
+
+// Корни сетевых дисков Windows пишутся формой UNC, а не буквой диска: буква
+// вместе с разделителем — шаблон из no-private-data.test.js.
+test('маппинг годен только целиком', () => {
+  const map = raw => normalizeConfig({ pathMap: raw }).pathMap;
+  assert.deepStrictEqual(map({ remote: '/home/user', local: '\\\\nas\\home' }), {
+    remote: '/home/user', local: '\\\\nas\\home',
+  });
+  // Половина пары ведёт в никуда — маппинга нет.
+  assert.deepStrictEqual(map({ remote: '/home/user' }), { remote: '', local: '' });
+  assert.deepStrictEqual(map({ local: '\\\\nas\\home' }), { remote: '', local: '' });
+  assert.deepStrictEqual(map({ remote: '  ', local: '\\\\nas\\home' }), { remote: '', local: '' });
+  assert.deepStrictEqual(map('мусор'), { remote: '', local: '' });
+});
+
+test('действие без id или без argv выбрасывается, а не роняет конфиг', () => {
+  const c = normalizeConfig({
+    actions: [
+      { label: 'без id', argv: ['x'] },
+      { id: 'без argv' },
+      { id: 'пустой argv', argv: [] },
+      // Не-строка в argv: молча выброшенный аргумент собрал бы не ту команду.
+      { id: 'кривой argv', argv: ['x', 42] },
+      'вообще не объект',
+      { id: 'годное', argv: ['x'] },
+    ],
+  });
+  assert.deepStrictEqual(c.actions.map(a => a.id), ['годное']);
+});
+
+test('подпись действия по умолчанию — его id', () => {
+  const [a] = normalizeConfig({ actions: [{ id: 'explorer', argv: ['x'] }] }).actions;
+  assert.strictEqual(a.label, 'explorer');
+});
+
+test('неразобранная комбинация обнуляется, но действие остаётся', () => {
+  // Опечатка в хоткее не повод прятать пункт, до которого человек и так дойдёт
+  // через ^K.
+  const [a] = normalizeConfig({ actions: [{ id: 'x', hotkey: 'Хрен+E', argv: ['x'] }] }).actions;
+  assert.strictEqual(a.hotkey, '');
+  assert.strictEqual(a.parsedHotkey, null);
+  assert.strictEqual(a.id, 'x');
+});
+
+test('встроенная клавиша окна выигрывает у настроенной', () => {
+  // ^I занят информацией о сессии: настроенное действие остаётся, но без
+  // клавиши, иначе подпись в меню обещала бы то, чего не происходит.
+  const [a] = normalizeConfig({ actions: [{ id: 'x', hotkey: 'Ctrl+I', argv: ['x'] }] }).actions;
+  assert.strictEqual(a.hotkey, '');
+  // Та же буква с добавленным модификатором свободна.
+  const [b] = normalizeConfig({ actions: [{ id: 'x', hotkey: 'Ctrl+Shift+I', argv: ['x'] }] }).actions;
+  assert.strictEqual(b.hotkey, 'Ctrl+Shift+I');
+});
+
+test('из двух действий на одной комбинации клавишу получает первое', () => {
+  const c = normalizeConfig({
+    actions: [
+      { id: 'first', hotkey: 'Ctrl+Shift+E', argv: ['x'] },
+      // Та же комбинация, записанная в другом порядке: сверяются разобранные
+      // клавиши, а не строки из файла.
+      { id: 'second', hotkey: 'Shift+Ctrl+E', argv: ['x'] },
+    ],
+  });
+  assert.deepStrictEqual(c.actions.map(a => a.hotkey), ['Ctrl+Shift+E', '']);
+});
+
+test('повтор id выбрасывается: два пункта с одним именем не различить', () => {
+  const c = normalizeConfig({
+    actions: [
+      { id: 'x', label: 'первое', argv: ['a'] },
+      { id: 'x', label: 'второе', argv: ['b'] },
+    ],
+  });
+  assert.deepStrictEqual(c.actions.map(a => a.label), ['первое']);
 });
 
 test('брокер считается настроенным только с адресом и префиксом сразу', () => {
@@ -64,16 +142,67 @@ test('поля с умолчанием true выключаются только 
   }
 });
 
-test('проект без пути отбрасывается, а не роняет конфиг', () => {
-  const c = normalizeConfig({ projects: [
-    { path: '/home/user/x', hotkey: 'Cmd+Shift+1' },
-    { hotkey: 'Cmd+Shift+2' },
-    'мусор',
-  ] });
-  assert.deepStrictEqual(c.projects, [{ path: '/home/user/x', hotkey: 'Cmd+Shift+1' }]);
+// Ключ уехал в windows11-manager: единственный источник хоткеев — его
+// claudeWt.projects, а сюда список приезжает ответом агрегатора. Оставшийся в
+// файле человека ключ читать нельзя — два списка снова разошлись бы.
+test('projects из конфига не читается вовсе', () => {
+  const cfg = normalizeConfig({
+    sshHost: 'host', projects: [{ path: '/p/one', hotkey: 'Ctrl+F11' }],
+  });
+  assert.equal(cfg.projects, undefined);
 });
 
-test('проект без хоткея остаётся в списке', () => {
-  const c = normalizeConfig({ projects: [{ path: '/home/user/y' }] });
-  assert.deepStrictEqual(c.projects, [{ path: '/home/user/y', hotkey: '' }]);
+test('backgroundRefresh по умолчанию включён', () => {
+  // Умолчание true, а не false: фоновый опрос кормит панель openHASP, и
+  // выключенным по умолчанию он молча лишал бы её обновлений.
+  assert.strictEqual(normalizeConfig({}).backgroundRefresh, true);
+  assert.strictEqual(normalizeConfig(null).backgroundRefresh, true);
+  assert.strictEqual(normalizeConfig({ backgroundRefresh: false }).backgroundRefresh, false);
+  // Нелогическое значение — умолчание, как у соседних ключей.
+  assert.strictEqual(normalizeConfig({ backgroundRefresh: 'нет' }).backgroundRefresh, true);
+});
+
+// Иконку действия берут из отдельного ключа, а не из argv[0], потому что у
+// самого частого действия argv[0] — это `cmd`: проводник открывается через
+// `cmd /c start` (правило в CLAUDE.md), и иконка вышла бы от командной строки.
+test('icon у действия доезжает до нормализованного конфига', () => {
+  const c = normalizeConfig({
+    actions: [{
+      id: 'explorer',
+      label: 'Open in Explorer',
+      argv: ['cmd', '/c', 'start', '', '{localPathSlash}'],
+      icon: '%SystemRoot%\\explorer.exe',
+    }],
+  });
+  assert.strictEqual(c.actions[0].icon, '%SystemRoot%\\explorer.exe');
+});
+
+// То же правило, что у hotkey: испорченный ключ обнуляется, но действие
+// остаётся в меню. Спрятать пункт из-за опечатки в иконке — потерять доступ к
+// нему вовсе, а иконка тут украшение.
+test('мусорный icon обнуляется, а действие остаётся в списке', () => {
+  const c = normalizeConfig({ actions: [{ id: 'cursor', argv: ['cursor', '{localPath}'], icon: 42 }] });
+  assert.strictEqual(c.actions.length, 1, 'опечатка в иконке не повод прятать пункт');
+  assert.strictEqual(c.actions[0].icon, '');
+});
+
+// ── второй глобальный хоткей ────────────────────────────────────────────────
+test('умолчание второго хоткея пустое, а не комбинация', () => {
+  // Умолчаний у него два, по одному на систему, и живут они в Rust, где видно
+  // систему. Запиши сюда одно из двух — и окно настроек, сохранившись на
+  // другой системе, увезло бы в конфиг чужую клавишу.
+  assert.strictEqual(normalizeConfig(null).projectsHotkey, '');
+});
+
+test('заданный второй хоткей проходит как написан', () => {
+  assert.strictEqual(
+    normalizeConfig({ projectsHotkey: 'Ctrl+Alt+P' }).projectsHotkey,
+    'Ctrl+Alt+P',
+  );
+});
+
+test('пустая строка второго хоткея остаётся пустой', () => {
+  // Пусто значит «взять встроенное», и подменять её умолчанием тут нечем.
+  assert.strictEqual(normalizeConfig({ projectsHotkey: '' }).projectsHotkey, '');
+  assert.strictEqual(normalizeConfig({ projectsHotkey: 42 }).projectsHotkey, '');
 });

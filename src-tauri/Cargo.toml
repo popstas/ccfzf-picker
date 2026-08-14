@@ -19,13 +19,42 @@ tauri-plugin-global-shortcut = "2"
 # на Windows-машине. Единственный транспорт этой просьбы — http-сервер, стоявший
 # здесь раньше, вешал демона на той стороне.
 rumqttc = "0.24"
+# Иконка приложения из exe уезжает на страницу картинкой: PNG — единственный
+# формат, который <img src="data:…"> понимает без кода на странице. Крейт уже
+# в дереве (Tauri тянет его ради image-png), прямая запись нужна ради `use`.
+png = "0.17"
+# Тот же data-URI: base64 руками — двадцать строк и свой тест, крейт дешевле.
+base64 = "0.22"
+# Время сборки в пункте меню трея. Штамп приезжает из build.rs числом секунд, а
+# перевести его в местные дату и время — это календарь и часовой пояс, то есть
+# ровно то, что руками писать не стоит. `default-features = false` + `clock`:
+# нужен только местный пояс, ни сериализации, ни wasm тут не бывает.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # AllowSetForegroundWindow: Windows отдаёт передний план только тому, кто им
 # уже владеет. Право надо выдать демону трекера явно, иначе он поднимет окно
 # «успешно», а на экране только мигнёт кнопка на таскбаре. Версия та же, что
 # уже тянет Tauri, — иначе в сборке оказались бы два разных `windows`.
+#
+# Остальные features — ради иконок из exe: Shell (SHGetFileInfoW), Gdi
+# (битмапы иконки), FileSystem и IO (reparse point за app-execution alias),
+# Environment (раскрытие `%SystemRoot%` в пути из конфига). `Win32_Security`
+# сам по себе не нужен, но без него `CreateFileW` из `Win32_Storage_FileSystem`
+# не существует: в её сигнатуре стоит `SECURITY_ATTRIBUTES`, и крейт прячет
+# всю функцию за этой feature. `Win32_System_Com` — ради пары
+# `CoInitializeEx`/`CoUninitialize` вокруг `SHGetFileInfoW`: шелл идёт за
+# иконкой в свои расширения, а те без апартамента у потока не отвечают.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Environment",
+    "Win32_System_IO",
+] }
 
 [profile.release]
 lto = true
