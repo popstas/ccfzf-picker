@@ -187,12 +187,19 @@
    * `window` приезжает уже в ответе агрегатора и приписывается строке в
    * buildSessionList — здесь остаётся только отсев.
    *
+   * `opts.configHost` — имя своей машины из конфига. Нужно строке, чтобы
+   * назвать машину чужого окна и промолчать про своё.
+   *
    * Pure: берёт уже полученный `res`, сама ничего не читает.
    */
   function buildSessionsPayload(res, sort = DEFAULT_SORT, opts = {}) {
     const mode = normalizeSort(sort);
     if (!res.ok) return { ok: false, reason: res.reason };
-    let rows = listApi.buildSessionList({ sessions: res.sessions, seen: res.seen });
+    // `state: res` — ради машины окна: на старом агрегаторе она названа только
+    // верхними полями ответа, и по одной записи окна её не узнать.
+    let rows = listApi.buildSessionList({
+      sessions: res.sessions, seen: res.seen, state: res, configHost: opts.configHost,
+    });
     if (opts.onlyLive) rows = rows.filter(r => r.live);
     if (opts.onlyWindow) rows = rows.filter(r => r.window);
     // Отсевы выше — про сессии агента, и на зелийные строки они не

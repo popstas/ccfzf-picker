@@ -122,5 +122,5 @@
     return able.find(e => normHost(e.host) === mine) || able[0] || null;
   }
 
-  return { canFocusRow, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager };
+  return { windowOf, normHost, canFocusRow, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager };
 });

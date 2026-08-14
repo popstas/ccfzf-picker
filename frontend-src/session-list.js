@@ -7,6 +7,9 @@
   const agentApi = typeof module === 'object' && module.exports
     ? require('./session-agent')
     : globalThis.SessionAgent;
+  const windowApi = typeof module === 'object' && module.exports
+    ? require('./session-windows')
+    : globalThis.SessionWindows;
 
   /**
    * Строки списка из ответа агрегатора.
@@ -23,7 +26,23 @@
    * Единственное поле, которое строка не отдаёт наружу, — `label`: его
    * приписывает labelSessions (session-groups.js) уже над готовым списком.
    */
-  function buildSessionList({ sessions, seen } = {}) {
+  /**
+   * Имя машины окна, если она не наша, иначе пустая строка.
+   *
+   * Пустое `configHost` значит «своей машины пикер не знает» — так настроен мак
+   * без фокуса. Тогда чужими становятся все окна разом, и это верно: раз своей
+   * машины нет, называть надо каждую.
+   */
+  function foreignHost(s, state, configHost) {
+    const w = windowApi.windowOf(s, state);
+    const host = windowApi.normHost((w || {}).host);
+    if (!host || host === windowApi.normHost(configHost)) return '';
+    // Наружу — имя как его написал трекер, а не приведённое к нижнему регистру:
+    // сравнивают машины без учёта регистра, а показывают как есть.
+    return String(w.host).trim();
+  }
+
+  function buildSessionList({ sessions, seen, state, configHost } = {}) {
     const list = Array.isArray(sessions) ? sessions : [];
     const byId = {};
     for (const s of list) if (s && s.id) byId[s.id] = s;
@@ -74,6 +93,14 @@
           // сознательно неразличимы — разница видна только в конфиге, а по
           // строке списка её не показать.
           window: s.window || null,
+          // Машина, на которой стоит это окно, — и только когда она не наша.
+          //
+          // Своё имя тут шум: у большинства строк окно там же, где пикер, и
+          // колонка из повторяющегося имени машины не сообщала бы ничего.
+          // Отбор идёт здесь, а не в отрисовщике: `windowOf` уже разбирается,
+          // откуда взять `host` на старом агрегаторе, и второй разбор той же
+          // развилки в глифе разошёлся бы с этим молча.
+          windowHost: foreignHost(s, state, configHost),
           branch: (agent || {}).branch || '',
           pr_url: (agent || {}).pr_url || '',
           agentState: (agent || {}).state || '',

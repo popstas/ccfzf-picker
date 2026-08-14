@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const {
   escapeHtml, statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
   sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
-  shortPath, rowTitle, titleAttr,
+  shortPath, rowTitle, titleAttr, windowHostHtml,
   prNumber, prBadgeHtml,
 } = require('../frontend-src/session-glyph');
 
@@ -494,4 +494,25 @@ test('prBadgeHtml renders the badge only for sessions with a pull request', () =
   );
   assert.strictEqual(prBadgeHtml({ pr_url: '' }), '');
   assert.strictEqual(prBadgeHtml({}), '');
+});
+
+// ── колонка с машиной чужого окна ───────────────────────────────────────────
+test('машина чужого окна выводится с подсказкой', () => {
+  const html = windowHostHtml({ windowHost: 'mac-host' });
+  assert.match(html, /mac-host/);
+  assert.match(html, /title="Window is on mac-host"/);
+});
+
+test('без чужой машины остаётся пустой элемент, а не пропуск', () => {
+  // Правые колонки стоят друг за другом, и дырка сдвинула бы соседние строки.
+  assert.strictEqual(windowHostHtml({ windowHost: '' }), '<div class="winhost"></div>');
+});
+
+test('выключенная галка убирает колонку целиком', () => {
+  assert.strictEqual(windowHostHtml({ windowHost: 'mac-host' }, false), '');
+});
+
+test('имя машины экранируется', () => {
+  // Строка приезжает из файла, написанного на чужой машине.
+  assert.ok(!windowHostHtml({ windowHost: '<b>x' }).includes('<b>'));
 });

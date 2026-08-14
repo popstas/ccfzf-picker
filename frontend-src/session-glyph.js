@@ -158,6 +158,25 @@
   }
 
   /**
+   * Машина, на которой стоит окно этой сессии.
+   *
+   * Пометка ▣ одинакова у своего окна и у окна соседней машины, и по строке
+   * было не понять, где оно стоит и почему Enter ведёт себя иначе: своё окно
+   * поднимается, чужое — нет.
+   *
+   * Решение «чужая ли машина» принято раньше, при сборке строки: сюда приезжает
+   * либо имя, которое стоит назвать, либо пустая строка. Пустой элемент вместо
+   * пропуска — по той же причине, что у `win` и `hk`: правые колонки стоят друг
+   * за другом, и дырка сдвинула бы соседние строки.
+   */
+  function windowHostHtml(session, showWindowHost = true) {
+    if (!showWindowHost) return '';
+    const host = session?.windowHost;
+    if (!host) return '<div class="winhost"></div>';
+    return `<div class="winhost" title="Window is on ${escapeHtml(host)}">${escapeHtml(host)}</div>`;
+  }
+
+  /**
    * Имя сессии для заголовка диалога.
    *
    * Меню действий приходит с одним `label` и без заголовка окна, список — с
@@ -348,7 +367,7 @@
 
   return {
     statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
-    sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml,
+    sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml, windowHostHtml,
     shortPath, rowTitle, titleAttr, escapeHtml,
     prNumber, prBadgeHtml,
   };

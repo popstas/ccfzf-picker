@@ -159,6 +159,14 @@
             flex: 0 0 auto; width: 10px; padding-left: 10px;
             font-size: 11px; color: #3fb950; text-align: center;
         }
+        /* Машина чужого окна. Ширины не задано намеренно, в отличие от `.win`:
+           там элемент либо пуст, либо в один знак, а имена машин разной длины,
+           и жёсткая ширина резала бы их. Пустой элемент при этом схлопывается
+           и строк не сдвигает. */
+        .winhost {
+            flex: 0 0 auto; padding-left: 10px;
+            font-size: 11px; color: #7d838c; white-space: nowrap;
+        }
         /* Контекст и деньги, между статусом и возрастом. */
         .usage {
             flex: 0 0 auto; padding-left: 10px;
@@ -299,9 +307,11 @@
 </div>
 <script src="state-shape.js"></script>
 <script src="session-agent.js"></script>
+<!-- session-windows до session-list: тот берёт оттуда windowOf в момент
+     загрузки, чтобы приписать строке машину её окна. -->
+<script src="session-windows.js"></script>
 <script src="session-list.js"></script>
 <script src="zellij-list.js"></script>
-<script src="session-windows.js"></script>
 <script src="open-transport.js"></script>
 <script src="session-groups.js"></script>
 <!-- ui-state после session-groups: он берёт оттуда normalizeSort в момент
@@ -413,6 +423,7 @@
     { key: 'showCost', label: 'cost', side: 'right' },
     { key: 'showContext', label: 'context', side: 'right' },
     { key: 'showWindow', label: 'window', side: 'right' },
+    { key: 'showWindowHost', label: 'window host', side: 'right' },
     { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
     { key: 'showAll', label: 'show all', side: 'filter' },
   ];
@@ -437,6 +448,10 @@
     showCost: { list: false, statusline: false },
     showContext: { list: true, statusline: true },
     showWindow: { list: true, statusline: false },
+    // Включена, хотя у одного трекера пустует всегда: имя машины появляется
+    // ровно тогда, когда оно нужно, — у окна, стоящего не здесь. Выключенной
+    // её бы никто и не нашёл, а лишней ширины она не занимает.
+    showWindowHost: { list: true, statusline: false },
     // Выключен: список без трекера и так весь без окон, и включённый фильтр
     // показал бы пустоту вместо сессий — с виду неотличимо от сломанного ssh.
     onlyWindow: { list: false, statusline: false },
@@ -503,7 +518,7 @@
 
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml,
-    windowHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml,
+    windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -729,6 +744,7 @@
           // чекбокс, как всё съезжало к названию сессии.
           `<div class="meta">` +
           windowHtml(session, toggles.showWindow) +
+          windowHostHtml(session, toggles.showWindowHost) +
           stateHtml(session, toggles.showEvent) +
           sessionIdHtml(session, toggles.showId) +
           hotkeyHtml(session, toggles.showHotkey) +
@@ -811,12 +827,22 @@
    */
   function regroup() {
     const payload = window.SessionGroups.buildSessionsPayload(
-      { ok: true, sessions: lastSessions, seen }, sortMode,
+      // Верхние поля ответа переезжают сюда поимённо: на старом агрегаторе
+      // только они и называют машину окна, а пересобранный ответ их терял.
+      {
+        ok: true, sessions: lastSessions, seen,
+        windowHost: lastState.windowHost, windowPid: lastState.windowPid,
+      },
+      sortMode,
       // showAll перекрывает onlyLive, а не заменяет его: конфиг задаёт, с чем
       // пикер открывается, галка — разовое «покажи и мёртвые тоже». Обратной
       // галки нет намеренно: включённый onlyLive и есть умолчание, а вторая
       // галка «только живые» поверх настройки читалась бы как второй фильтр.
-      { onlyLive: CONFIG.onlyLive && !toggles.showAll, onlyWindow: toggles.onlyWindow },
+      {
+        onlyLive: CONFIG.onlyLive && !toggles.showAll,
+        onlyWindow: toggles.onlyWindow,
+        configHost: CONFIG.windowHost,
+      },
     );
     groups = payload.groups;
     sortMode = payload.sort;

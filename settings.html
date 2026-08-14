@@ -57,6 +57,7 @@
     showPrompt: 'prompt', showAnswer: 'answer', showPaths: 'paths',
     showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
     showCost: 'cost', showContext: 'context', showWindow: 'window',
+    showWindowHost: 'window host',
   };
   const FILTER_LABELS = { onlyWindow: 'only sessions with a window', showAll: 'show all sessions' };
   const UI_DEFAULTS = {
@@ -71,6 +72,7 @@
       showCost: { list: false, statusline: false },
       showContext: { list: true, statusline: true },
       showWindow: { list: true, statusline: false },
+      showWindowHost: { list: true, statusline: false },
       onlyWindow: { list: false, statusline: false },
       showAll: { list: false, statusline: true },
     },

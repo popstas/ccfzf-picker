@@ -165,3 +165,50 @@ test('без новых полей строка отдаёт умолчания,
   assert.strictEqual(noAgent.agentStarted, 0);
   assert.strictEqual(noAgent.agentMessage, '');
 });
+
+// ── машина чужого окна ──────────────────────────────────────────────────────
+//
+// Пометка ▣ одинакова у своего окна и у окна соседней машины, и по строке было
+// не понять, где оно стоит и почему Enter ведёт себя иначе.
+function withWindow(win, extra) {
+  return buildSessionList(Object.assign({
+    sessions: [state({ window: win })],
+    seen: {},
+    configHost: 'win-host',
+  }, extra || {}))[0];
+}
+
+test('своя машина у окна не называется', () => {
+  // Имя своей машины в колонке — шум: у большинства строк окно там же, где
+  // пикер, и колонка повторяла бы одно и то же имя.
+  assert.strictEqual(withWindow({ host: 'win-host', pid: 7 }).windowHost, '');
+});
+
+test('машина сравнивается без учёта регистра и пробелов', () => {
+  // Одна сторона — os.hostname() соседней машины, другая — строка, набранная
+  // человеком в конфиге.
+  assert.strictEqual(withWindow({ host: ' WIN-Host ', pid: 7 }).windowHost, '');
+});
+
+test('чужая машина называется как её написал трекер', () => {
+  assert.strictEqual(withWindow({ host: 'Mac-Host', pid: 7 }).windowHost, 'Mac-Host');
+});
+
+test('без окна машины нет', () => {
+  assert.strictEqual(withWindow(null).windowHost, '');
+});
+
+test('на старом агрегаторе машина берётся из верхних полей ответа', () => {
+  // Там трекер один, и все окна его; поля host у записи окна нет вовсе.
+  const row = withWindow({ pid: 7 }, { state: { windowHost: 'mac-host', windowPid: 7 } });
+  assert.strictEqual(row.windowHost, 'mac-host');
+});
+
+test('без своей машины в конфиге называются все', () => {
+  // Пустое поле в конфиге значит «фокуса не бывает»; раз своей машины пикер не
+  // знает, чужими становятся все окна разом — и это верно.
+  const row = buildSessionList({
+    sessions: [state({ window: { host: 'mac-host', pid: 7 } })], seen: {}, configHost: '',
+  })[0];
+  assert.strictEqual(row.windowHost, 'mac-host');
+});
