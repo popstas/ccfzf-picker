@@ -122,3 +122,32 @@ test('комбинация, занятая самим окном пикера, �
 test('исправная форма претензий не вызывает', () => {
   assert.deepStrictEqual(validate(configToFields({ sshHost: 'host' })), []);
 });
+
+// ── второй глобальный хоткей в форме ────────────────────────────────────────
+test('второй хоткей правится на той же странице, что и первый', () => {
+  const page = PAGES.find(p => p.id === 'hotkeys');
+  const ids = page.fields.map(f => f.id);
+  assert.ok(ids.includes('projectsHotkey'), ids);
+});
+
+test('форма не даёт повесить оба хоткея на одну комбинацию', () => {
+  // Система отдаёт сочетание одному слушателю, и второй регистрируется
+  // отказом: молча не сработал бы именно он.
+  const problems = validate({
+    sshHost: 'host', hotkey: 'Cmd+Shift+C', projectsHotkey: 'cmd+shift+c',
+  });
+  assert.strictEqual(problems.length, 1, problems);
+  assert.match(problems[0], /both hotkeys/);
+});
+
+test('разные комбинации возражений не вызывают', () => {
+  assert.deepStrictEqual(
+    validate({ sshHost: 'host', hotkey: 'Cmd+Shift+C', projectsHotkey: 'Alt+Cmd+Shift+C' }),
+    [],
+  );
+});
+
+test('пустой второй хоткей возражений не вызывает', () => {
+  // Пусто значит «взять встроенное», а не «сломанная комбинация».
+  assert.deepStrictEqual(validate({ sshHost: 'host', hotkey: 'Cmd+Shift+C' }), []);
+});

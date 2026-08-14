@@ -14,6 +14,13 @@
     // либо ложь. Пустой хост пикер показывает как ненастроенный конфиг.
     sshHost: '',
     hotkey: 'Cmd+Shift+C',
+    // Пусто, а не комбинация: у второго хоткея умолчание своё на каждой
+    // системе (`Win+Shift+F10` против `Option+Cmd+Shift+C`), и одной строкой,
+    // как `Super` у первого, они не сходятся. Умолчание живёт в Rust, где
+    // видно систему; пустое поле здесь значит «взять встроенное». Запиши сюда
+    // одну из двух комбинаций — и окно настроек, сохранившись на другой
+    // системе, увезло бы в конфиг чужую клавишу.
+    projectsHotkey: '',
     // Прямой запуск бинаря, а не `open -na kitty --args`. Обе формы доводят
     // команду до kitty (проверено), но `open -n` каждый раз поднимает новый
     // экземпляр приложения, а --single-instance отдаёт окно уже запущенному
@@ -139,6 +146,8 @@
     return {
       sshHost: typeof src.sshHost === 'string' && src.sshHost ? src.sshHost : DEFAULTS.sshHost,
       hotkey: typeof src.hotkey === 'string' && src.hotkey ? src.hotkey : DEFAULTS.hotkey,
+      projectsHotkey: typeof src.projectsHotkey === 'string'
+        ? src.projectsHotkey : DEFAULTS.projectsHotkey,
       terminal: src.terminal && typeof src.terminal === 'object' && src.terminal.file
         ? { file: src.terminal.file, args: Array.isArray(src.terminal.args) ? src.terminal.args : [] }
         : DEFAULTS.terminal,

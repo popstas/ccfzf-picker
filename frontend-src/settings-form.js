@@ -49,6 +49,9 @@
       fields: [
         { id: 'hotkey', label: 'Show the picker', type: 'text',
           hint: 'SUPER is Cmd on a Mac and Win on Windows.' },
+        { id: 'projectsHotkey', label: 'Show the picker on projects', type: 'text',
+          hint: 'Leave empty for the built-in one: Win+Shift+F10 on Windows, '
+            + 'Option+Cmd+Shift+C on a Mac.' },
       ],
     },
     {
@@ -198,6 +201,17 @@
     // забирает себе, перечислены там, и второй список разошёлся бы с первым.
     if (hotkey && hotkeyApi.isReserved(hotkeyApi.parseHotkey(hotkey))) {
       problems.push(`${hotkey} is taken by the picker window itself — inside it, it will not respond`);
+    }
+    const projects = String(fields.projectsHotkey || '').trim();
+    if (projects && hotkeyApi.isReserved(hotkeyApi.parseHotkey(projects))) {
+      problems.push(`${projects} is taken by the picker window itself — inside it, it will not respond`);
+    }
+    // Две одинаковые комбинации — это молчащая вторая: система отдаёт
+    // сочетание одному слушателю, и второй регистрируется отказом. Отказ
+    // виден в трее, но сказать о нём здесь дешевле, чем отправлять человека
+    // туда искать.
+    if (projects && hotkey && projects.toLowerCase() === hotkey.toLowerCase()) {
+      problems.push(`${projects} is set for both hotkeys — only one of them will work`);
     }
     return problems;
   }

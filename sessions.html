@@ -1094,6 +1094,21 @@
    * настроенное действие с тем же id зажгло бы подсказку про Shift+клик там,
    * где Shift+клик ничего не сделает.
    */
+  /**
+   * Открыть список проектов: поставить `/a ` в начало строки поиска.
+   *
+   * Входов два и код у них общий: `^A` внутри окна и глобальный хоткей,
+   * приезжающий событием `picker-projects` от Rust. Режим живёт префиксом в
+   * тексте, а не отдельным флагом, поэтому «открыть в режиме проектов» — это
+   * правка строки поиска, и сделать её может только страница.
+   */
+  function showProjects() {
+    search.value = window.PickerMode.withProjectPrefix(search.value);
+    search.focus();
+    search.setSelectionRange(search.value.length, search.value.length);
+    onSearchInput();
+  }
+
   function markToggleId(row) {
     const ids = window.SessionActions.availableActions(row).map(a => a.id);
     if (ids.includes('unread')) return 'unread';
@@ -1751,10 +1766,7 @@
       // состояние живёт в самом тексте, и стирание префикса возвращает к
       // сессиям. Цена — `^A` больше не «выделить всё» в поле поиска.
       e.preventDefault();
-      search.value = window.PickerMode.withProjectPrefix(search.value);
-      search.focus();
-      search.setSelectionRange(search.value.length, search.value.length);
-      onSearchInput();
+      showProjects();
       return;
     }
     if (plainCtrl && e.code === 'KeyS') {
@@ -1969,6 +1981,13 @@
     // окна.
     await listen('project-hotkey', (event) => {
       newSession(event.payload);
+    });
+
+    // Второй глобальный хоткей: Rust показывает окно и говорит, с каким
+    // режимом открыться. Показать он может и сам, а вот префикс в строке
+    // поиска — дело страницы: режим живёт в тексте, а не флагом.
+    await listen('picker-projects', () => {
+      showProjects();
     });
 
     // Какие клавиши не встали. Приезжает от Rust на каждое применение списка:

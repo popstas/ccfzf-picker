@@ -125,17 +125,38 @@ fn toggle_picker(app: &tauri::AppHandle) {
         .and_then(|s| *s.0.lock().unwrap())
         .is_some_and(|t| Instant::now().duration_since(t) < DEBOUNCE);
     if picker_toggle(window.is_visible().unwrap_or(false), just_hidden) {
-        let _ = window.show();
-        let _ = window.set_focus();
-        // Список обновляется на показе: между открытиями он устаревает, а
-        // опрашивать закрытый пикер незачем.
-        let _ = app.emit("picker-shown", ());
-        if let Some(poller) = app.try_state::<poller::Poller>() {
-            poller.shown();
-        }
+        show_picker(app);
     } else {
         hide_window(app);
     }
+}
+
+/// Показать окно, не спрашивая, показано ли оно уже.
+///
+/// Отдельно от `toggle_picker` ради второго хоткея: тот открывает пикер сразу
+/// в режиме проектов, и переключение там было бы неверным — нажатие на уже
+/// открытом пикере обязано сменить режим, а не погасить окно, которое только
+/// что открыли первым хоткеем.
+fn show_picker(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("picker") else { return };
+    let _ = window.show();
+    let _ = window.set_focus();
+    // Список обновляется на показе: между открытиями он устаревает, а
+    // опрашивать закрытый пикер незачем.
+    let _ = app.emit("picker-shown", ());
+    if let Some(poller) = app.try_state::<poller::Poller>() {
+        poller.shown();
+    }
+}
+
+/// Открыть пикер в режиме проектов.
+///
+/// Режим живёт префиксом в строке поиска, а не отдельным флагом, и выставить
+/// его может только страница — Rust про строку поиска не знает ничего.
+/// Поэтому здесь два хода: показать окно и сказать странице, с чем открыться.
+fn open_projects(app: &tauri::AppHandle) {
+    show_picker(app);
+    let _ = app.emit("picker-projects", ());
 }
 
 #[tauri::command]
@@ -522,10 +543,12 @@ fn write_config(path: &std::path::Path, patch: &serde_json::Value) -> Result<(),
 fn save_config(app: tauri::AppHandle, patch: serde_json::Value) -> Result<serde_json::Value, String> {
     let path = config_path()?;
     write_config(&path, &patch)?;
-    let (hotkey_registered, hotkey_accelerator) = apply_config(&app);
+    let out = apply_config(&app);
     Ok(serde_json::json!({
-        "hotkeyRegistered": hotkey_registered,
-        "hotkeyAccelerator": hotkey_accelerator,
+        "hotkeyRegistered": out.picker_registered,
+        "hotkeyAccelerator": out.picker_accelerator,
+        "projectsHotkeyRegistered": out.projects_registered,
+        "projectsHotkeyAccelerator": out.projects_accelerator,
     }))
 }
 
@@ -550,17 +573,51 @@ fn register_picker_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) ->
     (registered, accelerator)
 }
 
+/// Поставить хоткей режима проектов.
+///
+/// Отдельная функция, а не второй аргумент к `register_picker_hotkey`:
+/// обработчики у них разные по существу — один переключает окно, другой
+/// открывает его в режиме и переключением быть не может.
+fn register_projects_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) -> (bool, String) {
+    let (shortcut, accelerator) = projects_hotkey(config);
+    let registered = match app.global_shortcut().on_shortcut(shortcut, |app, _sc, event| {
+        if event.state() == ShortcutState::Pressed {
+            open_projects(app);
+        }
+    }) {
+        Ok(()) => true,
+        Err(e) => {
+            // Отказ не фатален и обязан быть виден — то же правило, что у
+            // проектных хоткеев: молчащая клавиша выглядит сломанным конфигом.
+            eprintln!("ccfzf-picker: cannot register projects hotkey: {e}");
+            false
+        }
+    };
+    (registered, accelerator)
+}
+
 /// Пункт трея «показать»: хранится в состоянии приложения, чтобы
 /// `apply_config` мог поправить его подпись и акселератор после смены
 /// хоткея из окна настроек. Без этого трей продолжал бы обещать комбинацию,
 /// которая уже не слушается.
 struct ShowMenuItem(MenuItem<tauri::Wry>);
 
+/// Пункт трея «проекты» — по той же причине и с той же судьбой.
+struct ProjectsMenuItem(MenuItem<tauri::Wry>);
+
 /// Подпись и акселератор пункта трея — по тому же правилу, что и на старте:
 /// акселератор — украшение и показывается всегда, а работает ли клавиша на
 /// самом деле, говорит подпись (`show_item_label`).
 fn update_show_item(item: &MenuItem<tauri::Wry>, registered: bool, accelerator: &str) {
-    if let Err(e) = item.set_text(show_item_label(registered)) {
+    update_menu_item(item, show_item_label(registered), accelerator);
+}
+
+/// Общая часть на два пункта трея: подпись и акселератор.
+///
+/// Отказ здесь не роняет ничего: акселератор — украшение, и строку, которую
+/// не понял muda, пункт переживает без правой колонки.
+fn update_menu_item(item: &MenuItem<tauri::Wry>, label: &str, accelerator: &str) {
+    if let Err(e) = item.set_text(label) {
         eprintln!("ccfzf-picker: cannot update tray label: {e}");
     }
     if let Err(e) = item.set_accelerator(Some(accelerator)) {
@@ -577,7 +634,18 @@ fn update_show_item(item: &MenuItem<tauri::Wry>, registered: bool, accelerator: 
 /// Возвращает то же, что и `register_picker_hotkey`: встал ли хоткей пикера
 /// и на какой комбинации — этим отчитывается `save_config` перед формой
 /// настроек.
-fn apply_config(app: &tauri::AppHandle) -> (bool, String) {
+/// Чем кончилась постановка глобальных хоткеев: по паре «встал ли» и «на какой
+/// комбинации» на каждый. Структурой, а не четырьмя значениями в кортеже:
+/// перепутать местами два `bool` и две строки — вопрос времени, а форма
+/// настроек по этим полям красит отказ.
+struct HotkeyOutcome {
+    picker_registered: bool,
+    picker_accelerator: String,
+    projects_registered: bool,
+    projects_accelerator: String,
+}
+
+fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
     let config = match load_config() {
         Ok(c) => c,
         Err(e) => {
@@ -611,14 +679,27 @@ fn apply_config(app: &tauri::AppHandle) -> (bool, String) {
 
     let _ = app.global_shortcut().unregister_all();
     let (registered, accelerator) = register_picker_hotkey(app, &config);
+    let (projects_registered, projects_accelerator) = register_projects_hotkey(app, &config);
     project_hotkeys::reapply(app);
 
     if let Some(item) = app.try_state::<ShowMenuItem>() {
         update_show_item(&item.0, registered, &accelerator);
     }
+    if let Some(item) = app.try_state::<ProjectsMenuItem>() {
+        update_menu_item(
+            &item.0,
+            projects_item_label(projects_registered),
+            &projects_accelerator,
+        );
+    }
 
     let _ = app.emit("config-changed", ());
-    (registered, accelerator)
+    HotkeyOutcome {
+        picker_registered: registered,
+        picker_accelerator: accelerator,
+        projects_registered,
+        projects_accelerator,
+    }
 }
 
 /// Открыть окно настроек.
@@ -838,6 +919,33 @@ fn default_picker_shortcut() -> Shortcut {
 /// комбинация, сторожит тест.
 const DEFAULT_HOTKEY_ACCELERATOR: &str = "Super+Shift+C";
 
+/// Умолчание второго хоткея — открыть пикер сразу в режиме проектов.
+///
+/// Развилка по системам здесь есть, в отличие от первого хоткея: одной
+/// комбинации на обе не нашлось. На маке `Win+Shift+F10` набрать нечем, а на
+/// Windows `Alt+Super+Shift+C` уходит в системное меню окна.
+#[cfg(target_os = "macos")]
+fn default_projects_shortcut() -> Shortcut {
+    Shortcut::new(
+        Some(Modifiers::ALT | Modifiers::SUPER | Modifiers::SHIFT),
+        Code::KeyC,
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn default_projects_shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::F10)
+}
+
+/// То же умолчание записью для меню трея — и по той же причине рядом:
+/// разойдись они, меню обещало бы одну клавишу, а слушалась бы другая. Что
+/// это одна и та же комбинация, сторожит тест.
+#[cfg(target_os = "macos")]
+const DEFAULT_PROJECTS_ACCELERATOR: &str = "Alt+Super+Shift+C";
+
+#[cfg(not(target_os = "macos"))]
+const DEFAULT_PROJECTS_ACCELERATOR: &str = "Super+Shift+F10";
+
 /// Действующий хоткей пикера и запись, которой его показывать в меню.
 ///
 /// Запись нельзя взять у самого `Shortcut`: его `Display` печатает
@@ -855,6 +963,33 @@ pub(crate) fn picker_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
     (
         default_picker_shortcut(),
         DEFAULT_HOTKEY_ACCELERATOR.to_string(),
+    )
+}
+
+/// Действующий хоткей режима проектов и запись для меню.
+///
+/// Тем же устройством, что и `picker_hotkey`, и по тем же причинам: строка из
+/// конфига идёт наружу как написана, непонятая — откатывается на умолчание,
+/// а показывается всегда действующая.
+/// Пустая строка читается как «ключа нет», а не как испорченная комбинация:
+/// умолчание здесь своё на каждой системе и живёт только тут, поэтому в
+/// `config.yaml` и в окне настроек пустое поле значит «взять встроенное». У
+/// первого хоткея такой развилки нет — там умолчание одно на обе системы, и
+/// окно настроек пишет его строкой.
+pub(crate) fn projects_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
+    if let Some(s) = config
+        .get("projectsHotkey")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+    {
+        match s.parse::<Shortcut>() {
+            Ok(sc) => return (sc, s.to_string()),
+            Err(_) => eprintln!("ccfzf-picker: cannot parse projectsHotkey {s}, using default"),
+        }
+    }
+    (
+        default_projects_shortcut(),
+        DEFAULT_PROJECTS_ACCELERATOR.to_string(),
     )
 }
 
@@ -900,6 +1035,18 @@ fn show_item_label(hotkey_registered: bool) -> &'static str {
         "Show sessions"
     } else {
         "Hotkey is taken, click here"
+    }
+}
+
+/// Подпись пункта «проекты» — по тому же правилу, что и у «показать»: отказ
+/// регистрации называет подпись, а комбинация остаётся в правой колонке.
+/// Своя строка, а не общая с `show_item_label`: у двух хоткеев отказ разный,
+/// и «Hotkey is taken» под обоими пунктами не сказало бы, какой именно.
+fn projects_item_label(hotkey_registered: bool) -> &'static str {
+    if hotkey_registered {
+        "Show projects"
+    } else {
+        "Projects hotkey is taken, click here"
     }
 }
 
@@ -994,6 +1141,8 @@ fn main() {
             // никто.
             let (hotkey_registered, hotkey_accelerator) =
                 register_picker_hotkey(app.handle(), &config);
+            let (projects_registered, projects_accelerator) =
+                register_projects_hotkey(app.handle(), &config);
 
             // Меню трея строится здесь, а не в начале setup: ему нужны и
             // хоткей, и то, чем кончилась его регистрация.
@@ -1023,6 +1172,27 @@ fn main() {
             // же подпись и акселератор после сохранения настроек — без
             // пересборки всего меню на каждое сохранение.
             app.manage(ShowMenuItem(show_item.clone()));
+            // Второй пункт — вход в режим проектов, тем же устройством, что и
+            // первый: подпись говорит об отказе, акселератор показывается
+            // всегда, а строку, которую muda не понял, пункт переживает без
+            // правой колонки.
+            let projects_label = projects_item_label(projects_registered);
+            let projects_item = match MenuItem::with_id(
+                app,
+                "show-projects",
+                projects_label,
+                true,
+                Some(projects_accelerator.as_str()),
+            ) {
+                Ok(item) => item,
+                Err(e) => {
+                    eprintln!(
+                        "ccfzf-picker: cannot show hotkey {projects_accelerator} in tray menu: {e}"
+                    );
+                    MenuItem::with_id(app, "show-projects", projects_label, true, None::<&str>)?
+                }
+            };
+            app.manage(ProjectsMenuItem(projects_item.clone()));
             // Настройки — второй пункт, между показом и выходом. Из трея они
             // достижимы и тогда, когда до шестерёнки в статуслайне не добраться:
             // хоткей не встал, а пикер не открывается по той самой настройке,
@@ -1046,7 +1216,13 @@ fn main() {
             )?;
             let tray_menu = Menu::with_items(
                 app,
-                &[&show_item, &settings_item, &quit_item, &version_item],
+                &[
+                    &show_item,
+                    &projects_item,
+                    &settings_item,
+                    &quit_item,
+                    &version_item,
+                ],
             )?;
             TrayIconBuilder::new()
                 .icon(tray_icon())
@@ -1061,6 +1237,9 @@ fn main() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => toggle_picker(app),
+                    // Не toggle: пункт называется «показать проекты», и
+                    // погасить окно по нему было бы не тем, что обещано.
+                    "show-projects" => open_projects(app),
                     // Через spawn, а не вызовом на месте: обработчик меню
                     // крутится в потоке цикла событий, а webview на Windows
                     // дозревает через этот же цикл. Занятый цикл — то самое
@@ -1311,6 +1490,62 @@ mod tests {
             DEFAULT_HOTKEY_ACCELERATOR.parse::<Shortcut>().unwrap(),
             default_picker_shortcut()
         );
+    }
+
+    /// То же про второй хоткей, и сторож нужен ему сильнее: у него умолчаний
+    /// два, по одному на систему, и собирается на каждой из них только своё —
+    /// разъехавшуюся пару увидит лишь та машина, где её и завели.
+    #[test]
+    fn default_projects_accelerator_matches_default_shortcut() {
+        assert_eq!(
+            DEFAULT_PROJECTS_ACCELERATOR.parse::<Shortcut>().unwrap(),
+            default_projects_shortcut()
+        );
+    }
+
+    /// Два умолчания не совпадают: второй хоткей открывает другой режим, и
+    /// одна комбинация на оба означала бы, что один из них не работает вовсе.
+    #[test]
+    fn two_global_hotkeys_do_not_collide() {
+        assert_ne!(default_projects_shortcut(), default_picker_shortcut());
+    }
+
+    /// Про занятый второй хоткей меню тоже говорит подписью, и подпись эта
+    /// своя: «Hotkey is taken» под обоими пунктами не сказало бы, какой из
+    /// двух не встал.
+    #[test]
+    fn tray_label_tells_which_hotkey_is_taken() {
+        assert_eq!(projects_item_label(true), "Show projects");
+        assert_ne!(projects_item_label(false), projects_item_label(true));
+        assert_ne!(projects_item_label(false), show_item_label(false));
+    }
+
+    /// Второй хоткей читается из своего ключа и откатывается по тем же трём
+    /// развилкам, что и первый.
+    #[test]
+    fn projects_hotkey_shows_what_is_listened_to() {
+        let own = serde_json::json!({ "projectsHotkey": "Cmd+Shift+T" });
+        let (sc, accel) = projects_hotkey(&own);
+        assert_eq!(sc, "Cmd+Shift+T".parse::<Shortcut>().unwrap());
+        assert_eq!(accel, "Cmd+Shift+T");
+
+        for config in [
+            serde_json::json!({ "projectsHotkey": "не хоткей" }),
+            serde_json::json!({}),
+            serde_json::Value::Null,
+            // Пустое поле в окне настроек значит «взять встроенное»: умолчание
+            // здесь своё на каждой системе, и записать его строкой окно не
+            // может — оно не знает, на какой системе окажется конфиг.
+            serde_json::json!({ "projectsHotkey": "" }),
+            serde_json::json!({ "projectsHotkey": "   " }),
+            // Ключ соседа второму хоткею не указ: перепутай их местами — и оба
+            // повисли бы на одной комбинации.
+            serde_json::json!({ "hotkey": "Cmd+Shift+T" }),
+        ] {
+            let (sc, accel) = projects_hotkey(&config);
+            assert_eq!(sc, default_projects_shortcut(), "конфиг {config}");
+            assert_eq!(accel, DEFAULT_PROJECTS_ACCELERATOR, "конфиг {config}");
+        }
     }
 
     /// В меню показывается тот хоткей, который слушается на самом деле.

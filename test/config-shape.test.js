@@ -185,3 +185,24 @@ test('мусорный icon обнуляется, а действие остаё
   assert.strictEqual(c.actions.length, 1, 'опечатка в иконке не повод прятать пункт');
   assert.strictEqual(c.actions[0].icon, '');
 });
+
+// ── второй глобальный хоткей ────────────────────────────────────────────────
+test('умолчание второго хоткея пустое, а не комбинация', () => {
+  // Умолчаний у него два, по одному на систему, и живут они в Rust, где видно
+  // систему. Запиши сюда одно из двух — и окно настроек, сохранившись на
+  // другой системе, увезло бы в конфиг чужую клавишу.
+  assert.strictEqual(normalizeConfig(null).projectsHotkey, '');
+});
+
+test('заданный второй хоткей проходит как написан', () => {
+  assert.strictEqual(
+    normalizeConfig({ projectsHotkey: 'Ctrl+Alt+P' }).projectsHotkey,
+    'Ctrl+Alt+P',
+  );
+});
+
+test('пустая строка второго хоткея остаётся пустой', () => {
+  // Пусто значит «взять встроенное», и подменять её умолчанием тут нечем.
+  assert.strictEqual(normalizeConfig({ projectsHotkey: '' }).projectsHotkey, '');
+  assert.strictEqual(normalizeConfig({ projectsHotkey: 42 }).projectsHotkey, '');
+});
