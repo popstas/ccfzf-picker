@@ -690,8 +690,8 @@ function chooseWith(rows, active) {
     rows,
     active,
     // Строка свёрнутого блока не открывает ничего, а разворачивает блок: имя
-    // блока копится в expandedBlocks, а список рисуется заново.
-    expandedBlocks: [],
+    // блока уходит из collapsedBlocks, а список рисуется заново.
+    collapsedBlocks: ['g:Not running'],
     render: () => calls.push(['render']),
     // Array.from — не украшение: массив, собранный внутри vm, приходит с
     // прототипом другого realm, и deepStrictEqual сравнивает в том числе его.
@@ -702,7 +702,7 @@ function chooseWith(rows, active) {
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nchoose();`, ctx, { filename: 'sessions.html' });
-  return { calls, expandedBlocks: Array.from(ctx.expandedBlocks) };
+  return { calls, collapsedBlocks: Array.from(ctx.collapsedBlocks) };
 }
 
 test('Enter на строке снимка уходит по трём разным веткам', () => {
@@ -734,9 +734,9 @@ test('Enter на свёрнутом блоке разворачивает его
   const { collapsedRow } = require('../frontend-src/picker-blocks');
   const row = collapsedRow({ key: 'g:Not running', rows: [aggregatorSession()] });
   assert.strictEqual(row.kind, 'block-toggle');
-  const { calls, expandedBlocks } = chooseWith([row], 0);
+  const { calls, collapsedBlocks } = chooseWith([row], 0);
   assert.deepStrictEqual(calls, [['render']]);
-  assert.deepStrictEqual(expandedBlocks, ['g:Not running']);
+  assert.deepStrictEqual(collapsedBlocks, []);
 });
 
 // ── saveUi сохраняет достоверный uiToggles, а не плоскую toggles (C1, round 1 fix) ──

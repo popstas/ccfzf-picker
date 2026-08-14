@@ -22,10 +22,45 @@
         #list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 0; }
         /* Широкий режим: блоки колонками, у каждого свой скролл. Свой
            overflow у самого списка гасится — иначе скроллов два вложенных, и
-           колесо работает по тому, над которым курсор, то есть непредсказуемо. */
-        #list.blocks {
-            display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-            gap: 8px; overflow: hidden;
+           колесо работает по тому, над которым курсор, то есть непредсказуемо.
+
+           Раскладка колонок задана человеком и держится на смысле строк:
+           слева свои живые сессии, посередине чужие и под ними проекты,
+           справа история и под ней снимки. Номер колонки блоку ставит
+           picker-blocks.js — по тому же признаку, по которому блок собран.
+
+           Верхний уровень — flex-строка из flex-колонок, а не сетка. Сеткой
+           это не делается: главному списку отдана вся высота, а это значит
+           охватить все ряды, и `grid-row: 1 / -1` считает `-1` по **явной**
+           сетке, которой здесь нет вовсе — ряды неявные, размеченные по
+           содержимому, и охватывать нечего. Во flex-колонке полная высота
+           достаётся сама собой, растяжением. */
+        #list.blocks { display: flex; gap: 8px; overflow: hidden; }
+        #list.blocks .block-col {
+            flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden;
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        /* Первая колонка — главный список, и он должен быть виден целиком, а не
+           настолько, насколько хватило: блок в ней растёт на всю высоту. */
+        #list.blocks .col-1 .block { flex: 1 1 auto; }
+        /* В колонках с двумя блоками высота делится, и делится не по
+           содержимому. `flex: 0 1 auto` (то есть просто «по содержимому»)
+           здесь неверен: ужимает flex пропорционально размеру, и длинный сосед
+           съедает короткого — измерено, снимкам под шестьюдесятью строками
+           истории оставалось десять пикселей, то есть ничего.
+
+           Отсюда `flex: 1 1 0`: доля поровну. А `max-height: max-content`
+           не даёт блоку стать выше собственного содержимого — упёршийся в неё
+           блок flex замораживает и остаток отдаёт соседу. Выходит то, что
+           нужно: короткий блок показан целиком и без пустоты, длинный забирает
+           всё остальное и скроллится сам. */
+        #list.blocks .col-2 .block,
+        #list.blocks .col-3 .block { flex: 1 1 0; max-height: max-content; }
+        /* Подзаголовок машины внутри блока чужих сессий: та же подпись, что и
+           заголовок группы в узком списке, но мельче — заголовок блока над ней
+           уже сказал, что это чужие. */
+        #list.blocks .block-subhead {
+            padding-top: 6px; font-size: 11px; opacity: 0.75;
         }
         /* Высоту блоку задаёт его ряд, и задаёт растяжением, а не процентом —
            процента здесь нет намеренно.
@@ -43,16 +78,14 @@
            рисует верно — проверено измерением, — но полагаться на это незачем,
            когда то же самое достижимо без процента вовсе.
 
-           Отсюда устройство: блок — обычный растянутый элемент грида, ряд
-           даёт ему высоту сам; `min-height: 0` разрешает ряду быть короче
-           содержимого, а строки внутри (`flex: 0 1 auto`) занимают высоту по
-           содержимому и ужимаются, когда ряд короче, — вот и своя полоса.
-           Пустотой растяжение не оборачивается: ряд с одними короткими
-           блоками и сам считается по ним, `.block` ничего не рисует, и
-           раскладка строк совпадает с прежней до пикселя (сверено измерением
-           координат каждой строки на трёх ширинах окна). Поэтому же снят
-           `align-items: start`: он запрещал ровно то растяжение, которым
-           теперь и держится высота. */
+           Отсюда устройство: высоту блоку даёт его колонка, `min-height: 0`
+           разрешает ему быть короче содержимого, а строки внутри
+           (`flex: 0 1 auto`) занимают высоту по содержимому и ужимаются, когда
+           места меньше, — вот и своя полоса. Пустотой это не оборачивается:
+           `.block` ничего не рисует, а раскладка строк совпадает с прежней до
+           пикселя (сверено измерением координат каждой строки на трёх ширинах
+           окна). Поэтому же снят `align-items: start`: он запрещал ровно то
+           растяжение, которым теперь и держится высота. */
         #list.blocks .block {
             display: flex; flex-direction: column;
             min-height: 0; overflow: hidden;
@@ -546,11 +579,11 @@
   // чекбоксы статуслайна. Пересчитывается из uiToggles одной функцией, чтобы
   // две формы не разъехались.
   let toggles = window.UiState.listColumns(uiToggles);
-  // Режим окна и развёрнутые блоки. Первый живёт в ui.json (отступление от
+  // Режим окна и свёрнутые блоки. Первый живёт в ui.json (отступление от
   // умолчания запоминается, как сортировка и showAll), второе — только до
-  // перерисовки: свёрнутость истории это умолчание блока, а не настройка.
+  // перерисовки: развёрнутость истории это умолчание блока, а не настройка.
   let fullscreen = false;
-  let expandedBlocks = [];
+  let collapsedBlocks = [];
   let menuOpen = false;
   let menuActions = [];
   let menuActive = 0;
@@ -910,33 +943,76 @@
   // узкого списка при пустом `rows`. `null` каркасом не бывает никогда,
   // поэтому переход из узкого режима всегда пересобирает контейнеры.
   let blocksShape = null;
+  // Тело блока по его ключу. Искать по номеру узла больше нельзя: блоки лежат
+  // не одним потоком, а внутри колонок, и порядок узлов в `#list` не совпадает
+  // с порядком блоков.
+  let blockBodies = new Map();
+
+  function blockCellHtml(block) {
+    return `<div class="block" data-block="${escapeHtml(block.key)}">` +
+      `<div class="group-label">${escapeHtml(block.label)}</div>` +
+      `<div class="block-rows"></div></div>`;
+  }
+
+  /**
+   * Подзаголовок машины внутри блока чужих сессий.
+   *
+   * В `rows` не кладётся намеренно: это подпись, а не строка списка. Выбирать
+   * её нечем — ни `data-index`, ни класса `row` у неё нет, — поэтому стрелки и
+   * клик её не видят, а Enter на ней невозможен. Ровно так же ведёт себя
+   * заголовок группы в узком списке.
+   */
+  function subheadItem(row) {
+    return {
+      key: `sh:${row.key}`,
+      html: `<div class="group-label block-subhead">${escapeHtml(row.label)}</div>`,
+    };
+  }
 
   function itemsOfBlock(block, nowSec) {
     if (block.collapsed) return block.rows.map(blockToggleItem);
     if (block.kind === 'projects') return block.rows.map(r => projectItem(r, nowSec));
     if (block.kind === 'snapshots') return block.rows.map(r => snapshotItem(r, nowSec));
-    return block.rows.map(s => sessionItem(s, nowSec));
+    return block.rows.map(s => (
+      s.kind === 'block-subhead' ? subheadItem(s) : sessionItem(s, nowSec)));
   }
 
   function renderBlocks(mode, query, nowSec) {
     const blocks = window.PickerBlocks.buildBlocks({
       groups, projects: projectRows, snapshots: snapshotItemsFor(query),
-      mode, query, trackerHere: trackerIsHere(), expanded: expandedBlocks,
+      mode, query, trackerHere: trackerIsHere(), collapsed: collapsedBlocks,
     });
-    const shape = blocks.map(b => `${b.key}|${b.label}`).join('\n');
+    const shape = blocks.map(b => `${b.key}|${b.label}|${b.column}`).join('\n');
     if (shape !== blocksShape) {
-      list.innerHTML = blocks.map(b =>
-        `<div class="block" data-block="${escapeHtml(b.key)}">` +
-        `<div class="group-label">${escapeHtml(b.label)}</div>` +
-        `<div class="block-rows"></div></div>`).join('');
+      // Колонки — flex-строка из flex-колонок, а не сетка. Сеткой это не
+      // делается: колонка во всю высоту требует охватить все ряды, а
+      // `grid-row: 1 / -1` считает `-1` по **явной** сетке, которой здесь нет —
+      // ряды неявные, размеченные по содержимому, и охватывать нечего. Во
+      // flex-колонке полная высота достаётся сама собой, растяжением.
+      //
+      // Пустая колонка не рисуется вовсе: она забрала бы у соседей свою долю
+      // ширины ради пустоты. Поэтому же ширину колонки задаёт `flex`, а не
+      // доля от трёх, — на `/a` и `/s` колонка остаётся одна и занимает экран.
+      const byColumn = [1, 2, 3]
+        .map(column => blocks.filter(b => b.column === column))
+        .filter(column => column.length);
+      list.innerHTML = byColumn.map(column =>
+        `<div class="block-col col-${column[0].column}">` +
+        column.map(blockCellHtml).join('') + '</div>').join('');
       blocksShape = shape;
       renderedBlocks = new Map();
+      blockBodies = new Map(Array.from(list.querySelectorAll('.block'),
+        el => [el.getAttribute('data-block'), el.querySelector('.block-rows')]));
     }
     blocks.forEach((block, i) => {
+      // Сколько строк было до блока — считается ДО сборки его элементов, а не
+      // вычитанием их числа: подзаголовок машины — элемент без строки, и
+      // арифметика «строк ровно столько же, сколько элементов» на нём врёт.
+      const before = rows.length;
       const items = itemsOfBlock(block, nowSec);
       // Номер блока — на строке: по нему ходят стрелки (picker-blocks.js).
-      for (let n = rows.length - items.length; n < rows.length; n++) rows[n].block = i;
-      const body = list.children[i].querySelector('.block-rows');
+      for (let n = before; n < rows.length; n++) rows[n].block = i;
+      const body = blockBodies.get(block.key);
       const plan = window.PickerListSync.planListSync(
         renderedBlocks.get(block.key), items, body.children.length);
       applyPlan(body, plan);
@@ -1564,7 +1640,7 @@
     // блок. Стоит до разбора обычных видов строк: сессии за ней нет вовсе, и
     // любая ветка ниже приняла бы её за строку без id.
     if (row.kind === 'block-toggle') {
-      expandedBlocks = [...expandedBlocks, row.blockKey];
+      collapsedBlocks = collapsedBlocks.filter(key => key !== row.blockKey);
       render();
       return;
     }
@@ -2036,10 +2112,10 @@
       // помнится в ui.json.
       e.preventDefault();
       fullscreen = !fullscreen;
-      // Развёрнутые блоки — состояние одной раскладки: вернувшись в широкий
-      // режим, человек ждёт его умолчания, а не того, что разворачивал в
+      // Свёрнутые блоки — состояние одной раскладки: вернувшись в широкий
+      // режим, человек ждёт его умолчания, а не того, что сворачивал в
       // прошлый раз.
-      expandedBlocks = [];
+      collapsedBlocks = [];
       invoke('set_picker_size', { fullscreen })
         .catch((err) => { error = String(err); });
       saveUi();
