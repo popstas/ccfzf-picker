@@ -149,7 +149,14 @@
       const desktop = s.desktop ?? null;
       const key = `${desktop}`;
       if (!groups.has(key)) {
-        groups.set(key, { desktop, label: desktop === null ? 'Not running' : `Desktop ${desktop}`, sessions: [] });
+        // `past` — пометка «это уже было», а не «так называется». Широкий режим
+        // отводит истории свою колонку и умеет её сворачивать, и узнавать её по
+        // заголовку значило бы сделать видимую человеку строку форматом: правка
+        // формулировки молча выключила бы и колонку, и сворачивание.
+        groups.set(key, {
+          desktop, past: true, sessions: [],
+          label: desktop === null ? 'Not running' : `Desktop ${desktop}`,
+        });
       }
       groups.get(key).sessions.push(s);
     }

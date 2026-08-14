@@ -13,7 +13,7 @@ const AUG_12 = Math.floor(new Date(2026, 7, 12, 12, 0).getTime() / 1000);
 
 const GROUPS = [
   { label: 'Active local sessions - 2', sessions: [session('a'), session('b')], remote: false },
-  { label: 'Not running', sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
+  { label: 'Not running', past: true, sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
 ];
 
 // Список с двумя чужими машинами: в узком списке это две группы, в широком —
@@ -22,7 +22,7 @@ const REMOTE_GROUPS = [
   { label: 'Active local sessions - 1', sessions: [session('a')], remote: false },
   { label: 'Active on alpha-host - 1', sessions: [session('x')], remote: true, host: 'alpha-host' },
   { label: 'Active on zeta-host - 2', sessions: [session('y'), session('z')], remote: true, host: 'zeta-host' },
-  { label: 'Not running', sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
+  { label: 'Not running', past: true, sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
 ];
 const PROJECTS = [{ id: 'p1', kind: 'project', label: 'picker', cwd: '/home/user/picker' }];
 const SNAPSHOTS = [{ key: 'sn:1', kind: 'snapshot', label: 'work', total: 3 }];
@@ -30,16 +30,30 @@ const SNAPSHOTS = [{ key: 'sn:1', kind: 'snapshot', label: 'work', total: 3 }];
 function base(extra) {
   return {
     groups: GROUPS, projects: PROJECTS, snapshots: SNAPSHOTS,
-    mode: 'sessions', query: '', trackerHere: true, expanded: [], ...extra,
+    mode: 'sessions', query: '', trackerHere: true, collapsed: [], ...extra,
   };
 }
 
 test('каждая группа сессий становится блоком, проекты и снимки — своими', () => {
   const blocks = buildBlocks(base());
+  // Порядок — порядок чтения: колонка за колонкой, сверху вниз внутри колонки.
   assert.deepStrictEqual(blocks.map(b => b.label), [
-    'Active local sessions - 2', 'Not running', 'Projects', 'Snapshots',
+    'Active local sessions - 2', 'Projects', 'Not running', 'Snapshots',
   ]);
-  assert.deepStrictEqual(blocks.map(b => b.kind), ['sessions', 'sessions', 'projects', 'snapshots']);
+  assert.deepStrictEqual(blocks.map(b => b.kind), ['sessions', 'projects', 'sessions', 'snapshots']);
+});
+
+test('раскладка по колонкам: свои живые слева, рядом чужие и проекты, справа история и снимки', () => {
+  // Раскладку задал человек, и держится она на смысле строк: слева то, с чем
+  // работают сейчас, посередине то, что рядом, справа то, к чему возвращаются.
+  const blocks = buildBlocks(base({ groups: REMOTE_GROUPS }));
+  assert.deepStrictEqual(blocks.map(b => [b.label, b.column]), [
+    ['Active local sessions - 1', 1],
+    ['Active remote sessions - 3', 2],
+    ['Projects', 2],
+    ['Not running', 3],
+    ['Snapshots', 3],
+  ]);
 });
 
 test('чужие машины склеиваются в один блок', () => {
@@ -48,12 +62,27 @@ test('чужие машины склеиваются в один блок', () =
   // заголовок ничего не стоит.
   const blocks = buildBlocks(base({ groups: REMOTE_GROUPS }));
   assert.deepStrictEqual(blocks.map(b => b.label), [
-    'Active local sessions - 1', 'Active remote sessions - 3', 'Not running',
-    'Projects', 'Snapshots',
+    'Active local sessions - 1', 'Active remote sessions - 3',
+    'Projects', 'Not running', 'Snapshots',
   ]);
   // Строки — все чужие подряд, в порядке групп: сортировка внутри группы уже
   // сделана, а порядок машин задан алфавитом их имён.
-  assert.deepStrictEqual(blocks[1].rows.map(r => r.id), ['x', 'y', 'z']);
+  assert.deepStrictEqual(
+    blocks[1].rows.filter(r => r.kind !== 'block-subhead').map(r => r.id), ['x', 'y', 'z']);
+});
+
+test('внутри склеенного блока машины названы подзаголовками', () => {
+  // Склейка убрала заголовки групп, а вопрос «на какой машине» остался — ради
+  // него деление и заводили. Подзаголовок отвечает на него внутри колонки.
+  const blocks = buildBlocks(base({ groups: REMOTE_GROUPS }));
+  assert.deepStrictEqual(blocks[1].rows.map(r => r.kind === 'block-subhead' ? r.label : r.id), [
+    'alpha-host - 1', 'x', 'zeta-host - 2', 'y', 'z',
+  ]);
+});
+
+test('счёт в заголовке чужого блока считает сессии, а не подзаголовки', () => {
+  const blocks = buildBlocks(base({ groups: REMOTE_GROUPS }));
+  assert.strictEqual(blocks[1].label, 'Active remote sessions - 3');
 });
 
 test('склейка идёт по пометке группы, а не по её заголовку', () => {
@@ -76,6 +105,21 @@ test('единственная чужая машина тоже становит
   const blocks = buildBlocks(base({ groups, projects: [], snapshots: [] }));
   assert.deepStrictEqual(blocks.map(b => b.label),
     ['Active local sessions - 1', 'Active remote sessions - 1', 'Not running']);
+});
+
+test('колонку истории выбирает пометка группы, а не её заголовок', () => {
+  // Заголовок — видимая человеку строка, и опознавай мы историю по нему,
+  // правка формулировки молча увела бы её из своей колонки и заодно выключила
+  // бы сворачивание. Пометку `past` ставит groupSessions.
+  const renamed = [
+    { label: 'Active local sessions - 1', sessions: [session('a')], remote: false },
+    { label: 'Что угодно', past: true, sessions: [session('old', { live: false })] },
+  ];
+  const blocks = buildBlocks(base({ groups: renamed, projects: [], snapshots: [] }));
+  assert.deepStrictEqual(blocks.map(b => [b.label, b.column]), [
+    ['Active local sessions - 1', 1],
+    ['Что угодно', 3],
+  ]);
 });
 
 test('ключ склеенного блока не зависит от набора машин', () => {
@@ -115,8 +159,18 @@ test('запрос отбирает строки во всех блоках ср
   assert.deepStrictEqual(blocks.map(b => b.kind), ['projects']);
 });
 
-test('свёрнутая история — одна строка со счётом и датой последней активности', () => {
+test('история приходит развёрнутой', () => {
+  // Сворачивалась она затем, чтобы «что было раньше» не оттесняло вниз «что
+  // работает сейчас». Со своей колонкой во всю высоту она никого не оттесняет,
+  // и умолчание перевернулось; сам механизм остался.
   const blocks = buildBlocks(base());
+  const history = blocks.find(b => b.label === 'Not running');
+  assert.strictEqual(history.collapsed, false);
+  assert.deepStrictEqual(history.rows.map(r => r.id), ['old']);
+});
+
+test('свёрнутая история — одна строка со счётом и датой последней активности', () => {
+  const blocks = buildBlocks(base({ collapsed: ['g:Not running'] }));
   const history = blocks.find(b => b.label === 'Not running');
   assert.strictEqual(history.collapsed, true);
   assert.strictEqual(history.rows.length, 1);
@@ -124,11 +178,11 @@ test('свёрнутая история — одна строка со счёт�
   assert.strictEqual(history.rows[0].label, '1 session · last Aug 12');
 });
 
-test('развёрнутая история отдаёт свои сессии', () => {
-  const blocks = buildBlocks(base({ expanded: ['g:Not running'] }));
-  const history = blocks.find(b => b.label === 'Not running');
-  assert.strictEqual(history.collapsed, false);
-  assert.deepStrictEqual(history.rows.map(r => r.id), ['old']);
+test('свернуть можно только историю', () => {
+  // Список свёртываемых заголовков — один, и просьба про чужой блок ничего не
+  // меняет: колонка живых сессий, свёрнутая в строку, не сообщала бы главного.
+  const blocks = buildBlocks(base({ collapsed: ['g:Active local sessions - 2', 'projects'] }));
+  assert.deepStrictEqual(blocks.map(b => b.collapsed), [false, false, false, false]);
 });
 
 test('живые блоки свёрнутыми не приходят', () => {

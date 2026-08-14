@@ -9,10 +9,26 @@
     ? require('./picker-filter')
     : globalThis.PickerFilter;
 
-  // Сворачивается только история: ради неё сворачивание и заведено — «что
-  // было раньше» в широком окне не должно оттеснять вниз «что работает
-  // сейчас». Признак — заголовок группы, который ставит groupSessions.
-  const COLLAPSED_LABELS = ['Not running'];
+  // Колонки широкого режима. Раскладка задана человеком и держится на смысле
+  // строк, а не на их числе: слева то, с чем работают сейчас, посередине то,
+  // что рядом, справа то, к чему возвращаются.
+  //
+  //   1 — свои живые сессии (и зелий): главный список, ему отдана вся высота;
+  //   2 — чужие живые сессии, под ними проекты;
+  //   3 — история, под ней снимки.
+  //
+  // Номер живёт здесь, а не в CSS: колонку выбирают по тому же признаку, по
+  // которому блок собран (`group.remote`, `group.past`), а разбор заголовка
+  // сделал бы видимую человеку строку форматом.
+  const COLUMN_LIVE = 1;
+  const COLUMN_NEAR = 2;
+  const COLUMN_PAST = 3;
+
+  // История приходит развёрнутой: сворачивание заводилось ради того, чтобы
+  // «что было раньше» не оттесняло вниз «что работает сейчас», а со своей
+  // колонкой она никого и не оттесняет. Механизм цел и работает по просьбе
+  // (`opts.collapsed`): строка-переключатель, её Enter и подпись со счётом на
+  // месте.
 
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -55,6 +71,25 @@
   const REMOTE_KEY = 'g:remote';
 
   /**
+   * Подзаголовок машины внутри склеенного блока чужих сессий.
+   *
+   * Склейка убрала заголовки групп, а вопрос «на какой машине» осталась —
+   * ради него деление по машинам и заводили. Поэтому имя машины возвращается
+   * строкой внутри блока: колонка одна, а разделение видно.
+   *
+   * Строка эта — подпись, а не строка списка: выбрать её нельзя, Enter на ней
+   * не сработает, и в `rows` она не попадает вовсе (см. `subheadItem` в
+   * sessions.html).
+   */
+  function subheadRow(group) {
+    return {
+      kind: 'block-subhead',
+      key: `sub:${group.host}`,
+      label: `${group.host} - ${group.sessions.length}`,
+    };
+  }
+
+  /**
    * Блоки широкого режима.
    *
    * Блоки сессий приезжают из groupSessions один в один — с единственным
@@ -77,7 +112,7 @@
     const o = opts || {};
     const mode = o.mode || 'sessions';
     const query = o.query || '';
-    const expanded = new Set(o.expanded || []);
+    const collapsed = new Set(o.collapsed || []);
     const blocks = [];
 
     if (mode === 'sessions') {
@@ -85,21 +120,32 @@
       // задан списком, и уводить чужие сессии в конец значило бы показывать их
       // не там, где они стоят в узком списке.
       let remote = null;
+      let remoteCount = 0;
       for (const group of filterApi.filterSessions(o.groups || [], query)) {
         if (group.remote) {
           if (!remote) {
-            remote = { key: REMOTE_KEY, label: REMOTE_LABEL, kind: 'sessions', rows: [], collapsed: false };
+            remote = {
+              key: REMOTE_KEY, label: REMOTE_LABEL, kind: 'sessions',
+              rows: [], collapsed: false, column: COLUMN_NEAR,
+            };
             blocks.push(remote);
           }
-          remote.rows = [...remote.rows, ...group.sessions];
+          // Подзаголовок перед каждой машиной — в том же массиве строк, что и
+          // сессии: обход блока один, и вторая дорога для подписей разошлась бы
+          // с первой на первой же правке.
+          remote.rows = [...remote.rows, subheadRow(group), ...group.sessions];
+          remoteCount += group.sessions.length;
           continue;
         }
         blocks.push({
           key: `g:${group.label}`, label: group.label, kind: 'sessions',
           rows: group.sessions, collapsed: false,
+          column: group.past ? COLUMN_PAST : COLUMN_LIVE,
+          past: group.past === true,
         });
       }
-      if (remote) remote.label = `${REMOTE_LABEL} - ${remote.rows.length}`;
+      // Счёт — по сессиям, а не по строкам: подзаголовки в него не входят.
+      if (remote) remote.label = `${REMOTE_LABEL} - ${remoteCount}`;
     }
 
     // Проекты и снимки — блоки того же ряда, а не отдельные режимы: в широком
@@ -107,20 +153,39 @@
     // он оставляет на экране один блок.
     if (mode === 'sessions' || mode === 'projects') {
       const rows = filterApi.filterProjects(o.projects || [], query);
-      if (rows.length) blocks.push({ key: 'projects', label: 'Projects', kind: 'projects', rows, collapsed: false });
+      if (rows.length) {
+        blocks.push({
+          key: 'projects', label: 'Projects', kind: 'projects',
+          rows, collapsed: false, column: COLUMN_NEAR,
+        });
+      }
     }
     // Снимки уже отобраны запросом на стороне buildSnapshotRows: у них своя
     // пара «заголовок раскладки и её сессии», и отбор строкой порознь порвал
     // бы её. trackerHere — то же условие, что у ^S.
     if ((mode === 'sessions' || mode === 'snapshots') && o.trackerHere) {
       const rows = o.snapshots || [];
-      if (rows.length) blocks.push({ key: 'snapshots', label: 'Snapshots', kind: 'snapshots', rows, collapsed: false });
+      if (rows.length) {
+        blocks.push({
+          key: 'snapshots', label: 'Snapshots', kind: 'snapshots',
+          rows, collapsed: false, column: COLUMN_PAST,
+        });
+      }
     }
 
-    return blocks.map(block => {
-      if (!COLLAPSED_LABELS.includes(block.label) || expanded.has(block.key)) return block;
+    const shaped = blocks.map(block => {
+      if (!block.past || !collapsed.has(block.key)) return block;
       return { ...block, collapsed: true, rows: [collapsedRow(block)] };
     });
+    // Порядок блоков — порядок чтения: колонка за колонкой, сверху вниз внутри
+    // колонки. По этому же порядку ходят `←/→` (moveBetweenBlocks), и разъедься
+    // он с видимым, стрелка уводила бы не туда, куда смотрит глаз. Сортировка
+    // устойчива, поэтому внутри колонки блоки остаются в порядке сборки:
+    // чужие сессии выше проектов, история выше снимков.
+    return shaped
+      .map((block, at) => ({ block, at }))
+      .sort((a, b) => (a.block.column - b.block.column) || (a.at - b.at))
+      .map(({ block }) => block);
   }
 
   /** Индексы строк одного блока, в порядке показа. */
