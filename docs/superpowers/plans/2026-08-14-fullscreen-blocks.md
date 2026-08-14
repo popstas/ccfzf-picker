@@ -685,7 +685,7 @@ git commit -m "refactor(picker): разметка строки отделена 
       groups, projects: projectRows, snapshots: snapshotItemsFor(query),
       mode, query, trackerHere: trackerIsHere(), expanded: expandedBlocks,
     });
-    const shape = blocks.map(b => `${b.key} ${b.label}`).join('');
+    const shape = blocks.map(b => `${b.key}|${b.label}`).join('\n');
     if (shape !== blocksShape) {
       list.innerHTML = blocks.map(b =>
         `<div class="block" data-block="${escapeHtml(b.key)}">` +
