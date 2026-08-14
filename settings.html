@@ -207,7 +207,15 @@
             fresh.toggles[key] = { ...fresh.toggles[key], [axis]: ui.toggles[key][axis] };
           }
         }
-        await invoke('save_ui', { ui: window.UiState.uiStateToSave(fresh.sort, fresh.toggles) });
+        // Режим окна возвращается в файл нетронутым — по той же причине, что и
+        // `sort`: им распоряжается пикер (`^F`), а окно настроек его не
+        // показывает и не правит. Не верни его uiStateToSave третьим
+        // аргументом — и первое же сохранение вкладки UI забыло бы широкий
+        // режим, а пикер получил бы по `ui-changed` узкую раскладку внутри
+        // широкой рамы.
+        await invoke('save_ui', {
+          ui: window.UiState.uiStateToSave(fresh.sort, fresh.toggles, fresh.fullscreen),
+        });
         // Пикер — другое окно, своего ui.json он не перечитает. Событие
         // рассылается всем окнам, и подписан на него только он.
         if (window.__TAURI__) await window.__TAURI__.event.emit('ui-changed');
