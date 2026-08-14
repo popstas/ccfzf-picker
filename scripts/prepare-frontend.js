@@ -33,6 +33,7 @@ const FILES = [
   'frontend-src/session-name.js',
   'frontend-src/settings-form.js',
   'frontend-src/action-icons.js',
+  'frontend-src/picker-blocks.js',
 ];
 
 fs.mkdirSync(OUT, { recursive: true });
