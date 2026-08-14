@@ -58,6 +58,47 @@
     return new Set(sessions.filter(s => s && s.window).map(s => s.id));
   }
 
+  /** Имя машины — в сравнимый вид. То же правило, что в session-windows.js. */
+  function normHost(value) {
+    return typeof value === 'string' ? value.trim().toLowerCase() : '';
+  }
+
+  /**
+   * Снимки этой машины.
+   *
+   * Раскладку восстанавливают там, где снимали, а список у пикера один на все
+   * источники: агрегатор складывает снимки всех трекеров вместе. Снимок
+   * соседней машины здесь не помог бы ничем — восстановить её раскладку на
+   * своём экране человеку нечего.
+   *
+   * Снимок без имени машины считается своим. Старый агрегатор владельца не
+   * пишет, а трекер тогда был ровно один, и все снимки были его; отбрось мы
+   * такие, режим опустел бы там, где работал. Пикер и агрегатор обновляются
+   * порознь, и порядок нам не подвластен.
+   */
+  function snapshotsHere(state, configHost) {
+    const all = Array.isArray(state?.snapshots) ? state.snapshots : [];
+    const mine = normHost(configHost);
+    return all.filter(s => {
+      if (!s) return false;
+      const host = normHost(s.host);
+      return host ? host === mine : true;
+    });
+  }
+
+  /**
+   * Куда просить о восстановлении этого снимка.
+   *
+   * Адрес называет снимок, а не машина-менеджер: у каждой машины свой префикс
+   * топиков, и просьба обязана уйти той, что снимок сняла. Пустая строка значит
+   * «спроси свой конфиг» — так пикер вёл себя до появления поля, и так он
+   * обязан вести себя со старым агрегатором.
+   */
+  function snapshotBase(snapshot) {
+    const base = snapshot && typeof snapshot.mqttBase === 'string' ? snapshot.mqttBase.trim() : '';
+    return base;
+  }
+
   /**
    * Строки снимков, отобранные запросом.
    *
@@ -101,5 +142,5 @@
     return out;
   }
 
-  return { buildSnapshotRows, openIdsFromState, formatSnapshotTime, projectBasename };
+  return { buildSnapshotRows, openIdsFromState, formatSnapshotTime, projectBasename, snapshotsHere, snapshotBase };
 });

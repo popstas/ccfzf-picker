@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { buildSnapshotRows, openIdsFromState, formatSnapshotTime } =
+const { buildSnapshotRows, openIdsFromState, formatSnapshotTime, snapshotsHere, snapshotBase } =
   require('../frontend-src/picker-snapshots.js');
 
 const SNAP = {
@@ -90,4 +90,47 @@ test('время снимка — час и дата', () => {
 
 test('снимок без времени показывает id вместо даты', () => {
   assert.equal(formatSnapshotTime({ id: 'snap-1' }), 'snap-1');
+});
+
+test('снимки отбираются по своей машине', () => {
+  // Снимок соседней машины в этом списке не помог бы ничем: восстановить
+  // раскладку на чужом экране человеку нечего.
+  const state = {
+    snapshots: [
+      { id: 'a', host: 'windows-box', sessions: [] },
+      { id: 'b', host: 'mac-host', mqttBase: 'home/room/mac/windows', sessions: [] },
+    ],
+  };
+  assert.deepEqual(snapshotsHere(state, 'mac-host').map(s => s.id), ['b']);
+});
+
+test('снимок без машины считается своим', () => {
+  // Старый агрегатор владельца не пишет, а трекер тогда был один — и все
+  // снимки были его. Отбрось мы такие, режим опустел бы там, где работал.
+  const state = { windowHost: 'windows-box', snapshots: [{ id: 'a', sessions: [] }] };
+  assert.deepEqual(snapshotsHere(state, 'windows-box').map(s => s.id), ['a']);
+});
+
+test('имя машины сравнивается без учёта регистра и пробелов', () => {
+  const state = { snapshots: [{ id: 'a', host: 'Mac-Host ', sessions: [] }] };
+  assert.equal(snapshotsHere(state, ' mac-host').length, 1);
+});
+
+test('без снимков — пустой список, а не поломка', () => {
+  assert.deepEqual(snapshotsHere({}, 'mac-host'), []);
+  assert.deepEqual(snapshotsHere({ snapshots: 'нет' }, 'mac-host'), []);
+});
+
+test('адрес снимка берётся у снимка, а не у конфига', () => {
+  assert.equal(
+    snapshotBase({ id: 'b', mqttBase: 'home/room/mac/windows' }),
+    'home/room/mac/windows',
+  );
+});
+
+test('снимок старого агрегатора адреса не называет, и это пустая строка', () => {
+  // Пустая строка значит «спроси свой конфиг» — так пикер вёл себя до
+  // появления поля.
+  assert.equal(snapshotBase({ id: 'a' }), '');
+  assert.equal(snapshotBase(null), '');
 });
