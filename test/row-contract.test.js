@@ -653,7 +653,7 @@ test('с трекером `/s` остаётся режимом снимков, �
 
 test('режим проектов и обычный поиск от трекера не зависят', () => {
   for (const here of [true, false]) {
-    assert.deepStrictEqual(shownFor('/a foo', here), { mode: 'projects', query: 'foo' });
+    assert.deepStrictEqual(shownFor('/p foo', here), { mode: 'projects', query: 'foo' });
     assert.deepStrictEqual(shownFor('foo', here), { mode: 'sessions', query: 'foo' });
   }
 });

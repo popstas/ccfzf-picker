@@ -1423,18 +1423,23 @@
    * где Shift+клик ничего не сделает.
    */
   /**
-   * Открыть список проектов: поставить `/a ` в начало строки поиска.
+   * Открыть список названного режима: поставить его префикс в начало строки
+   * поиска.
    *
-   * Входов два и код у них общий: `^A` внутри окна и глобальный хоткей,
-   * приезжающий событием `picker-projects` от Rust. Режим живёт префиксом в
-   * тексте, а не отдельным флагом, поэтому «открыть в режиме проектов» — это
-   * правка строки поиска, и сделать её может только страница.
+   * Режим живёт префиксом в тексте, а не отдельным флагом, поэтому «открыть в
+   * режиме X» — это правка строки поиска, и сделать её может только страница.
+   * Входов у проектов два и код у них общий: `^P` внутри окна и глобальный
+   * хоткей, приезжающий событием `picker-projects` от Rust.
    */
-  function showProjects() {
-    search.value = window.PickerMode.withProjectPrefix(search.value);
+  function showMode(mode) {
+    search.value = window.PickerMode.withPrefix(search.value, mode);
     search.focus();
     search.setSelectionRange(search.value.length, search.value.length);
     onSearchInput();
+  }
+
+  function showProjects() {
+    showMode('projects');
   }
 
   function markToggleId(row) {
@@ -2113,10 +2118,7 @@
       // отказ, что и у подсказки, и лучше молчащего режима с молчащим Enter.
       e.preventDefault();
       if (!trackerIsHere()) return;
-      search.value = window.PickerMode.withSnapshotPrefix(search.value);
-      search.focus();
-      search.setSelectionRange(search.value.length, search.value.length);
-      onSearchInput();
+      showMode('snapshots');
       return;
     }
     if (plainCtrl && e.code === 'KeyF') {

@@ -11,66 +11,56 @@
    * себя по-разному без видимой причины — а стирание префикса возвращает к
    * сессиям само собой, безо всякого выхода из режима.
    *
-   * `/al` и `/api` префиксом не считаются: человек, ищущий сессию со словом
-   * `/api` в пути, не должен молча оказаться в другом списке.
+   * Одна таблица на все пять, а не пять пар регулярок: разбор, снятие и
+   * вставка обязаны видеть один и тот же набор, иначе `^L` на строке с чужим
+   * префиксом приписал бы свой поверх.
    *
-   * `\s*` впереди — не вольность, а условие того, что обе функции ниже видят
-   * одно и то же. Строка поиска приходит в `^A` живьём, с пробелом, который
-   * человек успел набрать; без этой поблажки `withProjectPrefix` не узнавала бы
-   * уже стоящий префикс и приписывала бы второй, а `parseQuery` на той же
-   * строке оставалась бы в сессиях.
+   * Хвост `(\s+|$)` у каждой записи обязателен: без него `/lib` уводил бы в
+   * режим `local`, а `/home` — в `history`. По этой же причине префиксом не
+   * считаются `/api`, `/src` и `/pr`.
+   *
+   * `\s*` впереди — не вольность: строка поиска приходит в хоткей живьём,
+   * вместе с пробелом, который человек успел набрать. Без этой поблажки
+   * `withPrefix` не узнавала бы уже стоящий префикс и приписывала бы второй.
    */
-  const PROJECT_PREFIX = /^\s*\/(all|a)(\s+|$)/i;
-  const PROJECT_PREFIX_TEXT = '/a ';
+  const PREFIXES = [
+    { mode: 'local', text: '/l ', re: /^\s*\/(local|l)(\s+|$)/i },
+    { mode: 'remote', text: '/r ', re: /^\s*\/(remote|r)(\s+|$)/i },
+    { mode: 'history', text: '/h ', re: /^\s*\/(history|h)(\s+|$)/i },
+    { mode: 'projects', text: '/p ', re: /^\s*\/(projects|p)(\s+|$)/i },
+    { mode: 'snapshots', text: '/s ', re: /^\s*\/(snapshots|s)(\s+|$)/i },
+  ];
 
-  /**
-   * Снимки — третий режим той же строки поиска.
-   *
-   * `/session` и `/src` префиксом не считаются по той же причине, по которой
-   * им не считается `/api`: хвост `(\s+|$)` требует, чтобы после `/s` строка
-   * кончилась или пошёл пробел.
-   */
-  const SNAPSHOT_PREFIX = /^\s*\/(snapshots|s)(\s+|$)/i;
-  const SNAPSHOT_PREFIX_TEXT = '/s ';
+  /** Запись таблицы, которой отвечает начало строки, и длина совпадения. */
+  function matchPrefix(text) {
+    for (const prefix of PREFIXES) {
+      const hit = text.match(prefix.re);
+      if (hit) return { prefix, length: hit[0].length };
+    }
+    return null;
+  }
 
   function parseQuery(raw) {
     const text = String(raw == null ? '' : raw);
-    const project = text.match(PROJECT_PREFIX);
-    if (project) return { mode: 'projects', query: text.slice(project[0].length).trim() };
-    const snapshot = text.match(SNAPSHOT_PREFIX);
-    if (snapshot) return { mode: 'snapshots', query: text.slice(snapshot[0].length).trim() };
+    const hit = matchPrefix(text);
+    if (hit) return { mode: hit.prefix.mode, query: text.slice(hit.length).trim() };
     return { mode: 'sessions', query: text.trim() };
   }
 
-  /**
-   * Снять префикс любого из режимов, оставив сам запрос.
-   *
-   * Режимов стало два, и хоткеи их переключают: `^S` после `^A` обязан
-   * сменить префикс, а не приписать второй. Без этого `/a picker` под `^S`
-   * превращался в `/s /a picker` — режим снимков с запросом, которому ничем
-   * не соответствовать, то есть пустой список без единого слова о причине.
-   */
+  /** Снять префикс любого из режимов, оставив сам запрос. */
   function stripPrefix(text) {
-    const project = text.match(PROJECT_PREFIX);
-    if (project) return text.slice(project[0].length);
-    const snapshot = text.match(SNAPSHOT_PREFIX);
-    if (snapshot) return text.slice(snapshot[0].length);
-    return text;
+    const hit = matchPrefix(text);
+    return hit ? text.slice(hit.length) : text;
   }
 
-  /** Строка поиска с префиксом впереди — то, что делает `^A`. */
-  function withProjectPrefix(raw) {
+  /** Строка поиска с префиксом названного режима впереди — то, что делают хоткеи. */
+  function withPrefix(raw, mode) {
     const text = String(raw == null ? '' : raw);
-    if (PROJECT_PREFIX.test(text)) return text;
-    return PROJECT_PREFIX_TEXT + stripPrefix(text).replace(/^\s+/, '');
+    const target = PREFIXES.find(p => p.mode === mode);
+    if (!target) return text;
+    if (target.re.test(text)) return text;
+    return target.text + stripPrefix(text).replace(/^\s+/, '');
   }
 
-  /** Строка поиска с префиксом снимков впереди. */
-  function withSnapshotPrefix(raw) {
-    const text = String(raw == null ? '' : raw);
-    if (SNAPSHOT_PREFIX.test(text)) return text;
-    return SNAPSHOT_PREFIX_TEXT + stripPrefix(text).replace(/^\s+/, '');
-  }
-
-  return { parseQuery, withProjectPrefix, withSnapshotPrefix, PREFIX_TEXT: PROJECT_PREFIX_TEXT, SNAPSHOT_PREFIX_TEXT };
+  return { parseQuery, withPrefix, stripPrefix, PREFIXES };
 });
