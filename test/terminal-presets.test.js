@@ -18,9 +18,9 @@ test('система узнаётся по тому, что видно стра�
 
 test('в списке — терминалы своей системы и «Custom» последним', () => {
   const mac = presetsFor('MacIntel').map(p => p.id);
-  assert.deepStrictEqual(mac, ['kitty', 'ghostty', 'iterm2', CUSTOM]);
+  assert.deepStrictEqual(mac, ['kitty', 'ghostty', 'iterm2', 'wezterm', CUSTOM]);
   const win = presetsFor('Win32').map(p => p.id);
-  assert.deepStrictEqual(win, ['wt', CUSTOM]);
+  assert.deepStrictEqual(win, ['wt', 'wezterm-windows', CUSTOM]);
   // Чужие по системе не предлагаются: путь с другой системы здесь всё равно
   // не работает.
   assert.ok(!win.includes('iterm2'));
@@ -132,6 +132,28 @@ test('Windows Terminal берёт хвост argv без флагов', () => {
   const argv = argvFor('wt');
   assert.strictEqual(argv[0], 'wt.exe');
   assert.deepStrictEqual(argv.slice(1, 4), ['ssh', '-t', 'host-a']);
+});
+
+test('оба WezTerm берут хвост argv после `start --`', () => {
+  // Без `--` разбор аргументов wezterm принял бы `ssh` за свою подкоманду.
+  // Пресета два, и разница между ними только в пути: на Windows зовётся
+  // `wezterm-gui.exe`, иначе к окну терминала прибавилось бы консольное.
+  // Имя без каталога — как у `wt.exe`: установщик кладёт WezTerm в PATH, а
+  // абсолютный путь был бы вымыслом (msi, portable и scoop кладут по-разному).
+  for (const [id, file] of [
+    ['wezterm', '/Applications/WezTerm.app/Contents/MacOS/wezterm'],
+    ['wezterm-windows', 'wezterm-gui.exe'],
+  ]) {
+    const argv = argvFor(id);
+    assert.strictEqual(argv[0], file);
+    assert.deepStrictEqual(argv.slice(1, 5), ['start', '--', 'ssh', '-t'], id);
+    assert.strictEqual(argv[5], 'host-a', id);
+    // Команда идёт отдельным элементом, а не строкой: подстановок у этого
+    // пресета нет, и кавычить нечего.
+    assert.ok(argv[6].includes('claude'), argv[6]);
+  }
+  assert.notStrictEqual(presetById('wezterm-windows').file, 'wezterm.exe',
+    'на Windows зовётся wezterm-gui.exe — иначе рядом встанет консольное окно');
 });
 
 test('iTerm2 получает команду одной строкой внутри AppleScript', () => {

@@ -30,7 +30,7 @@
   const KNOWN_PANELS = [
     { key: 'live', label: 'Local sessions' },
     { key: 'remote', label: 'Remote sessions' },
-    { key: 'past', label: 'Not running' },
+    { key: 'past', label: 'History' },
     { key: 'zellij', label: 'Zellij' },
     { key: 'projects', label: 'Projects' },
     { key: 'snapshots', label: 'Snapshots' },
@@ -62,7 +62,7 @@
    */
   function labelForUnknown(key) {
     const name = String(key || '');
-    if (name.startsWith('past:')) return `Not running: desktop ${name.slice('past:'.length)}`;
+    if (name.startsWith('past:')) return `History: desktop ${name.slice('past:'.length)}`;
     return name;
   }
 

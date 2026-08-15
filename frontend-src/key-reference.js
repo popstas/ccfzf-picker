@@ -36,7 +36,7 @@
     // обещала бы, что `/` — команда всегда, а в поле поиска это обычный знак,
     // с которого начинаются префиксы режимов.
     { key: '/', label: 'Back to the search box (when it is not focused)' },
-    { key: 'F1', label: 'This list' },
+    { key: 'F1 or ^?', label: 'This list' },
     { key: 'Shift+click', label: 'Mark seen or unread' },
     { key: 'Right click', label: 'Session menu' },
   ];

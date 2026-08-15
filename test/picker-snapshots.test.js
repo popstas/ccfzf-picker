@@ -1,8 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { buildSnapshotRows, openIdsFromState, formatSnapshotTime, snapshotsHere, snapshotBase } =
-  require('../frontend-src/picker-snapshots.js');
+const {
+  buildSnapshotRows, snapshotCount, openIdsFromState, formatSnapshotTime,
+  snapshotDay, dayLabel, snapshotsHere, snapshotBase,
+} = require('../frontend-src/picker-snapshots.js');
 
 const SNAP = {
   id: 'snap-1',
@@ -12,6 +14,21 @@ const SNAP = {
     { id: 'bbb', cwd: '/home/user/projects/js/windows-mqtt', title: 'mqtt' },
   ],
 };
+
+/** Снимок в названный местный день и час — время берётся своими часами. */
+function snapAt(id, y, m, d, hh, mm, sessions) {
+  return {
+    id,
+    created: Math.floor(new Date(y, m - 1, d, hh, mm, 0).getTime() / 1000),
+    sessions: sessions ?? [{ id: `${id}-s`, cwd: '/home/user/projects/js/ccfzf-picker' }],
+  };
+}
+
+/** Строки без дней — то, чем список был до группировки. Так короче сверять. */
+function rowsUnderDays(snapshots, open, query, collapsedDays) {
+  return buildSnapshotRows(snapshots, open ?? new Set(), query ?? '', collapsedDays)
+    .filter(r => r.kind !== 'snapshot-day');
+}
 
 test('openIdsFromState берёт сессии с окном', () => {
   // Отдельного openSessionIds возить неоткуда: всё уже в том же ответе.
@@ -31,7 +48,7 @@ test('openIdsFromState на пустом ответе — пустое множ�
 });
 
 test('заголовок снимка считает, скольких не хватает', () => {
-  const rows = buildSnapshotRows([SNAP], new Set(['aaa']), '');
+  const rows = rowsUnderDays([SNAP], new Set(['aaa']));
   assert.equal(rows[0].kind, 'snapshot');
   assert.equal(rows[0].total, 2);
   assert.equal(rows[0].missing, 1);
@@ -48,29 +65,38 @@ test('строки сессий помечены открытостью', () => 
 
 test('ключи строк разведены и стабильны', () => {
   // picker-list-sync правит только отличающиеся строки, и совпавший ключ
-  // заголовка с ключом сессии подменял бы одну строку другой.
+  // заголовка с ключом сессии подменял бы одну строку другой. День — такой же
+  // заголовок, и его ключ разведён с обоими.
   const rows = buildSnapshotRows([SNAP], new Set(), '');
   assert.deepEqual(rows.map(r => r.key),
-    ['g:snap:snap-1', 'snap:snap-1:aaa', 'snap:snap-1:bbb']);
+    [`g:snapday:${snapshotDay(SNAP)}`, 'g:snap:snap-1', 'snap:snap-1:aaa', 'snap:snap-1:bbb']);
 });
 
 test('имя строки сессии — basename каталога', () => {
-  const rows = buildSnapshotRows([SNAP], new Set(), '');
+  const rows = rowsUnderDays([SNAP]);
   assert.equal(rows[1].label, 'ccfzf-picker');
 });
 
 test('без cwd имя берётся из заголовка', () => {
-  const rows = buildSnapshotRows(
-    [{ id: 's', created: 1, sessions: [{ id: 'x', cwd: '', title: 'заголовок' }] }],
-    new Set(), '');
+  const rows = rowsUnderDays(
+    [{ id: 's', created: 1, sessions: [{ id: 'x', cwd: '', title: 'заголовок' }] }]);
   assert.equal(rows[1].label, 'заголовок');
 });
 
 test('фильтр уносит снимок вместе с заголовком', () => {
   // Снимок без подошедших сессий не должен оставлять на экране пустую группу.
-  const rows = buildSnapshotRows([SNAP], new Set(), 'mqtt');
+  const rows = rowsUnderDays([SNAP], new Set(), 'mqtt');
   assert.deepEqual(rows.map(r => r.key), ['g:snap:snap-1', 'snap:snap-1:bbb']);
   assert.deepEqual(buildSnapshotRows([SNAP], new Set(), 'ничего'), []);
+});
+
+test('день, из которого ушли все снимки, не заводится вовсе', () => {
+  // Заголовок дня без единого снимка — обещание, за которым ничего нет.
+  const rows = buildSnapshotRows([
+    snapAt('a', 2026, 8, 16, 14, 20, [{ id: 'a1', cwd: '/home/user/picker' }]),
+    snapAt('b', 2026, 8, 15, 11, 3, [{ id: 'b1', cwd: '/home/user/mqtt' }]),
+  ], new Set(), 'picker');
+  assert.deepEqual(rows.filter(r => r.kind === 'snapshot-day').map(r => r.label), ['Aug 16']);
 });
 
 test('пустой список снимков — пустой список строк', () => {
@@ -83,13 +109,107 @@ test('снимок без сессий не даёт даже заголовка
   assert.deepEqual(buildSnapshotRows([{ id: 's', created: 1, sessions: [] }], new Set(), ''), []);
 });
 
-test('время снимка — час и дата', () => {
+test('время снимка — только час: дату говорит заголовок дня', () => {
   const text = formatSnapshotTime({ created: 1754640660 });
-  assert.match(text, /^\d{2}:\d{2} · \d{4}-\d{2}-\d{2}$/);
+  assert.match(text, /^\d{2}:\d{2}$/);
 });
 
 test('снимок без времени показывает id вместо даты', () => {
   assert.equal(formatSnapshotTime({ id: 'snap-1' }), 'snap-1');
+});
+
+// ── дни ─────────────────────────────────────────────────────────────────────
+
+const THREE_DAYS = [
+  snapAt('mid', 2026, 8, 16, 11, 3, [{ id: 'm1', cwd: '/home/user/a' }]),
+  snapAt('old', 2026, 8, 14, 9, 30, [{ id: 'o1', cwd: '/home/user/b' }]),
+  snapAt('new', 2026, 8, 16, 14, 20,
+    [{ id: 'n1', cwd: '/home/user/c' }, { id: 'n2', cwd: '/home/user/d' }]),
+];
+
+test('дни идут свежим первым, и внутри дня свежий снимок первый', () => {
+  // Порядок в ответе агрегатора неизвестен, а список перерисовывается раз в
+  // секунду — устойчивый порядок обязателен.
+  const rows = buildSnapshotRows(THREE_DAYS, new Set(), '', { '2026-08-14': false });
+  assert.deepEqual(
+    rows.filter(r => r.kind === 'snapshot-day').map(r => r.label), ['Aug 16', 'Aug 14']);
+  assert.deepEqual(
+    rows.filter(r => r.kind === 'snapshot').map(r => r.id), ['new', 'mid', 'old']);
+});
+
+test('по умолчанию развёрнут только самый свежий день', () => {
+  const rows = buildSnapshotRows(THREE_DAYS, new Set(), '');
+  const days = rows.filter(r => r.kind === 'snapshot-day');
+  assert.deepEqual(days.map(r => r.collapsed), [false, true]);
+  // Свёрнутый день не отдаёт ни снимков, ни сессий — только свой заголовок.
+  assert.deepEqual(rows.filter(r => r.kind === 'snapshot').map(r => r.id), ['new', 'mid']);
+});
+
+test('отступление человека сильнее умолчания — в обе стороны', () => {
+  // Карта — только отступления: чего в ней нет, то по умолчанию. Так
+  // умолчание можно менять, не переписывая никому запомненное.
+  const rows = buildSnapshotRows(THREE_DAYS, new Set(), '',
+    { '2026-08-16': true, '2026-08-14': false });
+  assert.deepEqual(rows.filter(r => r.kind === 'snapshot-day').map(r => r.collapsed),
+    [true, false]);
+  assert.deepEqual(rows.filter(r => r.kind === 'snapshot').map(r => r.id), ['old']);
+});
+
+test('в заголовке дня счёт снимков и счёт сессий', () => {
+  const [day] = buildSnapshotRows(THREE_DAYS, new Set(), '');
+  assert.equal(day.snapshots, 2);
+  assert.equal(day.sessions, 3);
+  assert.equal(day.meta, '2 snapshots · 3 sessions');
+  // Единственное число — без «s»: «1 snapshots» читается как недоделка.
+  const [alone] = buildSnapshotRows([THREE_DAYS[1]], new Set(), '');
+  assert.equal(alone.meta, '1 snapshot · 1 session');
+});
+
+test('непустой запрос разворачивает все дни и снимает с них сворачивание', () => {
+  // Искали снимок, а не счёт. А раз свёрнутость назначена сверху, Enter на
+  // заголовке молчал бы — поэтому же он перестаёт быть переключателем.
+  const rows = buildSnapshotRows(THREE_DAYS, new Set(), 'user', { '2026-08-16': true });
+  const days = rows.filter(r => r.kind === 'snapshot-day');
+  assert.deepEqual(days.map(r => r.collapsed), [false, false]);
+  assert.deepEqual(days.map(r => r.foldable), [false, false]);
+  assert.deepEqual(rows.filter(r => r.kind === 'snapshot').map(r => r.id), ['new', 'mid', 'old']);
+});
+
+test('снимок без отметки времени уходит в день «No date», и день этот последний', () => {
+  const rows = buildSnapshotRows([
+    { id: 'no-time', sessions: [{ id: 'x', cwd: '/home/user/a' }] },
+    THREE_DAYS[0],
+  ], new Set(), '');
+  const days = rows.filter(r => r.kind === 'snapshot-day');
+  assert.deepEqual(days.map(r => r.label), ['Aug 16', 'No date']);
+  assert.deepEqual(days.map(r => r.key), ['g:snapday:2026-08-16', 'g:snapday:none']);
+});
+
+test('счёт секции снимков не зависит от того, что свёрнуто', () => {
+  // Иначе «Snapshots - 3» превращалось бы в «Snapshots - 1» без единого
+  // исчезнувшего снимка: строки свёрнутого дня в список не попадают вовсе.
+  const open = buildSnapshotRows(THREE_DAYS, new Set(), '', { '2026-08-14': false });
+  const shut = buildSnapshotRows(THREE_DAYS, new Set(), '', { '2026-08-16': true });
+  assert.equal(snapshotCount(open), 3);
+  assert.equal(snapshotCount(shut), 3);
+  assert.equal(snapshotCount([]), 0);
+});
+
+test('подпись дня — английский месяц из своей таблицы', () => {
+  // toLocaleDateString дал бы вид по локали системы, а всё видимое человеку у
+  // нас английское.
+  assert.equal(dayLabel('2026-08-16'), 'Aug 16');
+  assert.equal(dayLabel('2026-01-01'), 'Jan 1');
+  assert.equal(dayLabel(''), 'No date');
+});
+
+test('день считается местными часами', () => {
+  // «Когда я это снимал» человек меряет своими часами — тот же довод, по
+  // которому местной была дата в заголовке свёрнутой истории.
+  const noon = Math.floor(new Date(2026, 7, 16, 12, 0, 0).getTime() / 1000);
+  assert.equal(snapshotDay({ created: noon }), '2026-08-16');
+  assert.equal(snapshotDay({}), '');
+  assert.equal(snapshotDay({ created: 0 }), '');
 });
 
 test('снимки отбираются по своей машине', () => {
