@@ -661,6 +661,32 @@
     render();
     return true;
   }
+  // Путь помощника, разворачивающего команду на месте. Спрашивается у Rust:
+  // лежит он рядом с config.yaml, а домашнего каталога страница не знает.
+  //
+  // Нужен не всем: спрашивается ровно тогда, когда терминал назвал его в своих
+  // аргументах (`{helper}`), — у kitty, Ghostty и Windows Terminal ветка эта не
+  // включается вовсе. Ответ помнится: файл переписывается на каждый спрос, и
+  // делать это на каждое открытие сессии незачем.
+  let helperCache = null;
+  let helperError = '';
+  function helperNeeded() {
+    return ((CONFIG.terminal || {}).args || [])
+      .some(a => String(a).includes(window.OpenStrategy.HELPER_PLACEHOLDER));
+  }
+  async function helperPath() {
+    if (!helperNeeded()) return '';
+    if (helperCache) return helperCache;
+    try {
+      helperCache = await invoke('terminal_helper');
+      helperError = '';
+    } catch (e) {
+      helperCache = null;
+      helperError = String(e);
+    }
+    return helperCache || '';
+  }
+
   // Чекбоксы statusline. Набор ключей задаётся здесь и только здесь: его же
   // читает normalizeUiState, отбрасывая из ui.json всё, чего в этом списке нет.
   // Порядок и группы — как в самой строке списка: сначала то, что рисуется
@@ -1809,9 +1835,14 @@
     if (action === 'manager') return openViaManager(row);
     if (sshHostMissing()) return;
     const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, {
-      sshHost: CONFIG.sshHost, terminal: CONFIG.terminal,
+      sshHost: CONFIG.sshHost, terminal: CONFIG.terminal, helperPath: await helperPath(),
     });
-    if (!cmd) return;
+    if (!cmd) {
+      // Пустая команда у терминала с помощником значит, что путь не приехал:
+      // молчать нельзя, иначе Enter не сработал бы без единого слова.
+      if (helperNeeded()) { error = helperError || 'terminal helper is not available'; render(); }
+      return;
+    }
     if (cmd.destructive) {
       const ok = confirm(
         `Take over session "${sessionName(row)}"?\n\n`
@@ -2418,11 +2449,18 @@
       render();
       return;
     }
-    const argv = [
-      CONFIG.terminal.file, ...CONFIG.terminal.args,
-      'ssh', '-t', CONFIG.sshHost,
-      remote,
-    ];
+    // Через ту же terminalArgv, что и открытие сессии. Собранный здесь руками
+    // `[file, ...args, 'ssh', …]` про подстановку не знал вовсе: у iTerm2 это
+    // давало окно, в которое печатается литеральный `{command}`, а ssh с
+    // аргументами уезжал osascript в никуда. Поймано живьём 2026-08-15.
+    const argv = window.OpenStrategy.terminalArgv(
+      CONFIG.terminal, ['ssh', '-t', CONFIG.sshHost, remote], { helperPath: await helperPath() },
+    );
+    if (!argv) {
+      error = helperError || 'terminal helper is not available';
+      render();
+      return;
+    }
     try {
       await invoke('spawn_detached', { argv });
     } catch (e) {

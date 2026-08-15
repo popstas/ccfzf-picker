@@ -199,6 +199,80 @@ test('незнакомая стратегия не даёт команды', () 
   assert.strictEqual(buildOpenCommand(row(), 'нет такой', OPTS), null);
 });
 
+// ── terminalArgv: одно место, где команда встречается с терминалом ──────────
+//
+// Мина, ради которой это заведено, уже сработала: `newSession` в
+// `sessions.html` собирал argv руками — `[file, ...args, 'ssh', …]`, — то есть
+// про подстановку не знал вовсе. У iTerm2 это значило окно, в которое
+// печатается литеральный `{command}`, а `ssh` с аргументами уезжает osascript
+// в никуда. Живьём поймано 2026-08-15. Второй сборки argv быть не должно.
+
+const { terminalArgv, toBase64 } = require('../frontend-src/open-strategy');
+const PARTS = ['ssh', '-t', 'host-a', "exec $SHELL -ic 'cd -- x'"];
+
+test('терминал без подстановки получает команду хвостом argv', () => {
+  assert.deepStrictEqual(terminalArgv({ file: 'kitty', args: ['--hold'] }, PARTS, {}),
+    ['kitty', '--hold', ...PARTS]);
+});
+
+test('терминалу с {command} команда приезжает одной строкой', () => {
+  const argv = terminalArgv({ file: 'x', args: ['-e', 'run "{command}"'] }, PARTS, {});
+  assert.strictEqual(argv.length, 3);
+  assert.ok(!argv[2].includes('{command}'), argv[2]);
+  assert.ok(argv[2].includes('ssh'), argv[2]);
+});
+
+test('терминалу с помощником не достаётся ни одной кавычки', () => {
+  // Ради этого помощник и заведён: токенизатор iTerm2 обрабатывает `\` внутри
+  // одинарных кавычек, поэтому команду ему отдавать нельзя вовсе. Отдаётся
+  // путь помощника и base64 — а в алфавите base64 нет ни кавычки, ни слэша
+  // наружу, ни пробела, так что делить тут нечего и портить нечего.
+  const term = { file: 'osascript', args: ['-e', 'run command "{helper} {commandBase64}"'] };
+  const argv = terminalArgv(term, PARTS, { helperPath: '/home/user/.config/x/open.sh' });
+  const script = argv[2];
+  assert.ok(!script.includes('{helper}') && !script.includes('{commandBase64}'), script);
+  // Внутри кавычек AppleScript — ровно два токена, и оба безопасны.
+  const inside = script.slice(script.indexOf('"') + 1, script.lastIndexOf('"'));
+  assert.deepStrictEqual(inside.split(' ').length, 2, inside);
+  const [path, blob] = inside.split(' ');
+  assert.strictEqual(path, '/home/user/.config/x/open.sh');
+  assert.match(blob, /^[A-Za-z0-9+/]+={0,2}$/, blob);
+});
+
+test('base64 разворачивается обратно в ту же команду', () => {
+  // Круг замыкается на той стороне: помощник декодирует и отдаёт шеллу.
+  const term = { file: 'osascript', args: ['{helper} {commandBase64}'] };
+  const blob = terminalArgv(term, PARTS, { helperPath: '/h' })[1].split(' ')[1];
+  assert.strictEqual(Buffer.from(blob, 'base64').toString('utf8'),
+    PARTS.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' '));
+});
+
+test('не-ASCII в пути переживает base64', () => {
+  // Каталог с кириллицей — обычное дело, а btoa на таком падает: кодировать
+  // надо байты UTF-8, а не символы.
+  const term = { file: 'x', args: ['{helper} {commandBase64}'] };
+  const parts = ['ssh', '-t', 'h', 'cd -- /home/user/проекты/тест'];
+  const blob = terminalArgv(term, parts, { helperPath: '/h' })[1].split(' ')[1];
+  assert.ok(Buffer.from(blob, 'base64').toString('utf8').includes('проекты/тест'));
+});
+
+test('без пути помощника команда не собирается', () => {
+  // Молча уехать нельзя: пустой путь дал бы токен-пустышку, iTerm2 запустил бы
+  // base64 как программу, и окно закрылось бы — тот самый симптом, с которого
+  // всё началось.
+  const term = { file: 'x', args: ['{helper} {commandBase64}'] };
+  assert.strictEqual(terminalArgv(term, PARTS, {}), null);
+  assert.strictEqual(terminalArgv(term, PARTS, { helperPath: '' }), null);
+});
+
+test('toBase64 не тащит переносов строк', () => {
+  // Перенос внутри токена разорвал бы его на два, и второй уехал бы отдельным
+  // аргументом. У длинной команды это не гипотеза: base64 в утилитах переносит
+  // по 76 знаков.
+  const blob = toBase64('x'.repeat(400));
+  assert.ok(!blob.includes('\n'), blob);
+});
+
 test('новая сессия называется по каталогу проекта', () => {
   // Имя не для красоты: по нему оконный трекер находит сессию в заголовке
   // окна, не дожидаясь /rename. Форма взята у ccfzf.
@@ -290,4 +364,21 @@ test('строка зелийной сессии присоединяется с
   assert.strictEqual(chooseOpenStrategy(row, {}, {}), 'attach');
   const cmd = buildOpenCommand(row, 'attach', { sshHost: 'user@example-host', terminal: { file: 'wt', args: [] } });
   assert.ok(cmd.argv.includes("zellij attach 'home'"), cmd.argv);
+});
+
+test('страница не собирает argv терминала мимо terminalArgv', () => {
+  // Мина сработавшая: `newSession` складывал argv у себя,
+  // `[CONFIG.terminal.file, ...CONFIG.terminal.args, 'ssh', …]`, и про
+  // подстановку не знал вовсе — у iTerm2 это давало окно с литеральным
+  // `{command}`, а ssh уезжал osascript в никуда. Ловится текстом страницы:
+  // поведением это не поймать, argv тут собирается верным для kitty и молча
+  // неверным для того единственного терминала, который подстановкой живёт.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const page = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+  const byHand = page.match(/terminal\.file,\s*\.\.\.[A-Za-z_$][\w$]*\.terminal\.args/g) || [];
+  assert.deepStrictEqual(byHand, [], 'argv терминала снова собирается на месте');
+  // И обратное: обе дороги открытия обязаны звать общую сборку.
+  const calls = page.match(/OpenStrategy\.terminalArgv\(/g) || [];
+  assert.ok(calls.length >= 1, 'terminalArgv со страницы не зовётся вовсе');
 });
