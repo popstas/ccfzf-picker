@@ -259,9 +259,15 @@ cargo решает про `build.rs` до того, как хоть что-то 
   берут.** Обычный путь (`buildOpenCommand` в `frontend-src/open-strategy.js`)
   — `[terminal.file, ...terminal.args, 'ssh', '-t', host, remote]`: элементы
   уходят аргументами процесса, и кавычить нечего. kitty исполняет этот хвост
-  как есть, Ghostty хочет его после `-e`, Windows Terminal берёт как есть —
-  всем троим хватает пресета с верными аргументами (`terminal-presets.js`,
-  выбор в настройках полем «Terminal preset»).
+  как есть, Ghostty хочет его после `-e`, Windows Terminal берёт как есть,
+  WezTerm — после `start --` (без `--` он принял бы `ssh` за свою подкоманду);
+  всем четверым хватает пресета с верными аргументами (`terminal-presets.js`,
+  выбор в настройках полем «Terminal preset»). Окно после конца сессии WezTerm
+  закрывает, и держать его нечем: флага вроде kitty-шного `--hold` у
+  `wezterm start` нет вовсе — это `exit_behavior` в `~/.wezterm.lua`, то есть
+  настройка человека, а не пресета. На Windows он зовётся `wezterm-gui.exe`
+  (обычный `wezterm.exe` привёл бы с собой консольное окно) и без каталога —
+  как `wt.exe`, потому что абсолютный путь у msi, portable и scoop разный.
 
   iTerm2 в argv команду не принимает вовсе: `open -a iTerm` аргументы до
   программы не доносит. Единственная дорога к нему — AppleScript, где команда

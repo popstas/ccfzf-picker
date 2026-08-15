@@ -2,10 +2,6 @@
 
 # next
 
-- [ ] **Пресет WezTerm — для Windows и macOS.** Добавить в
-  `frontend-src/terminal-presets.js` (проверить, каким из трёх способов
-  `terminalArgv` он берёт команду: хвостом argv, `{command}` или `{helper}`).
-
 # future
 
 - [ ] **Завести местный режим — работу без отдельного хоста для агентов.**

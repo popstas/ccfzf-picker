@@ -60,6 +60,23 @@
    * `--single-instance` в одном ряду читается тревожно: второе окно отдаёт уже
    * запущенный экземпляр, и до него флаг может не доехать. Проверять это
    * можно только живьём, здесь ни одного из этих терминалов нет.
+   *
+   * WezTerm берёт команду хвостом argv, как kitty, — но после `start --`: без
+   * `--` его разбор аргументов принял бы `ssh` за свою подкоманду. Пресета два,
+   * и разница между ними только в пути: на маке зовётся `wezterm` из бандла
+   * приложения, на Windows — `wezterm-gui.exe`, а не `wezterm.exe`, иначе к
+   * окну терминала прибавилось бы консольное окно самого запускающего.
+   *
+   * Имя без каталога — та же форма, что у `wt.exe`, и по той же причине:
+   * установщик кладёт WezTerm в PATH, а абсолютный путь тут был бы вымыслом
+   * (у msi, portable-распаковки и scoop он разный). Не нашёлся — человек
+   * допишет путь в поле руками, пресет для того поля и заполняет.
+   *
+   * Окно после конца сессии WezTerm закрывает — держать его нечем: флага вроде
+   * kitty-шного `--hold` у `wezterm start` нет вовсе, это `exit_behavior` в его
+   * собственном конфиге (`~/.wezterm.lua`), то есть настройка человека, а не
+   * пресета. Решено оставить как есть: цена — непрочитанная ошибка ssh, та же,
+   * что была у kitty до `--hold`.
    */
   const PRESETS = [
     {
@@ -76,6 +93,10 @@
       args: ['-e', 'tell application "iTerm" to create window with default profile command "{helper} {commandBase64}"'],
     },
     {
+      id: 'wezterm', label: 'WezTerm', os: 'macos',
+      file: '/Applications/WezTerm.app/Contents/MacOS/wezterm', args: ['start', '--'],
+    },
+    {
       id: 'kitty-linux', label: 'kitty', os: 'linux',
       file: '/usr/bin/kitty', args: ['--single-instance', '--hold'],
     },
@@ -86,6 +107,10 @@
     {
       id: 'wt', label: 'Windows Terminal', os: 'windows',
       file: 'wt.exe', args: [],
+    },
+    {
+      id: 'wezterm-windows', label: 'WezTerm', os: 'windows',
+      file: 'wezterm-gui.exe', args: ['start', '--'],
     },
   ];
 
