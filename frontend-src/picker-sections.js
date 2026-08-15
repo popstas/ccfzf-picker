@@ -186,9 +186,22 @@
       }
     }
 
+    // Непустой запрос разворачивает всё, и это сильнее любой памяти о
+    // свёрнутости: секция, свёрнутая под запросом, прятала бы ровно то, что
+    // человек только что искал, — а о том, что оно там, ему узнать неоткуда.
+    // Причина та же, по которой разворачивает префикс.
+    const searching = String(query).trim() !== '';
+    // Свернуть можно только ту секцию, чья свёрнутость не назначена сверху.
+    // Под запросом и под префиксом она назначена, и Enter на заголовке не дал
+    // бы ничего видимого: `collapsed: true` тут же затёрлось бы обратно.
+    // Молчащий переключатель хуже отсутствующего, поэтому там заголовок —
+    // подпись, а не строка списка (см. `sectionItem` в sessions.html), и в
+    // `rows` он не попадает вовсе, как заголовок группы до всей этой затеи.
+    const foldable = mode === 'sessions' && !searching;
     const shaped = sections.map(section => ({
       ...section,
-      collapsed: mode !== 'sessions' ? false
+      foldable,
+      collapsed: !foldable ? false
         : (typeof override[section.key] === 'boolean'
           ? override[section.key]
           : defaultCollapsed(section, wide ? 'wide' : 'narrow')),

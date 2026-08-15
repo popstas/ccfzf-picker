@@ -290,3 +290,36 @@ test('пустой список никуда не ведёт', () => {
   assert.strictEqual(moveInBlocks([], 0, 1), 0);
   assert.strictEqual(moveBetweenBlocks([], 0, 1), 0);
 });
+
+test('непустой запрос разворачивает секции, и память о свёрнутости не спорит', () => {
+  // Свёрнутая под запросом секция прятала бы ровно то, что человек только что
+  // искал, — а о том, что оно там, ему узнать неоткуда: в заголовке счёт всей
+  // секции, а не найденного. Отсюда правило сильнее памяти: `past` свёрнут и
+  // по умолчанию, и рукой человека, а под запросом всё равно раскрыт.
+  const found = buildSections(base({
+    layout: 'narrow', query: 'old', collapsed: { past: true },
+  }));
+  const past = found.find(s => s.key === 'past');
+  assert.ok(past, found.map(s => s.key));
+  assert.strictEqual(past.collapsed, false);
+  assert.deepStrictEqual(past.rows.map(r => r.id), ['old']);
+
+  // Пустой запрос — и память снова главная.
+  const idle = buildSections(base({ layout: 'narrow', collapsed: { past: true } }));
+  assert.strictEqual(idle.find(s => s.key === 'past').collapsed, true);
+});
+
+test('сворачивать можно только там, где свёрнутость не назначена сверху', () => {
+  // Под запросом и под префиксом она назначена, и Enter на заголовке не дал бы
+  // ничего видимого: `collapsed: true` тут же затёрлось бы обратно. Молчащий
+  // переключатель хуже отсутствующего, поэтому там заголовок — подпись.
+  assert.ok(buildSections(base({ layout: 'narrow' })).every(s => s.foldable === true));
+  assert.ok(buildSections(base({ layout: 'wide' })).every(s => s.foldable === true));
+  assert.ok(buildSections(base({ layout: 'narrow', query: 'old' }))
+    .every(s => s.foldable === false));
+  assert.ok(buildSections(base({ layout: 'narrow', mode: 'projects' }))
+    .every(s => s.foldable === false));
+  // Пробелы запросом не считаются: строка из одних пробелов ничего не отбирает.
+  assert.ok(buildSections(base({ layout: 'narrow', query: '   ' }))
+    .every(s => s.foldable === true));
+});

@@ -933,10 +933,20 @@
    * точки состояния, ни правых колонок, и ставить ради него сетку не за чем.
    */
   function sectionItem(section) {
+    const text = window.PickerSections.sectionHeaderText(section);
+    // Под запросом и под префиксом сворачивать нечего: секция там развёрнута
+    // назначением сверху, и переключатель молчал бы. Заголовок в этом случае —
+    // подпись, а не строка: ни `data-index`, ни класса `row`, и в `rows` он не
+    // попадает — стрелки под запросом ходят прямо по найденному.
+    if (!section.foldable) {
+      return {
+        key: `sec:${section.key}`,
+        html: `<div class="group-label">${escapeHtml(text)}</div>`,
+      };
+    }
     const index = rows.length;
     rows.push({ kind: 'section', sectionKey: section.key, collapsed: section.collapsed });
     const mark = section.collapsed ? '▸' : '▾';
-    const text = window.PickerSections.sectionHeaderText(section);
     return {
       key: `sec:${section.key}`,
       html: `<div class="row section" data-index="${index}">` +

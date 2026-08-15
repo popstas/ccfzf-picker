@@ -336,7 +336,14 @@ const PickerSections = require('../frontend-src/picker-sections');
 function withoutHeader(items, rows) {
   // Array.from — не украшение: массив приезжает из vm, у него другой Object, и
   // deepStrictEqual сравнивает ещё и прототип.
-  return { items: Array.from(items).slice(1), rows: rows.slice(1) };
+  //
+  // Отбор по виду, а не по месту: под пустым запросом заголовок секции —
+  // строка списка и занимает место в `rows`, под непустым — подпись, и в
+  // `rows` его нет вовсе. Срез по единице врал бы в одном из двух случаев.
+  return {
+    items: Array.from(items).filter(i => !String(i.key).startsWith('sec:')),
+    rows: rows.filter(r => r.kind !== 'section'),
+  };
 }
 
 function pageFunctions(...signatures) {
@@ -436,9 +443,10 @@ test('строка проекта доезжает с настоящего пу�
   assert.ok(!items[1].html.includes('mark'), items[1].html);
 
   // data-index — это индекс в rows, по нему меню и клик находят строку.
-  // Плюс единица — заголовок секции: он такая же строка списка и стоит первым.
+  // Нумерация с нуля: под префиксом (а этот режим и есть префикс `/p`)
+  // заголовок секции — подпись, а не строка, и места в `rows` не занимает.
   for (let i = 0; i < items.length; i += 1) {
-    assert.ok(items[i].html.includes(`data-index="${i + 1}"`), items[i].html);
+    assert.ok(items[i].html.includes(`data-index="${i}"`), items[i].html);
     assert.strictEqual(rows[i].id, AGGREGATOR_PROJECTS[i].path);
     assert.strictEqual(rows[i].kind, 'project');
   }
@@ -461,7 +469,9 @@ test('отбор проектов и порядок строк — тот же, 
   // после набора в строке поиска клик открывал бы соседний проект.
   const { items, rows } = renderProjectRows(AGGREGATOR_PROJECTS, 'empty');
   assert.strictEqual(items.length, 1);
-  assert.ok(items[0].html.includes('data-index="1"'), items[0].html);
+  // Под непустым запросом заголовок секции — подпись, а не строка, поэтому
+  // нумерация снова начинается с нуля.
+  assert.ok(items[0].html.includes('data-index="0"'), items[0].html);
   assert.strictEqual(rows[0].id, '/home/user/projects/empty');
 
   const byPath = renderProjectRows(AGGREGATOR_PROJECTS, 'projects/ccfzf');
@@ -581,8 +591,8 @@ test('строка снимка доезжает с настоящего пут�
   assert.deepStrictEqual(items.map(i => i.key),
     ['g:snap:snap-1', 'snap:snap-1:aaa', 'snap:snap-1:bbb']);
   for (let i = 0; i < items.length; i += 1) {
-    // Плюс единица — заголовок секции: он стоит первой строкой списка.
-    assert.ok(items[i].html.includes(`data-index="${i + 1}"`), items[i].html);
+    // С нуля по той же причине, что и у проектов: режим снимков — префикс.
+    assert.ok(items[i].html.includes(`data-index="${i}"`), items[i].html);
     assert.ok(!items[i].html.includes('undefined'), items[i].html);
   }
 
@@ -620,7 +630,7 @@ test('отбор снимков и порядок строк — тот же, ч
   const { items, rows } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, 'empty');
   assert.strictEqual(items.length, 2);
   assert.deepStrictEqual(rows.map(r => r.id), ['snap-1', 'bbb']);
-  assert.ok(items[1].html.includes('data-index="2"'), items[1].html);
+  assert.ok(items[1].html.includes('data-index="1"'), items[1].html);
   assert.deepStrictEqual(renderSnapshotRows(AGGREGATOR_SNAPSHOTS, 'нет такого').items, []);
 });
 
@@ -1389,12 +1399,12 @@ test('renderWide: номер строки в разметке совпадает
   const SECTIONS = [
     {
       key: 'live', label: 'Active local sessions', kind: 'sessions',
-      count: 1, lastAt: 0, collapsed: false, column: 1,
+      count: 1, lastAt: 0, collapsed: false, foldable: true, column: 1,
       rows: [{ id: 'a' }],
     },
     {
       key: 'remote', label: 'Active remote sessions', kind: 'sessions',
-      count: 2, lastAt: 0, collapsed: false, column: 2,
+      count: 2, lastAt: 0, collapsed: false, foldable: true, column: 2,
       rows: [
         { kind: 'block-subhead', key: 'sub:alpha-host', label: 'alpha-host - 2' },
         { id: 'x' }, { id: 'y' },
@@ -1465,7 +1475,8 @@ test('свёрнутая секция отдаёт один заголовок, 
     subheadItem: () => { throw new Error('свёрнутая секция не должна рисовать строки'); },
     SECTION: {
       key: 'past', label: 'Not running', kind: 'sessions', count: 47,
-      lastAt: 0, collapsed: true, rows: new Array(47).fill({ id: 'old' }),
+      lastAt: 0, collapsed: true, foldable: true,
+      rows: new Array(47).fill({ id: 'old' }),
     },
   });
   const items = vm.runInContext(
@@ -1527,4 +1538,30 @@ test('меню не открывается на заголовке секции'
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nopenMenu();`, ctx, { filename: 'sessions.html' });
   assert.deepStrictEqual(calls, []);
+});
+
+test('заголовок несворачиваемой секции — подпись, а не строка списка', () => {
+  // Под запросом и под префиксом свернуть секцию нечем, и заголовок обязан
+  // перестать быть строкой: иначе Enter на нём молчал бы, а стрелки ходили бы
+  // через строку, по которой ничего не открывается.
+  const rows = [];
+  const ctx = vm.createContext({
+    rows,
+    escapeHtml: (s) => String(s),
+    window: { PickerSections },
+    SECTION: {
+      key: 'past', label: 'Not running', kind: 'sessions', count: 3,
+      lastAt: 0, collapsed: false, foldable: false, rows: [],
+    },
+  });
+  const item = vm.runInContext(
+    `${pageFunctions('sectionItem(section)')}\nsectionItem(SECTION);`,
+    ctx, { filename: 'sessions.html' });
+  assert.ok(item.html.includes('class="group-label"'), item.html);
+  assert.ok(!item.html.includes('data-index'), item.html);
+  assert.ok(!item.html.includes('▾'), item.html);
+  // Главное: в rows он не попал, то есть ни стрелке, ни клику не виден.
+  assert.strictEqual(rows.length, 0);
+  // Счёт при этом на месте — подпись остаётся подписью секции.
+  assert.ok(item.html.includes('Not running - 3'), item.html);
 });
