@@ -298,25 +298,23 @@ fn wanted_size(fullscreen: bool, scale: PickerScale, screen: Option<(f64, f64)>)
         (NARROW_SIZE, scale.narrow)
     };
     let Some(screen) = screen else { return base };
-    let axis = |base: f64, pct: f64, screen: f64, clamp: bool| {
+    // Встроенный размер широкой раскладки зажимается по экрану, и зажимает его
+    // всё та же `fit_to_screen`. Узкое окно встроенным размером не зажималось
+    // никогда — оно заведомо меньше любого экрана, на котором пикер
+    // запускают, — и менять это здесь незачем: сторож
+    // `narrow_size_matches_the_window_config` держится за то, что при выборе
+    // `Default` окно открывается ровно размером из `tauri.conf.json`.
+    let fitted = if fullscreen { fit_to_screen(base, screen) } else { base };
+    let axis = |fitted: f64, pct: f64, screen: f64| {
         if pct > 0.0 && screen > 0.0 && !screen.is_nan() {
-            return screen * pct / 100.0;
-        }
-        if clamp {
-            fit_axis(base, screen)
+            screen * pct / 100.0
         } else {
-            base
+            fitted
         }
     };
-    // Узкое окно встроенным размером не зажималось никогда — оно заведомо
-    // меньше любого экрана, на котором пикер запускают, — и менять это здесь
-    // незачем: сторож `narrow_size_matches_the_window_config` держится за то,
-    // что при выборе `Default` окно открывается ровно размером из
-    // `tauri.conf.json`.
-    let clamp = fullscreen;
     (
-        axis(base.0, pct.0, screen.0, clamp),
-        axis(base.1, pct.1, screen.1, clamp),
+        axis(fitted.0, pct.0, screen.0),
+        axis(fitted.1, pct.1, screen.1),
     )
 }
 
