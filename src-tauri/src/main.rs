@@ -161,6 +161,19 @@ fn toggle_window(app: &tauri::AppHandle, projects: bool) {
 fn show_picker(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("picker") else { return };
     let _ = window.show();
+    // Отложенный размер применяется здесь и только после `show()`: просьба,
+    // пришедшая по скрытому окну, была отложена именно потому, что экрана у
+    // такого окна нет. См. `SizeRequest`. Отказ стоит строки в stderr, а не
+    // возврата: показ окна дороже размера, и не показать его из-за неудавшейся
+    // центровки было бы хуже, чем показать не той ширины.
+    if let Some(fullscreen) = app
+        .try_state::<PickerSize>()
+        .and_then(|state| state.0.lock().unwrap().shown())
+    {
+        if let Err(e) = apply_picker_size(&window, fullscreen) {
+            eprintln!("ccfzf-picker: {e}");
+        }
+    }
     let _ = window.set_focus();
     // Список обновляется на показе: между открытиями он устаревает, а
     // опрашивать закрытый пикер незачем.
@@ -173,6 +186,231 @@ fn show_picker(app: &tauri::AppHandle) {
 #[tauri::command]
 fn hide_picker(app: tauri::AppHandle) {
     hide_window(&app);
+}
+
+/// Размеры окна пикера.
+///
+/// Узкий обязан совпадать с `tauri.conf.json` — с ним пикер открывается, к
+/// нему же возвращается выход из широкого режима; сторожит это тест.
+/// Широкий — не весь экран намеренно: окно `alwaysOnTop`, и под ним должно
+/// остаться видно, что было. По той же причине он ещё и зажимается по экрану:
+/// 1400×900 на тринадцатидюймовом маке (логические 1440×900) закрывают экран
+/// целиком и залезают под строку меню, а отступить некуда — окно без декораций
+/// и drag-region, мышью его не подвинуть вовсе. Отсюда `SCREEN_FILL`: желаемое
+/// или доля экрана, что меньше.
+const NARROW_SIZE: (f64, f64) = (900.0, 640.0);
+const WIDE_SIZE: (f64, f64) = (1400.0, 900.0);
+
+/// Доля экрана, больше которой широкое окно не берёт. Остаток — та самая
+/// полоса, по которой видно, что было под пикером.
+const SCREEN_FILL: f64 = 0.9;
+
+/// Зажать желаемый размер по логическому размеру экрана.
+///
+/// Чистая и отдельная от команды намеренно: монитора в тестах нет, а
+/// арифметику проверить и нужно, и можно.
+fn fit_to_screen(want: (f64, f64), screen: (f64, f64)) -> (f64, f64) {
+    (fit_axis(want.0, screen.0), fit_axis(want.1, screen.1))
+}
+
+/// Ноль, отрицательное и NaN значат «сторона экрана неизвестна»: зажимать не
+/// по чему, и отдать здесь долю такого экрана значило бы схлопнуть окно в
+/// точку. Желаемое в этом случае честнее.
+fn fit_axis(want: f64, screen: f64) -> f64 {
+    if screen <= 0.0 || screen.is_nan() {
+        return want;
+    }
+    want.min(screen * SCREEN_FILL)
+}
+
+/// Монитор, по которому считаются размер и место окна.
+///
+/// `current_monitor` отвечает `Result<Option<_>>` — монитора может не быть
+/// вовсе (дисплей отключили, окно ещё не выведено), и это не ошибка, а
+/// «считать не по чему». Запасной ход на `primary_monitor` оставлен нарочно:
+/// у tao на macOS `current_monitor` — это `ns_window.screen()`, а у
+/// невыведенного окна он `nil`. Спрашивают отсюда теперь только по показанному
+/// окну (`SizeRequest`), так что до запасного хода дело доходить не должно, —
+/// но выйди оно иначе, зажим обязан считаться, а не пропасть: незажатое окно
+/// закрывает маленький мак целиком, и поймать это можно только глазами.
+fn picker_monitor(window: &tauri::WebviewWindow) -> Option<tauri::window::Monitor> {
+    window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+}
+
+/// Логический размер монитора.
+///
+/// `size()` физический, поэтому делится на `scale_factor()`: `set_size` ниже
+/// принимает логический. Отрицательный, нулевой и NaN масштаб — это «монитор
+/// не назвался»: делить на такое нельзя, а зажимать не по чему.
+fn monitor_logical_size(monitor: &tauri::window::Monitor) -> Option<(f64, f64)> {
+    let scale = monitor.scale_factor();
+    if scale <= 0.0 || scale.is_nan() {
+        return None;
+    }
+    let size = monitor.size();
+    Some((size.width as f64 / scale, size.height as f64 / scale))
+}
+
+/// Левый верхний угол окна, поставленного посреди рабочей области, в
+/// физических точках.
+///
+/// Считается сам, а не `center()`, и место здесь считается по каждой стороне
+/// отдельно — как и зажим размера. Отрицательной доли не бывает: окно шире
+/// рабочей области прижимается к её началу, а не уезжает за левый край, где
+/// его не достать ни мышью, ни глазами.
+///
+/// Вырожденный масштаб (ноль, отрицательный, NaN) читается как единица:
+/// `as i64` от NaN даёт нуль, и окно уехало бы в угол, будто оно нулевого
+/// размера. Сравнение `scale > 0.0` ложно и для NaN — это и есть проверка.
+fn center_axis(want: f64, scale: f64, area_pos: i32, area_len: u32) -> i32 {
+    let scale = if scale > 0.0 { scale } else { 1.0 };
+    let window = (want * scale).round() as i64;
+    let free = (area_len as i64 - window).max(0) / 2;
+    area_pos.saturating_add(free as i32)
+}
+
+/// Размер и место окна под режим списка.
+///
+/// Размер меняет Rust, а не страница: у окна нет декораций
+/// (`decorations: false`), и `window.resizeTo` в webview на таком окне не
+/// работает. Пересчёт места после смены размера обязателен — без него окно
+/// растёт вправо и вниз от прежнего верхнего левого угла и уезжает за край
+/// экрана.
+///
+/// **Место ставится своим `set_position`, а не `center()`, и это не вкусовщина
+/// — на macOS `center()` в этой паре работать не может.** `set_size` у tao
+/// уходит в `set_content_size_async` — `dispatch_async` на главную очередь, то
+/// есть исполняется не сейчас, а следующим витком. `center()` же — это
+/// `NSWindow.center()` (в tao функции `center` нет вовсе, вся реализация
+/// платформенная), и зовётся он **сразу**: `send_user_message` в
+/// tauri-runtime-wry, увидев главный поток, исполняет просьбу на месте, а
+/// показ и хоткей идут ровно с главного потока. Порядок выходит обратный
+/// написанному: окно центруется по **прежнему** размеру, и только потом
+/// меняет размер — а `setContentSize` держит верхний левый угол, так что
+/// разница уезжает вправо и вниз. На маке это и намеряно живьём: 1323×861 при
+/// левом крае 312 = 55 + (1415 − 900) / 2, то есть центровка считала ширину
+/// узкого окна.
+///
+/// Своё `set_position` от порядка не зависит вовсе: оно уходит в ту же
+/// очередь, что и размер (`set_frame_top_left_point_async`), встаёт в ней
+/// следом, а угол считается по новому размеру — какой бы из двух вызовов ни
+/// исполнился первым, окно окажется там, где считано.
+///
+/// Считается по рабочей области, а не по всему экрану: строка меню и Dock на
+/// маке, панель задач на Windows. Тем же считает место и сам Tauri при
+/// создании окна с `center: true` — расходиться с ним на смене размера
+/// незачем.
+///
+/// Зовётся только по показанному окну, см. `SizeRequest`.
+fn apply_picker_size(window: &tauri::WebviewWindow, fullscreen: bool) -> Result<(), String> {
+    let monitor = picker_monitor(window);
+    let (w, h) = if fullscreen {
+        match monitor.as_ref().and_then(monitor_logical_size) {
+            Some(screen) => fit_to_screen(WIDE_SIZE, screen),
+            None => WIDE_SIZE,
+        }
+    } else {
+        NARROW_SIZE
+    };
+    window
+        .set_size(tauri::LogicalSize::new(w, h))
+        .map_err(|e| format!("cannot resize picker: {e}"))?;
+    // Монитор не назвался — просим систему сделать что может: место без
+    // экрана не посчитать, а оставить окно там, где оно выросло, хуже.
+    let Some(monitor) = monitor else {
+        return window
+            .center()
+            .map_err(|e| format!("cannot center picker: {e}"));
+    };
+    let area = monitor.work_area();
+    let scale = monitor.scale_factor();
+    let x = center_axis(w, scale, area.position.x, area.size.width);
+    let y = center_axis(h, scale, area.position.y, area.size.height);
+    window
+        .set_position(tauri::PhysicalPosition::new(x, y))
+        .map_err(|e| format!("cannot center picker: {e}"))
+}
+
+/// Судьба просьбы о размере: применить сейчас или запомнить до показа.
+///
+/// Скрытому окну размер не ставится вовсе. Окно пикера создаётся скрытым
+/// (`visible: false` в `tauri.conf.json`), а страница просит размер при каждой
+/// своей загрузке — то есть по окну, которого ещё нет на экране. Экрана у
+/// такого окна нет и в буквальном смысле: у tao на macOS `current_monitor` —
+/// это `ns_window.screen()`, а у невыведенного окна он `nil`. И размер, и
+/// место пришлось бы считать по главному монитору наугад — на второй машине с
+/// внешним экраном это и есть «наугад», а посчитанное по чужому экрану окно
+/// заедет за край своего.
+///
+/// Отсюда разделение: `set_picker_size` записывает названный режим и применяет
+/// его только по показанному окну, `show_picker` применяет запомненное сразу
+/// после `show()` — считать надо по тому экрану, на котором окно уже стоит.
+/// Решает это Rust, а не страница: у скрытого окна webview умеет усыплять её
+/// целиком, и «страница по событию `picker-shown` перепросит размер» замолчала
+/// бы ровно в том случае, ради которого затевалось.
+///
+/// Само по себе это тот баг на маке — узкое окно в углу, широкое за правым
+/// краем — не чинит: там дело в порядке двух вызовов внутри
+/// `apply_picker_size`, разбор там же. Здесь — второе условие правильного
+/// счёта, свой экран.
+///
+/// Применённое перестаёт быть отложенным: второй показ подряд, между которыми
+/// никто размера не просил, окна не трогает — лишний перескок на глазах хуже,
+/// чем ничего.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+struct SizeRequest {
+    /// Последний названный страницей режим списка.
+    fullscreen: bool,
+    /// Названный, но ещё не применённый: просьба пришла по скрытому окну.
+    pending: bool,
+}
+
+impl SizeRequest {
+    /// Страница назвала режим. Отвечает режимом, если ставить размер надо
+    /// сейчас, и `None`, если просьба отложена до показа.
+    fn asked(&mut self, fullscreen: bool, visible: bool) -> Option<bool> {
+        self.fullscreen = fullscreen;
+        self.pending = !visible;
+        visible.then_some(fullscreen)
+    }
+
+    /// Окно показали. Отвечает отложенным режимом — один раз на просьбу.
+    fn shown(&mut self) -> Option<bool> {
+        if !self.pending {
+            return None;
+        }
+        self.pending = false;
+        Some(self.fullscreen)
+    }
+}
+
+/// Отложенная просьба о размере. См. `SizeRequest`.
+#[derive(Default)]
+struct PickerSize(Mutex<SizeRequest>);
+
+#[tauri::command]
+fn set_picker_size(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("picker") else {
+        return Err("picker window is gone".into());
+    };
+    // Не смогли спросить — считаем окно скрытым: отложенная просьба применится
+    // на ближайшем показе, а применённая по скрытому окну не применится
+    // никогда.
+    let visible = window.is_visible().unwrap_or(false);
+    let apply = match app.try_state::<PickerSize>() {
+        Some(state) => state.0.lock().unwrap().asked(fullscreen, visible),
+        // Состояния нет только до конца `setup`, а страница до него не
+        // загружается; правило при этом то же самое.
+        None => visible.then_some(fullscreen),
+    };
+    match apply {
+        Some(fullscreen) => apply_picker_size(&window, fullscreen),
+        None => Ok(()),
+    }
 }
 
 /// Иконка трея.
@@ -1075,7 +1313,7 @@ fn main() {
         // шлёт событие, и перепутать их нечем.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            hide_picker, poll_now, spawn_detached, load_seen, save_seen, load_config,
+            hide_picker, set_picker_size, poll_now, spawn_detached, load_seen, save_seen, load_config,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, open_session_mqtt, open_project_mqtt, new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons
@@ -1123,6 +1361,10 @@ fn main() {
             // windows11-manager. До первого ответа висит список прошлого
             // запуска.
             app.manage(project_hotkeys::Registered::default());
+            // Просьба о размере, пришедшая по скрытому окну, ждёт здесь до
+            // показа: центровать окно, у которого нет экрана, нечем. См.
+            // `SizeRequest`.
+            app.manage(PickerSize::default());
             // Иконки меню читаются из exe на первый показ и держатся до
             // перезапуска: ключ кеша знает mtime, так что обновившийся exe
             // перечитается сам.
@@ -1761,5 +2003,160 @@ actions:
         assert!(err.contains("config.yaml"), "{err}");
         assert!(check_ssh_host("example-host").is_ok());
         assert!(check_ssh_host("  ").is_err(), "пробелы — тот же пустой хост");
+    }
+
+    /// Узкий размер обязан совпадать с тем, что стоит в tauri.conf.json:
+    /// разойдись они, выход из режима давал бы окно не того размера, с
+    /// которым пикер открылся, и поймать это можно было бы только глазами.
+    #[test]
+    fn narrow_size_matches_the_window_config() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = &conf["app"]["windows"][0];
+        assert_eq!(window["width"].as_f64().unwrap(), NARROW_SIZE.0);
+        assert_eq!(window["height"].as_f64().unwrap(), NARROW_SIZE.1);
+    }
+
+    /// Широкий шире узкого — иначе режим не делает того, ради чего заведён.
+    #[test]
+    fn wide_size_is_wider_than_narrow() {
+        assert!(WIDE_SIZE.0 > NARROW_SIZE.0);
+        assert!(WIDE_SIZE.1 > NARROW_SIZE.1);
+    }
+
+    /// На большом экране зажимать нечего: человек просил широкое окно, он его
+    /// и получает. Зажми оно и здесь, широкий режим на внешнем мониторе стал
+    /// бы меньше, чем задумано, без всякой на то причины.
+    #[test]
+    fn big_screen_gives_the_wanted_size() {
+        assert_eq!(fit_to_screen(WIDE_SIZE, (2560.0, 1440.0)), WIDE_SIZE);
+    }
+
+    /// Тринадцатидюймовый мак: логические 1440×900 меньше желаемых 1400×900 по
+    /// высоте и почти равны по ширине. Окно обязано выйти строго меньше экрана
+    /// по обеим сторонам — иначе оно закроет экран целиком и залезет под
+    /// строку меню, а подвинуть его нечем.
+    #[test]
+    fn small_screen_leaves_something_visible() {
+        let screen = (1440.0, 900.0);
+        let (w, h) = fit_to_screen(WIDE_SIZE, screen);
+        assert!(w < screen.0, "ширина {w} не оставила полосы на экране {screen:?}");
+        assert!(h < screen.1, "высота {h} не оставила полосы на экране {screen:?}");
+        assert!(w > 0.0 && h > 0.0, "зажатое окно схлопнулось: {w}×{h}");
+    }
+
+    /// Зажимается каждая сторона своя: экран ниже желаемого, но шире, обязан
+    /// урезать только высоту. Считай мы по одной стороне, широкий режим на
+    /// низком широком мониторе терял бы ширину ни за что.
+    #[test]
+    fn axes_are_clamped_independently() {
+        let (w, h) = fit_to_screen(WIDE_SIZE, (3440.0, 800.0));
+        assert_eq!(w, WIDE_SIZE.0);
+        assert!(h < 800.0, "высота {h} не зажалась под экран 800");
+    }
+
+    /// Тот самый мак: рабочая область 1415×923 при масштабе 2 и Dock слева
+    /// (её начало по x — 55), широкое окно после зажима — 1323×860.4
+    /// логических. Окно обязано встать посреди рабочей области, а не там, где
+    /// его оставил прежний размер: при `center()` намеряно было 312 по левому
+    /// краю — центровка считала ширину узкого окна.
+    #[test]
+    fn a_window_lands_in_the_middle_of_the_work_area() {
+        // Рабочая область в физических точках — такой её и отдаёт монитор.
+        let x = center_axis(1323.0, 2.0, 110, 2830);
+        let y = center_axis(860.4, 2.0, 66, 1846);
+        assert_eq!(x, 110 + (2830 - 2646) / 2, "левый край: {x}");
+        assert_eq!(y, 66 + (1846 - 1721) / 2, "верхний край: {y}");
+    }
+
+    /// Начало рабочей области — не всегда ноль: второй монитор стоит правее
+    /// первого, и окно обязано встать посреди своего, а не первого.
+    #[test]
+    fn the_second_monitor_starts_where_it_starts() {
+        assert_eq!(center_axis(900.0, 1.0, 1920, 1920), 1920 + 510);
+    }
+
+    /// Окно шире рабочей области прижимается к её началу. Отрицательная доля
+    /// увела бы его за левый край экрана, где ни мышью не достать, ни увидеть,
+    /// — а окно у нас без декораций, подвинуть его нечем.
+    #[test]
+    fn a_window_wider_than_the_screen_stays_at_the_edge() {
+        assert_eq!(center_axis(1400.0, 1.0, 0, 1000), 0);
+        assert_eq!(center_axis(1400.0, 1.0, 55, 1000), 55);
+    }
+
+    /// Вырожденный масштаб — «монитор не назвался», а не «окно нулевого
+    /// размера»: `as i64` от NaN даёт нуль, и окно уехало бы в угол рабочей
+    /// области, будто ширины у него нет вовсе.
+    #[test]
+    fn a_degenerate_scale_does_not_shrink_the_window_to_a_point() {
+        let sane = center_axis(900.0, 1.0, 0, 1920);
+        assert_eq!(center_axis(900.0, f64::NAN, 0, 1920), sane);
+        assert_eq!(center_axis(900.0, 0.0, 0, 1920), sane);
+        assert_eq!(center_axis(900.0, -2.0, 0, 1920), sane);
+    }
+
+    /// Показанному окну размер ставится на месте и ничего не откладывает:
+    /// `^F` на открытом пикере обязан сработать тем же нажатием, а не ждать
+    /// следующего показа.
+    #[test]
+    fn a_shown_window_gets_the_size_at_once() {
+        let mut req = SizeRequest::default();
+        assert_eq!(req.asked(true, true), Some(true));
+        assert_eq!(req.shown(), None, "применённое не должно применяться дважды");
+    }
+
+    /// Скрытому — откладывается: центровать окно, у которого нет экрана,
+    /// нечем, и просьба со страницы при загрузке приходит именно по такому.
+    #[test]
+    fn a_hidden_window_remembers_the_size_until_it_is_shown() {
+        let mut req = SizeRequest::default();
+        assert_eq!(req.asked(true, false), None);
+        assert_eq!(req.shown(), Some(true));
+    }
+
+    /// Второй показ подряд окна не трогает: перескок на глазах у человека
+    /// хуже, чем ничего, а размер с прошлого показа никуда не делся.
+    #[test]
+    fn a_second_show_moves_nothing() {
+        let mut req = SizeRequest::default();
+        req.asked(true, false);
+        assert_eq!(req.shown(), Some(true));
+        assert_eq!(req.shown(), None);
+    }
+
+    /// Просьбы к скрытому окну накапливаются последней: страница может
+    /// перечитать `ui.json` дважды (загрузка и `ui-changed`), и применить на
+    /// показе надо тот режим, который она назвала последним.
+    #[test]
+    fn the_last_request_to_a_hidden_window_wins() {
+        let mut req = SizeRequest::default();
+        assert_eq!(req.asked(true, false), None);
+        assert_eq!(req.asked(false, false), None);
+        assert_eq!(req.shown(), Some(false));
+    }
+
+    /// Просьба к показанному окну снимает отложенную: размер уже поставлен, и
+    /// применять на следующем показе нечего.
+    #[test]
+    fn a_request_to_a_shown_window_clears_the_pending_one() {
+        let mut req = SizeRequest::default();
+        req.asked(true, false);
+        assert_eq!(req.asked(false, true), Some(false));
+        assert_eq!(req.shown(), None);
+    }
+
+    /// Вырожденный экран — это «монитор не назвался», а не «экран нулевой».
+    /// Отдай мы тут долю такого экрана, окно схлопнулось бы в точку или ушло в
+    /// отрицательный размер, и пикер пропал бы с глаз без единой ошибки.
+    #[test]
+    fn degenerate_screen_falls_back_to_the_wanted_size() {
+        assert_eq!(fit_to_screen(WIDE_SIZE, (0.0, 0.0)), WIDE_SIZE);
+        assert_eq!(fit_to_screen(WIDE_SIZE, (-1920.0, -1080.0)), WIDE_SIZE);
+        assert_eq!(fit_to_screen(WIDE_SIZE, (f64::NAN, f64::NAN)), WIDE_SIZE);
+        // Одна сторона известна, другая нет — зажимается только известная.
+        let (w, h) = fit_to_screen(WIDE_SIZE, (1000.0, 0.0));
+        assert!(w < 1000.0, "известная сторона обязана зажаться: {w}");
+        assert_eq!(h, WIDE_SIZE.1);
     }
 }

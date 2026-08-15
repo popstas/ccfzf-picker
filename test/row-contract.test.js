@@ -299,12 +299,40 @@ test('ошибочный ответ агрегатора не доходит д�
 
 // ── Тот же шов у строк проектов ──────────────────────────────────────────────
 //
-// Разница одна: у сессии строку собирают отрисовщики из session-glyph.js, а у
-// проекта — renderProjects прямо в sessions.html, и требовать его через require
-// неоткуда. Поэтому функция вычитывается из страницы и выполняется в vm — так
-// же, как frontend-load.test.js грузит модули тегами. Проверяется настоящий
-// писатель в DOM, а не его копия в тесте: копия разъехалась бы молча.
+// Разница одна: у сессии колонки рисуют отрисовщики из session-glyph.js, а всю
+// строку целиком складывают projectItem, snapshotItem и sessionItem — они живут
+// прямо в sessions.html, и требовать их через require неоткуда. Поэтому функции
+// вычитываются из страницы и выполняются в vm (как именно — см. pageFunctions
+// ниже) — тем же приёмом, каким frontend-load.test.js грузит модули тегами.
+// Проверяется настоящий писатель в DOM, а не его копия в тесте: копия
+// разъехалась бы молча.
 const SESSIONS_HTML = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+
+/**
+ * Вычитать со страницы функции по их точным сигнатурам и склеить в один кусок
+ * для vm.
+ *
+ * Рисовальщик теперь только обходит список, а разметку одной строки собирает
+ * вынесенная из него функция: узкий и широкий режимы обходят список
+ * по-разному, а разметка у них одна. Вынесенная функция осталась снаружи
+ * куска, вычитанного по сигнатуре рисовальщика, и в vm вызов упал бы на
+ * «projectItem is not defined». Поэтому достаются обе — и сторож от этого
+ * только крепче: настоящий сборщик разметки теперь как раз строчная функция, и
+ * шов, ради которого заведён этот файл, проходит через неё.
+ *
+ * Сигнатура сверяется целиком, как и раньше: переименованный параметр или
+ * лишний аргумент обязаны уронить тест, а не молча вычитать соседнюю функцию.
+ */
+function pageFunctions(...signatures) {
+  return signatures.map((signature) => {
+    // Экранируются только скобки: в сигнатурах других знаков регулярного
+    // выражения не бывает.
+    const head = signature.replace(/[()]/g, '\\$&');
+    const source = SESSIONS_HTML.match(new RegExp(`\\n {2}function ${head} \\{[\\s\\S]*?\\n {2}\\}\\n`));
+    assert.ok(source, `${signature} не найден в sessions.html — тест сторожит не то`);
+    return source[0];
+  }).join('\n');
+}
 
 // Форма — с живого ответа `ccfzf --state`, поля те же, что у project_rows.
 const AGGREGATOR_PROJECTS = [
@@ -328,8 +356,7 @@ const PROJECTS_NOW = 1786045920; // минута после mtime первого
  * знает только эта машина.
  */
 function renderProjectRows(projects, query, toggles, taken) {
-  const source = SESSIONS_HTML.match(/\n {2}function renderProjects\(query, items, nowSec\) \{[\s\S]*?\n {2}\}\n/);
-  assert.ok(source, 'renderProjects не найден в sessions.html — тест сторожит не то');
+  const source = pageFunctions('projectItem(project, nowSec)', 'renderProjects(query, items, nowSec)');
   const projectRows = buildProjectList({ projects });
   markHotkeysTaken(projectRows, taken || []);
   const ctx = {
@@ -348,7 +375,7 @@ function renderProjectRows(projects, query, toggles, taken) {
     nowSec: PROJECTS_NOW,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${source[0]}\nrenderProjects(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
+  vm.runInContext(`${source}\nrenderProjects(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
   return { items: ctx.items, rows: ctx.rows };
 }
 
@@ -495,8 +522,10 @@ const AGGREGATOR_SNAPSHOTS = [{
 
 /** Пропустить снимки настоящим путём: buildSnapshotRows → renderSnapshots. */
 function renderSnapshotRows(snapshots, query, options) {
-  const source = SESSIONS_HTML.match(/\n {2}function renderSnapshots\(query, items, nowSec\) \{[\s\S]*?\n {2}\}\n/);
-  assert.ok(source, 'renderSnapshots не найден в sessions.html — тест сторожит не то');
+  // Строки снимков считает snapshotItemsFor — она вычитывается вместе с
+  // рисовальщиком по той же причине, что и snapshotItem: живёт снаружи его тела.
+  const source = pageFunctions(
+    'snapshotItem(row, nowSec)', 'snapshotItemsFor(query)', 'renderSnapshots(query, items, nowSec)');
   const opts = options || {};
   const ctx = {
     // Ровно то, чем renderSnapshots пользуется снаружи себя.
@@ -513,7 +542,7 @@ function renderSnapshotRows(snapshots, query, options) {
     nowSec: PROJECTS_NOW,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${source[0]}\nrenderSnapshots(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
+  vm.runInContext(`${source}\nrenderSnapshots(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
   return { items: ctx.items, rows: ctx.rows };
 }
 
@@ -586,6 +615,63 @@ test('выключенный чекбокс путей убирает путь �
   assert.ok(items[1].html.includes('title="/home/user/projects/ccfzf"'), items[1].html);
 });
 
+// ── Какой режим показан на самом деле ────────────────────────────────────────
+//
+// Развилка одна, а раскладок две: узкий список и блоки широкого режима. Пока
+// она стояла по месту, широкая ветка брала `mode` как есть — и `/s` на машине
+// без трекера давал там пустой экран, потому что buildBlocks на `snapshots`
+// без трекера не отдаёт ни одного блока, а узкий список в том же случае честно
+// искал по сессиям. Вычитывается со страницы тем же приёмом, что и
+// рисовальщики выше.
+const { parseQuery } = require('../frontend-src/picker-mode');
+
+function shownFor(value, trackerHere) {
+  const ctx = {
+    // Ровно то, чем shownModeAndQuery пользуется снаружи себя.
+    window: { PickerMode: { parseQuery } },
+    search: { value },
+    trackerIsHere: () => trackerHere,
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${pageFunctions('shownModeAndQuery()')}\nvar shown = shownModeAndQuery();`,
+    ctx, { filename: 'sessions.html' });
+  // Поля переписываются в свой объект: у сделанного внутри vm другой Object, и
+  // deepStrictEqual сравнивает ещё и прототип.
+  return { mode: ctx.shown.mode, query: ctx.shown.query };
+}
+
+test('без трекера `/s` откатывается в поиск по сессиям, а не показывает пустоту', () => {
+  // Ищется вся строка целиком, вместе с префиксом: в поиске по сессиям `/s` —
+  // то, что человек набрал, а не команда.
+  assert.deepStrictEqual(shownFor('/s foo', false), { mode: 'sessions', query: '/s foo' });
+  assert.deepStrictEqual(shownFor('/s', false), { mode: 'sessions', query: '/s' });
+});
+
+test('с трекером `/s` остаётся режимом снимков, и префикс из отбора уходит', () => {
+  assert.deepStrictEqual(shownFor('/s foo', true), { mode: 'snapshots', query: 'foo' });
+});
+
+test('режим проектов и обычный поиск от трекера не зависят', () => {
+  for (const here of [true, false]) {
+    assert.deepStrictEqual(shownFor('/a foo', here), { mode: 'projects', query: 'foo' });
+    assert.deepStrictEqual(shownFor('foo', here), { mode: 'sessions', query: 'foo' });
+  }
+});
+
+// Сторож на само устройство: обе раскладки обязаны брать режим у одной
+// функции. Посчитай его render() у себя — и широкая ветка снова разойдётся с
+// узкой, а поймать это будет нечем: пустой экран от зелёных тестов не отличим.
+test('обе раскладки берут режим из одного места, а не считают его порознь', () => {
+  const source = pageFunctions('render()');
+  assert.ok(source.includes('shownModeAndQuery()'),
+    'render() обязан спрашивать режим у shownModeAndQuery');
+  assert.ok(!source.includes('parseQuery'),
+    'render() снова разбирает строку поиска сам — раскладки разойдутся');
+  // Блоки получают ровно то же, что и узкий список: ни своего разбора строки,
+  // ни своей развилки по трекеру.
+  assert.ok(source.includes('renderBlocks(mode, query, nowSec)'), source);
+});
+
 // ── Куда Enter уводит строку снимка ──────────────────────────────────────────
 //
 // Единственное место, которое различает три исхода — поднять всю раскладку,
@@ -603,6 +689,10 @@ function chooseWith(rows, active) {
   const ctx = {
     rows,
     active,
+    // Строка свёрнутого блока не открывает ничего, а разворачивает блок: имя
+    // блока уходит из collapsedBlocks, а список рисуется заново.
+    collapsedBlocks: ['g:Not running'],
+    render: () => calls.push(['render']),
     // Array.from — не украшение: массив, собранный внутри vm, приходит с
     // прототипом другого realm, и deepStrictEqual сравнивает в том числе его.
     restoreSnapshot: (id, sessionIds) => calls.push(['restoreSnapshot', id, Array.from(sessionIds)]),
@@ -612,7 +702,7 @@ function chooseWith(rows, active) {
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nchoose();`, ctx, { filename: 'sessions.html' });
-  return calls;
+  return { calls, collapsedBlocks: Array.from(ctx.collapsedBlocks) };
 }
 
 test('Enter на строке снимка уходит по трём разным веткам', () => {
@@ -623,17 +713,30 @@ test('Enter на строке снимка уходит по трём разны
 
   // Заголовок — вся раскладка. Пустой список сессий здесь значит «все», и
   // непустой на его месте поднял бы часть вместо целого.
-  assert.deepStrictEqual(chooseWith(rows, 0), [['restoreSnapshot', 'snap-1', []]]);
+  assert.deepStrictEqual(chooseWith(rows, 0).calls, [['restoreSnapshot', 'snap-1', []]]);
 
   // Открытая сессия — окно уже есть, Enter показывает его, а не заводит второе.
-  assert.deepStrictEqual(chooseWith(rows, 1), [['focusSession', 'aaa']]);
+  assert.deepStrictEqual(chooseWith(rows, 1).calls, [['focusSession', 'aaa']]);
 
   // Закрытая — просьба на один id, и адресована она снимку. `snapshotId` и
   // `id` здесь заведомо разные: подстановка одного вместо другого роняет
   // именно это сравнение.
   assert.strictEqual(rows[2].id, 'bbb');
   assert.strictEqual(rows[2].snapshotId, 'snap-1');
-  assert.deepStrictEqual(chooseWith(rows, 2), [['restoreSnapshot', 'snap-1', ['bbb']]]);
+  assert.deepStrictEqual(chooseWith(rows, 2).calls, [['restoreSnapshot', 'snap-1', ['bbb']]]);
+});
+
+// Строка свёрнутого блока приходит из buildBlocks и сессией не является вовсе:
+// у неё нет ни id, ни cwd. Не разбери её choose первой, она ушла бы в
+// openSession — в просьбу открыть сессию с `id: undefined`, а это молчаливый
+// отказ на той стороне: ответа у публикации нет.
+test('Enter на свёрнутом блоке разворачивает его, а не открывает сессию', () => {
+  const { collapsedRow } = require('../frontend-src/picker-blocks');
+  const row = collapsedRow({ key: 'g:Not running', rows: [aggregatorSession()] });
+  assert.strictEqual(row.kind, 'block-toggle');
+  const { calls, collapsedBlocks } = chooseWith([row], 0);
+  assert.deepStrictEqual(calls, [['render']]);
+  assert.deepStrictEqual(collapsedBlocks, []);
 });
 
 // ── saveUi сохраняет достоверный uiToggles, а не плоскую toggles (C1, round 1 fix) ──
@@ -644,7 +747,7 @@ test('Enter на строке снимка уходит по трём разны
 // но и по смене сортировки. Тест вычитывает настоящий saveUi из страницы (тем
 // же приёмом, что renderProjects и choose выше) и проверяет, что сохранённый
 // объект правда двухосный и ось statusline из uiToggles никуда не делась.
-function saveUiWith(uiToggles) {
+function saveUiWith(uiToggles, fullscreen) {
   const source = SESSIONS_HTML.match(/\n {2}function saveUi\(\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'saveUi не найден в sessions.html — тест сторожит не то');
   const calls = [];
@@ -655,6 +758,9 @@ function saveUiWith(uiToggles) {
     render: () => {},
     sortMode: 'name',
     uiToggles,
+    // Режим окна — третий аргумент uiStateToSave: не передай его saveUi, и
+    // широкий режим забывался бы при первом же сохранении вида списка.
+    fullscreen: Boolean(fullscreen),
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nsaveUi();`, ctx, { filename: 'sessions.html' });
@@ -673,7 +779,18 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
       showPrompt: { list: true, statusline: true },
       showId: { list: false, statusline: false },
     },
+    // Узкое окно — это и есть умолчание режима.
+    fullscreen: false,
   });
+});
+
+test('saveUi запоминает и режим окна, а не только вид списка', () => {
+  // Третий аргумент uiStateToSave. Забудь его saveUi — и ^F помнился бы ровно
+  // до первого сохранения вида списка (смена сортировки, любая галка), после
+  // чего перезапуск открывал бы узкое окно, хотя человек его не просил.
+  const calls = saveUiWith({ showPrompt: { list: true, statusline: true } }, true);
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].ui.fullscreen, true);
 });
 
 // ── renderChecks рисует только галки с осью statusline (C2) ─────────────────
@@ -1121,13 +1238,11 @@ test('при открытом меню правый клик ничего не �
  * renderSessions из sessions.html, а не вызовом отрисовщика по одному.
  */
 function renderSessionRows(state, query, toggles) {
-  const source = SESSIONS_HTML.match(/\n {2}function renderSessions\(query, items, nowSec\) \{[\s\S]*?\n {2}\}\n/);
-  assert.ok(source, 'renderSessions не найден в sessions.html — тест сторожит не то');
   // markToggleId вычитывается из той же страницы, а не подставляется заглушкой:
   // от неё зависит класс `markable`, то есть обещание про Shift+клик, и копия
   // разошлась бы с настоящим правилом молча.
-  const toggleSrc = SESSIONS_HTML.match(/\n {2}function markToggleId\(row\) \{[\s\S]*?\n {2}\}\n/);
-  assert.ok(toggleSrc, 'markToggleId не найден в sessions.html — тест сторожит не то');
+  const source = pageFunctions(
+    'markToggleId(row)', 'sessionItem(session, nowSec)', 'renderSessions(query, items, nowSec)');
   const ctx = {
     // Ровно то, чем renderSessions пользуется снаружи себя.
     window: {
@@ -1154,7 +1269,7 @@ function renderSessionRows(state, query, toggles) {
     nowSec: NOW,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${toggleSrc[0]}\n${source[0]}\nrenderSessions(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
+  vm.runInContext(`${source}\nrenderSessions(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
   return { items: ctx.items, rows: ctx.rows };
 }
 
@@ -1192,4 +1307,25 @@ test('строка зелийной сессии доезжает до отри�
   // Ключ строки — с префиксом: он же уходит в picker-list-sync, и столкнись
   // он с uuid сессии, список перерисовывался бы целиком.
   assert.ok(items.some(i => i.key === 's:zellij:home'), items.map(i => i.key));
+});
+
+// Маркер вида строки — самый хрупкий инвариант широкого режима: карточка в
+// `#list.blocks` бьёт по `.row.session`, и держится это на одном слове в
+// шаблоне sessionItem. Потеряй он `session` — карточки молча исчезнут; потеряй
+// `zellij` — зелийная псевдосессия молча станет карточкой, то есть вернётся
+// уже чинённый дефект. Ни то, ни другое не видно ни в одном другом assert:
+// ключи, колонки и подписи от подмены класса не меняются вовсе.
+test('вид строки назван классом: сессия — session, зелийная — zellij', () => {
+  const { items } = renderSessionRows({ ok: true, sessions: [aggregatorSession()] });
+  assert.ok(items.length, 'сессия не доехала до отрисовки');
+  const session = items.find(i => i.html.includes('class="row '));
+  assert.ok(/class="row session(?:[ "])/.test(session.html), session.html);
+
+  const { items: zellij } = renderSessionRows(
+    { ok: true, sessions: [], zellij: [{ name: 'home', created: 1785591360, agents: 0 }] });
+  const row = zellij.find(i => i.html.includes('class="row '));
+  assert.ok(/class="row zellij(?:[ "])/.test(row.html), row.html);
+  // И не «session» заодно: строка с двумя классами сразу поймалась бы обеими
+  // проверками, а карточкой всё равно стала бы.
+  assert.ok(!row.html.includes('row session'), row.html);
 });

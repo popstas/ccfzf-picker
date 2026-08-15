@@ -20,6 +20,7 @@ test('пустой файл даёт вид по умолчанию', () => {
       showId: { list: false, statusline: true },
       showCost: { list: true, statusline: false },
     },
+    fullscreen: false,
   });
   assert.deepStrictEqual(normalizeUiState(null, DEFAULTS), normalizeUiState({}, DEFAULTS));
   assert.deepStrictEqual(normalizeUiState('мусор', DEFAULTS), normalizeUiState({}, DEFAULTS));
@@ -33,6 +34,7 @@ test('сохранённый вид возвращается как был', () 
       showId: { list: true, statusline: false },
       showCost: { list: true, statusline: true },
     },
+    fullscreen: true,
   };
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
 });
@@ -115,6 +117,23 @@ test('listColumns отдаёт плоскую карту для отрисовк
   });
 });
 
+test('режим окна читается из файла и переживает запись', () => {
+  const ui = normalizeUiState({ fullscreen: true }, { toggles: {} });
+  assert.strictEqual(ui.fullscreen, true);
+  assert.strictEqual(uiStateToSave(ui.sort, ui.toggles, ui.fullscreen).fullscreen, true);
+});
+
+test('старый ui.json без режима читается как узкое окно', () => {
+  // Умолчание — то, с чем пикер жил до появления режима: файл, написанный
+  // прошлой версией, не должен открывать окно, которого человек не просил.
+  assert.strictEqual(normalizeUiState({ sort: 'name' }, { toggles: {} }).fullscreen, false);
+  assert.strictEqual(normalizeUiState(null, { toggles: {} }).fullscreen, false);
+});
+
+test('нелогичный режим в файле заменяется умолчанием', () => {
+  assert.strictEqual(normalizeUiState({ fullscreen: 'да' }, { toggles: {} }).fullscreen, false);
+});
+
 test('в файл уходит ровно то, что читается обратно', () => {
   const toggles = {
     showPrompt: { list: false, statusline: true },
@@ -122,7 +141,7 @@ test('в файл уходит ровно то, что читается обра
     showCost: { list: true, statusline: false },
   };
   const saved = uiStateToSave('name', toggles);
-  assert.deepStrictEqual(saved, { sort: 'name', toggles });
+  assert.deepStrictEqual(saved, { sort: 'name', toggles, fullscreen: false });
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
   // Мусорная сортировка не должна попасть даже в файл: перезапуск молча
   // починит её, но человек, заглянувший в ui.json, увидел бы неправду.

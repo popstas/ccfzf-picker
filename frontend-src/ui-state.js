@@ -67,6 +67,11 @@
     return {
       sort: groupsApi.normalizeSort(src.sort),
       toggles,
+      // Третье поле верхнего уровня, а не запись в toggles: у галки две оси
+      // и чекбокс в статуслайне, а режим окна — не колонка. Нелогичное
+      // значение читается как узкое окно: испорченный файл не должен
+      // открывать окно, которого человек не просил.
+      fullscreen: src.fullscreen === true,
     };
   }
 
@@ -75,8 +80,8 @@
    * пишет — файл маленький и человекочитаемый, и заглянувший в него не должен
    * гадать, что из этого пикер и правда помнит.
    */
-  function uiStateToSave(sort, toggles) {
-    return normalizeUiState({ sort, toggles }, { toggles: toggles || {} });
+  function uiStateToSave(sort, toggles, fullscreen) {
+    return normalizeUiState({ sort, toggles, fullscreen }, { toggles: toggles || {} });
   }
 
   /**

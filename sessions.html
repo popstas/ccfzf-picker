@@ -20,6 +20,126 @@
             flex: 0 0 auto;
         }
         #list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 0; }
+        /* Широкий режим: блоки колонками, у каждого свой скролл. Свой
+           overflow у самого списка гасится — иначе скроллов два вложенных, и
+           колесо работает по тому, над которым курсор, то есть непредсказуемо.
+
+           Раскладка колонок задана человеком и держится на смысле строк:
+           слева свои живые сессии, посередине чужие и под ними проекты,
+           справа история и под ней снимки. Номер колонки блоку ставит
+           picker-blocks.js — по тому же признаку, по которому блок собран.
+
+           Верхний уровень — flex-строка из flex-колонок, а не сетка. Сеткой
+           это не делается: главному списку отдана вся высота, а это значит
+           охватить все ряды, и `grid-row: 1 / -1` считает `-1` по **явной**
+           сетке, которой здесь нет вовсе — ряды неявные, размеченные по
+           содержимому, и охватывать нечего. Во flex-колонке полная высота
+           достаётся сама собой, растяжением. */
+        #list.blocks { display: flex; gap: 8px; overflow: hidden; }
+        #list.blocks .block-col {
+            flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden;
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        /* Первая колонка — главный список, и он должен быть виден целиком, а не
+           настолько, насколько хватило: блок в ней растёт на всю высоту. */
+        #list.blocks .col-1 .block { flex: 1 1 auto; }
+        /* В колонках с двумя блоками высота делится, и делится не по
+           содержимому. `flex: 0 1 auto` (то есть просто «по содержимому»)
+           здесь неверен: ужимает flex пропорционально размеру, и длинный сосед
+           съедает короткого — измерено, снимкам под шестьюдесятью строками
+           истории оставалось десять пикселей, то есть ничего.
+
+           Отсюда `flex: 1 1 0` — доля поровну, — а нижнему блоку колонки
+           вдобавок разрешено быть по содержимому, но не выше половины:
+           короткий показан целиком и без пустоты, а всё, чего он не взял,
+           достаётся верхнему. Верхний в обеих колонках и есть длинный (чужие
+           сессии, история), так что делить нижнему нечего.
+
+           `max-content` тут был и оказался ловушкой: в Chromium он считается
+           верно, а в WebKit — а это WKWebView, на котором пикер живёт на маке —
+           блок с ним схлопывается в один заголовок, и колонка выглядит пустой.
+           Ровно это человек и увидел на макбуке. Процент от высоты колонки
+           считают одинаково оба движка — измерено в обоих. */
+        #list.blocks .col-2 .block,
+        #list.blocks .col-3 .block { flex: 1 1 0; }
+        /* `:not(:only-child)` — не придирка: одинокий блок в колонке упёрся бы
+           в тот же потолок и занял бы половину колонки впустую. Измерено, так
+           и было. */
+        #list.blocks .col-2 .block:last-child:not(:only-child),
+        #list.blocks .col-3 .block:last-child:not(:only-child) {
+            flex: 0 1 auto; max-height: 50%;
+        }
+        /* Подзаголовок машины внутри блока чужих сессий: та же подпись, что и
+           заголовок группы в узком списке, но мельче — заголовок блока над ней
+           уже сказал, что это чужие. */
+        #list.blocks .block-subhead {
+            padding-top: 6px; font-size: 11px; opacity: 0.75;
+        }
+        /* Высоту блоку задаёт его ряд, и задаёт растяжением, а не процентом —
+           процента здесь нет намеренно.
+
+           `max-height: 100%` разрешалась бы относительно grid area, а у ряда,
+           размеченного по содержимому, высота области сама от содержимого и
+           зависит. Движку, который такую область считает неопределённой,
+           процент положено читать как `none`: блок вырос бы под все свои
+           строки, `.block-rows` стало бы нечему переполняться, `overflow-y:
+           auto` полосы бы не дал, а переросший ряд молча срезался бы
+           `overflow: hidden` выше. На экране это длинный блок без единой
+           полосы прокрутки — ровно та раскладка, ради ухода от которой блоки и
+           заведены: в одном контейнере скролл один. Chromium (а это WebView2,
+           на котором пикер и живёт под Windows) процент здесь разрешает и
+           рисует верно — проверено измерением, — но полагаться на это незачем,
+           когда то же самое достижимо без процента вовсе.
+
+           Отсюда устройство: высоту блоку даёт его колонка, `min-height: 0`
+           разрешает ему быть короче содержимого, а строки внутри
+           (`flex: 0 1 auto`) занимают высоту по содержимому и ужимаются, когда
+           места меньше, — вот и своя полоса. Пустотой это не оборачивается:
+           `.block` ничего не рисует, а раскладка строк совпадает с прежней до
+           пикселя (сверено измерением координат каждой строки на трёх ширинах
+           окна). Поэтому же снят `align-items: start`: он запрещал ровно то
+           растяжение, которым теперь и держится высота. */
+        #list.blocks .block {
+            display: flex; flex-direction: column;
+            min-height: 0; overflow: hidden;
+        }
+        #list.blocks .block-rows { overflow-y: auto; min-height: 0; flex: 0 1 auto; }
+        /* Карточка — только у строки сессии (`.row.session`), не у голого
+           `.row`: тот же `.text`/`.meta`/`.name`/`.dot` носят и строка
+           проекта, и снимок (заголовок и его сессия), и свёрнутый блок, и
+           зелийная псевдосессия (`.row.zellij`) — карточку получать им не
+           положено, спека держит их строками: запроса с ответом, которые
+           карточка и разворачивает, нет ни у одной из них (у зелия в
+           частности — своих `agentPrompt`/`agentDescription` она не носит).
+           Метаданные уходят под текст, а не вправо — в колонке 420px правая
+           группа отобрала бы у имени почти всю ширину. */
+        #list.blocks .row.session {
+            align-items: flex-start; flex-wrap: wrap; gap: 8px;
+            padding: 8px 12px; border-radius: 6px;
+        }
+        /* basis: 0%, а не 100% — со 100% .text просился бы на всю ширину
+           строки один, не помещался бы рядом с кружком (гипотетический размер
+           для переноса строки считается по basis, ещё до роста) и уезжал на
+           отдельную flex-линию, а кружок с ним — оставался бы над именем, а
+           не рядом с его первой строкой. При basis: 0% элемент всегда
+           помещается на линию кружка, а всю оставшуюся ширину забирает уже
+           ростом (flex-grow: 1). min-width: 0 — иначе длинный путь или id без
+           пробелов распирал бы карточку вместо переноса. */
+        #list.blocks .row.session .text { flex: 1 1 0%; min-width: 0; }
+        #list.blocks .row.session .meta { flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; gap: 10px; }
+        /* Запрос и ответ — до трёх строк каждый, с обрезкой по последней.
+           Ради этого режим и заведён: в строке от них видно первые слова, а
+           узнают сессию как раз по тому, чем она занята. */
+        #list.blocks .row.session .prompt,
+        #list.blocks .row.session .summary {
+            white-space: normal; display: -webkit-box;
+            -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        /* Имя переносится: обрезка многоточием оставляла бы от длинного имени
+           сессии первые пару слов, а в карточке место под него есть. */
+        #list.blocks .row.session .name { white-space: normal; }
+        /* Кружок стоит у первой строки имени, а не по центру карточки. */
+        #list.blocks .row.session .dot { margin-top: 5px; }
         #statusline {
             height: 28px; padding: 0 18px; display: flex; align-items: center; gap: 14px;
             font-size: 11px; color: #7d838c; border-top: 1px solid #3a3d42;
@@ -345,6 +465,7 @@
 <script src="picker-mode.js"></script>
 <script src="project-list.js"></script>
 <script src="picker-list-sync.js"></script>
+<script src="picker-blocks.js"></script>
 <script src="action-icons.js"></script>
 <script>
   let groups = [];
@@ -471,6 +592,11 @@
   // чекбоксы статуслайна. Пересчитывается из uiToggles одной функцией, чтобы
   // две формы не разъехались.
   let toggles = window.UiState.listColumns(uiToggles);
+  // Режим окна и свёрнутые блоки. Первый живёт в ui.json (отступление от
+  // умолчания запоминается, как сортировка и showAll), второе — только до
+  // перерисовки: развёрнутость истории это умолчание блока, а не настройка.
+  let fullscreen = false;
+  let collapsedBlocks = [];
   let menuOpen = false;
   let menuActions = [];
   let menuActive = 0;
@@ -581,7 +707,7 @@
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
     // Про `/s` рассказываем только там, где он работает: подсказка о режиме,
     // которого нет, обманывает ровно так же, как молчащий Enter.
-    menuHint.textContent = '^K / right click - Session menu, ^N - new session, ^A - all projects'
+    menuHint.textContent = '^K / right click - Session menu, ^N - new session, ^A - all projects, ^F - wide view'
       + (trackerIsHere() ? ', ^S - snapshots' : '');
   }
 
@@ -597,7 +723,7 @@
     // uiToggles, не toggles: тот плоский и не помнит ось statusline — запись
     // плоской картой обнулила бы её при первом же save_ui, включая тот, что
     // зовётся сменой сортировки (ниже, не только из чекбокса).
-    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles) })
+    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen) })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -606,17 +732,69 @@
   // здесь остаётся только запись в DOM.
   let rendered = { keys: [], html: [] };
 
+  /**
+   * Записать в DOM решение planListSync.
+   *
+   * Одна на обе раскладки: узкий список пишет в `#list`, широкий — в
+   * `.block-rows` каждого блока, а сама запись у них слово в слово одна и та
+   * же. Вторая её копия разошлась бы с первой молча — правку заметили бы
+   * только в той раскладке, где её сделали.
+   */
+  function applyPlan(container, plan) {
+    if (plan.mode === 'rebuild') {
+      container.innerHTML = plan.html.join('');
+      return;
+    }
+    // Снимок детей до правок: outerHTML заменяет элемент, а живая коллекция
+    // container.children отдала бы уже новый узел на следующей итерации.
+    const nodes = Array.from(container.children);
+    for (const update of plan.updates) nodes[update.index].outerHTML = update.html;
+  }
+
   function syncList(items) {
     const plan = window.PickerListSync.planListSync(rendered, items, list.children.length);
-    if (plan.mode === 'rebuild') {
-      list.innerHTML = plan.html.join('');
-    } else {
-      // Снимок детей до правок: outerHTML заменяет элемент, а живая коллекция
-      // list.children отдала бы уже новый узел на следующей итерации.
-      const nodes = Array.from(list.children);
-      for (const update of plan.updates) nodes[update.index].outerHTML = update.html;
-    }
+    applyPlan(list, plan);
     rendered = { keys: plan.keys, html: plan.html };
+  }
+
+  // Строка списка — одна функция на вид строки. Обход у узкого и широкого
+  // режимов разный, а разметка одна: вторая копия разошлась бы с первой на
+  // первой же правке колонок.
+  function projectItem(project, nowSec) {
+    const index = rows.length;
+    rows.push(project);
+    // Зелёная точка у проекта, где кто-то работает прямо сейчас: тот же
+    // словарь цветов, что и у сессии, и та же ширина левой колонки. Без
+    // живых — обычная серая точка, а не `closed`: прозрачная задумана для
+    // закрытой сессии, чтобы место осталось пустым, а у проекта «сейчас
+    // никто не работает» — обычное состояние, а не отсутствие строки.
+    const dotClass = project.liveCount ? 'dot active' : 'dot';
+    // Подсказка — через тот же titleAttr, что у сессий: иначе в ней висел бы
+    // полный путь, а строкой ниже, в теле строки, — тот же путь через
+    // shortPath, и одна строка показывала бы каталог двумя разными видами.
+    const html = `<div class="row project" data-index="${index}"${titleAttr(project)}>` +
+      `<div class="${dotClass}"></div>` +
+      `<div class="text"><div class="name">` +
+      (project.mark ? '<span class="mark">★</span> ' : '') +
+      `${escapeHtml(project.label)}</div>` +
+      (toggles.showPaths
+        ? `<div class="cwd">${escapeHtml(shortPath(project.cwd))}</div>` : '') +
+      `</div>` +
+      `<div class="meta">` +
+      `<div class="count">${project.sessionCount}` +
+      (project.liveCount ? ` · ${project.liveCount}●` : '') +
+      `</div>` +
+      // Колонка `hk` у проекта — та же самая колонка, что и у сессии, и
+      // рисует её та же hotkeyHtml: второй способ рисовать то же самое
+      // разошёлся бы с первым на первой же правке (ровно то, что уже
+      // произошло — задачи 4 и 7 доводили hotkey/hotkeyTaken до строки
+      // проекта, а на экран это не попадало, потому что здесь функция не
+      // звалась вовсе). Порядок — как у строки сессии: hotkeyHtml перед
+      // ageHtml.
+      hotkeyHtml(project, toggles.showHotkey) +
+      ageHtml(project, nowSec) +
+      `</div></div>`;
+    return { key: `p:${project.id}`, html };
   }
 
   /**
@@ -628,41 +806,52 @@
    */
   function renderProjects(query, items, nowSec) {
     for (const project of window.PickerFilter.filterProjects(projectRows, query)) {
-      const index = rows.length;
-      rows.push(project);
-      // Зелёная точка у проекта, где кто-то работает прямо сейчас: тот же
-      // словарь цветов, что и у сессии, и та же ширина левой колонки. Без
-      // живых — обычная серая точка, а не `closed`: прозрачная задумана для
-      // закрытой сессии, чтобы место осталось пустым, а у проекта «сейчас
-      // никто не работает» — обычное состояние, а не отсутствие строки.
-      const dotClass = project.liveCount ? 'dot active' : 'dot';
-      // Подсказка — через тот же titleAttr, что у сессий: иначе в ней висел бы
-      // полный путь, а строкой ниже, в теле строки, — тот же путь через
-      // shortPath, и одна строка показывала бы каталог двумя разными видами.
-      const html = `<div class="row project" data-index="${index}"${titleAttr(project)}>` +
-        `<div class="${dotClass}"></div>` +
-        `<div class="text"><div class="name">` +
-        (project.mark ? '<span class="mark">★</span> ' : '') +
-        `${escapeHtml(project.label)}</div>` +
-        (toggles.showPaths
-          ? `<div class="cwd">${escapeHtml(shortPath(project.cwd))}</div>` : '') +
-        `</div>` +
-        `<div class="meta">` +
-        `<div class="count">${project.sessionCount}` +
-        (project.liveCount ? ` · ${project.liveCount}●` : '') +
-        `</div>` +
-        // Колонка `hk` у проекта — та же самая колонка, что и у сессии, и
-        // рисует её та же hotkeyHtml: второй способ рисовать то же самое
-        // разошёлся бы с первым на первой же правке (ровно то, что уже
-        // произошло — задачи 4 и 7 доводили hotkey/hotkeyTaken до строки
-        // проекта, а на экран это не попадало, потому что здесь функция не
-        // звалась вовсе). Порядок — как у строки сессии (698-704): hotkeyHtml
-        // перед ageHtml.
-        hotkeyHtml(project, toggles.showHotkey) +
-        ageHtml(project, nowSec) +
-        `</div></div>`;
-      items.push({ key: `p:${project.id}`, html });
+      items.push(projectItem(project, nowSec));
     }
+  }
+
+  // `nowSec` в сигнатуре — ради единообразия с соседями: строки снимков
+  // возраста не показывают, и считать его здесь не из чего.
+  function snapshotItem(row, nowSec) {
+    const index = rows.length;
+    rows.push(row);
+    if (row.kind === 'snapshot') {
+      const missing = row.missing
+        ? `${row.missing} not open`
+        : 'all on screen';
+      return {
+        key: row.key,
+        html: `<div class="row snapshot" data-index="${index}">` +
+          `<div class="dot"></div>` +
+          `<div class="text"><div class="name">${escapeHtml(row.label)}</div></div>` +
+          `<div class="meta"><div class="count">${row.total} · ${escapeHtml(missing)}</div>` +
+          `</div></div>`,
+      };
+    }
+    // Открытая сессия — тусклая: восстановление её всё равно пропустит, а
+    // Enter на ней поднимет уже существующее окно. Класс `on-screen`, а не
+    // `closed`: в этом файле `closed` значит «сессии больше нет», а здесь
+    // всё наоборот — окно есть, и именно поэтому строка тусклая.
+    return {
+      key: row.key,
+      html: `<div class="row snapshot-session${row.open ? ' on-screen' : ''}" data-index="${index}"` +
+        ` title="${escapeHtml(row.cwd)}">` +
+        `<div class="dot${row.open ? ' active' : ''}"></div>` +
+        `<div class="text"><div class="name">${escapeHtml(row.label)}</div>` +
+        (toggles.showPaths
+          ? `<div class="cwd">${escapeHtml(shortPath(row.cwd))}</div>` : '') +
+        `</div>` +
+        `<div class="meta"><div class="count">${row.open ? '▣ open' : ''}</div>` +
+        `</div></div>`,
+    };
+  }
+
+  // Строки снимков считаются здесь, а не в рисовальщике: их спрашивают обе
+  // раскладки — узкий renderSnapshots и блок `snapshots` широкого режима, — и
+  // второй расчёт разошёлся бы с первым на первой же правке отбора.
+  function snapshotItemsFor(query) {
+    const open = window.PickerSnapshots.openIdsFromState(lastState);
+    return window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query);
   }
 
   /**
@@ -672,44 +861,58 @@
    * группами сессий — но здесь кладётся: у него есть своё действие, Enter
    * поднимает раскладку целиком. Поэтому и класс `row`, а не `group-label`.
    */
-  // `nowSec` в сигнатуре — ради единообразия с соседями: строки снимков
-  // возраста не показывают, и считать его здесь не из чего.
   function renderSnapshots(query, items, nowSec) {
-    const open = window.PickerSnapshots.openIdsFromState(lastState);
-    for (const row of window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query)) {
-      const index = rows.length;
-      rows.push(row);
-      if (row.kind === 'snapshot') {
-        const missing = row.missing
-          ? `${row.missing} not open`
-          : 'all on screen';
-        items.push({
-          key: row.key,
-          html: `<div class="row snapshot" data-index="${index}">` +
-            `<div class="dot"></div>` +
-            `<div class="text"><div class="name">${escapeHtml(row.label)}</div></div>` +
-            `<div class="meta"><div class="count">${row.total} · ${escapeHtml(missing)}</div>` +
-            `</div></div>`,
-        });
-        continue;
-      }
-      // Открытая сессия — тусклая: восстановление её всё равно пропустит, а
-      // Enter на ней поднимет уже существующее окно. Класс `on-screen`, а не
-      // `closed`: в этом файле `closed` значит «сессии больше нет», а здесь
-      // всё наоборот — окно есть, и именно поэтому строка тусклая.
-      items.push({
-        key: row.key,
-        html: `<div class="row snapshot-session${row.open ? ' on-screen' : ''}" data-index="${index}"` +
-          ` title="${escapeHtml(row.cwd)}">` +
-          `<div class="dot${row.open ? ' active' : ''}"></div>` +
-          `<div class="text"><div class="name">${escapeHtml(row.label)}</div>` +
-          (toggles.showPaths
-            ? `<div class="cwd">${escapeHtml(shortPath(row.cwd))}</div>` : '') +
-          `</div>` +
-          `<div class="meta"><div class="count">${row.open ? '▣ open' : ''}</div>` +
-          `</div></div>`,
-      });
-    }
+    for (const row of snapshotItemsFor(query)) items.push(snapshotItem(row, nowSec));
+  }
+
+  function sessionItem(session, nowSec) {
+    const index = rows.length;
+    rows.push(session);
+    // Подсказка про Shift+клик — ровно у тех строк, которые Shift+клик и
+    // пометит: спрашиваем ту же markToggleId, что и сам клик. Раньше здесь
+    // стоял agentState, и обещание расходилось с делом на сессиях, которых
+    // человек ещё не открывал.
+    const markable = markToggleId(session) !== null;
+    // Маркер вида строки — как `project`/`snapshot`/`snapshot-session`/
+    // `block-toggle` у соседей: карточка в широком режиме бьёт только по
+    // `.session`, иначе те же голые `.text`/`.meta`/`.name`/`.dot` внутри
+    // `#list.blocks` ловили бы и строку проекта, и снимок, и свёрнутый блок.
+    // Зелийная псевдосессия (session-groups.js кладёт её в тот же массив,
+    // что и настоящие сессии, и рисует тем же sessionItem) карточкой тоже не
+    // должна становиться: запроса с ответом у неё нет (agentPrompt и
+    // agentDescription она не носит), карточка вышла бы пустой и всё равно
+    // выросла бы на строку — поэтому её вид назван своим классом `zellij`, а
+    // не `session`.
+    const rowKind = session.kind === 'zellij' ? 'zellij' : 'session';
+    const html = `<div class="row ${rowKind}${session.live ? '' : ' closed'}${markable ? ' markable' : ''}" data-index="${index}"${titleAttr(session)}>` +
+      statusDotHtml(session) +
+      `<div class="text"><div class="name">${escapeHtml(session.label)}` +
+      `${prBadgeHtml(session)}` +
+      `</div>` +
+      (toggles.showPaths
+        ? `<div class="cwd">${escapeHtml(shortPath(session.cwd))}</div>` : '') +
+      // Две строки под карточкой: что спросили и чем ответили. Пустой div
+      // всё равно занял бы высоту, поэтому рисуем только то, что есть.
+      // Склейку «сводка, а у работающей — предыдущая» считает
+      // sessionDescription (session-agent.js) на сборке строки.
+      (toggles.showPrompt && session.agentPrompt
+        ? `<div class="prompt">${escapeHtml(session.agentPrompt)}</div>` : '') +
+      (toggles.showAnswer && session.agentDescription
+        ? `<div class="summary">${escapeHtml(session.agentDescription)}</div>` : '') +
+      `</div>` +
+      // Правые колонки — одной группой: она и прижимает их вправо. Порознь
+      // это делала `.state` своим margin-left: auto, и стоило снять с неё
+      // чекбокс, как всё съезжало к названию сессии.
+      `<div class="meta">` +
+      windowHtml(session, toggles.showWindow) +
+      windowHostHtml(session, toggles.showWindowHost) +
+      stateHtml(session, toggles.showEvent) +
+      sessionIdHtml(session, toggles.showId) +
+      hotkeyHtml(session, toggles.showHotkey) +
+      usageHtml(session, toggles) +
+      ageHtml(session, nowSec) +
+      `</div></div>`;
+    return { key: `s:${session.id}`, html };
   }
 
   function renderSessions(query, items, nowSec) {
@@ -721,45 +924,137 @@
         key: `g:${group.label}`,
         html: `<div class="group-label">${escapeHtml(group.label)}</div>`,
       });
-      for (const session of group.sessions) {
-        const index = rows.length;
-        rows.push(session);
-        // Подсказка про Shift+клик — ровно у тех строк, которые Shift+клик и
-        // пометит: спрашиваем ту же markToggleId, что и сам клик. Раньше здесь
-        // стоял agentState, и обещание расходилось с делом на сессиях, которых
-        // человек ещё не открывал.
-        const markable = markToggleId(session) !== null;
-        const html = `<div class="row ${session.live ? '' : 'closed'}${markable ? ' markable' : ''}" data-index="${index}"${titleAttr(session)}>` +
-          statusDotHtml(session) +
-          `<div class="text"><div class="name">${escapeHtml(session.label)}` +
-          `${prBadgeHtml(session)}` +
-          `</div>` +
-          (toggles.showPaths
-            ? `<div class="cwd">${escapeHtml(shortPath(session.cwd))}</div>` : '') +
-          // Две строки под карточкой: что спросили и чем ответили. Пустой div
-          // всё равно занял бы высоту, поэтому рисуем только то, что есть.
-          // Склейку «сводка, а у работающей — предыдущая» считает
-          // sessionDescription (session-agent.js) на сборке строки.
-          (toggles.showPrompt && session.agentPrompt
-            ? `<div class="prompt">${escapeHtml(session.agentPrompt)}</div>` : '') +
-          (toggles.showAnswer && session.agentDescription
-            ? `<div class="summary">${escapeHtml(session.agentDescription)}</div>` : '') +
-          `</div>` +
-          // Правые колонки — одной группой: она и прижимает их вправо. Порознь
-          // это делала `.state` своим margin-left: auto, и стоило снять с неё
-          // чекбокс, как всё съезжало к названию сессии.
-          `<div class="meta">` +
-          windowHtml(session, toggles.showWindow) +
-          windowHostHtml(session, toggles.showWindowHost) +
-          stateHtml(session, toggles.showEvent) +
-          sessionIdHtml(session, toggles.showId) +
-          hotkeyHtml(session, toggles.showHotkey) +
-          usageHtml(session, toggles) +
-          ageHtml(session, nowSec) +
-          `</div></div>`;
-        items.push({ key: `s:${session.id}`, html });
-      }
+      for (const session of group.sessions) items.push(sessionItem(session, nowSec));
     }
+  }
+
+  /** Строка свёрнутого блока: Enter на ней разворачивает блок. */
+  function blockToggleItem(row) {
+    const index = rows.length;
+    rows.push(row);
+    return {
+      key: `bt:${row.blockKey}`,
+      html: `<div class="row block-toggle" data-index="${index}">` +
+        `<div class="dot"></div>` +
+        `<div class="text"><div class="name">${escapeHtml(row.label)}</div></div>` +
+        `</div>`,
+    };
+  }
+
+  // Что нарисовано в каждом блоке. Своё состояние на блок, а не одно на весь
+  // список: planListSync сравнивает содержимое одного контейнера, и общая
+  // память заставляла бы его пересобирать все блоки на каждое изменение
+  // любого. Ключ — тот же key блока.
+  let renderedBlocks = new Map();
+  // Каркас, который сейчас в DOM: ключи и подписи блоков. Сменился — контейнеры
+  // пересобираются целиком; строки внутри правит planListSync, как и раньше.
+  //
+  // `null`, а не `''`, и это не придирка: пустая строка — законный каркас,
+  // ровно тот, что получается из пустого набора блоков. Отмечай она заодно и
+  // «в списке сейчас не блоки», первая же отрисовка пустого набора сравнила бы
+  // `'' !== ''`, сочла каркас несменившимся и оставила бы на экране строки
+  // узкого списка при пустом `rows`. `null` каркасом не бывает никогда,
+  // поэтому переход из узкого режима всегда пересобирает контейнеры.
+  let blocksShape = null;
+  // Тело блока по его ключу. Искать по номеру узла больше нельзя: блоки лежат
+  // не одним потоком, а внутри колонок, и порядок узлов в `#list` не совпадает
+  // с порядком блоков.
+  let blockBodies = new Map();
+
+  function blockCellHtml(block) {
+    return `<div class="block" data-block="${escapeHtml(block.key)}">` +
+      `<div class="group-label">${escapeHtml(block.label)}</div>` +
+      `<div class="block-rows"></div></div>`;
+  }
+
+  /**
+   * Подзаголовок машины внутри блока чужих сессий.
+   *
+   * В `rows` не кладётся намеренно: это подпись, а не строка списка. Выбирать
+   * её нечем — ни `data-index`, ни класса `row` у неё нет, — поэтому стрелки и
+   * клик её не видят, а Enter на ней невозможен. Ровно так же ведёт себя
+   * заголовок группы в узком списке.
+   */
+  function subheadItem(row) {
+    return {
+      key: `sh:${row.key}`,
+      html: `<div class="group-label block-subhead">${escapeHtml(row.label)}</div>`,
+    };
+  }
+
+  function itemsOfBlock(block, nowSec) {
+    if (block.collapsed) return block.rows.map(blockToggleItem);
+    if (block.kind === 'projects') return block.rows.map(r => projectItem(r, nowSec));
+    if (block.kind === 'snapshots') return block.rows.map(r => snapshotItem(r, nowSec));
+    return block.rows.map(s => (
+      s.kind === 'block-subhead' ? subheadItem(s) : sessionItem(s, nowSec)));
+  }
+
+  function renderBlocks(mode, query, nowSec) {
+    const blocks = window.PickerBlocks.buildBlocks({
+      groups, projects: projectRows, snapshots: snapshotItemsFor(query),
+      mode, query, trackerHere: trackerIsHere(), collapsed: collapsedBlocks,
+    });
+    const shape = blocks.map(b => `${b.key}|${b.label}|${b.column}`).join('\n');
+    if (shape !== blocksShape) {
+      // Колонки — flex-строка из flex-колонок, а не сетка. Сеткой это не
+      // делается: колонка во всю высоту требует охватить все ряды, а
+      // `grid-row: 1 / -1` считает `-1` по **явной** сетке, которой здесь нет —
+      // ряды неявные, размеченные по содержимому, и охватывать нечего. Во
+      // flex-колонке полная высота достаётся сама собой, растяжением.
+      //
+      // Пустая колонка не рисуется вовсе: она забрала бы у соседей свою долю
+      // ширины ради пустоты. Поэтому же ширину колонки задаёт `flex`, а не
+      // доля от трёх, — на `/a` и `/s` колонка остаётся одна и занимает экран.
+      const byColumn = [1, 2, 3]
+        .map(column => blocks.filter(b => b.column === column))
+        .filter(column => column.length);
+      list.innerHTML = byColumn.map(column =>
+        `<div class="block-col col-${column[0].column}">` +
+        column.map(blockCellHtml).join('') + '</div>').join('');
+      blocksShape = shape;
+      renderedBlocks = new Map();
+      blockBodies = new Map(Array.from(list.querySelectorAll('.block'),
+        el => [el.getAttribute('data-block'), el.querySelector('.block-rows')]));
+    }
+    blocks.forEach((block, i) => {
+      // Сколько строк было до блока — считается ДО сборки его элементов, а не
+      // вычитанием их числа: подзаголовок машины — элемент без строки, и
+      // арифметика «строк ровно столько же, сколько элементов» на нём врёт.
+      const before = rows.length;
+      const items = itemsOfBlock(block, nowSec);
+      // Номер блока — на строке: по нему ходят стрелки (picker-blocks.js).
+      for (let n = before; n < rows.length; n++) rows[n].block = i;
+      const body = blockBodies.get(block.key);
+      const plan = window.PickerListSync.planListSync(
+        renderedBlocks.get(block.key), items, body.children.length);
+      applyPlan(body, plan);
+      renderedBlocks.set(block.key, { keys: plan.keys, html: plan.html });
+    });
+    return blocks.length;
+  }
+
+  /**
+   * Режим и строка отбора, которые показаны на самом деле.
+   *
+   * Режим живёт в строке поиска, а не отдельным флагом: см. picker-mode.js. Но
+   * режим снимков предлагается только там, где восстановление выполнимо, — те
+   * же условия, что у ветки focus. Не выполнены — `/s` остаётся обычным
+   * поиском по сессиям, и Enter делает привычное, а не молчит; отбор при этом
+   * идёт по всей строке, вместе с префиксом: `/s` в таком поиске — то, что
+   * человек ищет, а не команда.
+   *
+   * Считается один раз на обе раскладки, узкую и широкую, и потому вынесено
+   * из render(): широкая ветка не может взять `mode` как есть — buildBlocks на
+   * `snapshots` без трекера не отдаёт ни одного блока, и вместо поиска по
+   * сессиям человек получил бы пустой экран без единого слова о том, почему.
+   * Две копии этого отката разошлись бы на первой же правке — они уже
+   * разъезжались ровно здесь.
+   */
+  function shownModeAndQuery() {
+    const { mode, query } = window.PickerMode.parseQuery(search.value);
+    if (mode !== 'snapshots' || trackerIsHere()) return { mode, query };
+    return { mode: 'sessions', query: search.value.trim() };
   }
 
   function render() {
@@ -770,16 +1065,22 @@
     // агрегатора, а «встала ли клавиша» знает только эта машина, и меняется
     // отдельным событием — не в такт опросу, который перестраивает projectRows.
     window.ProjectList.markHotkeysTaken(projectRows, hotkeysTaken);
-    // Режим живёт в строке поиска, а не отдельным флагом: см. picker-mode.js.
-    const { mode, query } = window.PickerMode.parseQuery(search.value);
-    // Режим снимков предлагается только там, где восстановление выполнимо:
-    // те же условия, что у ветки focus. Не выполнены — `/s` остаётся обычным
-    // поиском по сессиям, и Enter делает привычное, а не молчит.
-    const snapshotsMode = mode === 'snapshots' && trackerIsHere();
-    if (mode === 'projects') renderProjects(query, items, nowSec);
-    else if (snapshotsMode) renderSnapshots(query, items, nowSec);
-    else renderSessions(mode === 'snapshots' ? search.value.trim() : query, items, nowSec);
-    syncList(items);
+    const { mode, query } = shownModeAndQuery();
+    list.classList.toggle('blocks', fullscreen);
+    if (fullscreen) {
+      // Узкое состояние отрисовки сбрасывается: вернувшись, planListSync
+      // сравнил бы новые строки со старым снимком чужой раскладки и правил бы
+      // не те элементы. Тот же сброс в обратную сторону — ниже.
+      rendered = { keys: [], html: [] };
+      renderBlocks(mode, query, nowSec);
+    } else {
+      blocksShape = null;
+      renderedBlocks = new Map();
+      if (mode === 'projects') renderProjects(query, items, nowSec);
+      else if (mode === 'snapshots') renderSnapshots(query, items, nowSec);
+      else renderSessions(query, items, nowSec);
+      syncList(items);
+    }
     // Отказ показывается и поверх непустого списка: строки в нём с прошлого
     // удачного опроса, и молчать о том, что свежих больше не приходит, нельзя.
     if (notice) {
@@ -809,7 +1110,10 @@
           ? (projectRows.length ? 'Nothing matches.'
             : lastState.sessions ? 'No projects — is ccfzf on the host up to date?'
               : 'Loading…')
-          : snapshotsMode
+          // Тот же `mode`, что и у обеих раскладок выше: подсказка про
+          // недостающие снимки обязана быть одна на узкий список и на блоки, а
+          // откат `/s` в поиск по сессиям — не показывать её вовсе.
+          : mode === 'snapshots'
             ? (snapshotRows.length ? 'Nothing matches.'
               // Пустой список снимков почти всегда значит «трекер на той
               // стороне ещё не научился их публиковать» — на вид это не
@@ -1016,14 +1320,39 @@
     nodes.forEach((node, i) => node.classList.toggle('active', i === active));
   }
 
+  /** Каретка на краю запроса и ничего не выделено. */
+  function atQueryEdge(key) {
+    if (search.selectionStart !== search.selectionEnd) return false;
+    return key === 'ArrowLeft'
+      ? search.selectionStart === 0
+      : search.selectionStart === search.value.length;
+  }
+
   function move(delta) {
     if (!rows.length) return;
-    active = (active + delta + rows.length) % rows.length;
+    // В широком режиме — внутри своего блока, с упором в края; в узком — по
+    // кругу, как было: там список один, и круг возвращает к его началу.
+    active = fullscreen
+      ? window.PickerBlocks.moveInBlocks(rows, active, delta)
+      : (active + delta + rows.length) % rows.length;
     paint();
-    // Только здесь, не в paint: render() тикает раз в секунду с обновлением
-    // списка, и scrollIntoView каждый раз дёргал бы скролл к активной строке,
-    // даже когда пользователь сам ушёл вниз читать другие сессии.
+    scrollActiveIntoView();
+  }
+
+  function moveBlock(delta) {
+    if (!rows.length) return;
+    active = window.PickerBlocks.moveBetweenBlocks(rows, active, delta);
+    paint();
+    scrollActiveIntoView();
+  }
+
+  // Только на нажатие клавиши, не в paint: render() тикает раз в секунду, и
+  // scrollIntoView каждый раз дёргал бы скролл к активной строке, даже когда
+  // человек сам ушёл вниз читать другие сессии.
+  function scrollActiveIntoView() {
     const current = list.querySelectorAll('.row')[active];
+    // block: 'nearest' сам находит ближайший скроллящийся предок — в широком
+    // режиме это тело блока, в узком сам список.
     if (current) current.scrollIntoView({ block: 'nearest' });
   }
 
@@ -1320,6 +1649,14 @@
   function choose() {
     const row = rows[active];
     if (!row) return;
+    // Строка свёрнутого блока: Enter на ней не открывает ничего, а разворачивает
+    // блок. Стоит до разбора обычных видов строк: сессии за ней нет вовсе, и
+    // любая ветка ниже приняла бы её за строку без id.
+    if (row.kind === 'block-toggle') {
+      collapsedBlocks = collapsedBlocks.filter(key => key !== row.blockKey);
+      render();
+      return;
+    }
     // Заголовок снимка: поднять раскладку целиком.
     if (row.kind === 'snapshot') return restoreSnapshot(row.id, []);
     // Сессия из снимка: у открытой окно уже есть, и Enter должен поднять его,
@@ -1782,6 +2119,22 @@
       onSearchInput();
       return;
     }
+    if (plainCtrl && e.code === 'KeyF') {
+      // Режим окна — не префикс в строке поиска, в отличие от `^A` и `^S`: он
+      // меняет раскладку, а не то, что показано, и потому живёт флагом и
+      // помнится в ui.json.
+      e.preventDefault();
+      fullscreen = !fullscreen;
+      // Свёрнутые блоки — состояние одной раскладки: вернувшись в широкий
+      // режим, человек ждёт его умолчания, а не того, что сворачивал в
+      // прошлый раз.
+      collapsedBlocks = [];
+      invoke('set_picker_size', { fullscreen })
+        .catch((err) => { error = String(err); });
+      saveUi();
+      render();
+      return;
+    }
     // ^P/^U/^I — те же три действия, что и в меню. preventDefault здесь
     // обязателен: иначе Ctrl+P в webview уйдёт в печать.
     if (plainCtrl) {
@@ -1803,6 +2156,15 @@
     }
     if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+    // ←/→ уходят в навигацию только в широком режиме и только когда каретка
+    // на краю запроса: внутри набранного текста они правят его, как раньше.
+    // Поле поиска сфокусировано всегда, и отнять у него стрелки насовсем
+    // значило бы лишить человека правки запроса — ту же цену уже заплатили за
+    // `^A`, второй раз она ни к чему.
+    else if (fullscreen && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && atQueryEdge(e.key)) {
+      e.preventDefault();
+      moveBlock(e.key === 'ArrowRight' ? 1 : -1);
+    }
     else if (e.key === 'Enter') { e.preventDefault(); choose(); }
     else if (e.key === 'Escape') { e.preventDefault(); invoke('hide_picker'); }
   });
@@ -1957,6 +2319,17 @@
       // toggles тут производная, а не источник: источник — uiToggles, и
       // именно его, а не эту плоскую карту, пишет saveUi().
       toggles = window.UiState.listColumns(uiToggles);
+      fullscreen = ui.fullscreen;
+      // Размер просим у Rust сразу: окно открывается с размером из
+      // tauri.conf.json, и без этого широкий режим помнился бы, а окно
+      // осталось бы узким. Просим безусловно, в обе стороны: узкий режим —
+      // такое же прочитанное состояние, а лишняя просьба на неизменившемся
+      // окне ничего не стоит. Страница при этом почти всегда просит по
+      // скрытому окну — загрузка идёт до первого показа, — и Rust такую
+      // просьбу откладывает до показа сам (`SizeRequest` в main.rs): на
+      // скрытом окне центровка не работает.
+      invoke('set_picker_size', { fullscreen })
+        .catch((err) => { error = String(err); });
       // Набор вынесенных в статуслайн галок мог прийти из файла другим, чем
       // при первой отрисовке разметки (до загрузки uiToggles ещё нет) —
       // разметку чекбоксов надо пересобрать под то, что реально загружено.
@@ -2020,6 +2393,14 @@
         sortMode = ui.sort;
         uiToggles = ui.toggles;
         toggles = window.UiState.listColumns(uiToggles);
+        fullscreen = ui.fullscreen;
+        // Тот же размер, что и при первой загрузке, и так же безусловно:
+        // дорога сюда гоночная (настройки перечитывают ui.json между ^F и
+        // записью saveUi), и `if (fullscreen)` приводил бы ровно в то
+        // состояние, ради ухода от которого чинили settings.html, — узкая
+        // раскладка в широкой раме.
+        invoke('set_picker_size', { fullscreen })
+          .catch((err) => { error = String(err); });
       } catch (e) {
         error = String(e);
       }

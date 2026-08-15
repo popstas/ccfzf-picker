@@ -138,6 +138,17 @@ test('правка пикера переживает сохранение нас
   assert.strictEqual(saved.sort, 'name', 'сортировкой распоряжается пикер, не настройки');
 });
 
+test('режим окна переживает сохранение настроек', async () => {
+  // То же правило, что и у сортировки: широким режимом распоряжается пикер
+  // (`^F`), окно настроек про него не знает вовсе и обязано вернуть в файл
+  // прочитанное. Не верни — и первое же сохранение вкладки UI забыло бы режим,
+  // а пикер получил бы по `ui-changed` узкую раскладку внутри широкой рамы.
+  const onDisk = defaults();
+  onDisk.fullscreen = true;
+  const { saved } = await saveUiTab({ onDisk, snapshot: defaults(), dirty: {} });
+  assert.strictEqual(saved.fullscreen, true);
+});
+
 test('нетронутая ось берётся из файла, а не из снимка загрузки', async () => {
   const snapshot = defaults();
   const onDisk = defaults();
