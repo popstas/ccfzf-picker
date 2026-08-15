@@ -1494,3 +1494,37 @@ test('стрелки уходят в навигацию только на кра
   // Есть выделение — стрелки остаются полю: ими его снимают.
   assert.strictEqual(check('picker', 0, 6, 'ArrowLeft'), false);
 });
+
+test('сброс выбора уводит его с заголовка секции, а наведённый — нет', () => {
+  // Заголовок секции — обычная строка списка и всегда первая. Не снимай сброс
+  // выбор с него, Enter сразу после открытия окна сворачивал бы верхнюю
+  // секцию вместо того, чтобы открыть верхнюю сессию. А наведённый стрелками
+  // выбор трогать нельзя: свернуть первую секцию с клавиатуры было бы нечем.
+  const source = pageFunctions('render()');
+  assert.ok(source.includes('selectionReset'),
+    'render() обязан спрашивать про сброс выбора');
+  assert.ok(source.includes("r.kind !== 'section'"),
+    'сброс обязан искать первую строку, которая не заголовок');
+  // Просят сброс ровно два места, и оба — начало нового отбора: новая строка
+  // поиска и новый показ окна.
+  for (const fn of ['onSearchInput()', 'beginShow()']) {
+    assert.ok(pageFunctions(fn).includes('selectionReset = true;'), fn);
+  }
+});
+
+test('меню не открывается на заголовке секции', () => {
+  // Ни id, ни имени у него нет: меню вышло бы озаглавленным «undefined» и без
+  // единого работающего пункта.
+  const source = SESSIONS_HTML.match(/\n {2}function openMenu\(\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(source, 'openMenu не найден в sessions.html — тест сторожит не то');
+  const calls = [];
+  const ctx = {
+    rows: [{ kind: 'section', sectionKey: 'live', collapsed: false }],
+    active: 0,
+    actionsFor: () => { throw new Error('меню на заголовке секции собираться не должно'); },
+    renderMenu: () => calls.push(['renderMenu']),
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${source[0]}\nopenMenu();`, ctx, { filename: 'sessions.html' });
+  assert.deepStrictEqual(calls, []);
+});
