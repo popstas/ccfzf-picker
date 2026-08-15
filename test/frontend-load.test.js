@@ -65,7 +65,7 @@ test('порядок тегов таков, что каждый модуль н�
       [{ id: 's1', created: 1, sessions: [{ id: 'a', cwd: '/home/user/projects/ccfzf', title: 'ccfzf' }] }],
       [], 'projects/ccfzf',
     ).map(r => r.kind)],
-    ['snapshot', 'snapshot-session'],
+    ['snapshot-day', 'snapshot', 'snapshot-session'],
   );
   // picker-sections берёт filterSessions/filterProjects у picker-filter на
   // загрузке. Запрос обязан быть непустым по той же причине, что и у снимков:

@@ -540,7 +540,7 @@ test('выключенный чекбокс hotkeys убирает колонк�
 // sessions.html их читает — разъехавшись, они дадут «undefined» в разметке при
 // зелёном picker-snapshots.test.js. Функция так же вычитывается из страницы и
 // выполняется в vm: копия отрисовщика в тесте разошлась бы с настоящим молча.
-const { buildSnapshotRows, openIdsFromState } = require('../frontend-src/picker-snapshots');
+const { buildSnapshotRows, openIdsFromState, snapshotDay } = require('../frontend-src/picker-snapshots');
 
 // Форма — с живого ответа `ccfzf --state`, поле `snapshots`.
 const AGGREGATOR_SNAPSHOTS = [{
@@ -564,6 +564,8 @@ function renderSnapshotRows(snapshots, query, options) {
     // Ровно то, чем itemsOfSection пользуется снаружи себя.
     window: { PickerSnapshots: { buildSnapshotRows, openIdsFromState }, PickerSections },
     snapshotRows: snapshots,
+    // Отступлений нет — дни складываются по умолчанию: свежий развёрнут.
+    collapsedDays: (opts.collapsedDays || {}),
     // Открытые окна приезжают тем же ответом, что и весь список.
     lastState: { sessions: (opts.open || []).map(id => ({ id, window: { hwnd: 1 } })) },
     rows: [],
@@ -584,53 +586,80 @@ function renderSnapshotRows(snapshots, query, options) {
 
 test('строка снимка доезжает с настоящего пути до разметки списка', () => {
   const { items, rows } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '', { open: ['aaa'] });
-  // Заголовок и две сессии одним потоком, все три — строки rows: у заголовка
-  // своё действие, и Enter на нём поднимает раскладку целиком.
+  // День, заголовок снимка и две сессии одним потоком, все четыре — строки
+  // rows: у каждой своё действие, и у дня оно тоже есть — свернуть его.
   assert.deepStrictEqual(rows.map(r => r.kind),
-    ['snapshot', 'snapshot-session', 'snapshot-session']);
-  assert.deepStrictEqual(items.map(i => i.key),
-    ['g:snap:snap-1', 'snap:snap-1:aaa', 'snap:snap-1:bbb']);
+    ['snapshot-day', 'snapshot', 'snapshot-session', 'snapshot-session']);
+  assert.deepStrictEqual(items.map(i => i.key), [
+    `g:snapday:${snapshotDay(AGGREGATOR_SNAPSHOTS[0])}`,
+    'g:snap:snap-1', 'snap:snap-1:aaa', 'snap:snap-1:bbb',
+  ]);
   for (let i = 0; i < items.length; i += 1) {
     // С нуля по той же причине, что и у проектов: режим снимков — префикс.
     assert.ok(items[i].html.includes(`data-index="${i}"`), items[i].html);
     assert.ok(!items[i].html.includes('undefined'), items[i].html);
   }
 
-  // Счёт в заголовке: сколько сессий всего и сколько из них ещё не на экране.
-  // Имена total и missing — тот самый промах, который тест обязан ловить.
-  assert.ok(items[0].html.includes('<div class="count">2 · 1 not open</div>'), items[0].html);
-  assert.match(items[0].html, /<div class="name">\d{2}:\d{2} · \d{4}-\d{2}-\d{2}<\/div>/);
+  // Заголовок дня: значок развёрнутости, английский месяц и оба счётчика.
+  assert.ok(items[0].html.includes('class="row snapshot-day"'), items[0].html);
+  assert.match(items[0].html, /<div class="name">▾ [A-Z][a-z]{2} \d{1,2}<\/div>/);
+  assert.ok(items[0].html.includes('<div class="count">1 snapshot · 2 sessions</div>'),
+    items[0].html);
+
+  // Счёт в заголовке снимка: сколько сессий всего и сколько из них ещё не на
+  // экране. Имена total и missing — тот самый промах, который тест обязан
+  // ловить. Даты в имени нет: её говорит день, а строка — только час.
+  assert.ok(items[1].html.includes('<div class="count">2 · 1 not open</div>'), items[1].html);
+  assert.match(items[1].html, /<div class="name">\d{2}:\d{2}<\/div>/);
 
   // Открытая сессия — тусклая и с пометкой; восстановление её пропустит.
   // Класс именно `on-screen`: `closed` в этом файле значит обратное — «сессии
   // нет», — и строка снимка носила бы его ровно в тех случаях, когда окно есть.
-  assert.ok(items[1].html.includes('class="row snapshot-session on-screen"'), items[1].html);
-  assert.ok(!items[1].html.includes('closed'), items[1].html);
-  assert.ok(items[1].html.includes('<div class="dot active"></div>'), items[1].html);
-  assert.ok(items[1].html.includes('▣ open'), items[1].html);
+  assert.ok(items[2].html.includes('class="row snapshot-session on-screen"'), items[2].html);
+  assert.ok(!items[2].html.includes('closed'), items[2].html);
+  assert.ok(items[2].html.includes('<div class="dot active"></div>'), items[2].html);
+  assert.ok(items[2].html.includes('▣ open'), items[2].html);
   // Закрытая — обычная, и колонка пуста, а не «undefined».
-  assert.ok(items[2].html.includes('class="row snapshot-session"'), items[2].html);
-  assert.ok(items[2].html.includes('<div class="dot"></div>'), items[2].html);
-  assert.ok(items[2].html.includes('<div class="count"></div>'), items[2].html);
+  assert.ok(items[3].html.includes('class="row snapshot-session"'), items[3].html);
+  assert.ok(items[3].html.includes('<div class="dot"></div>'), items[3].html);
+  assert.ok(items[3].html.includes('<div class="count"></div>'), items[3].html);
 
   // Имя строки — каталог проекта, путь — тот же shortPath, что у сессий.
-  assert.ok(items[2].html.includes('<div class="name">empty</div>'), items[2].html);
-  assert.ok(items[2].html.includes('<div class="cwd">~/projects/empty</div>'), items[2].html);
-  assert.ok(items[2].html.includes('title="/home/user/projects/empty"'), items[2].html);
+  assert.ok(items[3].html.includes('<div class="name">empty</div>'), items[3].html);
+  assert.ok(items[3].html.includes('<div class="cwd">~/projects/empty</div>'), items[3].html);
+  assert.ok(items[3].html.includes('title="/home/user/projects/empty"'), items[3].html);
+});
+
+test('свёрнутый день отдаёт один заголовок, и значок при нём другой', () => {
+  // Строки свёрнутого дня в список не попадают вовсе — ни в разметку, ни в
+  // rows: иначе стрелки ходили бы по невидимому.
+  const day = snapshotDay(AGGREGATOR_SNAPSHOTS[0]);
+  const { items, rows } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '',
+    { collapsedDays: { [day]: true } });
+  assert.deepStrictEqual(rows.map(r => r.kind), ['snapshot-day']);
+  assert.strictEqual(items.length, 1);
+  assert.match(items[0].html, /<div class="name">▸ [A-Z][a-z]{2} \d{1,2}<\/div>/);
 });
 
 test('все окна на экране — заголовок говорит об этом, а не молчит', () => {
   const { items } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '', { open: ['aaa', 'bbb'] });
-  assert.ok(items[0].html.includes('<div class="count">2 · all on screen</div>'), items[0].html);
+  assert.ok(items[1].html.includes('<div class="count">2 · all on screen</div>'), items[1].html);
 });
 
 test('отбор снимков и порядок строк — тот же, что видит человек', () => {
   // Снимок без подошедших сессий уходит с заголовком, а data-index
   // пересчитывается от нуля: иначе после набора Enter поднимал бы не ту строку.
+  //
+  // Заголовок дня под запросом — подпись, а не строка: свёрнутость там
+  // назначена сверху, и переключатель молчал бы. Поэтому в `rows` его нет, а
+  // data-index у строк считается от нуля так, будто дня и не было.
   const { items, rows } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, 'empty');
-  assert.strictEqual(items.length, 2);
+  assert.strictEqual(items.length, 3);
+  assert.ok(items[0].html.includes('class="group-label"'), items[0].html);
+  assert.ok(!items[0].html.includes('data-index'), items[0].html);
   assert.deepStrictEqual(rows.map(r => r.id), ['snap-1', 'bbb']);
-  assert.ok(items[1].html.includes('data-index="1"'), items[1].html);
+  assert.ok(items[1].html.includes('data-index="0"'), items[1].html);
+  assert.ok(items[2].html.includes('data-index="1"'), items[2].html);
   assert.deepStrictEqual(renderSnapshotRows(AGGREGATOR_SNAPSHOTS, 'нет такого').items, []);
 });
 
@@ -640,16 +669,16 @@ test('имя и путь снимка в разметку экранируютс
     sessions: [{ id: 'ccc', cwd: '/home/user/projects/<b>"x"', title: 'x' }],
   }]);
   // Путь идёт и в подсказку, и в тело строки — обе через escapeHtml.
-  assert.ok(!items[1].html.includes('<b>'), items[1].html);
-  assert.ok(!items[1].html.includes('"x"'), items[1].html);
-  assert.ok(items[1].html.includes('&lt;b&gt;&quot;x&quot;'), items[1].html);
+  assert.ok(!items[2].html.includes('<b>'), items[2].html);
+  assert.ok(!items[2].html.includes('"x"'), items[2].html);
+  assert.ok(items[2].html.includes('&lt;b&gt;&quot;x&quot;'), items[2].html);
 });
 
 test('выключенный чекбокс путей убирает путь из строки снимка', () => {
   const { items } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '', { toggles: { showPaths: false } });
-  assert.ok(!items[1].html.includes('class="cwd"'), items[1].html);
+  assert.ok(!items[2].html.includes('class="cwd"'), items[2].html);
   // Подсказка остаётся: она и заведена для того, чего в строке не видно.
-  assert.ok(items[1].html.includes('title="/home/user/projects/ccfzf"'), items[1].html);
+  assert.ok(items[2].html.includes('title="/home/user/projects/ccfzf"'), items[2].html);
 });
 
 // ── Какой режим показан на самом деле ────────────────────────────────────────
@@ -731,6 +760,9 @@ function chooseWith(rows, active) {
     // а список рисуется заново.
     fullscreen: false,
     collapsed: { narrow: { past: true }, wide: {} },
+    // Свёрнутость дней снимков — своя карта и живёт только в памяти страницы,
+    // поэтому `saveUi` её ветка не зовёт.
+    collapsedDays: {},
     layoutName: () => 'narrow',
     saveUi: () => calls.push(['saveUi']),
     render: () => calls.push(['render']),
@@ -745,28 +777,39 @@ function chooseWith(rows, active) {
   vm.runInContext(`${source[0]}\nchoose();`, ctx, { filename: 'sessions.html' });
   // JSON-круг — не украшение: объект пересобран внутри vm, у него другой
   // Object, и deepStrictEqual сравнивает ещё и прототип.
-  return { calls, collapsed: JSON.parse(JSON.stringify(ctx.collapsed)) };
+  return {
+    calls,
+    collapsed: JSON.parse(JSON.stringify(ctx.collapsed)),
+    collapsedDays: JSON.parse(JSON.stringify(ctx.collapsedDays)),
+  };
 }
 
-test('Enter на строке снимка уходит по трём разным веткам', () => {
-  // Настоящие строки: заголовок, открытая сессия (aaa), закрытая (bbb).
+test('Enter на строке снимка уходит по четырём разным веткам', () => {
+  // Настоящие строки: день, заголовок, открытая сессия (aaa), закрытая (bbb).
   const { rows } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '', { open: ['aaa'] });
   assert.deepStrictEqual(rows.map(r => r.kind),
-    ['snapshot', 'snapshot-session', 'snapshot-session']);
+    ['snapshot-day', 'snapshot', 'snapshot-session', 'snapshot-session']);
 
-  // Заголовок — вся раскладка. Пустой список сессий здесь значит «все», и
-  // непустой на его месте поднял бы часть вместо целого.
-  assert.deepStrictEqual(chooseWith(rows, 0).calls, [['restoreSnapshot', 'snap-1', []]]);
+  // День — переключатель, и восстановления в нём нет: снимков под ним бывает
+  // несколько, и «подними их все» никто не просил. Записывается только в
+  // память страницы, поэтому `saveUi` тут не зовётся.
+  const day = chooseWith(rows, 0);
+  assert.deepStrictEqual(day.calls, [['render']]);
+  assert.deepStrictEqual(day.collapsedDays, { [snapshotDay(AGGREGATOR_SNAPSHOTS[0])]: true });
+
+  // Заголовок снимка — вся раскладка. Пустой список сессий здесь значит «все»,
+  // и непустой на его месте поднял бы часть вместо целого.
+  assert.deepStrictEqual(chooseWith(rows, 1).calls, [['restoreSnapshot', 'snap-1', []]]);
 
   // Открытая сессия — окно уже есть, Enter показывает его, а не заводит второе.
-  assert.deepStrictEqual(chooseWith(rows, 1).calls, [['focusSession', 'aaa']]);
+  assert.deepStrictEqual(chooseWith(rows, 2).calls, [['focusSession', 'aaa']]);
 
   // Закрытая — просьба на один id, и адресована она снимку. `snapshotId` и
   // `id` здесь заведомо разные: подстановка одного вместо другого роняет
   // именно это сравнение.
-  assert.strictEqual(rows[2].id, 'bbb');
-  assert.strictEqual(rows[2].snapshotId, 'snap-1');
-  assert.deepStrictEqual(chooseWith(rows, 2).calls, [['restoreSnapshot', 'snap-1', ['bbb']]]);
+  assert.strictEqual(rows[3].id, 'bbb');
+  assert.strictEqual(rows[3].snapshotId, 'snap-1');
+  assert.deepStrictEqual(chooseWith(rows, 3).calls, [['restoreSnapshot', 'snap-1', ['bbb']]]);
 });
 
 // Заголовок секции приходит из buildSections и сессией не является вовсе: у
@@ -1575,16 +1618,23 @@ test('стрелки уходят в навигацию только на кра
   assert.strictEqual(check('picker', 0, 6, 'ArrowLeft'), false);
 });
 
-test('сброс выбора уводит его с заголовка секции, а наведённый — нет', () => {
+test('сброс выбора уводит его с заголовка, а наведённый — нет', () => {
   // Заголовок секции — обычная строка списка и всегда первая. Не снимай сброс
   // выбор с него, Enter сразу после открытия окна сворачивал бы верхнюю
   // секцию вместо того, чтобы открыть верхнюю сессию. А наведённый стрелками
   // выбор трогать нельзя: свернуть первую секцию с клавиатуры было бы нечем.
+  //
+  // Заголовков теперь два вида, и второй — день снимков: в режиме `/s` он и
+  // есть первая строка списка, так что Enter сразу после `^S` сворачивал бы
+  // сегодняшний день вместо того, чтобы поднять свежую раскладку. Проверка на
+  // один `section` этого не ловила бы вовсе.
   const source = pageFunctions('render()');
   assert.ok(source.includes('selectionReset'),
     'render() обязан спрашивать про сброс выбора');
-  assert.ok(source.includes("r.kind !== 'section'"),
+  assert.ok(source.includes('HEADER_KINDS.has(r.kind)'),
     'сброс обязан искать первую строку, которая не заголовок');
+  assert.match(SESSIONS_HTML, /const HEADER_KINDS = new Set\(\['section', 'snapshot-day'\]\)/,
+    'оба вида заголовков обязаны стоять в HEADER_KINDS');
   // Просят сброс ровно два места, и оба — начало нового отбора: новая строка
   // поиска и новый показ окна.
   for (const fn of ['onSearchInput()', 'beginShow()']) {

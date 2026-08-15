@@ -222,6 +222,9 @@ test('меню решено для каждого вида строки, а не
     zellij: ['info'],
     project: ['new', 'explorer'],
     snapshot: ['restore'],
+    // Пусто, и это решение, а не пропуск: под днём снимков несколько, и
+    // «восстанови их все» никто не просил. Такое меню openMenu не открывает.
+    'snapshot-day': [],
     'snapshot-session': ['explorer', 'new'],
   };
   for (const [kind, ids] of Object.entries(decided)) {

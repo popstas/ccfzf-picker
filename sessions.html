@@ -296,6 +296,15 @@
            восстановление пропустит). Случая два, цвет один — правило одно. */
         .row.closed .name,
         .row.snapshot-session.on-screen .name { color: #a8adb5; }
+        /* Заголовок дня. Читается заголовком, как и заголовок секции: те же
+           мелкие прописные. Кружка у него нет вовсе — и места под кружок тоже:
+           день стоит выше снимков, а не в одной с ними колонке. */
+        .row.snapshot-day { padding: 9px 18px 5px; }
+        .row.snapshot-day .name {
+            font-size: 10px; letter-spacing: .08em;
+            text-transform: uppercase; color: #7d838c;
+        }
+        .row.snapshot-day .count { color: #6f757e; }
         /* Заголовок раскладки. Не group-label: у него есть своё действие —
            Enter поднимает снимок целиком, — поэтому это строка, а не подпись.
            Отличается от строки сессии разрядкой и цветом подписи, как группа. */
@@ -620,6 +629,12 @@
   // только сброс — наведённый стрелками или кликом остаётся где стоит, иначе
   // свернуть первую секцию с клавиатуры было бы нечем.
   let selectionReset = true;
+  // Строки-переключатели: Enter на них ничего не открывает, а сворачивает. Их
+  // сброс выбора и пропускает. Список, а не одна проверка на `section`:
+  // заголовок дня у снимков — такая же строка и с той же ценой, и в режиме
+  // `/s` он и есть первая строка списка. Enter сразу после `^S` сворачивал бы
+  // сегодняшний день вместо того, чтобы поднять свежую раскладку.
+  const HEADER_KINDS = new Set(['section', 'snapshot-day']);
   // Умолчание — из session-groups, а не литералом: иначе список открывался бы
   // в одном порядке, а ui.json без сохранённой сортировки нормализовался бы в
   // другой.
@@ -643,6 +658,16 @@
   // раскладывает buildSnapshotRows на каждой отрисовке: отбор запросом и
   // пометка «окно открыто» считаются по свежему ответу, а не по прошлому.
   let snapshotRows = [];
+  // Дни снимков, которые человек свернул или развернул сам, — карта
+  // «`YYYY-MM-DD` → свёрнут ли». Только отступления: чего в ней нет, то по
+  // умолчанию (развёрнут самый свежий день, остальные свёрнуты), и умолчание
+  // живёт в buildSnapshotRows.
+  //
+  // В памяти страницы, а не в `ui.json`: ключи вида `2026-08-16` копились бы в
+  // файле навсегда — по одному на каждый день, когда снимок хоть раз трогали, —
+  // и вылезли бы строками в окне настроек, где список панелей и берётся из
+  // ui.json. Цена известна: свёрнутость дней живёт до перезапуска пикера.
+  let collapsedDays = {};
   // Текст отказа: не смогли спросить удалённый хост или ответ пришёл не той формы.
   // Держится до первого удачного опроса, а не до следующей отрисовки, — иначе
   // он мигал бы раз в секунду.
@@ -1014,6 +1039,31 @@
   // `nowSec` в сигнатуре — ради единообразия с соседями: строки снимков
   // возраста не показывают, и считать его здесь не из чего.
   function snapshotItem(row, nowSec) {
+    // Заголовок дня — до всего остального: строкой он бывает не всегда.
+    //
+    // Под запросом свёрнутость назначена сверху (все дни развёрнуты), и Enter
+    // на переключателе молчал бы: записанное тут же затиралось бы обратно.
+    // Молчащий переключатель хуже отсутствующего, поэтому там заголовок — не
+    // строка, а подпись: ни `data-index`, ни класса `row`, и в `rows` он не
+    // попадает вовсе. Тот же приём и та же причина, что у заголовка секции.
+    if (row.kind === 'snapshot-day') {
+      if (!row.foldable) {
+        return {
+          key: row.key,
+          html: `<div class="group-label">${escapeHtml(`${row.label} - ${row.meta}`)}</div>`,
+        };
+      }
+      const at = rows.length;
+      rows.push(row);
+      const mark = row.collapsed ? '▸' : '▾';
+      return {
+        key: row.key,
+        html: `<div class="row snapshot-day" data-index="${at}">` +
+          `<div class="text"><div class="name">${escapeHtml(`${mark} ${row.label}`)}</div></div>` +
+          `<div class="meta"><div class="count">${escapeHtml(row.meta)}</div>` +
+          `</div></div>`,
+      };
+    }
     const index = rows.length;
     rows.push(row);
     if (row.kind === 'snapshot') {
@@ -1054,7 +1104,7 @@
   // целиком, — поэтому у него класс `row`, а не `group-label`.
   function snapshotItemsFor(query) {
     const open = window.PickerSnapshots.openIdsFromState(lastState);
-    return window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query);
+    return window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query, collapsedDays);
   }
 
   function sessionItem(session, nowSec) {
@@ -1375,7 +1425,7 @@
     }
     if (selectionReset) {
       selectionReset = false;
-      const first = rows.findIndex(r => r.kind !== 'section');
+      const first = rows.findIndex(r => !HEADER_KINDS.has(r.kind));
       active = first === -1 ? 0 : first;
     }
     if (active >= rows.length) active = Math.max(0, rows.length - 1);
@@ -1942,6 +1992,15 @@
         [layout]: { ...collapsed[layout], [row.sectionKey]: !row.collapsed },
       };
       saveUi();
+      render();
+      return;
+    }
+    // Заголовок дня: свернуть или развернуть день. Восстанавливать здесь
+    // нечего — снимков за день несколько, и «подними их все» никто не просил.
+    // Запоминается только в памяти страницы (см. `collapsedDays`), поэтому и
+    // `saveUi` тут не зовётся, в отличие от заголовка секции.
+    if (row.kind === 'snapshot-day') {
+      collapsedDays = { ...collapsedDays, [row.day]: !row.collapsed };
       render();
       return;
     }

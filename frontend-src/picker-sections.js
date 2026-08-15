@@ -8,6 +8,14 @@
   const filterApi = typeof module === 'object' && module.exports
     ? require('./picker-filter')
     : globalThis.PickerFilter;
+  // Счёт снимков берётся у соседа, а не пишется здесь второй раз: считать его
+  // надо по заголовкам дней (строки свёрнутого дня в список не попадают), и
+  // разойдись копии — заголовок секции показывал бы одно число, а режим `/s`
+  // другое. Загрузка это выдерживает: picker-snapshots.js стоит в sessions.html
+  // раньше (606 против 610) и в prepare-frontend.js тоже.
+  const snapshotsApi = typeof module === 'object' && module.exports
+    ? require('./picker-snapshots')
+    : globalThis.PickerSnapshots;
 
   // Колонки широкого режима. Раскладка задана человеком и держится на смысле
   // строк, а не на их числе:
@@ -219,12 +227,16 @@
     // Снимки уже отобраны запросом на стороне buildSnapshotRows: у них своя
     // пара «заголовок раскладки и её сессии», и отбор строкой порознь порвал
     // бы её. trackerHere — то же условие, что у ^S.
+    //
+    // Счёт здесь — не длина списка строк, а число снимков: строки идут тремя
+    // видами (день, снимок, сессия), и день можно свернуть — `rows.length`
+    // менялся бы на каждое сворачивание, будто снимки исчезают.
     if ((mode === 'sessions' || mode === 'snapshots') && o.trackerHere) {
       const rows = o.snapshots || [];
       if (rows.length) {
         sections.push({
           key: 'snapshots', label: 'Snapshots', kind: 'snapshots',
-          rows, count: rows.length, past: false,
+          rows, count: snapshotsApi.snapshotCount(rows), past: false,
           ...(wide ? { column: COLUMN_PAST } : {}),
         });
       }
