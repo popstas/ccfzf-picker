@@ -985,6 +985,60 @@ fn register_projects_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) 
     (registered, accelerator)
 }
 
+/// Комбинация так, как её показывают человеку: `Super` — это `Win`.
+///
+/// Клавиша на клавиатуре подписана `Win`, а muda пишет её словом `Windows`, и
+/// `Windows+Shift+C` длиннее самого пункта меню. Своё имя модификатора здесь
+/// не выдумывается: `Cmd`, `Command` и `Meta` — те же имена, которые понимает
+/// разбор хоткея, и человек мог написать в `config.yaml` любое из них.
+///
+/// Прочие части строки идут как есть, а не приводятся к какому-нибудь общему
+/// виду: в колонке показывается ровно то, что человек написал в конфиге, — и
+/// это лучше канонической формы, потому что искать глазами он будет своё.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn accelerator_text(accelerator: &str) -> String {
+    accelerator
+        .split('+')
+        .map(|part| {
+            let part = part.trim();
+            match part.to_ascii_lowercase().as_str() {
+                "super" | "meta" | "cmd" | "command" | "win" | "windows" => "Win".to_string(),
+                _ => part.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+/// Подпись пункта и то, что уходит в нативный слот акселератора.
+///
+/// На Windows слот не используется вовсе, и это единственный способ показать
+/// `Win` вместо `Windows`: слово зашито в `Display` самого muda
+/// (`platform_impl/windows/accelerator.rs`), и подменить его нечем. Взамен
+/// комбинация пишется в подпись через `\t` — ровно тем приёмом, каким её
+/// кладёт туда и сам muda (`format!("{text}\t{}", accelerator)`): выравнивание
+/// по табуляции делает Win32, и колонка выходит та же самая. Без акселератора
+/// muda отдаёт подпись в меню как есть, так что табуляция доезжает до Win32
+/// нетронутой.
+///
+/// Цена — запись в таблице акселераторов меню, которую muda завёл бы рядом. Но
+/// она и была украшением: работает настоящий хоткей, глобальный, а меню трея
+/// клавиш не слушает вовсе. Ровно поэтому же отказ регистрации называет
+/// подпись, а не колонка.
+///
+/// На маке ничего не меняется: NSMenuItem рисует ⌘⇧C сам, и табуляция в
+/// заголовке была бы литеральной.
+fn menu_item_parts(label: &str, accelerator: &str) -> (String, Option<String>) {
+    #[cfg(windows)]
+    {
+        (format!("{label}\t{}", accelerator_text(accelerator)), None)
+    }
+    #[cfg(not(windows))]
+    {
+        (label.to_string(), Some(accelerator.to_string()))
+    }
+}
+
 /// Пункт трея «показать»: хранится в состоянии приложения, чтобы
 /// `apply_config` мог поправить его подпись и акселератор после смены
 /// хоткея из окна настроек. Без этого трей продолжал бы обещать комбинацию,
@@ -1005,11 +1059,16 @@ fn update_show_item(item: &MenuItem<tauri::Wry>, registered: bool, accelerator: 
 ///
 /// Отказ здесь не роняет ничего: акселератор — украшение, и строку, которую
 /// не понял muda, пункт переживает без правой колонки.
+///
+/// Что именно уходит в подпись, а что в слот, решает `menu_item_parts`: на
+/// Windows комбинация едет в подписи, и слот обязан быть очищен — иначе muda
+/// приписал бы к нашей табуляции свою вторую, со словом `Windows`.
 fn update_menu_item(item: &MenuItem<tauri::Wry>, label: &str, accelerator: &str) {
-    if let Err(e) = item.set_text(label) {
+    let (text, accel) = menu_item_parts(label, accelerator);
+    if let Err(e) = item.set_text(&text) {
         eprintln!("ccfzf-picker: cannot update tray label: {e}");
     }
-    if let Err(e) = item.set_accelerator(Some(accelerator)) {
+    if let Err(e) = item.set_accelerator(accel.as_deref()) {
         eprintln!("ccfzf-picker: cannot show hotkey {accelerator} in tray menu: {e}");
     }
 }
@@ -1648,20 +1707,21 @@ fn main() {
             // `with_id` вернёт ошибкой, а `?` уронил бы приложение на старте —
             // из-за подписи в меню. Поэтому отказ означает пункт без правой
             // колонки, а не отсутствие трея.
-            let label = show_item_label(hotkey_registered);
+            let (show_text, show_accel) =
+                menu_item_parts(show_item_label(hotkey_registered), &hotkey_accelerator);
             let show_item = match MenuItem::with_id(
                 app,
                 "show",
-                label,
+                &show_text,
                 true,
-                Some(hotkey_accelerator.as_str()),
+                show_accel.as_deref(),
             ) {
                 Ok(item) => item,
                 Err(e) => {
                     eprintln!(
                         "ccfzf-picker: cannot show hotkey {hotkey_accelerator} in tray menu: {e}"
                     );
-                    MenuItem::with_id(app, "show", label, true, None::<&str>)?
+                    MenuItem::with_id(app, "show", &show_text, true, None::<&str>)?
                 }
             };
             // Сохраняется в состоянии, чтобы `apply_config` мог поправить эту
@@ -1672,20 +1732,23 @@ fn main() {
             // первый: подпись говорит об отказе, акселератор показывается
             // всегда, а строку, которую muda не понял, пункт переживает без
             // правой колонки.
-            let projects_label = projects_item_label(projects_registered);
+            let (projects_text, projects_accel) = menu_item_parts(
+                projects_item_label(projects_registered),
+                &projects_accelerator,
+            );
             let projects_item = match MenuItem::with_id(
                 app,
                 "show-projects",
-                projects_label,
+                &projects_text,
                 true,
-                Some(projects_accelerator.as_str()),
+                projects_accel.as_deref(),
             ) {
                 Ok(item) => item,
                 Err(e) => {
                     eprintln!(
                         "ccfzf-picker: cannot show hotkey {projects_accelerator} in tray menu: {e}"
                     );
-                    MenuItem::with_id(app, "show-projects", projects_label, true, None::<&str>)?
+                    MenuItem::with_id(app, "show-projects", &projects_text, true, None::<&str>)?
                 }
             };
             app.manage(ProjectsMenuItem(projects_item.clone()));
@@ -2057,6 +2120,51 @@ mod tests {
         for (_, _, label) in MODE_MENU {
             assert!(!label.contains("Show"), "подпись {label} со словом Show");
         }
+    }
+
+    /// Клавиша Win зовётся `Win`, как она и подписана на клавиатуре.
+    ///
+    /// muda пишет её словом `Windows` — хардкод в его `Display`, — и
+    /// `Windows+Shift+C` длиннее самого пункта меню. Проверяются все имена
+    /// модификатора, которые понимает разбор хоткея: человек мог написать в
+    /// `config.yaml` любое из них, и колонка обязана называть клавишу одинаково
+    /// независимо от того, какое он выбрал.
+    #[test]
+    fn the_super_key_is_shown_as_win() {
+        for written in [
+            "Super+Shift+C", "super+shift+c", "Cmd+Shift+C", "Command+Shift+C",
+            "Meta+Shift+C", "Win+Shift+C", "Windows+Shift+C",
+        ] {
+            let shown = accelerator_text(written);
+            assert!(shown.starts_with("Win+"), "{written} показан как {shown}");
+            assert!(!shown.contains("Windows"), "{written} показан как {shown}");
+        }
+        assert_eq!(accelerator_text("Alt+Super+Shift+C"), "Alt+Win+Shift+C");
+    }
+
+    /// Прочие части строки идут как есть: в колонке человек ищет глазами то,
+    /// что сам написал в конфиге, а не каноническую форму.
+    #[test]
+    fn other_parts_of_the_combination_are_left_alone() {
+        assert_eq!(accelerator_text("Ctrl+Shift+F10"), "Ctrl+Shift+F10");
+        assert_eq!(accelerator_text(""), "");
+    }
+
+    /// Комбинация уезжает либо в подпись, либо в нативный слот — но не в оба
+    /// сразу и не в никуда.
+    ///
+    /// Оба разом означали бы две колонки в одной строке: свою через табуляцию и
+    /// мудовскую поверх неё. Ни одного — пункт без комбинации вовсе, а человеку
+    /// надо видеть, какая именно клавиша не сработала.
+    #[test]
+    fn the_combination_goes_to_exactly_one_place() {
+        let (text, accel) = menu_item_parts("Sessions", "Super+Shift+C");
+        let in_label = text.contains("Win+Shift+C");
+        let in_slot = accel.is_some();
+        assert!(in_label != in_slot, "подпись {text:?}, слот {accel:?}");
+        // Подпись пункта остаётся первой частью до табуляции — по ней muda
+        // читает её обратно (`text.split('\t').next()`).
+        assert_eq!(text.split('\t').next(), Some("Sessions"));
     }
 
     /// Ни id, ни имена режимов не повторяются: одинаковый id означал бы, что
