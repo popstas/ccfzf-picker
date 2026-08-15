@@ -176,14 +176,30 @@ test('сохранение без правок ничего не меняет', 
   assert.strictEqual(dirtyAxes.size, 0);
 });
 
-test('вкладка UI возвращает в файл и режим окна, и свёрнутость секций', () => {
-  // Ни тем, ни другим окно настроек не распоряжается — ими распоряжается
-  // пикер (`^F` и Enter на заголовке секции). Не верни их uiStateToSave
-  // четвёртым и третьим аргументом, и первое же сохранение вкладки UI забыло
-  // бы и раскладку, и все свёрнутые секции.
+test('вкладка UI возвращает в файл всё, чем распоряжается не она', () => {
+  // Режимом окна, свёрнутостью и порядком секций окно настроек не
+  // распоряжается — ими распоряжается пикер (`^F`, Enter на заголовке и
+  // перетаскивание заголовка). Не верни их uiStateToSave третьим, четвёртым и
+  // пятым аргументом, и первое же сохранение вкладки UI забыло бы и
+  // раскладку, и свёрнутые секции, и их порядок.
+  //
+  // Мина срабатывала уже дважды — на `fullscreen` и на `collapsed`, — и
+  // сторож поэтому сверяет список аргументов дословно: арность одна ничего не
+  // ловит, аргументы можно переставить местами.
   const source = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
   const call = source.match(/uiStateToSave\(([^)]*)\)/);
   assert.ok(call, 'вызов uiStateToSave не найден в settings.html — тест сторожит не то');
   const args = call[1].split(',').map(s => s.trim());
-  assert.deepStrictEqual(args, ['fresh.sort', 'fresh.toggles', 'fresh.fullscreen', 'fresh.collapsed']);
+  assert.deepStrictEqual(args,
+    ['fresh.sort', 'fresh.toggles', 'fresh.fullscreen', 'fresh.collapsed', 'fresh.order']);
+});
+
+test('пикер тоже зовёт uiStateToSave всеми аргументами', () => {
+  // Та же мина с другой стороны: страница пикера пишет ui.json чаще всех, и
+  // забытый аргумент стирал бы поле при каждой смене сортировки.
+  const source = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+  const call = source.match(/uiStateToSave\(([^)]*)\)/);
+  assert.ok(call, 'вызов uiStateToSave не найден в sessions.html — тест сторожит не то');
+  const args = call[1].split(',').map(s => s.trim());
+  assert.deepStrictEqual(args, ['sortMode', 'uiToggles', 'fullscreen', 'collapsed', 'order']);
 });

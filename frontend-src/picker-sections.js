@@ -213,10 +213,83 @@
     // порядку ходят `←/→` (moveBetweenBlocks), и разъедься он с видимым,
     // стрелка уводила бы не туда, куда смотрит глаз. Сортировка устойчива,
     // поэтому внутри колонки секции остаются в порядке сборки.
-    if (!wide) return shaped;
-    return shaped
+    //
+    // Всё это — умолчание, поверх которого ложится порядок, назначенный
+    // человеком перетаскиванием заголовка. Назначенный порядок применяется
+    // всегда, в том числе под запросом и под префиксом, где перетаскивать
+    // нельзя: иначе секции прыгали бы местами на первую же набранную букву.
+    if (!wide) return applyNarrowOrder(shaped, o.order);
+    return applyWideOrder(shaped, o.order);
+  }
+
+  // «Места не назначено» — не ноль и не бесконечность: на бесконечности
+  // разность двух неназначенных даёт NaN, и сортировка молча перестаёт
+  // сравнивать. Большое конечное число сравнивается честно и даёт ноль,
+  // отправляя пару в запасное сравнение по порядку сборки.
+  const UNPLACED = Number.MAX_SAFE_INTEGER;
+
+  /** Место ключа в списке; неназванный — в конец. */
+  function placeOf(keys, key) {
+    const at = keys.indexOf(key);
+    return at === -1 ? UNPLACED : at;
+  }
+
+  /**
+   * Узкий список в назначенном порядке.
+   *
+   * Названные секции идут в названном порядке, остальные — следом, в порядке
+   * сборки. То же правило, что у `normalizeCollapsed`: чего в файле нет — то
+   * по умолчанию, а умолчание для порядка и есть конец списка. Иначе новый
+   * вид секции пришлось бы дописывать людям в ui.json.
+   *
+   * Незнакомый ключ отсеивается сам собой: `indexOf` его просто не находит у
+   * секций, которых нет. Выбрасывать его из файла нельзя — `remote:<host>`
+   * приходят и уходят вместе с машинами, и место уснувшего трекера забылось
+   * бы за один опрос.
+   */
+  function applyNarrowOrder(sections, order) {
+    const keys = Array.isArray(order) ? order : [];
+    if (!keys.length) return sections;
+    return sections
       .map((section, at) => ({ section, at }))
-      .sort((a, b) => (a.section.column - b.section.column) || (a.at - b.at))
+      .sort((a, b) => (placeOf(keys, a.section.key) - placeOf(keys, b.section.key))
+        || (a.at - b.at))
+      .map(({ section }) => section);
+  }
+
+  /**
+   * Широкая раскладка в назначенном порядке.
+   *
+   * Здесь порядок называет и колонку, и место внутри неё: человек волен
+   * перенести секцию в соседнюю колонку, и умолчание «колонку задаёт смысл
+   * секции» отступает перед этим выбором. Секция, которую не переносили,
+   * остаётся в своей колонке по смыслу — иначе одно перетаскивание сгоняло бы
+   * весь список в первую колонку.
+   *
+   * Порядок результата — колонка за колонкой, сверху вниз внутри колонки, то
+   * есть ровно порядок чтения, по которому ходят `←/→`.
+   */
+  function applyWideOrder(sections, order) {
+    const columns = Array.isArray(order) ? order.filter(Array.isArray) : [];
+    if (!columns.length) {
+      return sections
+        .map((section, at) => ({ section, at }))
+        .sort((a, b) => (a.section.column - b.section.column) || (a.at - b.at))
+        .map(({ section }) => section);
+    }
+    const placed = sections.map((section, at) => {
+      const col = columns.findIndex(keys => keys.includes(section.key));
+      return {
+        // Колонка из файла главнее колонки по смыслу — но только для той
+        // секции, которую в файле назвали.
+        section: col === -1 ? section : { ...section, column: col + 1 },
+        at,
+        place: col === -1 ? UNPLACED : columns[col].indexOf(section.key),
+      };
+    });
+    return placed
+      .sort((a, b) => (a.section.column - b.section.column)
+        || (a.place - b.place) || (a.at - b.at))
       .map(({ section }) => section);
   }
 

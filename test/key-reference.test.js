@@ -78,8 +78,8 @@ test('проектные хоткеи приезжают из ответа аг�
   const sections = buildKeyReference({
     trackerHere: false,
     projects: [
-      { label: 'picker', cwd: '/home/me/picker', hotkey: 'Ctrl+F11' },
-      { label: 'no key', cwd: '/home/me/other', hotkey: '' },
+      { label: 'picker', cwd: '/home/user/picker', hotkey: 'Ctrl+F11' },
+      { label: 'no key', cwd: '/home/user/other', hotkey: '' },
     ],
   });
   const row = findKey(sections, '^F11');
@@ -93,8 +93,8 @@ test('не вставшая клавиша показана зачёркнуто
   // системе». Ровно это расследование однажды заняло полдня.
   const sections = buildKeyReference({
     trackerHere: false,
-    projects: [{ label: 'picker', cwd: '/home/me/picker', hotkey: 'Ctrl+F11' }],
-    hotkeysTaken: [{ cwd: '/home/me/picker', hotkey: 'Ctrl+F11', reason: 'reserved' }],
+    projects: [{ label: 'picker', cwd: '/home/user/picker', hotkey: 'Ctrl+F11' }],
+    hotkeysTaken: [{ cwd: '/home/user/picker', hotkey: 'Ctrl+F11', reason: 'reserved' }],
   });
   const row = findKey(sections, '^F11');
   assert.ok(row, 'зачёркнутая клавиша всё равно показывается');

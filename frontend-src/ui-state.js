@@ -82,6 +82,66 @@
     return out;
   }
 
+  // Колонок в широкой раскладке ровно три, и это свойство раскладки, а не
+  // файла: прочитай пикер длину из ui.json — номер колонки стал бы зависеть
+  // от содержимого файла, который правят чем угодно.
+  const WIDE_COLUMNS = 3;
+
+  /**
+   * Ключи секций из файла: строки, и каждая ровно один раз.
+   *
+   * Задвоенный ключ — это спор о том, где стоит секция, а не две секции:
+   * разрешается он в пользу первой записи, потому что список читается сверху
+   * вниз и первое упоминание и есть то место, куда человек её перетащил.
+   */
+  function normalizeKeys(raw, seen) {
+    const src = Array.isArray(raw) ? raw : [];
+    const out = [];
+    for (const key of src) {
+      if (typeof key !== 'string') continue;
+      const name = key.trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      out.push(name);
+    }
+    return out;
+  }
+
+  /**
+   * Порядок секций из файла: своя половинка у каждой раскладки.
+   *
+   * Формы у половинок разные, и это не оплошность. В узком списке секции идут
+   * одним потоком, и порядок — просто последовательность ключей. В широком
+   * секцию можно перенести и в соседнюю колонку, поэтому порядок там — три
+   * последовательности, по одной на колонку: так и колонка, и место внутри
+   * неё записаны одной структурой, а разворот её колонка за колонкой даёт
+   * ровно тот порядок чтения, по которому ходят `←/→`. Разъедься эти два
+   * порядка — стрелка уводила бы не туда, куда смотрит глаз, и поймать это
+   * тестом на одну функцию нельзя: врут они согласованно.
+   *
+   * Пустой список значит «как по умолчанию», а не «секций нет»: умолчание
+   * живёт в коде (`buildSections`), и так его можно менять, не переписывая
+   * людям ui.json. То же правило, что у `normalizeCollapsed`.
+   *
+   * Ключ, которого пикер не знает, здесь не выбрасывается — знать про набор
+   * секций этот разбор не может вовсе: `remote:<host>` приходят и уходят
+   * вместе с машинами, и выброси мы ключ уснувшего трекера, его место
+   * забылось бы за один опрос. Незнакомое отсеивает уже `buildSections`, где
+   * виден настоящий набор.
+   */
+  function normalizeOrder(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const wideSeen = new Set();
+    const wide = [];
+    const savedWide = Array.isArray(src.wide) ? src.wide : [];
+    for (let i = 0; i < WIDE_COLUMNS; i++) {
+      // Общий `wideSeen` на все колонки: одна секция не может стоять в двух
+      // колонках сразу, и вторая запись про неё — спор, а не вторая секция.
+      wide.push(normalizeKeys(savedWide[i], wideSeen));
+    }
+    return { narrow: normalizeKeys(src.narrow, new Set()), wide };
+  }
+
   function normalizeUiState(raw, defaults) {
     const base = defaults || {};
     const baseToggles = base.toggles || {};
@@ -102,6 +162,8 @@
       fullscreen: src.fullscreen === true,
       // Четвёртое поле верхнего уровня, рядом с sort/toggles/fullscreen.
       collapsed: normalizeCollapsed(src.collapsed),
+      // Пятое, рядом с ними же: порядок секций, свой у каждой раскладки.
+      order: normalizeOrder(src.order),
     };
   }
 
@@ -110,8 +172,9 @@
    * пишет — файл маленький и человекочитаемый, и заглянувший в него не должен
    * гадать, что из этого пикер и правда помнит.
    */
-  function uiStateToSave(sort, toggles, fullscreen, collapsed) {
-    return normalizeUiState({ sort, toggles, fullscreen, collapsed }, { toggles: toggles || {} });
+  function uiStateToSave(sort, toggles, fullscreen, collapsed, order) {
+    return normalizeUiState(
+      { sort, toggles, fullscreen, collapsed, order }, { toggles: toggles || {} });
   }
 
   /**

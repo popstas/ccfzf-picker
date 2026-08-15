@@ -322,3 +322,97 @@ test('сворачивать можно только там, где свёрну
   assert.ok(buildSections(base({ layout: 'narrow', query: '   ' }))
     .every(s => s.foldable === true));
 });
+
+// Порядок секций, назначенный человеком. Приезжает половинкой `order` из
+// ui.json — своей у каждой раскладки, — и накладывается поверх умолчания,
+// которое задаёт код: в узком списке это порядок сборки, в широком — колонка
+// по смыслу секции.
+
+test('узкий список идёт в назначенном порядке', () => {
+  const sections = buildSections(base({
+    layout: 'narrow', order: ['snapshots', 'past', 'live'],
+  }));
+  assert.deepStrictEqual(sections.map(s => s.key),
+    ['snapshots', 'past', 'live', 'projects']);
+});
+
+test('секция, которой нет в назначенном порядке, встаёт в конец', () => {
+  // Правило то же, что у normalizeCollapsed: чего нет — то по умолчанию, а
+  // умолчание для порядка — конец списка. Иначе новый вид секции пришлось бы
+  // дописывать людям в ui.json.
+  const sections = buildSections(base({ layout: 'narrow', order: ['projects'] }));
+  assert.deepStrictEqual(sections.map(s => s.key),
+    ['projects', 'live', 'past', 'snapshots']);
+});
+
+test('незнакомый ключ в порядке ничего не ломает', () => {
+  // `remote:<host>` приходят и уходят вместе с машинами: лёг трекер — ключ в
+  // файле остался, а секции нет.
+  const sections = buildSections(base({
+    layout: 'narrow', order: ['remote:ушедшая-машина', 'past', 'live'],
+  }));
+  assert.deepStrictEqual(sections.map(s => s.key), ['past', 'live', 'projects', 'snapshots']);
+});
+
+test('в широком режиме порядок называет и колонку, и место в ней', () => {
+  // Колонку задаёт смысл секции — но только пока человек не сказал иначе.
+  const sections = buildSections(base({
+    layout: 'wide',
+    order: [['past'], ['live'], ['snapshots', 'projects']],
+  }));
+  assert.deepStrictEqual(sections.map(s => s.key),
+    ['past', 'live', 'snapshots', 'projects']);
+  assert.deepStrictEqual(sections.map(s => s.column), [1, 2, 3, 3]);
+});
+
+test('невыбранная секция остаётся в своей колонке по смыслу', () => {
+  // Человек перетащил одну — остальные обязаны остаться там, где были, а не
+  // съехать в первую колонку.
+  const sections = buildSections(base({ layout: 'wide', order: [['snapshots'], [], []] }));
+  const byKey = Object.fromEntries(sections.map(s => [s.key, s.column]));
+  assert.strictEqual(byKey.snapshots, 1, 'перетащенная — в названной колонке');
+  assert.strictEqual(byKey.live, 1, 'живые сессии остались в своей первой');
+  assert.strictEqual(byKey.projects, 2, 'проекты остались во второй');
+  assert.strictEqual(byKey.past, 3, 'история осталась в третьей');
+  // И внутри первой колонки перетащенная стоит выше: её место названо, а
+  // место живых сессий — нет, значит они в конец.
+  assert.deepStrictEqual(
+    sections.filter(s => s.column === 1).map(s => s.key), ['snapshots', 'live']);
+});
+
+test('порядок чтения и порядок секций — одно и то же', () => {
+  // По этому порядку ходят ←/→ (moveBetweenBlocks). Разъедься он с видимым —
+  // стрелка уводила бы не туда, куда смотрит глаз, и поймать это тестом на
+  // одну функцию нельзя: врут они согласованно. Поэтому сверяется здесь:
+  // список секций обязан идти колонка за колонкой, сверху вниз внутри колонки.
+  const sections = buildSections(base({
+    layout: 'wide', order: [['past', 'snapshots'], ['live'], ['projects']],
+  }));
+  const columns = sections.map(s => s.column);
+  assert.deepStrictEqual(columns, [...columns].sort((a, b) => a - b),
+    'секции идут не колонка за колонкой');
+  assert.deepStrictEqual(sections.map(s => s.key),
+    ['past', 'snapshots', 'live', 'projects']);
+});
+
+test('порядок применяется и под запросом, хотя перетаскивать там нельзя', () => {
+  // Перетаскивание живёт только там, где набор секций постоянный (foldable),
+  // но применять уже назначенный порядок надо всегда: иначе секции прыгали бы
+  // местами на первую же набранную букву.
+  const sections = buildSections(base({
+    layout: 'narrow', query: 'a', order: ['past', 'live'],
+  }));
+  const keys = sections.map(s => s.key);
+  assert.ok(keys.indexOf('past') < keys.indexOf('live'), keys.join(' '));
+  assert.strictEqual(sections.every(s => s.foldable === false), true,
+    'под запросом секции не сворачиваются и не перетаскиваются');
+});
+
+test('мусор вместо порядка не роняет список', () => {
+  for (const order of [null, 'нет', 42, [], [[], [], []]]) {
+    const narrow = buildSections(base({ layout: 'narrow', order }));
+    assert.ok(narrow.length, JSON.stringify(order));
+    const wide = buildSections(base({ layout: 'wide', order }));
+    assert.ok(wide.length, JSON.stringify(order));
+  }
+});

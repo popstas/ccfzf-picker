@@ -815,6 +815,11 @@ function saveUiWith(uiToggles, fullscreen) {
     fullscreen: Boolean(fullscreen),
     // Четвёртый — свёрнутые секции, по половинке на раскладку.
     collapsed: { narrow: {}, wide: {} },
+    // Пятый — порядок секций, тоже по половинке на раскладку. Не передай его
+    // saveUi, и назначенный перетаскиванием порядок стирался бы при первой же
+    // смене сортировки — та же мина, что уже сработала на fullscreen и на
+    // collapsed.
+    order: { narrow: [], wide: [[], [], []] },
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nsaveUi();`, ctx, { filename: 'sessions.html' });
@@ -837,6 +842,8 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
     fullscreen: false,
     // Свёрнутых секций человек не трогал — обе половинки пусты.
     collapsed: { narrow: {}, wide: {} },
+    // Порядка не назначал — тоже пусто, то есть «как по умолчанию».
+    order: { narrow: [], wide: [[], [], []] },
   });
 });
 

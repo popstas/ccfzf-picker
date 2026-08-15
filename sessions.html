@@ -433,6 +433,34 @@
            одинаково, а это расследование однажды заняло полдня. */
         #keys-rows .info-row.taken .k { text-decoration: line-through; color: #7d838c; }
         #keys-rows .info-row.taken .v { color: #868c95; }
+        /* Перетаскивание заголовка секции.
+           `touch-action: none` обязателен: без него движение пальцем или по
+           тачпаду уходит в прокрутку списка, и pointermove до нас не
+           доезжает вовсе. */
+        .row.section { touch-action: none; }
+        .row.section.dragging { opacity: .45; }
+        /* Куда встанет секция. Рисуется поверх списка отдельным узлом, а не
+           перестановкой строк: перестановка на каждое движение мыши — это
+           пересборка каркаса блоков, то самое, что обязано случиться после
+           отпускания, а не во время. */
+        #drop-line {
+            position: absolute; z-index: 20; height: 2px;
+            background: #6aa9ff; border-radius: 2px;
+            pointer-events: none; display: none;
+        }
+        #drop-line.on { display: block; }
+        /* Пустая колонка на время перетаскивания. Обычно она не рисуется
+           вовсе — забрала бы у соседей долю ширины ради пустоты, — но тогда
+           секцию, ушедшую из колонки последней, вернуть было бы некуда:
+           колонки нет в DOM, и указателю не во что попасть. Появляется она
+           только под перетаскиванием и узкой, чтобы раскладка не прыгала. */
+        /* Селектор с `#list`, а не голый `.block-col.drop-zone`: базовое
+           правило колонки прижато идентификатором (`#list.blocks .block-col`)
+           и по весу выигрывает у двух классов. Без этого пустая колонка
+           забирала бы свою треть ширины, ради ухода от чего она и временная. */
+        #list.blocks .block-col.drop-zone {
+            flex: 0 0 96px; border: 1px dashed #3a3d42; border-radius: 8px;
+        }
         /* Кнопка `?` — перед шестерёнкой: та прижата вправо своим
            margin-left:auto, и поставленная после неё кнопка отобрала бы у
            шестерёнки место последней. */
@@ -474,6 +502,7 @@
     <div id="info-rows"></div>
   </div>
 </div>
+<div id="drop-line"></div>
 <div id="keys-backdrop" aria-hidden="true">
   <div id="keys-card" role="dialog">
     <div id="keys-title">Keyboard shortcuts</div>
@@ -657,6 +686,12 @@
   // defaultCollapsed в picker-sections.js).
   let fullscreen = false;
   let collapsed = { narrow: {}, wide: {} };
+  // Порядок секций, назначенный перетаскиванием заголовка. Пятое поле ui.json,
+  // рядом с sort/toggles/fullscreen/collapsed, и половинки у него свои на
+  // каждую раскладку — как у collapsed, но формы разные: в узком списке это
+  // последовательность ключей, в широком три последовательности, по одной на
+  // колонку. Разбор и умолчания — в ui-state.js.
+  let order = { narrow: [], wide: [[], [], []] };
 
   /** Имя текущей раскладки: им же именуются половинки `collapsed`. */
   function layoutName() {
@@ -794,7 +829,7 @@
     // uiToggles, не toggles: тот плоский и не помнит ось statusline — запись
     // плоской картой обнулила бы её при первом же save_ui, включая тот, что
     // зовётся сменой сортировки (ниже, не только из чекбокса).
-    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen, collapsed) })
+    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen, collapsed, order) })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -1076,6 +1111,9 @@
       groups, projects: projectRows, snapshots: snapshotItemsFor(query),
       mode, query, trackerHere: trackerIsHere(),
       layout: layoutName(), collapsed: collapsed[layoutName()],
+      // Половинка своей раскладки, как и у collapsed: формы у них разные, и
+      // выбирать нужную обязан тот, кто знает раскладку.
+      order: order[layoutName()],
     });
   }
 
@@ -1374,6 +1412,12 @@
    * бы молча. Здесь остаётся только разбор ответа, тот же, что был.
    */
   function applyState(payload) {
+    // Пока человек тащит заголовок, список не перерисовывается. Подача тикает
+    // раз в секунду, planListSync правит изменившиеся элементы — и
+    // перетаскиваемый узел подменился бы под указателем прямо в движении; в
+    // широкой раскладке вдобавок пересобрался бы каркас блоков целиком.
+    // Придержанный ответ применяется сразу после отпускания (endDrag).
+    if (drag) { heldState = payload; return; }
     const state = payload && payload.state;
     if (!state) {
       // Отказ без единого удачного ответа — показывать нечего, кроме отказа.
@@ -1807,6 +1851,241 @@
     infoBackdrop.setAttribute('aria-hidden', 'true');
     search.focus();
   }
+
+  // ── Перетаскивание заголовков секций ───────────────────────────────────
+  //
+  // Тащат за заголовок, а не за строку: строки заняты кликом, который
+  // открывает сессию. Перетаскивание своё, на pointer-событиях, а не HTML5
+  // drag-and-drop: у вебвью Tauri `dragDropEnabled` по умолчанию `true`, и
+  // системный обработчик файлового перетаскивания съедает события страницы —
+  // в doc-комментарии поля у `tauri-utils` это записано прямо («Disabling it
+  // is required to use HTML5 drag and drop on the frontend on Windows»).
+  // Своё перетаскивание вдобавок проще согласовать с придержанным тактом.
+  //
+  // Порог в несколько пикселей обязателен: без него любой клик по заголовку
+  // становился бы перетаскиванием на ноль позиций, и свернуть секцию мышью
+  // стало бы нечем.
+  const DRAG_THRESHOLD = 4;
+  let drag = null;
+  // Ответ агрегатора, придержанный на время перетаскивания. Такт тикает раз в
+  // секунду, planListSync правит изменившиеся элементы — перетаскиваемый узел
+  // подменился бы под указателем прямо в движении. В широкой раскладке
+  // вдобавок менялся бы blocksShape, а это пересборка контейнеров целиком.
+  let heldState = null;
+  // Клик приходит после pointerup, и после настоящего перетаскивания он
+  // свернул бы секцию, которую только что перенесли.
+  let suppressClick = false;
+  const dropLine = document.getElementById('drop-line');
+
+  /** Ключ секции у DOM-узла её заголовка. */
+  function sectionKeyOf(node) {
+    const row = rows[Number(node.dataset.index)];
+    return row && row.kind === 'section' ? row.sectionKey : '';
+  }
+
+  /**
+   * Переставить ключ в списке.
+   *
+   * `to` считается по видимому списку, где перетаскиваемая секция ещё стоит на
+   * своём месте: убрав её раньше, чем поправлен номер, мы съехали бы на
+   * единицу при движении вниз.
+   */
+  function moveKey(keys, key, to) {
+    const from = keys.indexOf(key);
+    const rest = keys.filter(k => k !== key);
+    const at = from !== -1 && from < to ? to - 1 : to;
+    rest.splice(Math.max(0, Math.min(rest.length, at)), 0, key);
+    return rest;
+  }
+
+  /** Сколько заголовков выше указателя — столько и позиция вставки. */
+  function dropIndexOf(nodes, y) {
+    let at = 0;
+    for (const node of nodes) {
+      const r = node.getBoundingClientRect();
+      if (y > r.top + r.height / 2) at++;
+    }
+    return at;
+  }
+
+  /** Заголовки секций узкого списка, в видимом порядке. */
+  function narrowHeaders() {
+    return [...list.querySelectorAll('.row.section')];
+  }
+
+  /**
+   * Куда встанет секция в широкой раскладке: колонка и место в ней.
+   *
+   * Колонка ищется по указателю, а не по смыслу секции: человек волен
+   * перенести её куда угодно, и это отступление от умолчания и есть смысл
+   * задачи. Промах мимо всех колонок уводит в крайнюю — иначе у края экрана
+   * перетаскивание молча не срабатывало бы.
+   */
+  function wideDropTarget(x, y) {
+    const cols = [...list.querySelectorAll('.block-col')];
+    if (!cols.length) return null;
+    let col = cols.find((c) => {
+      const r = c.getBoundingClientRect();
+      return x >= r.left && x <= r.right;
+    });
+    if (!col) {
+      col = x < cols[0].getBoundingClientRect().left ? cols[0] : cols[cols.length - 1];
+    }
+    const found = col.className.match(/col-(\d)/);
+    const column = found ? Number(found[1]) : 1;
+    const blocks = [...col.querySelectorAll('.block')];
+    return { col, column, at: dropIndexOf(blocks, y), keys: blocks.map(b => b.dataset.block) };
+  }
+
+  /**
+   * Пустые колонки на время перетаскивания.
+   *
+   * Дописываются узлами, а не перерисовкой списка: перерисовка заменила бы
+   * узел, на котором висит захват указателя, и перетаскивание оборвалось бы в
+   * момент начала. Без них секцию, ушедшую из колонки последней, вернуть было
+   * бы некуда — пустой колонки нет в DOM, и указателю не во что попасть.
+   */
+  function addDropZones() {
+    if (!fullscreen) return;
+    const have = new Set([...list.querySelectorAll('.block-col')]
+      .map(c => (c.className.match(/col-(\d)/) || [])[1]));
+    for (const column of ['1', '2', '3']) {
+      if (have.has(column)) continue;
+      const zone = document.createElement('div');
+      zone.className = `block-col col-${column} drop-zone`;
+      // Колонки идут по возрастанию номера, и вставлять надо между соседями,
+      // а не в конец: иначе пустая вторая оказалась бы правее третьей.
+      const after = [...list.querySelectorAll('.block-col')]
+        .find(c => Number((c.className.match(/col-(\d)/) || [])[1]) > Number(column));
+      list.insertBefore(zone, after || null);
+    }
+  }
+
+  function clearDropZones() {
+    for (const zone of list.querySelectorAll('.block-col.drop-zone')) zone.remove();
+  }
+
+  /** Показать, куда встанет секция. */
+  function paintDropLine(x, y) {
+    if (fullscreen) {
+      const target = wideDropTarget(x, y);
+      if (!target) return;
+      const colRect = target.col.getBoundingClientRect();
+      const blocks = [...target.col.querySelectorAll('.block')];
+      const above = blocks[target.at - 1];
+      const below = blocks[target.at];
+      const top = below ? below.getBoundingClientRect().top
+        : above ? above.getBoundingClientRect().bottom
+          : colRect.top + 4;
+      dropLine.style.left = `${colRect.left}px`;
+      dropLine.style.width = `${colRect.width}px`;
+      dropLine.style.top = `${top}px`;
+    } else {
+      const headers = narrowHeaders();
+      const at = dropIndexOf(headers, y);
+      const listRect = list.getBoundingClientRect();
+      const below = headers[at];
+      const top = below ? below.getBoundingClientRect().top
+        : headers.length ? headers[headers.length - 1].getBoundingClientRect().bottom
+          : listRect.top;
+      dropLine.style.left = `${listRect.left}px`;
+      dropLine.style.width = `${listRect.width}px`;
+      dropLine.style.top = `${top}px`;
+    }
+    dropLine.classList.add('on');
+  }
+
+  /** Записать новый порядок и вернуть список к обычной жизни. */
+  function commitDrag(x, y) {
+    if (fullscreen) {
+      const target = wideDropTarget(x, y);
+      if (!target) return;
+      // Ключ вынимается из всех колонок и кладётся в названную: секция одна,
+      // и остаться в прежней колонке она не может.
+      const columns = order.wide.map(keys => keys.filter(k => k !== drag.key));
+      // Видимый порядок колонки, а не сохранённый: сохранённого может не быть
+      // вовсе, а поставить секцию надо туда, куда смотрит человек.
+      const visible = target.keys.filter(k => k !== drag.key);
+      const at = Math.max(0, Math.min(visible.length, target.at
+        - (target.keys.indexOf(drag.key) !== -1 && target.keys.indexOf(drag.key) < target.at ? 1 : 0)));
+      visible.splice(at, 0, drag.key);
+      columns[target.column - 1] = visible;
+      order = { ...order, wide: columns };
+    } else {
+      // Видимый порядок, а не сохранённый: в файле может не быть ничего, а
+      // человек переносит то, что видит.
+      const headers = narrowHeaders();
+      const visible = headers.map(sectionKeyOf).filter(Boolean);
+      order = { ...order, narrow: moveKey(visible, drag.key, dropIndexOf(headers, y)) };
+    }
+    // Порядок секций, которых сейчас нет на экране (лёг трекер — нет и его
+    // секции), в файле не сохраняется: он записывается по видимому списку.
+    // Вернувшаяся машина встанет в конец, по тому же правилу, по которому
+    // туда встаёт всё неназванное. Помнить место того, чего нет, значило бы
+    // держать в файле ключи, про которые уже не сказать, живые они или мусор.
+    saveUi();
+  }
+
+  function endDrag() {
+    if (!drag) return;
+    const moved = drag.moved;
+    if (drag.node) drag.node.classList.remove('dragging');
+    drag = null;
+    dropLine.classList.remove('on');
+    clearDropZones();
+    // Придержанный ответ применяется сразу после отпускания — вместе с
+    // пересборкой каркаса, которой ждали.
+    if (heldState) {
+      const payload = heldState;
+      heldState = null;
+      applyState(payload);
+    } else if (moved) {
+      render();
+    }
+  }
+
+  list.addEventListener('pointerdown', (e) => {
+    if (menuOpen || infoOpen || keysOpen) return;
+    // Только левой кнопкой: правая открывает меню строки.
+    if (e.button !== 0) return;
+    const node = e.target.closest('.row.section');
+    if (!node) return;
+    // Заголовок бывает строкой только там, где секции — постоянный список:
+    // при пустом запросе и без префикса (признак `foldable`). Под запросом он
+    // подпись, и `.row.section` там не найдётся вовсе, так что отдельной
+    // проверки на foldable здесь не нужно.
+    const key = sectionKeyOf(node);
+    if (!key) return;
+    drag = { key, node, x: e.clientX, y: e.clientY, moved: false };
+    // Захват на узел: увести указатель за пределы строки — обычное дело, а
+    // без захвата события ушли бы соседу, и перетаскивание оборвалось бы.
+    node.setPointerCapture(e.pointerId);
+  });
+
+  list.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if (!drag.moved) {
+      if (Math.abs(e.clientX - drag.x) < DRAG_THRESHOLD
+        && Math.abs(e.clientY - drag.y) < DRAG_THRESHOLD) return;
+      drag.moved = true;
+      suppressClick = true;
+      drag.node.classList.add('dragging');
+      addDropZones();
+    }
+    paintDropLine(e.clientX, e.clientY);
+  });
+
+  list.addEventListener('pointerup', (e) => {
+    if (!drag) return;
+    if (drag.moved) commitDrag(e.clientX, e.clientY);
+    endDrag();
+  });
+
+  // Отмена приходит вместо pointerup, когда указатель отобрала система.
+  list.addEventListener('pointercancel', () => {
+    if (drag) drag.moved = false;
+    endDrag();
+  });
 
   function closeKeys() {
     keysOpen = false;
@@ -2352,6 +2631,9 @@
 
   list.addEventListener('click', (e) => {
     if (menuOpen) return;
+    // Клик приходит следом за pointerup: без этого настоящее перетаскивание
+    // заодно сворачивало бы секцию, которую только что перенесли.
+    if (suppressClick) { suppressClick = false; return; }
     const row = e.target.closest('.row');
     if (!row) return;
     active = Number(row.dataset.index);
@@ -2516,6 +2798,7 @@
       toggles = window.UiState.listColumns(uiToggles);
       fullscreen = ui.fullscreen;
       collapsed = ui.collapsed;
+      order = ui.order;
       // Размер просим у Rust сразу: окно открывается с размером из
       // tauri.conf.json, и без этого широкий режим помнился бы, а окно
       // осталось бы узким. Просим безусловно, в обе стороны: узкий режим —
@@ -2591,6 +2874,7 @@
         toggles = window.UiState.listColumns(uiToggles);
         fullscreen = ui.fullscreen;
         collapsed = ui.collapsed;
+        order = ui.order;
         // Тот же размер, что и при первой загрузке, и так же безусловно:
         // дорога сюда гоночная (настройки перечитывают ui.json между ^F и
         // записью saveUi), и `if (fullscreen)` приводил бы ровно в то
