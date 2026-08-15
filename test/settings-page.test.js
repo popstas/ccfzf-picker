@@ -371,3 +371,59 @@ test('счёт правок вкладки Panels начинается зано�
     { onDisk: defaults(), snapshot, dirty: ['wide:past'] });
   assert.strictEqual(dirtyPanels.size, 0);
 });
+
+// ── Новый тип поля не должен молча приезжать текстовым ──────────────────────
+//
+// `fieldHtml` кончается общей веткой `<input>`: тип, для которого ветки нет,
+// рисуется полем ввода — и выглядит это работающим. Выпадашка размера,
+// забытая здесь, дала бы текстовое поле, в которое человек вписывал бы
+// проценты руками, а неверное число доехало бы до config.yaml.
+//
+// Сторож текстовый, потому что поймать это можно только глазами: разметка
+// собирается верной, просто не той. Список типов спрашивается у PAGES, а не
+// переписывается сюда вторым перечислением.
+test('у каждого типа поля есть своя ветка отрисовки', () => {
+  const { PAGES } = require('../frontend-src/settings-form');
+  const src = sourceOf(/\n {2}function fieldHtml\(field\) \{[\s\S]*?\n {2}\}\n/, 'fieldHtml');
+  const types = new Set(PAGES.flatMap(p => p.fields.map(f => f.type)));
+  assert.ok(types.size > 3, 'типов вышло слишком мало — тест сторожит не то');
+  for (const type of types) {
+    // `text` и есть общая ветка — своей у него нет и не нужно.
+    if (type === 'text') continue;
+    assert.ok(
+      src.includes(`field.type === '${type}'`),
+      `тип ${type} рисуется общей веткой — приедет текстовым полем`,
+    );
+  }
+});
+
+// Значение, которого в списке нет, дописывается пунктом, а не теряется:
+// config.yaml правят и руками, а `<select>` без совпадения показал бы первый
+// пункт — то есть соврал бы, что размер встроенный. Та же цена и та же
+// причина, что у «Custom» в выпадашке терминалов.
+test('размер, вписанный руками, виден в выпадашке', () => {
+  const { PAGES } = require('../frontend-src/settings-form');
+  const src = sourceOf(/\n {2}function fieldHtml\(field\) \{[\s\S]*?\n {2}\}\n/, 'fieldHtml');
+  const field = PAGES.flatMap(p => p.fields).find(f => f.type === 'choice');
+  assert.ok(field, 'поля-выпадашки в PAGES нет — тест сторожит не то');
+
+  const html = (value) => {
+    const ctx = {
+      fields: { [field.id]: value },
+      esc: (s) => String(s),
+      window: {},
+    };
+    vm.createContext(ctx);
+    return vm.runInContext(`${src}\nfieldHtml(${JSON.stringify(field)});`, ctx,
+      { filename: 'settings.html' });
+  };
+
+  const known = html(80);
+  assert.match(known, /<option value="80" selected>/);
+  assert.strictEqual((known.match(/<option/g) || []).length, field.options.length,
+    'известное значение лишнего пункта не заводит');
+
+  const handmade = html(70);
+  assert.match(handmade, /<option value="70" selected>70% of screen<\/option>/);
+  assert.strictEqual((handmade.match(/<option/g) || []).length, field.options.length + 1);
+});

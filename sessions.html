@@ -2404,11 +2404,17 @@
     if (session.kind === 'section') return;
     // Меню считается здесь же, а не спрашивается у бэкенда: всё, из чего оно
     // складывается, уже лежит в строке.
+    const actions = actionsFor(session);
+    // Пустая рамка хуже отсутствующей: она обещает выбор, которого нет, и
+    // закрывается второй клавишей вместо одной. Пусто бывает у строки внутри
+    // снимка без каталога — тянуть там не за что, а восстановление у неё
+    // висит на Enter.
+    if (!actions.length) return;
     renderMenu({
       id: session.id,
       label: session.label,
       cwd: session.cwd,
-      actions: actionsFor(session),
+      actions,
     });
   }
 
@@ -2629,6 +2635,14 @@
     }
     if (id === 'open-remote') {
       openViaManager(row);
+      return;
+    }
+    if (id === 'restore') {
+      // Ровно то же, что делает Enter на заголовке снимка, и той же функцией:
+      // вторая сборка просьбы разошлась бы с первой молча — ответа у
+      // публикации в MQTT нет, и промах виден только тем, что ничего не
+      // произошло.
+      restoreSnapshot(row.id, []);
       return;
     }
     if (id === 'attach') {

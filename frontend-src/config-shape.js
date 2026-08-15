@@ -72,6 +72,17 @@
     // папку» принадлежит машине, а не программе — пикер работает и на маке, и
     // на Windows, а конфиг всё равно свой на каждой из них.
     actions: [],
+    // Размер окна долями экрана, по стороне на каждую раскладку. Ноль — «взять
+    // встроенный размер», и он же умолчание: у большинства ключа нет вовсе.
+    //
+    // Проценты, а не пиксели: вопрос у человека не «сколько точек», а «сколько
+    // сессий влезет», и число, верное на одном экране, на втором значит другое.
+    // Ноль, а не отсутствие ключа: удалять ключи `merge_patch` не умеет, он
+    // только вставляет, — то есть выбор «Default» после выбора «80%» нечем
+    // было бы записать. Считает размер Rust (`wanted_size` в main.rs); здесь
+    // ключ описан затем же, зачем и `hideOnBlur`, — чтобы форма конфига была в
+    // одном месте и проверялась одним тестом.
+    pickerSize: { narrow: { width: 0, height: 0 }, wide: { width: 0, height: 0 } },
   };
 
   /**
@@ -140,6 +151,28 @@
     return out;
   }
 
+  /**
+   * Размер окна долями экрана.
+   *
+   * Правило то же, что и у соседей: испорченное выбрасывается, а не роняет
+   * файл. Годятся числа `1..100`; ноль, мусор и число вне диапазона читаются
+   * как «взять встроенный размер» — те же границы, по которым судит
+   * `scale_axis` в Rust. Две проверки тут неизбежны (размер ставит Rust,
+   * показывает выбор страница), поэтому они и записаны одинаково; сторож
+   * сверяет их на общих значениях.
+   */
+  function normalizePickerSize(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const axis = (half, side) => {
+      const value = Number(((src[half] || {}) || {})[side]);
+      return Number.isFinite(value) && value >= 1 && value <= 100 ? value : 0;
+    };
+    return {
+      narrow: { width: axis('narrow', 'width'), height: axis('narrow', 'height') },
+      wide: { width: axis('wide', 'width'), height: axis('wide', 'height') },
+    };
+  }
+
   function normalizeConfig(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
 
@@ -172,6 +205,7 @@
       mqtt: { configured: Boolean(nonEmpty((src.mqtt || {}).host) && nonEmpty((src.mqtt || {}).base)) },
       pathMap: normalizePathMap(src.pathMap),
       actions: normalizeActions(src.actions),
+      pickerSize: normalizePickerSize(src.pickerSize),
     };
   }
 

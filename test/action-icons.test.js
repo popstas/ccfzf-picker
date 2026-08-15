@@ -27,6 +27,10 @@ test('у каждого встроенного пункта есть свой з
   const ids = [
     ...availableActions(row),
     ...availableActions({ ...row, agentSeen: false }),
+    // Третья строка — заголовок снимка: его единственный пункт (`restore`)
+    // общая ветка сессии не отдаёт вовсе, и без отдельного спроса он приехал
+    // бы в меню без значка.
+    ...availableActions({ kind: 'snapshot', id: 'snap-1' }),
   ].map(a => a.id);
   assert.ok(ids.length > 1, 'availableActions вернул слишком мало — тест сторожит не то');
   // `open-remote` availableActions не отдаёт вовсе — этот пункт добавляет
