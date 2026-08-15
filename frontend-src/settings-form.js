@@ -23,6 +23,30 @@
    * Страница `ui` полей не имеет: она правит ui.json, а не config.yaml, и
    * рисуется своим кодом в settings.html — таблицей галок по двум осям.
    */
+  /**
+   * Размеры окна на выбор, одним списком на все четыре стороны.
+   *
+   * Ноль — «встроенный размер», то есть 900×640 из `tauri.conf.json` в узкой
+   * раскладке и зажатые по экрану 1400×900 в широкой. Он первым и он же
+   * умолчание: ключа в `config.yaml` у большинства нет вовсе, и список,
+   * начинающийся с доли экрана, обещал бы, что размер уже настроен.
+   *
+   * Доли считаются от экрана, а не от встроенного размера: вопрос у человека
+   * не «во сколько раз больше», а «сколько сессий влезет», и на разных
+   * машинах ответ разный. Считает их Rust (`wanted_size` в main.rs) — у окна
+   * нет декораций, и `window.resizeTo` на нём не работает вовсе.
+   *
+   * Четыре доли, а не десять: список, по которому надо водить глазами, хуже
+   * короткого, а разницу между 80% и 85% на глаз не увидеть.
+   */
+  const SIZE_CHOICES = [
+    { value: 0, label: 'Default' },
+    { value: 50, label: '50% of screen' },
+    { value: 65, label: '65% of screen' },
+    { value: 80, label: '80% of screen' },
+    { value: 95, label: '95% of screen' },
+  ];
+
   const PAGES = [
     {
       id: 'general',
@@ -48,6 +72,23 @@
           hint: 'Keeps the aggregator dump fresh: the openHASP panel lives off it.' },
         { id: 'caps.reptyr', label: 'Allow moving the process (reptyr)', type: 'bool' },
         { id: 'caps.takeover', label: 'Allow taking a session over', type: 'bool' },
+      ],
+    },
+    {
+      id: 'window',
+      title: 'Window',
+      fields: [
+        { id: 'pickerSize.narrow.width', label: 'List width', type: 'choice',
+          options: SIZE_CHOICES },
+        { id: 'pickerSize.narrow.height', label: 'List height', type: 'choice',
+          options: SIZE_CHOICES,
+          hint: 'A share of the screen fits more sessions on a big display. '
+            + 'Default is the built-in size, the same on every screen.' },
+        { id: 'pickerSize.wide.width', label: 'Wide mode width', type: 'choice',
+          options: SIZE_CHOICES },
+        { id: 'pickerSize.wide.height', label: 'Wide mode height', type: 'choice',
+          options: SIZE_CHOICES,
+          hint: 'Wide mode is the one Ctrl+F switches to.' },
       ],
     },
     { id: 'ui', title: 'UI', fields: [] },
@@ -119,6 +160,10 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
   function emptyFor(field) {
     if (field.type === 'bool') return Boolean(field.default);
     if (field.type === 'number') return '';
+    // Ноль, а не пустая строка: у выбора нет состояния «не заполнено» — первый
+    // пункт списка и есть умолчание, и отсутствующий ключ обязан показать
+    // именно его.
+    if (field.type === 'choice') return 0;
     return '';
   }
 
@@ -131,6 +176,14 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
     if (value === undefined || value === null) return emptyFor(field);
     if (field.type === 'bool') return Boolean(value);
     if (field.type === 'lines') return (Array.isArray(value) ? value : []).join('\n');
+    // Число, а не строка: значение из конфига сравнивается с тем, что отдаст
+    // `<select>` (а тот отдаёт строку всегда), и оба конца приводит `fromField`
+    // — но показанный выбор ищется по этому значению, и `'80' !== 80` выбрал бы
+    // первый пункт у настроенного поля.
+    if (field.type === 'choice') {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    }
     return value;
   }
 
@@ -152,6 +205,13 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
       return Number.isFinite(n) ? n : undefined;
     }
     if (field.type === 'bool') return Boolean(value);
+    // Выбор ложится в конфиг числом. Нечисло — «не трогали»: в списке такого
+    // пункта нет, и записать его значило бы вписать человеку в config.yaml
+    // значение, которого он не выбирал.
+    if (field.type === 'choice') {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : undefined;
+    }
     return String(value == null ? '' : value);
   }
 

@@ -149,6 +149,21 @@
       return `<div class="field"><label>${esc(field.label)}</label>`
         + `<select data-preset>${options}</select>${hint}</div>`;
     }
+    if (field.type === 'choice') {
+      // Значение, которого в списке нет, дописывается пунктом, а не молча
+      // теряется: `config.yaml` правят и руками, а `<select>` без совпадения
+      // показал бы первый пункт — то есть соврал бы, что размер встроенный.
+      // Тот же приём и та же причина, что у «Custom» в выпадашке терминалов.
+      const options = field.options.slice();
+      if (!options.some(o => o.value === value)) {
+        options.push({ value, label: `${value}% of screen` });
+      }
+      const html = options
+        .map(o => `<option value="${esc(o.value)}"${o.value === value ? ' selected' : ''}>`
+          + `${esc(o.label)}</option>`).join('');
+      return `<div class="field"><label>${esc(field.label)}</label>`
+        + `<select data-field="${field.id}">${html}</select>${hint}</div>`;
+    }
     if (field.type === 'bool') {
       return `<div class="field"><label><input type="checkbox" data-field="${field.id}"${
         value ? ' checked' : ''}> ${esc(field.label)}</label>${hint}</div>`;

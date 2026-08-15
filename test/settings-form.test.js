@@ -8,7 +8,7 @@ test('страницы перечисляют поля без повторов',
   const ids = PAGES.flatMap(p => p.fields.map(f => f.id));
   assert.deepStrictEqual([...new Set(ids)], ids);
   assert.deepStrictEqual(PAGES.map(p => p.id),
-    ['general', 'ui', 'panels', 'hotkeys', 'integrations']);
+    ['general', 'window', 'ui', 'panels', 'hotkeys', 'integrations']);
 });
 
 test('конфиг раскладывается по полям формы', () => {
@@ -171,4 +171,34 @@ test('поля терминала пресет не отменяет, а зап�
   assert.ok(ids.includes('terminal.args'), ids.join(' '));
   // И помощник стоит перед ними: сначала выбирают терминал, потом правят путь.
   assert.ok(ids.indexOf('terminalPreset') < ids.indexOf('terminal.file'));
+});
+
+// Выпадашка размера — первый тип поля, у которого значение не строка и не
+// булево, и круг «конфиг → поле → патч» на нём проверяется отдельно: строка из
+// DOM (`<select>` отдаёт её всегда) обязана сравняться с числом из конфига,
+// иначе нетронутое поле попадало бы в патч на каждом сохранении.
+test('размер окна ходит по кругу числом, а не строкой', () => {
+  const config = { pickerSize: { narrow: { width: 0, height: 80 }, wide: { width: 0, height: 0 } } };
+  const fields = configToFields(config);
+  assert.strictEqual(fields['pickerSize.narrow.height'], 80);
+  // Ключа нет вовсе — показывается умолчание, то есть встроенный размер.
+  assert.strictEqual(configToFields({})['pickerSize.narrow.height'], 0);
+
+  // Нетронутая форма патча не даёт, хотя из DOM всё пришло бы строками.
+  const fromDom = { ...fields, 'pickerSize.narrow.height': '80' };
+  assert.deepStrictEqual(fieldsToPatch(fromDom, config), {});
+
+  // Тронутая — даёт число, а не строку: yaml иначе получил бы `'95'`.
+  const patch = fieldsToPatch({ ...fields, 'pickerSize.wide.width': '95' }, config);
+  assert.deepStrictEqual(patch, { pickerSize: { wide: { width: 95 } } });
+});
+
+// Ноль — не «пусто», а полноценный выбор: он значит «встроенный размер».
+// Пропусти его патч, как пропускает пустую строку, и вернуться с 80% на
+// Default стало бы нечем — удалять ключи merge_patch не умеет.
+test('возврат к встроенному размеру записывается, а не пропускается', () => {
+  const config = { pickerSize: { narrow: { height: 80 } } };
+  const fields = configToFields(config);
+  const patch = fieldsToPatch({ ...fields, 'pickerSize.narrow.height': '0' }, config);
+  assert.deepStrictEqual(patch, { pickerSize: { narrow: { height: 0 } } });
 });

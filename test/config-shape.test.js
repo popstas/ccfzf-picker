@@ -1,5 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const { normalizeConfig } = require('../frontend-src/config-shape');
 
 // Умолчание reptyr — false, хотя в бою в config.yaml стоит true (вердикт —
@@ -205,4 +207,48 @@ test('пустая строка второго хоткея остаётся п�
   // Пусто значит «взять встроенное», и подменять её умолчанием тут нечем.
   assert.strictEqual(normalizeConfig({ projectsHotkey: '' }).projectsHotkey, '');
   assert.strictEqual(normalizeConfig({ projectsHotkey: 42 }).projectsHotkey, '');
+});
+
+// ── Размер окна долями экрана ──────────────────────────────────────────────
+
+test('без ключа размер окна встроенный, а не нулевой процент', () => {
+  // Ключа `pickerSize` у большинства нет вовсе, и его отсутствие обязано
+  // читаться как «как было». Ноль здесь и значит «встроенный размер» — не
+  // «схлопнуть окно».
+  const size = normalizeConfig({}).pickerSize;
+  assert.deepStrictEqual(size, { narrow: { width: 0, height: 0 }, wide: { width: 0, height: 0 } });
+});
+
+test('доли экрана читаются по стороне и по раскладке', () => {
+  const size = normalizeConfig({
+    pickerSize: { narrow: { height: 80 }, wide: { width: 95 } },
+  }).pickerSize;
+  assert.deepStrictEqual(size, {
+    narrow: { width: 0, height: 80 },
+    wide: { width: 95, height: 0 },
+  });
+});
+
+test('испорченная доля выбрасывается, а не роняет конфиг', () => {
+  const height = raw => normalizeConfig({ pickerSize: { narrow: { height: raw } } })
+    .pickerSize.narrow.height;
+  for (const bad of ['восемьдесят', null, undefined, {}, [], NaN, 0, -10, 300, Infinity]) {
+    assert.strictEqual(height(bad), 0, `${JSON.stringify(bad)} должно читаться как встроенный размер`);
+  }
+  // Границы диапазона — рабочие значения, а не отказ. Число строкой тоже
+  // годится: yaml отдаёт `height: "80"` строкой, а значит это то же самое.
+  assert.strictEqual(height(1), 1);
+  assert.strictEqual(height(100), 100);
+  assert.strictEqual(height('80'), 80);
+});
+
+// Проверок две — размер ставит Rust (`scale_axis` в main.rs), а показывает
+// выбор страница, — и разойтись им нельзя: показанное «80%» при отвергнутом
+// Rust'ом значении читалось бы как сломанное окно. Сторож сверяет границы по
+// тексту второго разбора: выполнить Rust отсюда нечем.
+test('границы доли те же, по которым судит Rust', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src-tauri', 'src', 'main.rs'), 'utf8');
+  const fn = src.match(/fn scale_axis\([\s\S]*?\n\}\n/);
+  assert.ok(fn, 'scale_axis не найдена в main.rs — тест сторожит не то');
+  assert.ok(fn[0].includes('(1.0..=100.0)'), 'диапазон в Rust разошёлся с диапазоном здесь');
 });

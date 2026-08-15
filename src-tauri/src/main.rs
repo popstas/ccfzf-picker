@@ -170,7 +170,7 @@ fn show_picker(app: &tauri::AppHandle) {
         .try_state::<PickerSize>()
         .and_then(|state| state.0.lock().unwrap().shown())
     {
-        if let Err(e) = apply_picker_size(&window, fullscreen) {
+        if let Err(e) = apply_picker_size(&window, fullscreen, picker_scale_now(app)) {
             eprintln!("ccfzf-picker: {e}");
         }
     }
@@ -221,6 +221,103 @@ fn fit_axis(want: f64, screen: f64) -> f64 {
         return want;
     }
     want.min(screen * SCREEN_FILL)
+}
+
+/// Доли экрана, названные человеком, — по стороне на каждую раскладку.
+///
+/// Ноль значит «взять встроенный размер», и он же — умолчание: ключа в
+/// `config.yaml` может не быть вовсе. Проценты, а не пиксели, потому что
+/// вопрос у человека не «сколько точек», а «сколько сессий влезет»: на большом
+/// экране в узкий список входит куда меньше, чем могло бы, а число пикселей,
+/// верное на одной машине, на второй значит другое.
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
+struct PickerScale {
+    narrow: (f64, f64),
+    wide: (f64, f64),
+}
+
+/// Одна доля из конфига.
+///
+/// Принимается `1..=100`; ноль, отсутствие ключа и мусор читаются как «взять
+/// встроенный размер». Число вне диапазона — тоже, но со строкой в stderr:
+/// правку руками надо либо исполнить, либо объяснить, а молчаливый откат
+/// выглядит потерянной настройкой.
+fn scale_axis(node: Option<&serde_json::Value>, name: &str) -> f64 {
+    let Some(value) = node else { return 0.0 };
+    if value.is_null() {
+        return 0.0;
+    }
+    let Some(pct) = value.as_f64() else {
+        eprintln!("ccfzf-picker: pickerSize.{name} is not a number, using the built-in size");
+        return 0.0;
+    };
+    if pct == 0.0 {
+        return 0.0;
+    }
+    if !(1.0..=100.0).contains(&pct) {
+        eprintln!("ccfzf-picker: pickerSize.{name} = {pct} is outside 1..100, using the built-in size");
+        return 0.0;
+    }
+    pct
+}
+
+/// `pickerSize` из конфига.
+fn picker_scale(config: &serde_json::Value) -> PickerScale {
+    let axes = |half: &str| {
+        let node = config.get("pickerSize").and_then(|v| v.get(half));
+        (
+            scale_axis(node.and_then(|v| v.get("width")), &format!("{half}.width")),
+            scale_axis(node.and_then(|v| v.get("height")), &format!("{half}.height")),
+        )
+    };
+    PickerScale { narrow: axes("narrow"), wide: axes("wide") }
+}
+
+/// Желаемый размер окна под режим списка.
+///
+/// Чистая и отдельная от `apply_picker_size` по той же причине, что и
+/// `fit_to_screen`: монитора в тестах нет, а арифметику проверить и нужно, и
+/// можно.
+///
+/// **Названная доля обходит `SCREEN_FILL`, а встроенный размер — нет**, и это
+/// не оплошность. Зажим защищает абсолютное число от маленького экрана: 1400×900
+/// закрывают тринадцатидюймовый мак целиком. Доля же в экран влезает по
+/// построению, и зажми мы и её, выбранные человеком 95% молча стали бы 90% —
+/// пункт списка, обещающий не то, что делает.
+///
+/// Экран неизвестен (`None`) — доли не считаются вовсе: `NaN * 0.8` уронил бы
+/// окно в точку, а «сколько это в пикселях» без экрана не ответить. Откат на
+/// встроенное, то есть на прежнее поведение.
+///
+/// Оси независимы: доля по высоте при встроенной ширине — обычный случай, за
+/// которым задача и заводилась.
+fn wanted_size(fullscreen: bool, scale: PickerScale, screen: Option<(f64, f64)>) -> (f64, f64) {
+    let (base, pct) = if fullscreen {
+        (WIDE_SIZE, scale.wide)
+    } else {
+        (NARROW_SIZE, scale.narrow)
+    };
+    let Some(screen) = screen else { return base };
+    let axis = |base: f64, pct: f64, screen: f64, clamp: bool| {
+        if pct > 0.0 && screen > 0.0 && !screen.is_nan() {
+            return screen * pct / 100.0;
+        }
+        if clamp {
+            fit_axis(base, screen)
+        } else {
+            base
+        }
+    };
+    // Узкое окно встроенным размером не зажималось никогда — оно заведомо
+    // меньше любого экрана, на котором пикер запускают, — и менять это здесь
+    // незачем: сторож `narrow_size_matches_the_window_config` держится за то,
+    // что при выборе `Default` окно открывается ровно размером из
+    // `tauri.conf.json`.
+    let clamp = fullscreen;
+    (
+        axis(base.0, pct.0, screen.0, clamp),
+        axis(base.1, pct.1, screen.1, clamp),
+    )
 }
 
 /// Монитор, по которому считаются размер и место окна.
@@ -306,16 +403,17 @@ fn center_axis(want: f64, scale: f64, area_pos: i32, area_len: u32) -> i32 {
 /// незачем.
 ///
 /// Зовётся только по показанному окну, см. `SizeRequest`.
-fn apply_picker_size(window: &tauri::WebviewWindow, fullscreen: bool) -> Result<(), String> {
+fn apply_picker_size(
+    window: &tauri::WebviewWindow,
+    fullscreen: bool,
+    scale: PickerScale,
+) -> Result<(), String> {
     let monitor = picker_monitor(window);
-    let (w, h) = if fullscreen {
-        match monitor.as_ref().and_then(monitor_logical_size) {
-            Some(screen) => fit_to_screen(WIDE_SIZE, screen),
-            None => WIDE_SIZE,
-        }
-    } else {
-        NARROW_SIZE
-    };
+    let (w, h) = wanted_size(
+        fullscreen,
+        scale,
+        monitor.as_ref().and_then(monitor_logical_size),
+    );
     window
         .set_size(tauri::LogicalSize::new(w, h))
         .map_err(|e| format!("cannot resize picker: {e}"))?;
@@ -392,6 +490,24 @@ impl SizeRequest {
 #[derive(Default)]
 struct PickerSize(Mutex<SizeRequest>);
 
+/// Доли экрана, действующие прямо сейчас.
+///
+/// Живут отдельным состоянием ровно затем же, зачем `HideOnBlur`: конфиг
+/// перечитывает `apply_config`, а размер ставится в другом месте и в другое
+/// время. Читать `config.yaml` с диска на каждый показ окна незачем.
+#[derive(Default)]
+struct WindowScale(Mutex<PickerScale>);
+
+/// Доли, действующие прямо сейчас.
+///
+/// Состояния может не быть только до конца `setup`; тогда действуют встроенные
+/// размеры — то же умолчание, что и у пустого конфига.
+fn picker_scale_now(app: &tauri::AppHandle) -> PickerScale {
+    app.try_state::<WindowScale>()
+        .map(|s| *s.0.lock().unwrap())
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 fn set_picker_size(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String> {
     let Some(window) = app.get_webview_window("picker") else {
@@ -408,7 +524,7 @@ fn set_picker_size(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String
         None => visible.then_some(fullscreen),
     };
     match apply {
-        Some(fullscreen) => apply_picker_size(&window, fullscreen),
+        Some(fullscreen) => apply_picker_size(&window, fullscreen, picker_scale_now(&app)),
         None => Ok(()),
     }
 }
@@ -926,6 +1042,22 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
         state.0.store(hide_on_blur(&config), Ordering::Relaxed);
     }
 
+    // Размер — тоже без перезапуска, но применяется он не здесь, а на ближайшем
+    // показе окна: пикер в этот момент скрыт (он гасит себя перед открытием
+    // настроек), а скрытому окну размер не ставится вовсе — экрана у него нет,
+    // см. `SizeRequest`. Отсюда пометка `pending`.
+    //
+    // Перепросить размер со страницы по событию `config-changed` нельзя по той
+    // же причине, по какой опрос живёт в Rust: у скрытого окна WebView2 умеет
+    // усыплять страницу целиком, и просьба замолчала бы ровно в том случае,
+    // ради которого затевалась.
+    if let Some(state) = app.try_state::<WindowScale>() {
+        *state.0.lock().unwrap() = picker_scale(&config);
+        if let Some(size) = app.try_state::<PickerSize>() {
+            size.0.lock().unwrap().pending = true;
+        }
+    }
+
     let _ = app.global_shortcut().unregister_all();
     let (registered, accelerator) = register_picker_hotkey(app, &config);
     let (projects_registered, projects_accelerator) = register_projects_hotkey(app, &config);
@@ -1401,6 +1533,9 @@ fn main() {
             //
             // Обработчик ставится всегда, а решает по флагу: см. `HideOnBlur`.
             app.manage(HideOnBlur(AtomicBool::new(hide_on_blur(&config))));
+            // Доли экрана — тем же приёмом и по той же причине: их
+            // переставляет `apply_config`, а читает `apply_picker_size`.
+            app.manage(WindowScale(Mutex::new(picker_scale(&config))));
             // Список хоткеев приезжает ответом агрегатора, а не из конфига:
             // единственный его источник — claudeWt.projects у
             // windows11-manager. До первого ответа висит список прошлого
@@ -2124,6 +2259,99 @@ actions:
         assert!(w < screen.0, "ширина {w} не оставила полосы на экране {screen:?}");
         assert!(h < screen.1, "высота {h} не оставила полосы на экране {screen:?}");
         assert!(w > 0.0 && h > 0.0, "зажатое окно схлопнулось: {w}×{h}");
+    }
+
+    /// Пустой конфиг — встроенные размеры, и это умолчание. Ключа `pickerSize`
+    /// у большинства нет вовсе, и он не должен ничего менять.
+    #[test]
+    fn empty_config_keeps_the_built_in_size() {
+        assert_eq!(picker_scale(&serde_json::json!({})), PickerScale::default());
+        assert_eq!(picker_scale(&serde_json::Value::Null), PickerScale::default());
+    }
+
+    /// Ноль — это и есть «взять встроенный размер», и пишет его окно настроек:
+    /// удалить ключ из `config.yaml` нечем — `merge_patch` только вставляет.
+    #[test]
+    fn zero_means_the_built_in_size() {
+        let conf = serde_json::json!({"pickerSize": {"narrow": {"width": 0, "height": 0}}});
+        assert_eq!(picker_scale(&conf), PickerScale::default());
+    }
+
+    /// Испорченное и вышедшее из диапазона откатывается на встроенное, а не
+    /// роняет запуск и не растягивает окно на десять экранов.
+    #[test]
+    fn broken_scale_falls_back_to_the_built_in_size() {
+        let scale = |v: serde_json::Value| {
+            picker_scale(&serde_json::json!({"pickerSize": {"narrow": {"height": v}}})).narrow.1
+        };
+        assert_eq!(scale(serde_json::json!("восемьдесят")), 0.0);
+        assert_eq!(scale(serde_json::json!(null)), 0.0);
+        assert_eq!(scale(serde_json::json!(0)), 0.0);
+        assert_eq!(scale(serde_json::json!(-10)), 0.0);
+        assert_eq!(scale(serde_json::json!(300)), 0.0);
+        // Границы диапазона — рабочие значения, а не отказ.
+        assert_eq!(scale(serde_json::json!(1)), 1.0);
+        assert_eq!(scale(serde_json::json!(100)), 100.0);
+    }
+
+    /// Половинки конфига свои у каждой раскладки и у каждой стороны: одна
+    /// названная доля не должна утаскивать за собой три остальные.
+    #[test]
+    fn scale_halves_are_read_separately() {
+        let conf = serde_json::json!({"pickerSize": {
+            "narrow": {"height": 80},
+            "wide": {"width": 95},
+        }});
+        assert_eq!(picker_scale(&conf), PickerScale { narrow: (0.0, 80.0), wide: (95.0, 0.0) });
+    }
+
+    /// Названная доля считается от экрана, и считается по стороне: доля высоты
+    /// при встроенной ширине — тот самый случай, ради которого всё затевалось
+    /// (в узкий список на большом экране входит куда меньше сессий, чем могло).
+    #[test]
+    fn a_named_share_is_measured_off_the_screen() {
+        let scale = PickerScale { narrow: (0.0, 80.0), ..Default::default() };
+        let (w, h) = wanted_size(false, scale, Some((2560.0, 1440.0)));
+        assert_eq!(w, NARROW_SIZE.0, "ширину не просили — она встроенная");
+        assert_eq!(h, 1152.0, "80% от 1440");
+    }
+
+    /// **Доля обходит `SCREEN_FILL`, а встроенный размер — нет.** Зажим
+    /// защищает абсолютное число от маленького экрана; доля в экран влезает по
+    /// построению, и зажми мы её, выбранные человеком 95% молча стали бы 90% —
+    /// пункт списка, обещающий не то, что делает.
+    #[test]
+    fn a_named_share_is_not_clamped_by_screen_fill() {
+        let screen = (1440.0, 900.0);
+        let scale = PickerScale { wide: (95.0, 95.0), ..Default::default() };
+        assert_eq!(wanted_size(true, scale, Some(screen)), (1368.0, 855.0));
+        // А встроенный размер на том же экране зажимается, как и прежде.
+        assert_eq!(
+            wanted_size(true, PickerScale::default(), Some(screen)),
+            fit_to_screen(WIDE_SIZE, screen),
+        );
+    }
+
+    /// Экран неизвестен — доли не считаются вовсе: `NaN * 0.8` уронил бы окно в
+    /// точку, а «сколько это в пикселях» без экрана не ответить. Откат на
+    /// встроенное, то есть на прежнее поведение.
+    #[test]
+    fn no_screen_means_the_built_in_size() {
+        let scale = PickerScale { narrow: (50.0, 80.0), wide: (50.0, 80.0) };
+        assert_eq!(wanted_size(false, scale, None), NARROW_SIZE);
+        assert_eq!(wanted_size(true, scale, None), WIDE_SIZE);
+        // Вырожденная сторона экрана — то же самое, и по стороне отдельно.
+        let (w, h) = wanted_size(false, scale, Some((0.0, 1440.0)));
+        assert_eq!(w, NARROW_SIZE.0);
+        assert_eq!(h, 1152.0);
+    }
+
+    /// Раскладки не путаются: доля, названная узкой, широкого окна не трогает.
+    #[test]
+    fn each_layout_takes_its_own_share() {
+        let screen = (2560.0, 1440.0);
+        let scale = PickerScale { narrow: (0.0, 80.0), wide: (0.0, 0.0) };
+        assert_eq!(wanted_size(true, scale, Some(screen)), fit_to_screen(WIDE_SIZE, screen));
     }
 
     /// Зажимается каждая сторона своя: экран ниже желаемого, но шире, обязан
