@@ -241,6 +241,51 @@ async function savePanelsTab({ onDisk, snapshot, dirty }) {
   return { saved: saved.args.ui, ui: ctx.ui, dirtyPanels: ctx.dirtyPanels };
 }
 
+/** Настоящая разметка вкладки Panels — тем же приёмом, что и axesHtml. */
+function panelsHtml(ui) {
+  const src = sourceOf(/\n {2}function panelTableHtml\([\s\S]*?\n {2}\}\n/, 'panelTableHtml')
+    + sourceOf(/\n {2}function panelsTableHtml\(\) \{[\s\S]*?\n {2}\}\n/, 'panelsTableHtml');
+  const ctx = {
+    esc: s => String(s).replace(/[&<>"]/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+    window: { PickerPanels },
+    ui: ui || defaults(),
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${src}\nvar out = panelsTableHtml();`, ctx, { filename: 'settings.html' });
+  return ctx.out;
+}
+
+test('вкладка Panels показывает обе раскладки', () => {
+  const html = panelsHtml();
+  assert.match(html, /Panels in the wide view/);
+  assert.match(html, /Panels in the narrow view/);
+  assert.ok(html.includes('data-layout="narrow"'), 'узких галок нет');
+  assert.ok(html.includes('data-layout="wide"'), 'широких галок нет');
+});
+
+test('у узкой таблицы нет выбора колонки', () => {
+  // Колонок в узком списке нет вовсе, и показанный выбор был бы выбором без
+  // последствий — хуже, чем его отсутствие.
+  const narrow = panelsHtml().split('Panels in the narrow view')[1];
+  assert.ok(narrow, 'узкая таблица не нашлась');
+  assert.ok(!narrow.includes('<select'), `в узкой таблице есть выпадашка: ${narrow}`);
+  assert.ok(!narrow.includes('>column<'), 'в узкой таблице есть столбец колонки');
+  // А в широкой — есть, и её не задело.
+  const wide = panelsHtml().split('Panels in the narrow view')[0];
+  assert.ok(wide.includes('data-prop="column"'), 'широкая потеряла выбор колонки');
+});
+
+test('у каждой галки панелей названа раскладка', () => {
+  // Без неё правка узкой панели ушла бы в широкую половинку — туда, где
+  // человек её не делал.
+  const boxes = panelsHtml().match(/<input type="checkbox"[^>]*>/g) || [];
+  assert.ok(boxes.length >= 11, `галок мало: ${boxes.length}`);
+  for (const box of boxes) {
+    assert.match(box, /data-layout="(narrow|wide)"/, `галка без раскладки: ${box}`);
+  }
+});
+
 test('перетаскивание пикера переживает сохранение вкладки Panels', async () => {
   // Пикер, пока окно настроек было открыто, перетащил снимки в первую колонку.
   const onDisk = defaults();
@@ -249,7 +294,7 @@ test('перетаскивание пикера переживает сохра�
   const snapshot = defaults();
   snapshot.hidden = { narrow: {}, wide: { past: true } };
 
-  const { saved } = await savePanelsTab({ onDisk, snapshot, dirty: ['past'] });
+  const { saved } = await savePanelsTab({ onDisk, snapshot, dirty: ['wide:past'] });
 
   assert.strictEqual(saved.hidden.wide.past, true, 'правка окна записана');
   assert.deepStrictEqual(saved.order.wide[0], ['snapshots'],
@@ -263,10 +308,49 @@ test('нетронутая панель из файла, а не из снимк
   // Снимок про snapshots ничего не знает: окно загрузилось раньше.
   snapshot.collapsed = { narrow: {}, wide: { past: true } };
 
-  const { saved } = await savePanelsTab({ onDisk, snapshot, dirty: ['past'] });
+  const { saved } = await savePanelsTab({ onDisk, snapshot, dirty: ['wide:past'] });
 
   assert.strictEqual(saved.hidden.wide.snapshots, true, 'чужая правка пережила');
   assert.strictEqual(saved.collapsed.wide.past, true, 'своя правка записана');
+});
+
+test('узкая правка ложится в узкую половинку и не задевает широкую', async () => {
+  // Половинки у панели свои: спрятанная в узком списке история ничего не
+  // говорит про широкий, где у неё своя колонка и мешать некому.
+  const onDisk = defaults();
+  const snapshot = defaults();
+  snapshot.hidden = { narrow: { past: true }, wide: {} };
+
+  const { saved } = await savePanelsTab({ onDisk, snapshot, dirty: ['narrow:past'] });
+
+  assert.strictEqual(saved.hidden.narrow.past, true);
+  assert.strictEqual(saved.hidden.wide.past, undefined, 'широкая половинка не тронута');
+});
+
+test('ключ с двоеточием переживает пометку раскладкой', async () => {
+  // Пометка — «раскладка:ключ», а в ключе своё двоеточие бывает
+  // (`remote:<host>`, `past:2`). Режь его по первому разделителю — и настройка
+  // ушла бы панели с именем `<host>`, которой не существует.
+  const snapshot = defaults();
+  snapshot.hidden = { narrow: { 'remote:alpha-host': true }, wide: {} };
+
+  const { saved } = await savePanelsTab(
+    { onDisk: defaults(), snapshot, dirty: ['narrow:remote:alpha-host'] });
+
+  assert.strictEqual(saved.hidden.narrow['remote:alpha-host'], true);
+});
+
+test('узкая правка не заводит панели порядка: колонок там нет', async () => {
+  // Порядком узкого списка распоряжается перетаскивание в пикере, и запись
+  // отсюда откатывала бы его.
+  const onDisk = defaults();
+  onDisk.order = { narrow: ['snapshots', 'live'], wide: [[], [], []] };
+  const snapshot = defaults();
+  snapshot.collapsed = { narrow: { live: true }, wide: {} };
+
+  const { saved } = await savePanelsTab({ onDisk, snapshot, dirty: ['narrow:live'] });
+
+  assert.deepStrictEqual(saved.order.narrow, ['snapshots', 'live']);
 });
 
 test('сохранение вкладки Panels не трогает сортировку и режим окна', async () => {
@@ -284,6 +368,6 @@ test('счёт правок вкладки Panels начинается зано�
   const snapshot = defaults();
   snapshot.hidden = { narrow: {}, wide: { past: true } };
   const { dirtyPanels } = await savePanelsTab(
-    { onDisk: defaults(), snapshot, dirty: ['past'] });
+    { onDisk: defaults(), snapshot, dirty: ['wide:past'] });
   assert.strictEqual(dirtyPanels.size, 0);
 });
