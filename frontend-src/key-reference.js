@@ -32,6 +32,10 @@
     // выглядели бы двумя разными клавишами. Порядок в строке — порядок
     // срабатывания.
     { key: 'Esc', label: 'Clear the search, then hide the picker' },
+    // Оговорка «when it is not focused» не для полноты: без неё строка
+    // обещала бы, что `/` — команда всегда, а в поле поиска это обычный знак,
+    // с которого начинаются префиксы режимов.
+    { key: '/', label: 'Back to the search box (when it is not focused)' },
     { key: 'F1', label: 'This list' },
     { key: 'Shift+click', label: 'Mark seen or unread' },
     { key: 'Right click', label: 'Session menu' },
