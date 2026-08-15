@@ -15,17 +15,14 @@ function ui(raw) {
 
 // ── узкий список ────────────────────────────────────────────────────────────
 
-test('в узком списке нет строки «Remote sessions»', () => {
-  // Постоянный ключ `remote` заводит только широкая раскладка: там чужие
-  // группы склеиваются в один блок, потому что блок занимает колонку. В узком
-  // каждая машина идёт своим `remote:<host>`, и строка `remote` предлагала бы
-  // настройку панели, которой на экране не бывает.
+test('строка «Remote sessions» есть в обеих раскладках', () => {
+  // Постоянный ключ `remote` теперь единственный, каким чужие сессии
+  // называются: склейка идёт в обеих раскладках (`buildSections`, ветка
+  // `group.remote`), и настраивать панель человек волен в любой из них.
   const keys = panelRows(EMPTY, 'narrow').map(r => r.key);
-  assert.deepStrictEqual(keys, ['live', 'past', 'zellij', 'projects', 'snapshots']);
+  assert.deepStrictEqual(keys, KNOWN_PANELS.map(p => p.key));
+  assert.deepStrictEqual(panelRows(EMPTY, 'wide').map(r => r.key), keys);
   assert.deepStrictEqual(knownPanelsFor('narrow').map(p => p.key), keys);
-  // А в широком — есть, и список там прежний.
-  assert.deepStrictEqual(knownPanelsFor('wide').map(p => p.key),
-    KNOWN_PANELS.map(p => p.key));
 });
 
 test('у узкой строки нет колонки вовсе, а не ноль', () => {
@@ -50,19 +47,36 @@ test('узкие половинки ui.json читаются, а широкие 
   assert.strictEqual(at('zellij').hidden, false);
 });
 
-test('машина попадает в узкий список, только если её уже трогали', () => {
+test('ключ отдельной машины из ui.json в список не попадает', () => {
+  // Остаток прежнего устройства узкого списка: панели `remote:<host>` нет
+  // теперь ни в одной раскладке, а в файле у всех, кто её трогал, ключ лежит.
+  // Покажи его окно — человек увидел бы «Remote: alpha-host» рядом с настоящей
+  // «Remote sessions» и настраивал бы то, чего на экране нет.
+  const state = ui({
+    order: { narrow: ['remote:alpha-host', 'live'] },
+    collapsed: { narrow: { 'remote:zeta-host': true } },
+  });
+  for (const layout of ['narrow', 'wide']) {
+    assert.ok(!panelRows(state, layout).some(r => r.key.startsWith('remote:')),
+      `${layout}: ${panelRows(state, layout).map(r => r.key).join(' ')}`);
+  }
+  // Постоянная строка при этом на месте — её мёртвые ключи не отменяют.
+  assert.ok(panelRows(state, 'narrow').some(r => r.key === 'remote'));
+});
+
+test('рабочий стол попадает в узкий список, только если его уже трогали', () => {
   // Цена выбранного устройства, и она известна: набор узких панелей зависит
   // от того, что приехало от агрегатора, а окно настроек ответа не видит.
-  // Ключи берутся из ui.json — значит, спрятать машину можно после того, как
-  // её хоть раз свернули или перетащили в пикере.
-  assert.ok(!panelRows(EMPTY, 'narrow').some(r => r.key.startsWith('remote:')));
-  const state = ui({ order: { narrow: ['remote:alpha-host', 'live'] } });
-  const row = panelRows(state, 'narrow').find(r => r.key === 'remote:alpha-host');
-  assert.ok(row, 'машины из узкого порядка нет в списке');
-  assert.strictEqual(row.label, 'Remote: alpha-host');
+  // Ключи берутся из ui.json — значит, спрятать рабочий стол можно после того,
+  // как его хоть раз свернули или перетащили в пикере.
+  assert.ok(!panelRows(EMPTY, 'narrow').some(r => r.key.startsWith('past:')));
+  const state = ui({ order: { narrow: ['past:2', 'live'] } });
+  const row = panelRows(state, 'narrow').find(r => r.key === 'past:2');
+  assert.ok(row, 'рабочего стола из узкого порядка нет в списке');
+  assert.strictEqual(row.label, 'Not running: desktop 2');
   // Узкий порядок — плоский список ключей, широкий — список колонок; разбор
   // half'ов один, и на плоском он не должен спотыкаться.
-  assert.ok(!panelRows(state, 'wide').some(r => r.key === 'remote:alpha-host'));
+  assert.ok(!panelRows(state, 'wide').some(r => r.key === 'past:2'));
 });
 
 test('умолчание свёрнутости в узком списке — не «развёрнута»', () => {
@@ -136,15 +150,13 @@ test('назначенная колонка и состояния читаютс
 });
 
 test('незнакомые ключи из файла показаны под понятным именем', () => {
-  // История умеет делиться по рабочим столам, а чужие машины в узком списке
-  // идут своими ключами. Промолчать о них значило бы показать список, из
-  // которого не видно, откуда взялась настройка.
-  const state = ui({ hidden: { wide: { 'past:2': true, 'remote:mac-host': true } } });
+  // История умеет делиться по рабочим столам. Промолчать о таких ключах значило
+  // бы показать список, из которого не видно, откуда взялась настройка.
+  const state = ui({ hidden: { wide: { 'past:2': true } } });
   const rows = panelRows(state);
   const desktop = rows.find(r => r.key === 'past:2');
   assert.ok(desktop, rows.map(r => r.key).join(' '));
   assert.strictEqual(desktop.label, 'Not running: desktop 2');
-  assert.strictEqual(rows.find(r => r.key === 'remote:mac-host').label, 'Remote: mac-host');
   // И идут они после известных, а не вперемешку.
   assert.ok(rows.findIndex(r => r.key === 'past:2') >= KNOWN_PANELS.length);
 });
