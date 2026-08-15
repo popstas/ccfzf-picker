@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const SessionWindows = require('../frontend-src/session-windows');
-const { canFocusRow, trackerHere, trackerHosts, focusPid } = SessionWindows;
+const { canFocusRow, trackerHere, trackerHosts, focusPid, openManager } = SessionWindows;
 
 // Ответ нового агрегатора: две машины, у каждой свой трекер.
 const STATE = {
@@ -88,6 +90,44 @@ test('trackerHosts собирает список и из старого отве
   assert.deepStrictEqual(trackerHosts({ windowHost: 'desktop-box', windowPid: 7 }),
     [{ host: 'desktop-box', pid: 7, canFocus: true }]);
   assert.deepStrictEqual(trackerHosts({}), []);
+});
+
+test('normHost определён ровно один раз на весь frontend-src', () => {
+  // Копий было три — дословных и разъехаться не успевших. Сторож стоит не
+  // из-за случившейся поломки, а потому что цена её тихая: разойдись правила
+  // приведения, одна и та же машина считалась бы своей в одном месте и чужой
+  // в соседнем, а на глаз это выглядело бы отказом фокуса без причины.
+  const dir = path.join(__dirname, '..', 'frontend-src');
+  const found = fs.readdirSync(dir)
+    .filter(name => name.endsWith('.js'))
+    .filter(name => /function\s+normHost\s*\(/.test(fs.readFileSync(path.join(dir, name), 'utf8')));
+  assert.deepStrictEqual(found, ['session-windows.js'],
+    'нужна одна копия, и живёт она там, где решается «чья это машина»');
+});
+
+test('trackerHosts отсеивает записи без имени машины', () => {
+  // Файл трекера пишет чужая машина, и доверия его содержимому нет. Пустой
+  // объект проходил `.filter(Boolean)` и доезжал до openManager, где
+  // запасное `|| able[0]` могло назначить менеджером именно его — просьба
+  // ушла бы с пустым mqttBase, то есть в никуда и молча.
+  const state = {
+    windowHosts: [
+      {},
+      null,
+      { host: '   ' },
+      { host: 42 },
+      { host: 'desktop-box', pid: 7 },
+    ],
+  };
+  assert.deepStrictEqual(trackerHosts(state), [{ host: 'desktop-box', pid: 7 }]);
+});
+
+test('trackerHosts не выдаёт безымянную запись за менеджера', () => {
+  // Тот же мусор, но спрошенный через openManager: своей машины в списке нет,
+  // и раньше менеджером становился пустой объект.
+  const state = { windowHosts: [{}, { host: 'mac-host', mqttBase: 'home/mac/windows' }] };
+  assert.deepStrictEqual(openManager(state, 'desktop-box'),
+    { host: 'mac-host', mqttBase: 'home/mac/windows' });
 });
 
 test('focusPid отдаёт ноль всему, что не положительное число', () => {

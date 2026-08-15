@@ -30,6 +30,14 @@
       fields: [
         { id: 'sshHost', label: 'Host with sessions', type: 'text',
           hint: 'Any form ssh understands. Without it there is nowhere to get the list from.' },
+        // Не поле конфига, а помощник к двум следующим: подставляет в них
+        // путь и аргументы разом. Своего ключа у него нет намеренно — второй
+        // источник правды разошёлся бы с полями, которые правят руками, и
+        // выпадашка обещала бы iTerm2 там, где в поле стоит kitty. Что выбрано,
+        // считается обратно по содержимому полей (`matchPreset`).
+        { id: 'terminalPreset', label: 'Terminal preset', type: 'preset',
+          hint: 'Fills in the path and the arguments below. '
+            + 'The arguments differ per terminal, so pick one before editing by hand.' },
         { id: 'terminal.file', label: 'Terminal', type: 'text' },
         { id: 'terminal.args', label: 'Terminal arguments', type: 'lines',
           hint: 'One per line — a comma occurs inside the arguments themselves.' },
@@ -43,6 +51,10 @@
       ],
     },
     { id: 'ui', title: 'UI', fields: [] },
+    // Полей у неё нет по той же причине, что и у `ui`: правит она ui.json, а
+    // не config.yaml, и рисуется своим кодом в settings.html — таблицей
+    // панелей широкого режима.
+    { id: 'panels', title: 'Panels', fields: [] },
     {
       id: 'hotkeys',
       title: 'Hotkeys',
@@ -72,7 +84,10 @@
     },
   ];
 
-  const FIELDS = PAGES.flatMap(page => page.fields);
+  // Помощники (`preset`) в список полей не входят: своего ключа в конфиге у них
+// нет, и `configToFields`/`fieldsToPatch` полезли бы за значением, которого не
+// существует, а патч унёс бы в config.yaml выдуманный ключ.
+const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !== 'preset');
 
   function at(source, path) {
     return path.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), source);

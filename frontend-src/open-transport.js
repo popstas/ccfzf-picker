@@ -3,9 +3,18 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.OpenTransport = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
-  function normHost(value) {
-    return typeof value === 'string' ? value.trim().toLowerCase() : '';
-  }
+  // globalThis, а не `root`: тот виден только внешней функции шима, а внутрь
+  // factory не передаётся.
+  //
+  // `normHost` берётся у соседа, а не пишется здесь третьей копией: правило
+  // приведения имени машины одно на весь пикер, и разойдись копии — одна и та
+  // же машина считалась бы своей в одном месте и чужой в соседнем. Загрузка
+  // это выдерживает: session-windows.js стоит в sessions.html раньше (447
+  // против 450) и в prepare-frontend.js тоже.
+  const windowApi = typeof module === 'object' && module.exports
+    ? require('./session-windows')
+    : globalThis.SessionWindows;
+  const { normHost } = windowApi;
 
   /**
    * Кто открывает сессию.

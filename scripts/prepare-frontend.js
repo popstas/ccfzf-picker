@@ -21,6 +21,7 @@ const FILES = [
   'frontend-src/session-info.js',
   'frontend-src/path-map.js',
   'frontend-src/action-hotkey.js',
+  'frontend-src/key-reference.js',
   'frontend-src/session-actions.js',
   'frontend-src/config-shape.js',
   'frontend-src/picker-filter.js',
@@ -31,9 +32,11 @@ const FILES = [
   'frontend-src/picker-list-sync.js',
   'frontend-src/open-strategy.js',
   'frontend-src/session-name.js',
+  'frontend-src/terminal-presets.js',
   'frontend-src/settings-form.js',
   'frontend-src/action-icons.js',
   'frontend-src/picker-sections.js',
+  'frontend-src/picker-panels.js',
 ];
 
 fs.mkdirSync(OUT, { recursive: true });

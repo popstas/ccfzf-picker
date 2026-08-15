@@ -65,10 +65,17 @@
    * Старый агрегатор списка не отдаёт, но одну машину называет верхними
    * полями — из них и собирается список на одного. Пустой список на таком
    * ответе выключил бы режим снимков там, где он работает.
+   *
+   * Запись без имени машины выбрасывается, а не пропускается дальше: файл
+   * пишет чужая машина, и доверия его содержимому нет. Одного `Boolean` тут
+   * мало — пустой объект проходил его насквозь и доезжал до `openManager`,
+   * где запасное `|| able[0]` могло назначить менеджером именно его. Просьба
+   * ушла бы с пустым `mqttBase`, то есть в никуда, и молча: ответа у
+   * публикации нет.
    */
   function trackerHosts(state) {
     const s = state || {};
-    if (Array.isArray(s.windowHosts)) return s.windowHosts.filter(Boolean);
+    if (Array.isArray(s.windowHosts)) return s.windowHosts.filter(e => e && normHost(e.host));
     return s.windowHost ? [{ host: s.windowHost, pid: s.windowPid, canFocus: true }] : [];
   }
 

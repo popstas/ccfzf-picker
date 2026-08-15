@@ -14,6 +14,40 @@
   }
 
   /**
+   * Место команды в аргументах терминала.
+   *
+   * Обычно команда едет хвостом argv, и это самый безопасный способ: элементы
+   * уходят аргументами процесса, кавычить нечего. Но так её берут не все.
+   * kitty исполняет хвост argv как есть, Ghostty хочет её после `-e` — этим
+   * двоим хватает обычного пути; а iTerm2 в argv команду не принимает вовсе,
+   * `open -a iTerm` аргументы до программы не доносит. Единственная дорога к
+   * нему — AppleScript, и там команда обязана быть **одной строкой** внутри
+   * двойных кавычек.
+   *
+   * Отсюда подстановка: аргумент, содержащий `{command}`, получает всю
+   * команду одной строкой. Приём тот же, что у `{localPath}` в настроенных
+   * человеком действиях, — и назван так же, чтобы второй способ не заводить.
+   *
+   * Подставляемое рассчитано на место внутри **двойных** кавычек: так стоит
+   * `{command}` в единственном пресете, который его использует.
+   */
+  const COMMAND_PLACEHOLDER = '{command}';
+
+  /** Элементы argv — в одну строку для `sh -c`. */
+  function joinCommand(parts) {
+    return parts.map(q).join(' ');
+  }
+
+  /**
+   * Строка — внутрь двойных кавычек: экранируются обратный слэш и кавычка.
+   *
+   * Слэш первым, иначе он удвоил бы слэши, добавленные следом за кавычками.
+   */
+  function quoteForDoubleQuoted(s) {
+    return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  /**
    * Чем открывать сессию.
    *
    * Порядок ветвей — по убыванию сохранности: tmux ничего не трогает, reptyr
@@ -168,10 +202,21 @@
 
     if (remote === null) return null;
     const term = terminal || { file: 'open', args: [] };
-    return {
-      argv: [term.file, ...(term.args || []), 'ssh', '-t', String(sshHost || ''), remote],
-      destructive,
-    };
+    const args = (term.args || []).map(a => String(a));
+    const parts = ['ssh', '-t', String(sshHost || ''), remote];
+    // Терминал, который команду из argv не берёт, называет ей место сам —
+    // подстановкой в своих аргументах. См. COMMAND_PLACEHOLDER.
+    if (args.some(a => a.includes(COMMAND_PLACEHOLDER))) {
+      const one = quoteForDoubleQuoted(joinCommand(parts));
+      return {
+        // split/join, а не replace: у replace в строке замены свои значения
+        // у `$&`, `$'` и прочих, а в команде стоит `exec $SHELL` и одинарные
+        // кавычки рядом — подстановка молча съела бы кусок команды.
+        argv: [term.file, ...args.map(a => a.split(COMMAND_PLACEHOLDER).join(one))],
+        destructive,
+      };
+    }
+    return { argv: [term.file, ...args, ...parts], destructive };
   }
 
   /**

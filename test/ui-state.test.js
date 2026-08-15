@@ -22,6 +22,8 @@ test('пустой файл даёт вид по умолчанию', () => {
     },
     fullscreen: false,
     collapsed: { narrow: {}, wide: {} },
+    order: { narrow: [], wide: [[], [], []] },
+    hidden: { narrow: {}, wide: {} },
   });
   assert.deepStrictEqual(normalizeUiState(null, DEFAULTS), normalizeUiState({}, DEFAULTS));
   assert.deepStrictEqual(normalizeUiState('мусор', DEFAULTS), normalizeUiState({}, DEFAULTS));
@@ -37,6 +39,8 @@ test('сохранённый вид возвращается как был', () 
     },
     fullscreen: true,
     collapsed: { narrow: { past: true }, wide: {} },
+    order: { narrow: ['past', 'live'], wide: [['live'], [], ['past']] },
+    hidden: { narrow: { projects: true }, wide: {} },
   };
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
 });
@@ -144,7 +148,9 @@ test('в файл уходит ровно то, что читается обра
   };
   const saved = uiStateToSave('name', toggles);
   assert.deepStrictEqual(saved,
-    { sort: 'name', toggles, fullscreen: false, collapsed: { narrow: {}, wide: {} } });
+    { sort: 'name', toggles, fullscreen: false, collapsed: { narrow: {}, wide: {} },
+      order: { narrow: [], wide: [[], [], []] },
+      hidden: { narrow: {}, wide: {} } });
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
   // Мусорная сортировка не должна попасть даже в файл: перезапуск молча
   // починит её, но человек, заглянувший в ui.json, увидел бы неправду.
@@ -179,4 +185,74 @@ test('старый ui.json без collapsed читается как «челов
 test('свёрнутость доезжает до файла четвёртым аргументом', () => {
   const saved = uiStateToSave('cost', {}, false, { narrow: { past: true }, wide: {} });
   assert.deepStrictEqual(saved.collapsed, { narrow: { past: true }, wide: {} });
+});
+
+// Порядок секций — пятое поле верхнего уровня, рядом с sort/toggles/
+// fullscreen/collapsed. Половинки свои у каждой раскладки, как у collapsed, но
+// формы у них разные: в узком списке секции идут одним потоком, и порядок —
+// это последовательность ключей; в широком секцию можно перенести и в другую
+// колонку, поэтому порядок там — три последовательности, по одной на колонку.
+// Так колонка и место внутри неё записаны одной структурой, а разворот её
+// колонка за колонкой даёт ровно тот порядок чтения, по которому ходят ←/→.
+
+test('порядок секций читается по раскладкам', () => {
+  const ui = normalizeUiState({
+    order: {
+      narrow: ['past', 'live', 'projects'],
+      wide: [['live'], ['remote', 'projects'], ['past', 'snapshots']],
+    },
+  }, { toggles: {} });
+  assert.deepStrictEqual(ui.order, {
+    narrow: ['past', 'live', 'projects'],
+    wide: [['live'], ['remote', 'projects'], ['past', 'snapshots']],
+  });
+});
+
+test('старый ui.json без order читается как «человек ничего не трогал»', () => {
+  // Пустой порядок значит «как по умолчанию», а умолчание живёт в коде
+  // (buildSections). Не поняв старый файл, первый же запуск после обновления
+  // перетасовал бы человеку список.
+  for (const raw of [{}, { order: null }, { order: 'нет' }, { order: 42 }]) {
+    assert.deepStrictEqual(
+      normalizeUiState(raw, { toggles: {} }).order,
+      { narrow: [], wide: [[], [], []] },
+      JSON.stringify(raw),
+    );
+  }
+});
+
+test('в порядке остаются только строки, и каждый ключ ровно один раз', () => {
+  // Файл правят чем угодно, а испорченный порядок — это список, в котором
+  // секция либо пропала, либо задвоилась; чинить его изнутри нечем.
+  const ui = normalizeUiState({
+    order: {
+      narrow: ['past', 42, 'past', '', null, 'live', '  '],
+      wide: [['live', 'live'], ['live', 'projects'], [null, 'past']],
+    },
+  }, { toggles: {} });
+  assert.deepStrictEqual(ui.order.narrow, ['past', 'live']);
+  // Ключ не может стоять в двух колонках сразу: секция одна, и вторая
+  // запись про неё — это спор, который надо разрешить, а не сохранить.
+  assert.deepStrictEqual(ui.order.wide, [['live'], ['projects'], ['past']]);
+});
+
+test('широкий порядок всегда о трёх колонках', () => {
+  // Колонок в раскладке ровно три, и список другой длины сделал бы номер
+  // колонки зависимым от содержимого файла.
+  const short = normalizeUiState({ order: { wide: [['live']] } }, { toggles: {} });
+  assert.deepStrictEqual(short.order.wide, [['live'], [], []]);
+  const long = normalizeUiState(
+    { order: { wide: [['a'], ['b'], ['c'], ['d']] } }, { toggles: {} });
+  assert.deepStrictEqual(long.order.wide, [['a'], ['b'], ['c']]);
+  const notArrays = normalizeUiState(
+    { order: { wide: ['live', null, 7] } }, { toggles: {} });
+  assert.deepStrictEqual(notArrays.order.wide, [[], [], []]);
+});
+
+test('порядок доезжает до файла пятым аргументом', () => {
+  const order = { narrow: ['past', 'live'], wide: [['live'], [], ['past']] };
+  const saved = uiStateToSave('cost', {}, false, { narrow: {}, wide: {} }, order);
+  assert.deepStrictEqual(saved.order, order);
+  // И читается обратно тем же: файл пишет и читает одна пара функций.
+  assert.deepStrictEqual(normalizeUiState(saved, { toggles: {} }).order, order);
 });

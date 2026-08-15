@@ -815,6 +815,13 @@ function saveUiWith(uiToggles, fullscreen) {
     fullscreen: Boolean(fullscreen),
     // Четвёртый — свёрнутые секции, по половинке на раскладку.
     collapsed: { narrow: {}, wide: {} },
+    // Пятый — порядок секций, тоже по половинке на раскладку. Не передай его
+    // saveUi, и назначенный перетаскиванием порядок стирался бы при первой же
+    // смене сортировки — та же мина, что уже сработала на fullscreen и на
+    // collapsed.
+    order: { narrow: [], wide: [[], [], []] },
+    // Шестой — спрятанные панели, той же формы, что и свёрнутость.
+    hidden: { narrow: {}, wide: {} },
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nsaveUi();`, ctx, { filename: 'sessions.html' });
@@ -837,6 +844,9 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
     fullscreen: false,
     // Свёрнутых секций человек не трогал — обе половинки пусты.
     collapsed: { narrow: {}, wide: {} },
+    // Порядка не назначал — тоже пусто, то есть «как по умолчанию».
+    order: { narrow: [], wide: [[], [], []] },
+    hidden: { narrow: {}, wide: {} },
   });
 });
 
@@ -1435,7 +1445,9 @@ test('renderWide: номер строки в разметке совпадает
     },
     // Каркас считается уже собранным: тогда renderWide не трогает `list`
     // вовсе, и двойник DOM нужен только на тела секций.
-    blocksShape: SECTIONS.map(s => `${s.key}|${s.column}`).join('\n'),
+    // Тот же вид отпечатка, что и в renderWide: свёрнутость входит в него,
+    // потому что от неё зависит класс блока.
+    blocksShape: SECTIONS.map(s => `${s.key}|${s.column}|${s.collapsed ? 1 : 0}`).join('\n'),
     renderedBlocks: new Map(),
     blockBodies: new Map(SECTIONS.map(s => [s.key, { children: [] }])),
     applyPlan: () => {},

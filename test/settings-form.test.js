@@ -7,7 +7,8 @@ test('страницы перечисляют поля без повторов',
   // ключа: сохранив одну страницу, человек молча откатил бы вторую.
   const ids = PAGES.flatMap(p => p.fields.map(f => f.id));
   assert.deepStrictEqual([...new Set(ids)], ids);
-  assert.deepStrictEqual(PAGES.map(p => p.id), ['general', 'ui', 'hotkeys', 'integrations']);
+  assert.deepStrictEqual(PAGES.map(p => p.id),
+    ['general', 'ui', 'panels', 'hotkeys', 'integrations']);
 });
 
 test('конфиг раскладывается по полям формы', () => {
@@ -150,4 +151,24 @@ test('разные комбинации возражений не вызываю
 test('пустой второй хоткей возражений не вызывает', () => {
   // Пусто значит «взять встроенное», а не «сломанная комбинация».
   assert.deepStrictEqual(validate({ sshHost: 'host', hotkey: 'Cmd+Shift+C' }), []);
+});
+
+// ── Выбор терминала: помощник, а не поле конфига ───────────────────────────
+
+test('пресет терминала не уезжает в конфиг отдельным ключом', () => {
+  // Своего ключа у него нет намеренно: второй источник правды разошёлся бы с
+  // полями, которые человек правит руками. Попади он в FIELDS — патч унёс бы
+  // в config.yaml выдуманный ключ `terminalPreset`.
+  const patch = fieldsToPatch({ ...configToFields({}), terminalPreset: 'iterm2' }, {});
+  assert.ok(!('terminalPreset' in patch), JSON.stringify(patch));
+});
+
+test('поля терминала пресет не отменяет, а заполняет', () => {
+  // Путь у всех разный — один homebrew на arm и на intel даёт два разных
+  // префикса, — поэтому оба поля остаются на месте и правятся руками.
+  const ids = PAGES.find(p => p.id === 'general').fields.map(f => f.id);
+  assert.ok(ids.includes('terminal.file'), ids.join(' '));
+  assert.ok(ids.includes('terminal.args'), ids.join(' '));
+  // И помощник стоит перед ними: сначала выбирают терминал, потом правят путь.
+  assert.ok(ids.indexOf('terminalPreset') < ids.indexOf('terminal.file'));
 });

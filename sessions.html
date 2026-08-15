@@ -40,9 +40,16 @@
             flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden;
             display: flex; flex-direction: column; gap: 8px;
         }
-        /* Первая колонка — главный список, и он должен быть виден целиком, а не
-           настолько, насколько хватило: блок в ней растёт на всю высоту. */
-        #list.blocks .col-1 .block { flex: 1 1 auto; }
+        /* Первая колонка правил себе больше не просит. `flex: 1 1 auto` тут
+           стоял с тех пор, когда блок в ней всегда был один: колонку задавал
+           смысл секции, и своих живых сессий бывает ровно одна группа. С
+           перетаскиванием в неё можно положить вторую — и `auto` (то есть
+           доля по содержимому) начинал делить высоту пропорционально размеру.
+           Измерено: свёрнутая история под шестьюдесятью строками живых
+           получала 5 пикселей из 417 при содержимом в 25, то есть исчезала с
+           экрана совсем. Одинокий блок растягивается на всю высоту и при
+           `flex: 1 1 0` — растёт он от нулевой доли, а не от содержимого, —
+           так что общее правило ниже покрывает и этот случай. */
         /* В колонках с двумя блоками высота делится, и делится не по
            содержимому. `flex: 0 1 auto` (то есть просто «по содержимому»)
            здесь неверен: ужимает flex пропорционально размеру, и длинный сосед
@@ -60,15 +67,25 @@
            блок с ним схлопывается в один заголовок, и колонка выглядит пустой.
            Ровно это человек и увидел на макбуке. Процент от высоты колонки
            считают одинаково оба движка — измерено в обоих. */
-        #list.blocks .col-2 .block,
-        #list.blocks .col-3 .block { flex: 1 1 0; }
+        #list.blocks .block { flex: 1 1 0; }
         /* `:not(:only-child)` — не придирка: одинокий блок в колонке упёрся бы
            в тот же потолок и занял бы половину колонки впустую. Измерено, так
            и было. */
-        #list.blocks .col-2 .block:last-child:not(:only-child),
-        #list.blocks .col-3 .block:last-child:not(:only-child) {
+        #list.blocks .block:last-child:not(:only-child) {
             flex: 0 1 auto; max-height: 50%;
         }
+        /* Свёрнутый блок — высотой в свой заголовок, в любой колонке и на
+           любом месте. Доля колонки ему не положена: показывает он одну
+           строку, а занимал бы столько же, сколько развёрнутый сосед —
+           измерено, 260 пикселей из 417 при содержимом в 25, и в WebKit
+           347 из 504.
+
+           Правило идёт последним и перекрывает все три выше — и долю
+           (`flex: 1 1 0`), и потолок в половину колонки, и растяжение первой
+           колонки. Само по себе оно опускание не делает: в низ своей колонки
+           свёрнутую секцию отправляет `buildSections`, потому что по тому же
+           списку считается порядок блоков, по которому ходят `←/→`. */
+        #list.blocks .block.collapsed { flex: 0 0 auto; max-height: none; }
         /* Подзаголовок машины внутри блока чужих сессий: та же подпись, что и
            заголовок группы в узком списке, но мельче — заголовок блока над ней
            уже сказал, что это чужие. */
@@ -101,7 +118,14 @@
            растяжение, которым теперь и держится высота. */
         #list.blocks .block {
             display: flex; flex-direction: column;
-            min-height: 0; overflow: hidden;
+            overflow: hidden;
+            /* Не ниже своего заголовка. `min-height: 0` тут стоял затем, чтобы
+               блок можно было ужать ниже содержимого, — и ужимался он до
+               нуля: длинный сосед по колонке съедал короткого целиком, а
+               `overflow: hidden` у колонки дорисовывал исчезновение. Строка
+               заголовка — это тот минимум, при котором секцию видно и по ней
+               можно щёлкнуть, чтобы развернуть. */
+            min-height: 2em;
         }
         #list.blocks .block-rows { overflow-y: auto; min-height: 0; flex: 0 1 auto; }
         /* Карточка — только у строки сессии (`.row.session`), не у голого
@@ -390,27 +414,85 @@
             display: none; padding: 16px; font-size: 13px; color: #868c95;
         }
         /* Session info — тот же модал, что и меню действий: разные только
-           содержимое и ширина. */
-        #info-backdrop {
+           содержимое и ширина. Справочник клавиш берёт то же оформление, а не
+           заводит своё: обе модалки — статичный список «слева ключ, справа
+           значение», и вторая копия этих правил разъехалась бы с первой на
+           первой же правке цвета. С `#actions-menu` роднить их незачем — та
+           про действия над строкой, у неё выбор стрелками и запуск. */
+        #info-backdrop, #keys-backdrop {
             display: none; position: absolute; inset: 0; z-index: 10;
             background: rgba(0, 0, 0, .45);
             align-items: center; justify-content: center; padding: 24px;
         }
-        #info-backdrop.open { display: flex; }
-        #info-card {
+        #info-backdrop.open, #keys-backdrop.open { display: flex; }
+        #info-card, #keys-card {
             width: min(560px, 100%); max-height: 100%; overflow-y: auto;
             background: #25262a; border: 1px solid #3a3d42; border-radius: 10px;
             box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
         }
-        #info-title {
+        #info-title, #keys-title {
             padding: 12px 16px 8px; font-size: 11px; color: #7d838c;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
             border-bottom: 1px solid #3a3d42;
         }
-        #info-rows { padding: 8px 0; }
+        #info-rows, #keys-rows { padding: 8px 0; }
         .info-row { display: flex; gap: 12px; padding: 3px 16px; font-size: 12px; }
         .info-row .k { flex: 0 0 96px; color: #7d838c; }
         .info-row .v { min-width: 0; word-break: break-word; }
+        /* Заголовок секции справочника. Не `.info-row`: у него нет пары
+           «ключ — значение», это подпись над группой строк. */
+        .keys-section {
+            padding: 10px 16px 4px; font-size: 11px; color: #7d838c;
+            text-transform: uppercase; letter-spacing: .04em;
+        }
+        .keys-section:first-child { padding-top: 4px; }
+        /* Клавиша слева — моноширинным: комбинации читаются столбиком, и
+           пропорциональный шрифт ставил бы `^K` и `⌘⇧C` разной ширины. */
+        #keys-rows .info-row .k {
+            flex: 0 0 132px; color: #c8ccd2;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+        /* Не вставшая клавиша: показана, но зачёркнута. Убрать её нельзя —
+           тогда «не настроено» и «отобрал сосед по системе» выглядят
+           одинаково, а это расследование однажды заняло полдня. */
+        #keys-rows .info-row.taken .k { text-decoration: line-through; color: #7d838c; }
+        #keys-rows .info-row.taken .v { color: #868c95; }
+        /* Перетаскивание заголовка секции.
+           `touch-action: none` обязателен: без него движение пальцем или по
+           тачпаду уходит в прокрутку списка, и pointermove до нас не
+           доезжает вовсе. */
+        .row.section { touch-action: none; }
+        .row.section.dragging { opacity: .45; }
+        /* Куда встанет секция. Рисуется поверх списка отдельным узлом, а не
+           перестановкой строк: перестановка на каждое движение мыши — это
+           пересборка каркаса блоков, то самое, что обязано случиться после
+           отпускания, а не во время. */
+        #drop-line {
+            position: absolute; z-index: 20; height: 2px;
+            background: #6aa9ff; border-radius: 2px;
+            pointer-events: none; display: none;
+        }
+        #drop-line.on { display: block; }
+        /* Пустая колонка на время перетаскивания. Обычно она не рисуется
+           вовсе — забрала бы у соседей долю ширины ради пустоты, — но тогда
+           секцию, ушедшую из колонки последней, вернуть было бы некуда:
+           колонки нет в DOM, и указателю не во что попасть. Появляется она
+           только под перетаскиванием и узкой, чтобы раскладка не прыгала. */
+        /* Селектор с `#list`, а не голый `.block-col.drop-zone`: базовое
+           правило колонки прижато идентификатором (`#list.blocks .block-col`)
+           и по весу выигрывает у двух классов. Без этого пустая колонка
+           забирала бы свою треть ширины, ради ухода от чего она и временная. */
+        #list.blocks .block-col.drop-zone {
+            flex: 0 0 96px; border: 1px dashed #3a3d42; border-radius: 8px;
+        }
+        /* Кнопка `?` — перед шестерёнкой: та прижата вправо своим
+           margin-left:auto, и поставленная после неё кнопка отобрала бы у
+           шестерёнки место последней. */
+        #keys-button { margin-left: auto; cursor: pointer; padding: 0 2px; }
+        #keys-button:hover { color: #a8adb5; }
+        /* Шестерёнка перестаёт быть той, кто отжимает пару вправо: теперь это
+           делает кнопка `?`, а шестерёнка просто идёт следом. */
+        #keys-button + #settings-button { margin-left: 0; }
     </style>
 </head>
 <body>
@@ -419,11 +501,15 @@
 <div id="message">Loading…</div>
 <div id="statusline">
   <span id="sort-control" title="Click to change sort"><span class="icon">⇅</span><span id="sort-label">cost</span></span>
-  <!-- Пусто: текст ставит paintToggles — хвост про `^S` зависит от ответа. -->
+  <!-- Пусто: текст ставит paintToggles. Полный список клавиш живёт в модалке
+       по `?`/F1 — здесь остаётся только вход в меню строки. -->
   <span id="menu-hint"></span>
   <!-- Наполняется из TOGGLE_CHECKS: разметка и обработчики не должны
        расходиться в именах ключей. -->
   <span class="status-checks" id="status-checks"></span>
+  <!-- Перед шестерёнкой: та прижата вправо, и поставленная после неё кнопка
+       отобрала бы у шестерёнки место последней. -->
+  <span id="keys-button" title="Keyboard shortcuts (F1)"><span class="icon">?</span></span>
   <!-- Справа и последним: это не часть ряда галок, а выход в другое окно. -->
   <span id="settings-button" title="Settings (Ctrl+,)"><span class="icon">⚙</span></span>
 </div>
@@ -438,6 +524,13 @@
   <div id="info-card" role="dialog">
     <div id="info-title"></div>
     <div id="info-rows"></div>
+  </div>
+</div>
+<div id="drop-line"></div>
+<div id="keys-backdrop" aria-hidden="true">
+  <div id="keys-card" role="dialog">
+    <div id="keys-title">Keyboard shortcuts</div>
+    <div id="keys-rows"></div>
   </div>
 </div>
 <script src="state-shape.js"></script>
@@ -467,6 +560,9 @@
      зависит; ловит порядок test/frontend-load.test.js. -->
 <script src="path-map.js"></script>
 <script src="action-hotkey.js"></script>
+<!-- key-reference после action-hotkey: он берёт оттуда таблицу клавиш в
+     момент загрузки, и в обратном порядке ему достался бы undefined. -->
+<script src="key-reference.js"></script>
 <script src="session-actions.js"></script>
 <script src="config-shape.js"></script>
 <script src="picker-filter.js"></script>
@@ -614,6 +710,16 @@
   // defaultCollapsed в picker-sections.js).
   let fullscreen = false;
   let collapsed = { narrow: {}, wide: {} };
+  // Порядок секций, назначенный перетаскиванием заголовка. Пятое поле ui.json,
+  // рядом с sort/toggles/fullscreen/collapsed, и половинки у него свои на
+  // каждую раскладку — как у collapsed, но формы разные: в узком списке это
+  // последовательность ключей, в широком три последовательности, по одной на
+  // колонку. Разбор и умолчания — в ui-state.js.
+  let order = { narrow: [], wide: [[], [], []] };
+  // Спрятанные панели. Шестое поле ui.json; ставится только из окна настроек —
+  // клавиши для этого нет намеренно: случайно нажатая убрала бы панель без
+  // следа, а вернуть её можно было бы только там же, в настройках.
+  let hidden = { narrow: {}, wide: {} };
 
   /** Имя текущей раскладки: им же именуются половинки `collapsed`. */
   function layoutName() {
@@ -627,6 +733,7 @@
   // старте и на config-changed, см. loadActionIcons.
   let actionIcons = {};
   let infoOpen = false;
+  let keysOpen = false;
 
   // Одна таблица «id действия ⇄ клавиша» на всё: подписи в меню Ctrl+K и
   // обработчики прямых клавиш ниже читают именно её. Раньше клавиша была
@@ -660,6 +767,9 @@
   const infoBackdrop = document.getElementById('info-backdrop');
   const infoTitle = document.getElementById('info-title');
   const infoRows = document.getElementById('info-rows');
+  const keysButton = document.getElementById('keys-button');
+  const keysBackdrop = document.getElementById('keys-backdrop');
+  const keysRows = document.getElementById('keys-rows');
 
   function paintSort() {
     sortLabel.textContent = sortMode;
@@ -727,11 +837,12 @@
 
   function paintToggles() {
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
-    // Про `/s` рассказываем только там, где он работает: подсказка о режиме,
-    // которого нет, обманывает ровно так же, как молчащий Enter.
-    menuHint.textContent = '^K / right click - Session menu, ^N - new session, '
-      + '^P - projects, ^L - local, ^H - history, ^F - wide view'
-      + (trackerIsHere() ? ', ^S - snapshots' : '');
+    // Одна строка на всё окно места не имеет: клавиш стало столько, что
+    // подсказка занимала весь статуслайн и всё равно недоговаривала —
+    // встроенных действий, настроенных человеком и глобальных в ней не было
+    // вовсе. Полный список уехал в модалку по `?`/F1, где условность каждой
+    // клавиши доживает до строки; здесь остаётся вход в меню строки.
+    menuHint.textContent = '^K / right click - Session menu';
   }
 
   /**
@@ -746,7 +857,7 @@
     // uiToggles, не toggles: тот плоский и не помнит ось statusline — запись
     // плоской картой обнулила бы её при первом же save_ui, включая тот, что
     // зовётся сменой сортировки (ниже, не только из чекбокса).
-    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen, collapsed) })
+    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen, collapsed, order, hidden) })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -982,7 +1093,11 @@
   // вместе с остальными. Снаружи он не был бы строкой, а его счёт менялся бы
   // каждые несколько секунд и пересобирал бы каркас в такт опросу.
   function blockCellHtml(section) {
-    return `<div class="block" data-block="${escapeHtml(section.key)}">` +
+    // Класс `collapsed` — признак для раскладки, а не украшение: свёрнутый
+    // блок обязан быть высотой в свой заголовок, где бы он ни стоял. Долю
+    // колонки ему давать нельзя — она вся ушла бы в пустоту.
+    const collapsedClass = section.collapsed ? ' collapsed' : '';
+    return `<div class="block${collapsedClass}" data-block="${escapeHtml(section.key)}">` +
       `<div class="block-rows"></div></div>`;
   }
 
@@ -1028,6 +1143,10 @@
       groups, projects: projectRows, snapshots: snapshotItemsFor(query),
       mode, query, trackerHere: trackerIsHere(),
       layout: layoutName(), collapsed: collapsed[layoutName()],
+      // Половинка своей раскладки, как и у collapsed: формы у них разные, и
+      // выбирать нужную обязан тот, кто знает раскладку.
+      order: order[layoutName()],
+      hidden: hidden[layoutName()],
     });
   }
 
@@ -1039,7 +1158,13 @@
   }
 
   function renderWide(sections, nowSec) {
-    const shape = sections.map(s => `${s.key}|${s.column}`).join('\n');
+    // Свёрнутость входит в отпечаток каркаса: от неё зависит класс блока.
+    // Без неё секция, свёрнутая на своём же месте (то есть не сменившая
+    // порядок), осталась бы с прежним классом — и заняла бы долю колонки,
+    // хотя показывает один заголовок. Счёта в отпечатке по-прежнему нет: он
+    // меняется каждые несколько секунд и пересобирал бы каркас в такт опросу,
+    // а свёрнутость меняется только рукой человека.
+    const shape = sections.map(s => `${s.key}|${s.column}|${s.collapsed ? 1 : 0}`).join('\n');
     if (shape !== blocksShape) {
       // Колонки — flex-строка из flex-колонок, а не сетка. Сеткой это не
       // делается: колонка во всю высоту требует охватить все ряды, а
@@ -1211,9 +1336,10 @@
     groups = payload.groups;
     sortMode = payload.sort;
     paintSort();
-    // Подсказка зависит от ответа (trackerIsHere), а красится не на каждый
-    // опрос: без этого вызова хвост про `^S` появлялся бы только после клика
-    // по чекбоксу.
+    // Галки красятся не на каждый опрос: без этого вызова состояние чекбоксов
+    // догоняло бы список только после клика по одному из них. Условность
+    // подсказок сюда больше не относится — она уехала в справочник клавиш,
+    // который собирается заново на каждое открытие.
     paintToggles();
     render();
   }
@@ -1325,6 +1451,12 @@
    * бы молча. Здесь остаётся только разбор ответа, тот же, что был.
    */
   function applyState(payload) {
+    // Пока человек тащит заголовок, список не перерисовывается. Подача тикает
+    // раз в секунду, planListSync правит изменившиеся элементы — и
+    // перетаскиваемый узел подменился бы под указателем прямо в движении; в
+    // широкой раскладке вдобавок пересобрался бы каркас блоков целиком.
+    // Придержанный ответ применяется сразу после отпускания (endDrag).
+    if (drag) { heldState = payload; return; }
     const state = payload && payload.state;
     if (!state) {
       // Отказ без единого удачного ответа — показывать нечего, кроме отказа.
@@ -1759,6 +1891,278 @@
     search.focus();
   }
 
+  // ── Перетаскивание заголовков секций ───────────────────────────────────
+  //
+  // Тащат за заголовок, а не за строку: строки заняты кликом, который
+  // открывает сессию. Перетаскивание своё, на pointer-событиях, а не HTML5
+  // drag-and-drop: у вебвью Tauri `dragDropEnabled` по умолчанию `true`, и
+  // системный обработчик файлового перетаскивания съедает события страницы —
+  // в doc-комментарии поля у `tauri-utils` это записано прямо («Disabling it
+  // is required to use HTML5 drag and drop on the frontend on Windows»).
+  // Своё перетаскивание вдобавок проще согласовать с придержанным тактом.
+  //
+  // Порог в несколько пикселей обязателен: без него любой клик по заголовку
+  // становился бы перетаскиванием на ноль позиций, и свернуть секцию мышью
+  // стало бы нечем.
+  const DRAG_THRESHOLD = 4;
+  let drag = null;
+  // Ответ агрегатора, придержанный на время перетаскивания. Такт тикает раз в
+  // секунду, planListSync правит изменившиеся элементы — перетаскиваемый узел
+  // подменился бы под указателем прямо в движении. В широкой раскладке
+  // вдобавок менялся бы blocksShape, а это пересборка контейнеров целиком.
+  let heldState = null;
+  // Клик приходит после pointerup, и после настоящего перетаскивания он
+  // свернул бы секцию, которую только что перенесли.
+  let suppressClick = false;
+  const dropLine = document.getElementById('drop-line');
+
+  /** Ключ секции у DOM-узла её заголовка. */
+  function sectionKeyOf(node) {
+    const row = rows[Number(node.dataset.index)];
+    return row && row.kind === 'section' ? row.sectionKey : '';
+  }
+
+  /**
+   * Переставить ключ в списке.
+   *
+   * `to` считается по видимому списку, где перетаскиваемая секция ещё стоит на
+   * своём месте: убрав её раньше, чем поправлен номер, мы съехали бы на
+   * единицу при движении вниз.
+   */
+  function moveKey(keys, key, to) {
+    const from = keys.indexOf(key);
+    const rest = keys.filter(k => k !== key);
+    const at = from !== -1 && from < to ? to - 1 : to;
+    rest.splice(Math.max(0, Math.min(rest.length, at)), 0, key);
+    return rest;
+  }
+
+  /** Сколько заголовков выше указателя — столько и позиция вставки. */
+  function dropIndexOf(nodes, y) {
+    let at = 0;
+    for (const node of nodes) {
+      const r = node.getBoundingClientRect();
+      if (y > r.top + r.height / 2) at++;
+    }
+    return at;
+  }
+
+  /** Заголовки секций узкого списка, в видимом порядке. */
+  function narrowHeaders() {
+    return [...list.querySelectorAll('.row.section')];
+  }
+
+  /**
+   * Куда встанет секция в широкой раскладке: колонка и место в ней.
+   *
+   * Колонка ищется по указателю, а не по смыслу секции: человек волен
+   * перенести её куда угодно, и это отступление от умолчания и есть смысл
+   * задачи. Промах мимо всех колонок уводит в крайнюю — иначе у края экрана
+   * перетаскивание молча не срабатывало бы.
+   */
+  function wideDropTarget(x, y) {
+    const cols = [...list.querySelectorAll('.block-col')];
+    if (!cols.length) return null;
+    let col = cols.find((c) => {
+      const r = c.getBoundingClientRect();
+      return x >= r.left && x <= r.right;
+    });
+    if (!col) {
+      col = x < cols[0].getBoundingClientRect().left ? cols[0] : cols[cols.length - 1];
+    }
+    const found = col.className.match(/col-(\d)/);
+    const column = found ? Number(found[1]) : 1;
+    const blocks = [...col.querySelectorAll('.block')];
+    return { col, column, at: dropIndexOf(blocks, y), keys: blocks.map(b => b.dataset.block) };
+  }
+
+  /**
+   * Пустые колонки на время перетаскивания.
+   *
+   * Дописываются узлами, а не перерисовкой списка: перерисовка заменила бы
+   * узел, на котором висит захват указателя, и перетаскивание оборвалось бы в
+   * момент начала. Без них секцию, ушедшую из колонки последней, вернуть было
+   * бы некуда — пустой колонки нет в DOM, и указателю не во что попасть.
+   */
+  function addDropZones() {
+    if (!fullscreen) return;
+    const have = new Set([...list.querySelectorAll('.block-col')]
+      .map(c => (c.className.match(/col-(\d)/) || [])[1]));
+    for (const column of ['1', '2', '3']) {
+      if (have.has(column)) continue;
+      const zone = document.createElement('div');
+      zone.className = `block-col col-${column} drop-zone`;
+      // Колонки идут по возрастанию номера, и вставлять надо между соседями,
+      // а не в конец: иначе пустая вторая оказалась бы правее третьей.
+      const after = [...list.querySelectorAll('.block-col')]
+        .find(c => Number((c.className.match(/col-(\d)/) || [])[1]) > Number(column));
+      list.insertBefore(zone, after || null);
+    }
+  }
+
+  function clearDropZones() {
+    for (const zone of list.querySelectorAll('.block-col.drop-zone')) zone.remove();
+  }
+
+  /** Показать, куда встанет секция. */
+  function paintDropLine(x, y) {
+    if (fullscreen) {
+      const target = wideDropTarget(x, y);
+      if (!target) return;
+      const colRect = target.col.getBoundingClientRect();
+      const blocks = [...target.col.querySelectorAll('.block')];
+      const above = blocks[target.at - 1];
+      const below = blocks[target.at];
+      const top = below ? below.getBoundingClientRect().top
+        : above ? above.getBoundingClientRect().bottom
+          : colRect.top + 4;
+      dropLine.style.left = `${colRect.left}px`;
+      dropLine.style.width = `${colRect.width}px`;
+      dropLine.style.top = `${top}px`;
+    } else {
+      const headers = narrowHeaders();
+      const at = dropIndexOf(headers, y);
+      const listRect = list.getBoundingClientRect();
+      const below = headers[at];
+      const top = below ? below.getBoundingClientRect().top
+        : headers.length ? headers[headers.length - 1].getBoundingClientRect().bottom
+          : listRect.top;
+      dropLine.style.left = `${listRect.left}px`;
+      dropLine.style.width = `${listRect.width}px`;
+      dropLine.style.top = `${top}px`;
+    }
+    dropLine.classList.add('on');
+  }
+
+  /** Записать новый порядок и вернуть список к обычной жизни. */
+  function commitDrag(x, y) {
+    if (fullscreen) {
+      const target = wideDropTarget(x, y);
+      if (!target) return;
+      // Ключ вынимается из всех колонок и кладётся в названную: секция одна,
+      // и остаться в прежней колонке она не может.
+      const columns = order.wide.map(keys => keys.filter(k => k !== drag.key));
+      // Видимый порядок колонки, а не сохранённый: сохранённого может не быть
+      // вовсе, а поставить секцию надо туда, куда смотрит человек.
+      const visible = target.keys.filter(k => k !== drag.key);
+      const at = Math.max(0, Math.min(visible.length, target.at
+        - (target.keys.indexOf(drag.key) !== -1 && target.keys.indexOf(drag.key) < target.at ? 1 : 0)));
+      visible.splice(at, 0, drag.key);
+      columns[target.column - 1] = visible;
+      order = { ...order, wide: columns };
+    } else {
+      // Видимый порядок, а не сохранённый: в файле может не быть ничего, а
+      // человек переносит то, что видит.
+      const headers = narrowHeaders();
+      const visible = headers.map(sectionKeyOf).filter(Boolean);
+      order = { ...order, narrow: moveKey(visible, drag.key, dropIndexOf(headers, y)) };
+    }
+    // Порядок секций, которых сейчас нет на экране (лёг трекер — нет и его
+    // секции), в файле не сохраняется: он записывается по видимому списку.
+    // Вернувшаяся машина встанет в конец, по тому же правилу, по которому
+    // туда встаёт всё неназванное. Помнить место того, чего нет, значило бы
+    // держать в файле ключи, про которые уже не сказать, живые они или мусор.
+    saveUi();
+  }
+
+  function endDrag() {
+    if (!drag) return;
+    const moved = drag.moved;
+    if (drag.node) drag.node.classList.remove('dragging');
+    drag = null;
+    dropLine.classList.remove('on');
+    clearDropZones();
+    // Придержанный ответ применяется сразу после отпускания — вместе с
+    // пересборкой каркаса, которой ждали.
+    if (heldState) {
+      const payload = heldState;
+      heldState = null;
+      applyState(payload);
+    } else if (moved) {
+      render();
+    }
+  }
+
+  list.addEventListener('pointerdown', (e) => {
+    if (menuOpen || infoOpen || keysOpen) return;
+    // Только левой кнопкой: правая открывает меню строки.
+    if (e.button !== 0) return;
+    const node = e.target.closest('.row.section');
+    if (!node) return;
+    // Заголовок бывает строкой только там, где секции — постоянный список:
+    // при пустом запросе и без префикса (признак `foldable`). Под запросом он
+    // подпись, и `.row.section` там не найдётся вовсе, так что отдельной
+    // проверки на foldable здесь не нужно.
+    const key = sectionKeyOf(node);
+    if (!key) return;
+    drag = { key, node, x: e.clientX, y: e.clientY, moved: false };
+    // Захват на узел: увести указатель за пределы строки — обычное дело, а
+    // без захвата события ушли бы соседу, и перетаскивание оборвалось бы.
+    node.setPointerCapture(e.pointerId);
+  });
+
+  list.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if (!drag.moved) {
+      if (Math.abs(e.clientX - drag.x) < DRAG_THRESHOLD
+        && Math.abs(e.clientY - drag.y) < DRAG_THRESHOLD) return;
+      drag.moved = true;
+      suppressClick = true;
+      drag.node.classList.add('dragging');
+      addDropZones();
+    }
+    paintDropLine(e.clientX, e.clientY);
+  });
+
+  list.addEventListener('pointerup', (e) => {
+    if (!drag) return;
+    if (drag.moved) commitDrag(e.clientX, e.clientY);
+    endDrag();
+  });
+
+  // Отмена приходит вместо pointerup, когда указатель отобрала система.
+  list.addEventListener('pointercancel', () => {
+    if (drag) drag.moved = false;
+    endDrag();
+  });
+
+  function closeKeys() {
+    keysOpen = false;
+    keysBackdrop.classList.remove('open');
+    keysBackdrop.setAttribute('aria-hidden', 'true');
+    search.focus();
+  }
+
+  /**
+   * Справочник клавиш.
+   *
+   * Список собирает buildKeyReference из единственной таблицы клавиш
+   * (action-hotkey.js) плюс того, что знает только страница: настроенных
+   * человеком действий, глобальных хоткеев и проектных, приехавших ответом
+   * агрегатора. Написать его здесь руками нельзя — вторая копия разошлась бы
+   * с обработчиком молча, и окно обещало бы клавишу, которую никто не слушает.
+   */
+  function openKeys() {
+    const sections = window.KeyReference.buildKeyReference({
+      trackerHere: trackerIsHere(),
+      actions: CONFIG.actions,
+      hotkey: CONFIG.hotkey,
+      projectsHotkey: CONFIG.projectsHotkey,
+      projects: projectRows,
+      hotkeysTaken,
+    });
+    keysRows.innerHTML = sections.map(section =>
+      `<div class="keys-section">${escapeHtml(section.title)}</div>`
+      + section.rows.map(r =>
+        `<div class="info-row${r.taken ? ' taken' : ''}">`
+        + `<span class="k">${escapeHtml(r.key)}</span>`
+        + `<span class="v">${escapeHtml(r.label)}</span></div>`).join('')).join('');
+    keysOpen = true;
+    keysBackdrop.classList.add('open');
+    keysBackdrop.setAttribute('aria-hidden', 'false');
+    search.blur();
+  }
+
   function openInfo(session) {
     if (!session) return;
     const nowSec = Math.floor(Date.now() / 1000);
@@ -2134,6 +2538,17 @@
   // строки без PR ^P просто ничего не делает.
 
   document.addEventListener('keydown', (e) => {
+    // Третий оверлей — третья ветка, а не обобщение двух: у меню действий
+    // есть выбор стрелками и запуск, а у двух статичных модалок — только
+    // «закрыть». Общий код на три ветки пришлось бы разветвлять обратно.
+    if (keysOpen) {
+      // F1 закрывает так же, как открыла: клавиша-переключатель.
+      if (e.key === 'Escape' || e.key === 'Enter' || e.key === 'F1') {
+        e.preventDefault();
+        closeKeys();
+      } else if (!(e.ctrlKey || e.metaKey || e.altKey)) { e.preventDefault(); }
+      return;
+    }
     if (infoOpen) {
       if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); closeInfo(); }
       else if (!(e.ctrlKey || e.metaKey || e.altKey)) { e.preventDefault(); }
@@ -2145,6 +2560,15 @@
       else if (e.key === 'Enter') { e.preventDefault(); runMenuAction(); }
       else if (e.key === 'Escape') { e.preventDefault(); closeMenu(); }
       else if (!(e.ctrlKey || e.metaKey || e.altKey)) { e.preventDefault(); }
+      return;
+    }
+    // F1, а не `?`: поле поиска сфокусировано всегда, `?` — печатный знак, и
+    // прямая ветка отобрала бы его у поиска насовсем — та же цена, за которую
+    // `seen` уехал с `^V` на `^D`. С RESERVED_CODES F1 не спорит: там заняты
+    // только формы «один Ctrl или Cmd плюс буква».
+    if (e.key === 'F1') {
+      e.preventDefault();
+      openKeys();
       return;
     }
     // `,` вместе с Ctrl или Cmd — общесистемная привычка открывать настройки.
@@ -2246,6 +2670,9 @@
 
   list.addEventListener('click', (e) => {
     if (menuOpen) return;
+    // Клик приходит следом за pointerup: без этого настоящее перетаскивание
+    // заодно сворачивало бы секцию, которую только что перенесли.
+    if (suppressClick) { suppressClick = false; return; }
     const row = e.target.closest('.row');
     if (!row) return;
     active = Number(row.dataset.index);
@@ -2298,6 +2725,18 @@
     if (e.target === infoBackdrop) closeInfo();
   });
 
+  keysBackdrop.addEventListener('click', (e) => {
+    if (e.target === keysBackdrop) closeKeys();
+  });
+
+  // Клик по `?` не должен всплывать до statusline: там висит смена сортировки,
+  // и открытие справочника заодно крутило бы её.
+  keysButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (keysOpen) closeKeys();
+    else openKeys();
+  });
+
   sortControl.addEventListener('click', (e) => {
     e.preventDefault();
     if (menuOpen) return;
@@ -2317,6 +2756,7 @@
   function beginShow() {
     closeMenu();
     closeInfo();
+    closeKeys();
     search.value = '';
     active = 0;
     selectionReset = true;
@@ -2397,6 +2837,8 @@
       toggles = window.UiState.listColumns(uiToggles);
       fullscreen = ui.fullscreen;
       collapsed = ui.collapsed;
+      order = ui.order;
+      hidden = ui.hidden;
       // Размер просим у Rust сразу: окно открывается с размером из
       // tauri.conf.json, и без этого широкий режим помнился бы, а окно
       // осталось бы узким. Просим безусловно, в обе стороны: узкий режим —
@@ -2472,6 +2914,8 @@
         toggles = window.UiState.listColumns(uiToggles);
         fullscreen = ui.fullscreen;
         collapsed = ui.collapsed;
+        order = ui.order;
+        hidden = ui.hidden;
         // Тот же размер, что и при первой загрузке, и так же безусловно:
         // дорога сюда гоночная (настройки перечитывают ui.json между ^F и
         // записью saveUi), и `if (fullscreen)` приводил бы ровно в то
