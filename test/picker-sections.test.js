@@ -519,6 +519,82 @@ test('прятанье работает и в узком списке', () => {
   assert.ok(!sections.some(s => s.key === 'projects'), sections.map(s => s.key).join(' '));
 });
 
+// ── своя живая панель показывается всегда ───────────────────────────────────
+//
+// Это главная панель, и в широкой раскладке ей отдана первая колонка. Пустая
+// колонка не рисуется, и на машине без своих живых сессий она исчезала целиком:
+// три назначенных колонки давали на экране две, и выглядело это потерянной
+// настройкой, а не отсутствием сессий. Поймано на маке.
+
+const NO_GROUPS = { groups: [], projects: [], snapshots: [] };
+
+test('панель своих сессий есть и когда своих сессий нет', () => {
+  for (const layout of ['wide', 'narrow']) {
+    const sections = buildSections(base({ ...NO_GROUPS, layout }));
+    const live = sections.find(s => s.key === 'live');
+    assert.ok(live, `${layout}: панели нет — колонка исчезнет`);
+    assert.strictEqual(live.count, 0);
+  }
+});
+
+test('пустая панель стоит в первой колонке и первой в списке', () => {
+  // Колонка нужна затем, ради чего всё и делалось: непустая первая колонка и
+  // есть то, что рисуется. Место — то же, где панель стоит с сессиями.
+  const sections = buildSections(base({ ...NO_GROUPS, layout: 'wide' }));
+  assert.strictEqual(sections[0].key, 'live');
+  assert.strictEqual(sections[0].column, 1);
+});
+
+test('пустая панель называется по тому же правилу, что и полная', () => {
+  // Без чужих машин — «Active sessions», с ними — «Active local sessions».
+  // Разойдись эти имена, панель называлась бы по-разному в зависимости от
+  // того, пуста она или нет.
+  const alone = buildSections(base({ ...NO_GROUPS, layout: 'wide' }));
+  assert.strictEqual(alone[0].label, 'Active sessions');
+  const withRemote = buildSections(base({
+    ...NO_GROUPS, layout: 'wide',
+    groups: [{ key: 'remote:alpha-host', label: 'Active on alpha-host', remote: true, host: 'alpha-host', sessions: [session('x')] }],
+  }));
+  assert.strictEqual(withRemote.find(s => s.key === 'live').label, 'Active local sessions');
+});
+
+test('пустая панель говорит о пустоте подписью, а не строкой', () => {
+  // У `block-subhead` нет ни `data-index`, ни класса `row`: ни стрелки, ни
+  // клик её не видят, и Enter на ней невозможен. Иначе выбор вставал бы на
+  // строку, которую нечем открыть.
+  const live = buildSections(base({ ...NO_GROUPS, layout: 'wide' }))[0];
+  assert.deepStrictEqual(live.rows.map(r => r.kind), ['block-subhead']);
+  assert.strictEqual(live.rows[0].label, 'No local sessions.');
+  // И в счёт она не входит: счёт про сессии, а не про строки разметки.
+  assert.strictEqual(live.count, 0);
+});
+
+test('своей панели не заводится второй, когда сессии есть', () => {
+  const sections = buildSections(base({ layout: 'wide' }));
+  assert.strictEqual(sections.filter(s => s.key === 'live').length, 1);
+  assert.ok(sections.find(s => s.key === 'live').count > 0);
+});
+
+test('под запросом пустая панель исчезает, как и все остальные', () => {
+  // Секция без совпадений уходит у всех одинаково, и пустой блок посреди
+  // найденного был бы шумом.
+  const sections = buildSections(base({ ...NO_GROUPS, layout: 'wide', query: 'ничего-такого' }));
+  assert.ok(!sections.some(s => s.key === 'live'), sections.map(s => s.key).join(' '));
+});
+
+test('под префиксом `/l` пустая панель не заводится', () => {
+  // Про пустоту там прямо говорит подпись «No sessions on this machine.», и
+  // заголовок с нулём рядом с ней — второй раз одно и то же.
+  const sections = buildSections(base({ ...NO_GROUPS, layout: 'wide', mode: 'local' }));
+  assert.deepStrictEqual(sections, []);
+});
+
+test('спрятанная панель остаётся спрятанной и пустой', () => {
+  // «Убери» сказано намеренно, и всегда-показ это не перебивает.
+  const sections = buildSections(base({ ...NO_GROUPS, layout: 'wide', hidden: { live: true } }));
+  assert.ok(!sections.some(s => s.key === 'live'), sections.map(s => s.key).join(' '));
+});
+
 test('мусор вместо карты спрятанных ничего не прячет', () => {
   for (const hidden of [null, 'нет', 42, { past: 'да' }]) {
     const sections = buildSections(base({ layout: 'wide', hidden }));
