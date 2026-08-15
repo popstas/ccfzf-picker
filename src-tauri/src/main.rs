@@ -107,7 +107,7 @@ fn hide_window(app: &tauri::AppHandle) {
 }
 
 fn toggle_picker(app: &tauri::AppHandle) {
-    toggle_window(app, false);
+    toggle_window(app, None);
 }
 
 /// Второй хоткей: то же переключение, но открывшееся окно встаёт в режим
@@ -118,10 +118,39 @@ fn toggle_picker(app: &tauri::AppHandle) {
 /// был бы неожиданностью. Дребезг у обоих общий (`LastToggle`), поэтому два
 /// хоткея подряд не откроют окно дважды.
 fn toggle_projects(app: &tauri::AppHandle) {
-    toggle_window(app, true);
+    toggle_window(app, Some(MODE_MENU[0].1));
 }
 
-fn toggle_window(app: &tauri::AppHandle, projects: bool) {
+/// Показать пикер в названном режиме — без переключения.
+///
+/// Так ведут себя все четыре пункта-режима в трее, и это не то же, что хоткей.
+/// Хоткей нажимают вслепую, поэтому он переключает: повторное нажатие обязано
+/// погасить окно. В меню же режим выбирают глазами, уже открыв трей, — выбрав
+/// `History`, ждут историю, а не гашения окна, которое ради этого выбора и
+/// открыли.
+fn show_in_mode(app: &tauri::AppHandle, mode: &str) {
+    show_picker(app);
+    emit_mode(app, mode);
+}
+
+/// Сказать странице, с каким режимом открыться.
+///
+/// Режим живёт префиксом в строке поиска, а не флагом, и выставить его может
+/// только страница — Rust про строку поиска не знает ничего. Отсюда два хода:
+/// показать окно и назвать режим.
+///
+/// Событие одно на все режимы, с именем в теле, а не по событию на режим:
+/// четыре имени событий на одной стороне и четыре подписки на другой — это
+/// два списка, которые разошлись бы молча.
+///
+/// Уходит оно **после** `picker-shown`, и порядок этот обязателен: по
+/// `picker-shown` страница чистит строку поиска (`beginShow`), и приди режим
+/// раньше, префикс стёрло бы тем же показом, ради которого его и ставили.
+fn emit_mode(app: &tauri::AppHandle, mode: &str) {
+    let _ = app.emit("picker-mode", mode);
+}
+
+fn toggle_window(app: &tauri::AppHandle, mode: Option<&str>) {
     let state = app.state::<LastToggle>();
     {
         let mut last = state.0.lock().unwrap();
@@ -141,11 +170,8 @@ fn toggle_window(app: &tauri::AppHandle, projects: bool) {
         .is_some_and(|t| Instant::now().duration_since(t) < DEBOUNCE);
     if picker_toggle(window.is_visible().unwrap_or(false), just_hidden) {
         show_picker(app);
-        if projects {
-            // Режим живёт префиксом в строке поиска, а не флагом, и выставить
-            // его может только страница — Rust про строку поиска не знает
-            // ничего. Отсюда два хода: показать окно и сказать, с чем открыться.
-            let _ = app.emit("picker-projects", ());
+        if let Some(mode) = mode {
+            emit_mode(app, mode);
         }
     } else {
         hide_window(app);
@@ -959,6 +985,60 @@ fn register_projects_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) 
     (registered, accelerator)
 }
 
+/// Комбинация так, как её показывают человеку: `Super` — это `Win`.
+///
+/// Клавиша на клавиатуре подписана `Win`, а muda пишет её словом `Windows`, и
+/// `Windows+Shift+C` длиннее самого пункта меню. Своё имя модификатора здесь
+/// не выдумывается: `Cmd`, `Command` и `Meta` — те же имена, которые понимает
+/// разбор хоткея, и человек мог написать в `config.yaml` любое из них.
+///
+/// Прочие части строки идут как есть, а не приводятся к какому-нибудь общему
+/// виду: в колонке показывается ровно то, что человек написал в конфиге, — и
+/// это лучше канонической формы, потому что искать глазами он будет своё.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn accelerator_text(accelerator: &str) -> String {
+    accelerator
+        .split('+')
+        .map(|part| {
+            let part = part.trim();
+            match part.to_ascii_lowercase().as_str() {
+                "super" | "meta" | "cmd" | "command" | "win" | "windows" => "Win".to_string(),
+                _ => part.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+/// Подпись пункта и то, что уходит в нативный слот акселератора.
+///
+/// На Windows слот не используется вовсе, и это единственный способ показать
+/// `Win` вместо `Windows`: слово зашито в `Display` самого muda
+/// (`platform_impl/windows/accelerator.rs`), и подменить его нечем. Взамен
+/// комбинация пишется в подпись через `\t` — ровно тем приёмом, каким её
+/// кладёт туда и сам muda (`format!("{text}\t{}", accelerator)`): выравнивание
+/// по табуляции делает Win32, и колонка выходит та же самая. Без акселератора
+/// muda отдаёт подпись в меню как есть, так что табуляция доезжает до Win32
+/// нетронутой.
+///
+/// Цена — запись в таблице акселераторов меню, которую muda завёл бы рядом. Но
+/// она и была украшением: работает настоящий хоткей, глобальный, а меню трея
+/// клавиш не слушает вовсе. Ровно поэтому же отказ регистрации называет
+/// подпись, а не колонка.
+///
+/// На маке ничего не меняется: NSMenuItem рисует ⌘⇧C сам, и табуляция в
+/// заголовке была бы литеральной.
+fn menu_item_parts(label: &str, accelerator: &str) -> (String, Option<String>) {
+    #[cfg(windows)]
+    {
+        (format!("{label}\t{}", accelerator_text(accelerator)), None)
+    }
+    #[cfg(not(windows))]
+    {
+        (label.to_string(), Some(accelerator.to_string()))
+    }
+}
+
 /// Пункт трея «показать»: хранится в состоянии приложения, чтобы
 /// `apply_config` мог поправить его подпись и акселератор после смены
 /// хоткея из окна настроек. Без этого трей продолжал бы обещать комбинацию,
@@ -979,11 +1059,16 @@ fn update_show_item(item: &MenuItem<tauri::Wry>, registered: bool, accelerator: 
 ///
 /// Отказ здесь не роняет ничего: акселератор — украшение, и строку, которую
 /// не понял muda, пункт переживает без правой колонки.
+///
+/// Что именно уходит в подпись, а что в слот, решает `menu_item_parts`: на
+/// Windows комбинация едет в подписи, и слот обязан быть очищен — иначе muda
+/// приписал бы к нашей табуляции свою вторую, со словом `Windows`.
 fn update_menu_item(item: &MenuItem<tauri::Wry>, label: &str, accelerator: &str) {
-    if let Err(e) = item.set_text(label) {
+    let (text, accel) = menu_item_parts(label, accelerator);
+    if let Err(e) = item.set_text(&text) {
         eprintln!("ccfzf-picker: cannot update tray label: {e}");
     }
-    if let Err(e) = item.set_accelerator(Some(accelerator)) {
+    if let Err(e) = item.set_accelerator(accel.as_deref()) {
         eprintln!("ccfzf-picker: cannot show hotkey {accelerator} in tray menu: {e}");
     }
 }
@@ -1450,6 +1535,37 @@ fn version_item_label(version: &str, built: Option<NaiveDateTime>, today: NaiveD
     }
 }
 
+/// Пункты трея, открывающие пикер в названном режиме: id пункта, имя режима,
+/// подпись.
+///
+/// Одна таблица на сборку меню и на разбор нажатия. Два списка разошлись бы
+/// молча и самым тихим отказом из возможных: пункт в меню есть, нажатие
+/// проходит через `on_menu_event` и не находит своей ветки — ни ошибки, ни
+/// следа, просто ничего не происходит. Та же причина, по которой у пикера одна
+/// таблица `PREFIXES` на разбор, снятие и вставку префикса.
+///
+/// Имена режимов здесь — те же, что в `PREFIXES` (`frontend-src/picker-mode.js`):
+/// они уезжают на страницу телом события `picker-mode` и там ищутся в этой
+/// таблице. Опечатка стоит молчащего пункта меню, и поймать её можно только
+/// сверкой двух файлов — сторож `test/tray-modes.test.js`.
+///
+/// Слова `Show` в подписях нет намеренно: оно было бы одинаковым у всех пяти
+/// пунктов и потому не различало бы ничего.
+const MODE_MENU: [(&str, &str, &str); 4] = [
+    ("show-projects", "projects", "Projects"),
+    ("show-remote", "remote", "Remote"),
+    ("show-history", "history", "History"),
+    ("show-snapshots", "snapshots", "Snapshots"),
+];
+
+/// Режим, который открывает пункт меню с таким id.
+fn mode_for_menu_id(id: &str) -> Option<&'static str> {
+    MODE_MENU
+        .iter()
+        .find(|(item_id, _, _)| *item_id == id)
+        .map(|(_, mode, _)| *mode)
+}
+
 /// Подпись пункта «показать» в меню трея.
 ///
 /// Про занятый хоткей говорит подпись, а не правая колонка: колонка — нативный
@@ -1458,7 +1574,7 @@ fn version_item_label(version: &str, built: Option<NaiveDateTime>, today: NaiveD
 /// сработала, а не только то, что что-то не сработало.
 fn show_item_label(hotkey_registered: bool) -> &'static str {
     if hotkey_registered {
-        "Show sessions"
+        "Sessions"
     } else {
         "Hotkey is taken, click here"
     }
@@ -1468,9 +1584,14 @@ fn show_item_label(hotkey_registered: bool) -> &'static str {
 /// регистрации называет подпись, а комбинация остаётся в правой колонке.
 /// Своя строка, а не общая с `show_item_label`: у двух хоткеев отказ разный,
 /// и «Hotkey is taken» под обоими пунктами не сказало бы, какой именно.
+///
+/// Рабочую подпись берёт из `MODE_MENU`, а не пишет вторично: пункт «проекты»
+/// — такой же пункт-режим, как три соседних, и разойдись эти два написания,
+/// меню называло бы один и тот же режим по-разному в зависимости от того,
+/// встал ли хоткей.
 fn projects_item_label(hotkey_registered: bool) -> &'static str {
     if hotkey_registered {
-        "Show projects"
+        MODE_MENU[0].2
     } else {
         "Projects hotkey is taken, click here"
     }
@@ -1586,20 +1707,21 @@ fn main() {
             // `with_id` вернёт ошибкой, а `?` уронил бы приложение на старте —
             // из-за подписи в меню. Поэтому отказ означает пункт без правой
             // колонки, а не отсутствие трея.
-            let label = show_item_label(hotkey_registered);
+            let (show_text, show_accel) =
+                menu_item_parts(show_item_label(hotkey_registered), &hotkey_accelerator);
             let show_item = match MenuItem::with_id(
                 app,
                 "show",
-                label,
+                &show_text,
                 true,
-                Some(hotkey_accelerator.as_str()),
+                show_accel.as_deref(),
             ) {
                 Ok(item) => item,
                 Err(e) => {
                     eprintln!(
                         "ccfzf-picker: cannot show hotkey {hotkey_accelerator} in tray menu: {e}"
                     );
-                    MenuItem::with_id(app, "show", label, true, None::<&str>)?
+                    MenuItem::with_id(app, "show", &show_text, true, None::<&str>)?
                 }
             };
             // Сохраняется в состоянии, чтобы `apply_config` мог поправить эту
@@ -1610,23 +1732,35 @@ fn main() {
             // первый: подпись говорит об отказе, акселератор показывается
             // всегда, а строку, которую muda не понял, пункт переживает без
             // правой колонки.
-            let projects_label = projects_item_label(projects_registered);
+            let (projects_text, projects_accel) = menu_item_parts(
+                projects_item_label(projects_registered),
+                &projects_accelerator,
+            );
             let projects_item = match MenuItem::with_id(
                 app,
                 "show-projects",
-                projects_label,
+                &projects_text,
                 true,
-                Some(projects_accelerator.as_str()),
+                projects_accel.as_deref(),
             ) {
                 Ok(item) => item,
                 Err(e) => {
                     eprintln!(
                         "ccfzf-picker: cannot show hotkey {projects_accelerator} in tray menu: {e}"
                     );
-                    MenuItem::with_id(app, "show-projects", projects_label, true, None::<&str>)?
+                    MenuItem::with_id(app, "show-projects", &projects_text, true, None::<&str>)?
                 }
             };
             app.manage(ProjectsMenuItem(projects_item.clone()));
+            // Остальные пункты-режимы — из той же таблицы, что и проектный, но
+            // без акселератора и без подписи об отказе: хоткея у этих трёх
+            // режимов нет вовсе, и отказываться нечему. Строятся циклом, а не
+            // тремя вызовами подряд: список пунктов уже есть в `MODE_MENU`, и
+            // второй, написанный руками здесь, разошёлся бы с ним молча.
+            let mode_items = MODE_MENU[1..]
+                .iter()
+                .map(|(id, _, label)| MenuItem::with_id(app, *id, *label, true, None::<&str>))
+                .collect::<Result<Vec<_>, _>>()?;
             // Настройки — второй пункт, между показом и выходом. Из трея они
             // достижимы и тогда, когда до шестерёнки в статуслайне не добраться:
             // хоткей не встал, а пикер не открывается по той самой настройке,
@@ -1648,16 +1782,20 @@ fn main() {
                 false,
                 None::<&str>,
             )?;
-            let tray_menu = Menu::with_items(
-                app,
-                &[
-                    &show_item,
-                    &projects_item,
-                    &settings_item,
-                    &quit_item,
-                    &version_item,
-                ],
-            )?;
+            // Порядок пунктов — порядок `MODE_MENU`: сперва общий список, за
+            // ним режимы, и лишь потом служебное. Пункты-режимы нажимают
+            // каждый день, «Settings…» и «Quit» — редко.
+            let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+                vec![&show_item, &projects_item];
+            items.extend(
+                mode_items
+                    .iter()
+                    .map(|item| item as &dyn tauri::menu::IsMenuItem<tauri::Wry>),
+            );
+            items.push(&settings_item);
+            items.push(&quit_item);
+            items.push(&version_item);
+            let tray_menu = Menu::with_items(app, &items)?;
             TrayIconBuilder::new()
                 .icon(tray_icon())
                 // Иконка одноцветная и просвечивает фоном: система сама красит
@@ -1671,9 +1809,6 @@ fn main() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => toggle_picker(app),
-                    // Не toggle: пункт называется «показать проекты», и
-                    // погасить окно по нему было бы не тем, что обещано.
-                    "show-projects" => toggle_projects(app),
                     // Через spawn, а не вызовом на месте: обработчик меню
                     // крутится в потоке цикла событий, а webview на Windows
                     // дозревает через этот же цикл. Занятый цикл — то самое
@@ -1689,7 +1824,14 @@ fn main() {
                         });
                     }
                     "quit" => app.exit(0),
-                    _ => {}
+                    // Пункты-режимы разбираются таблицей, а не веткой на
+                    // каждый: ветка, забытая при заведении пятого режима, дала
+                    // бы пункт меню, который молча ничего не делает.
+                    id => {
+                        if let Some(mode) = mode_for_menu_id(id) {
+                            show_in_mode(app, mode);
+                        }
+                    }
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
@@ -1949,9 +2091,93 @@ mod tests {
     /// двух не встал.
     #[test]
     fn tray_label_tells_which_hotkey_is_taken() {
-        assert_eq!(projects_item_label(true), "Show projects");
+        assert_eq!(projects_item_label(true), "Projects");
         assert_ne!(projects_item_label(false), projects_item_label(true));
         assert_ne!(projects_item_label(false), show_item_label(false));
+    }
+
+    /// Нажатие на каждый пункт-режим доходит до режима.
+    ///
+    /// Сторож про таблицу, а не про поведение: пункт меню, чей id никуда не
+    /// разбирается, — самый тихий отказ из возможных. Нажатие проходит, ветки
+    /// себе не находит, и ни ошибки, ни следа не остаётся.
+    #[test]
+    fn every_mode_menu_item_resolves_to_a_mode() {
+        for (id, mode, label) in MODE_MENU {
+            assert_eq!(mode_for_menu_id(id), Some(mode), "пункт {id} без режима");
+            assert!(!label.is_empty(), "пункт {id} без подписи");
+        }
+        assert_eq!(mode_for_menu_id("quit"), None);
+        assert_eq!(mode_for_menu_id("show"), None);
+    }
+
+    /// Слова `Show` в подписях нет: одинаковое у всех пяти пунктов, оно не
+    /// различало бы ничего. Проверяются и пункт «Sessions», и все режимы —
+    /// правка одной подписи не должна тихо разъехаться с остальными.
+    #[test]
+    fn tray_labels_name_the_mode_without_show() {
+        assert_eq!(show_item_label(true), "Sessions");
+        for (_, _, label) in MODE_MENU {
+            assert!(!label.contains("Show"), "подпись {label} со словом Show");
+        }
+    }
+
+    /// Клавиша Win зовётся `Win`, как она и подписана на клавиатуре.
+    ///
+    /// muda пишет её словом `Windows` — хардкод в его `Display`, — и
+    /// `Windows+Shift+C` длиннее самого пункта меню. Проверяются все имена
+    /// модификатора, которые понимает разбор хоткея: человек мог написать в
+    /// `config.yaml` любое из них, и колонка обязана называть клавишу одинаково
+    /// независимо от того, какое он выбрал.
+    #[test]
+    fn the_super_key_is_shown_as_win() {
+        for written in [
+            "Super+Shift+C", "super+shift+c", "Cmd+Shift+C", "Command+Shift+C",
+            "Meta+Shift+C", "Win+Shift+C", "Windows+Shift+C",
+        ] {
+            let shown = accelerator_text(written);
+            assert!(shown.starts_with("Win+"), "{written} показан как {shown}");
+            assert!(!shown.contains("Windows"), "{written} показан как {shown}");
+        }
+        assert_eq!(accelerator_text("Alt+Super+Shift+C"), "Alt+Win+Shift+C");
+    }
+
+    /// Прочие части строки идут как есть: в колонке человек ищет глазами то,
+    /// что сам написал в конфиге, а не каноническую форму.
+    #[test]
+    fn other_parts_of_the_combination_are_left_alone() {
+        assert_eq!(accelerator_text("Ctrl+Shift+F10"), "Ctrl+Shift+F10");
+        assert_eq!(accelerator_text(""), "");
+    }
+
+    /// Комбинация уезжает либо в подпись, либо в нативный слот — но не в оба
+    /// сразу и не в никуда.
+    ///
+    /// Оба разом означали бы две колонки в одной строке: свою через табуляцию и
+    /// мудовскую поверх неё. Ни одного — пункт без комбинации вовсе, а человеку
+    /// надо видеть, какая именно клавиша не сработала.
+    #[test]
+    fn the_combination_goes_to_exactly_one_place() {
+        let (text, accel) = menu_item_parts("Sessions", "Super+Shift+C");
+        let in_label = text.contains("Win+Shift+C");
+        let in_slot = accel.is_some();
+        assert!(in_label != in_slot, "подпись {text:?}, слот {accel:?}");
+        // Подпись пункта остаётся первой частью до табуляции — по ней muda
+        // читает её обратно (`text.split('\t').next()`).
+        assert_eq!(text.split('\t').next(), Some("Sessions"));
+    }
+
+    /// Ни id, ни имена режимов не повторяются: одинаковый id означал бы, что
+    /// один из двух пунктов недостижим, а `mode_for_menu_id` вернула бы для
+    /// него чужой режим.
+    #[test]
+    fn mode_menu_ids_and_modes_are_unique() {
+        for (i, (id, mode, _)) in MODE_MENU.iter().enumerate() {
+            for (other_id, other_mode, _) in MODE_MENU.iter().skip(i + 1) {
+                assert_ne!(id, other_id, "повторённый id {id}");
+                assert_ne!(mode, other_mode, "повторённый режим {mode}");
+            }
+        }
     }
 
     /// Второй хоткей обязан переключать окно, а не только показывать.
@@ -2028,7 +2254,7 @@ mod tests {
     /// Про занятый хоткей меню говорит подписью, и подписи эти разные.
     #[test]
     fn tray_label_tells_when_hotkey_is_taken() {
-        assert_eq!(show_item_label(true), "Show sessions");
+        assert_eq!(show_item_label(true), "Sessions");
         assert_ne!(show_item_label(false), show_item_label(true));
     }
 

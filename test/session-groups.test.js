@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   normalizeSort, cycleSort, compareSessions, groupSessions, labelSessions, SORT_MODES,
-  DEFAULT_SORT, buildSessionsPayload,
+  DEFAULT_SORT, buildSessionsPayload, activeFilters,
 } = require('../frontend-src/session-groups');
 
 // Сырые сессии — то, что отдаёт `ccfzf --state`, а не строки списка.
@@ -475,4 +475,54 @@ test('на равной свежести машины разводятся по 
     groups.filter(g => g.remote).map(g => g.key),
     ['remote:alpha-host', 'remote:zeta-host'],
   );
+});
+
+// ── activeFilters: спрошенное перебивает отобранное ────────────────────────
+
+test('без запроса и без префикса отсевы остаются как есть', () => {
+  assert.deepStrictEqual(
+    activeFilters({ mode: 'sessions', query: '', onlyLive: true, onlyWindow: true }),
+    { onlyLive: true, onlyWindow: true },
+  );
+  assert.deepStrictEqual(
+    activeFilters({ mode: 'sessions', query: '', onlyLive: false, onlyWindow: false }),
+    { onlyLive: false, onlyWindow: false },
+  );
+});
+
+test('непустой запрос снимает оба отсева', () => {
+  // Искали сессию, а не отбор. Отсев при поиске молчит: найденного просто нет
+  // в списке, и почему — не сказано ни словом.
+  assert.deepStrictEqual(
+    activeFilters({ mode: 'sessions', query: 'ccfzf', onlyLive: true, onlyWindow: true }),
+    { onlyLive: false, onlyWindow: false },
+  );
+});
+
+test('пробелы запросом не считаются', () => {
+  // Иначе случайно нажатый пробел молча снимал бы отсевы, и человек видел бы
+  // другой список, ничего не набрав.
+  assert.deepStrictEqual(
+    activeFilters({ mode: 'sessions', query: '   ', onlyLive: true, onlyWindow: true }),
+    { onlyLive: true, onlyWindow: true },
+  );
+});
+
+test('любой префикс режима снимает отсевы и на пустом запросе', () => {
+  // Оговорок по режимам нет намеренно: `/p` и `/s` сессий не касаются вовсе, а
+  // `/l` и `/r` живые по построению — таблица «какой режим что отменяет» была
+  // бы вторым списком рядом с PREFIXES и разошлась бы с ним на первой правке.
+  for (const mode of ['local', 'remote', 'history', 'projects', 'snapshots']) {
+    assert.deepStrictEqual(
+      activeFilters({ mode, query: '', onlyLive: true, onlyWindow: true }),
+      { onlyLive: false, onlyWindow: false },
+      `режим ${mode}`,
+    );
+  }
+});
+
+test('пустой вход не роняет и не выдумывает отсевов', () => {
+  // Зовётся она из regroup, а тот бывает позван и до первого ответа.
+  assert.deepStrictEqual(activeFilters(), { onlyLive: false, onlyWindow: false });
+  assert.deepStrictEqual(activeFilters({}), { onlyLive: false, onlyWindow: false });
 });
