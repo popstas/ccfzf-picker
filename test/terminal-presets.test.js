@@ -69,6 +69,19 @@ test('прежний kitty из config.yaml показывается как Cust
     CUSTOM);
 });
 
+test('прежний iTerm2 из config.yaml показывается как Custom', () => {
+  // Та же цена, что у kitty с `--hold`, и платится она по той же причине:
+  // в файле у того, кто выбрал iTerm2 до этой правки, лежит форма с
+  // `command`, а она не работает вовсе — команду разбирает токенизатор
+  // iTerm2. Выпадашка обязана сказать «Custom»: пообещай она iTerm2,
+  // человек решил бы, что пресет у него уже верный, и не выбрал бы заново —
+  // то есть остался бы с окном, закрывающимся сразу после открытия.
+  assert.strictEqual(matchPreset({
+    file: '/usr/bin/osascript',
+    args: ['-e', 'tell application "iTerm" to create window with default profile command "{command}"'],
+  }, 'MacIntel'), CUSTOM);
+});
+
 test('пресет чужой системы своим не считается', () => {
   // Иначе на Windows выпадашка показывала бы «kitty», хотя такого пути там нет.
   assert.strictEqual(
@@ -125,11 +138,29 @@ test('iTerm2 получает команду одной строкой внут�
   assert.ok(script.includes('ssh'), 'команды нет в скрипте');
 });
 
+test('команду разбирает шелл сессии, а не токенизатор iTerm2', () => {
+  // Параметр `command` у `create window` разбирает сам iTerm2, своим
+  // токенизатором, — и тот, в отличие от POSIX-шелла, обрабатывает `\` и
+  // внутри одинарных кавычек. Идиома `'\''`, которой `q` закрывает кавычку,
+  // от этого рассыпается. Замер на живом маке (2026-08-15) — одна и та же
+  // строка, два разбора:
+  //
+  //   sh:     exec $SHELL -ic 'cd -- '\''/home/user/x'\'' && claude --resume …
+  //   iTerm2: exec $SHELL -ic 'cd -- '\\\/home/user/x\''' && claude --resume …
+  //
+  // До ssh доезжала вторая, падала мгновенно, и окно закрывалось — ровно тот
+  // симптом, с которого началась задача. `write text` отдаёт разбор шеллу
+  // самой сессии, и argv совпадает с argv из sh байт в байт.
+  const script = argvFor('iterm2')[2];
+  assert.ok(script.includes('write text '), script);
+  assert.ok(!/profile\s+command/.test(script), 'команду снова разбирает iTerm2');
+});
+
 test('кавычки команды экранируются для двойных кавычек AppleScript', () => {
   const script = argvFor('iterm2')[2];
   // Внутри двойных кавычек AppleScript живые `"` порвали бы строку, и
   // osascript отказал бы на разборе — молча для пикера.
-  const body = script.slice(script.indexOf('command "') + 'command "'.length, -1);
+  const body = script.slice(script.indexOf('write text "') + 'write text "'.length, -1);
   assert.ok(!/(^|[^\\])"/.test(body), `неэкранированная кавычка: ${body}`);
 });
 
