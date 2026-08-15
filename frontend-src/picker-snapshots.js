@@ -8,6 +8,14 @@
   const filterApi = typeof module === 'object' && module.exports
     ? require('./picker-filter')
     : globalThis.PickerFilter;
+  // `normHost` берётся у соседа, а не пишется здесь третьей копией: правило
+  // приведения имени машины одно на весь пикер, и разойдись копии — снимок
+  // считался бы своим в одном месте и чужим в соседнем. Загрузка это
+  // выдерживает: session-windows.js стоит в sessions.html раньше (447 против
+  // 473) и в prepare-frontend.js тоже.
+  const { normHost } = typeof module === 'object' && module.exports
+    ? require('./session-windows')
+    : globalThis.SessionWindows;
 
   /**
    * Строки режима снимков — плоским списком, без механики сворачивания.
@@ -56,11 +64,6 @@
   function openIdsFromState(state) {
     const sessions = Array.isArray(state?.sessions) ? state.sessions : [];
     return new Set(sessions.filter(s => s && s.window).map(s => s.id));
-  }
-
-  /** Имя машины — в сравнимый вид. То же правило, что в session-windows.js. */
-  function normHost(value) {
-    return typeof value === 'string' ? value.trim().toLowerCase() : '';
   }
 
   /**
