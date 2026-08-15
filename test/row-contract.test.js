@@ -760,6 +760,8 @@ function saveUiWith(uiToggles, fullscreen) {
     // Режим окна — третий аргумент uiStateToSave: не передай его saveUi, и
     // широкий режим забывался бы при первом же сохранении вида списка.
     fullscreen: Boolean(fullscreen),
+    // Четвёртый — свёрнутые секции, по половинке на раскладку.
+    collapsed: { narrow: {}, wide: {} },
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nsaveUi();`, ctx, { filename: 'sessions.html' });
@@ -780,6 +782,8 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
     },
     // Узкое окно — это и есть умолчание режима.
     fullscreen: false,
+    // Свёрнутых секций человек не трогал — обе половинки пусты.
+    collapsed: { narrow: {}, wide: {} },
   });
 });
 
