@@ -172,6 +172,22 @@ test('formatAge steps through seconds, minutes, hours and days', () => {
   assert.strictEqual(formatAge(NOW - 3 * 86400, NOW), '3d');
 });
 
+test('formatAge keeps the minutes past an hour', () => {
+  // Час без минут отвечал «больше часа» на вопрос «сколько уже идёт ход»: и
+  // 1h01m, и 1h59m читались одинаково. Ход длиной в час — обычное дело у
+  // цикла /do и у ветки субагентов, то есть разрешение теряется ровно там,
+  // где на колонку и смотрят.
+  assert.strictEqual(formatAge(NOW - 3600 - 5 * 60, NOW), '1h 5m');
+  assert.strictEqual(formatAge(NOW - 3600 - 59 * 60, NOW), '1h 59m');
+  assert.strictEqual(formatAge(NOW - 23 * 3600 - 40 * 60, NOW), '23h 40m');
+});
+
+test('formatAge drops the minutes when there are none', () => {
+  // `1h 0m` — три лишних знака про ничто, а колонка узкая.
+  assert.strictEqual(formatAge(NOW - 3600, NOW), '1h');
+  assert.strictEqual(formatAge(NOW - 2 * 3600 - 30, NOW), '2h');
+});
+
 test('formatAge returns nothing for a session that never reported activity', () => {
   assert.strictEqual(formatAge(null, NOW), '');
   assert.strictEqual(formatAge(0, NOW), '');
