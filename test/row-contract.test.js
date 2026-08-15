@@ -1381,3 +1381,116 @@ test('вид строки назван классом: сессия — session,
   // проверками, а карточкой всё равно стала бы.
   assert.ok(!row.html.includes('row session'), row.html);
 });
+
+test('renderWide: номер строки в разметке совпадает с её местом в rows', () => {
+  // По индексу строки ходит клик, по номеру секции — `←/→`. Подзаголовок
+  // машины при этом элемент без строки, и арифметика «строк ровно столько же,
+  // сколько элементов» на нём врёт — ради этого случая тест и написан.
+  const SECTIONS = [
+    {
+      key: 'live', label: 'Active local sessions', kind: 'sessions',
+      count: 1, lastAt: 0, collapsed: false, column: 1,
+      rows: [{ id: 'a' }],
+    },
+    {
+      key: 'remote', label: 'Active remote sessions', kind: 'sessions',
+      count: 2, lastAt: 0, collapsed: false, column: 2,
+      rows: [
+        { kind: 'block-subhead', key: 'sub:alpha-host', label: 'alpha-host - 2' },
+        { id: 'x' }, { id: 'y' },
+      ],
+    },
+  ];
+
+  const rows = [];
+  // Заглушка строки: делает ровно то, что делают настоящие sessionItem и
+  // соседи, — кладёт строку в rows и подписывает разметку её номером.
+  const stubItem = (row) => {
+    const index = rows.length;
+    rows.push(row);
+    return { key: `k:${index}`, html: `<div class="row" data-index="${index}"></div>` };
+  };
+
+  const ctx = vm.createContext({
+    rows,
+    escapeHtml: (s) => String(s),
+    window: {
+      PickerSections,
+      // Отдаёт элементы как есть: что попало в план, то и нарисовано.
+      PickerListSync: {
+        planListSync: (_prev, items) => ({
+          mode: 'rebuild', keys: items.map(i => i.key), html: items.map(i => i.html),
+        }),
+      },
+    },
+    // Каркас считается уже собранным: тогда renderWide не трогает `list`
+    // вовсе, и двойник DOM нужен только на тела секций.
+    blocksShape: SECTIONS.map(s => `${s.key}|${s.column}`).join('\n'),
+    renderedBlocks: new Map(),
+    blockBodies: new Map(SECTIONS.map(s => [s.key, { children: [] }])),
+    applyPlan: () => {},
+    sessionItem: stubItem,
+    projectItem: stubItem,
+    snapshotItem: stubItem,
+    // Подзаголовок — подпись, а не строка: в rows он не попадает.
+    subheadItem: (row) => ({ key: `sh:${row.key}`, html: '<div class="group-label"></div>' }),
+    SECTIONS,
+  });
+
+  vm.runInContext(
+    `${pageFunctions('sectionItem(section)', 'itemsOfSection(section, nowSec)', 'renderWide(sections, nowSec)')}
+     renderWide(SECTIONS, 0);`,
+    ctx, { filename: 'sessions.html' });
+
+  // Две строки-заголовка и три сессии; подзаголовок машины строкой не стал.
+  assert.deepStrictEqual(rows.map(r => r.kind || r.id), ['section', 'a', 'section', 'x', 'y']);
+  // Номер секции стоит у каждой строки, включая заголовки.
+  assert.deepStrictEqual(rows.map(r => r.block), [0, 0, 1, 1, 1]);
+  // Заголовок знает свой ключ и своё состояние — по ним choose() переключает.
+  assert.deepStrictEqual(
+    rows.filter(r => r.kind === 'section').map(r => r.sectionKey),
+    ['live', 'remote'],
+  );
+});
+
+test('свёрнутая секция отдаёт один заголовок, но счёт в нём полный', () => {
+  const rows = [];
+  const ctx = vm.createContext({
+    rows,
+    escapeHtml: (s) => String(s),
+    window: { PickerSections },
+    sessionItem: () => { throw new Error('свёрнутая секция не должна рисовать строки'); },
+    projectItem: () => { throw new Error('свёрнутая секция не должна рисовать строки'); },
+    snapshotItem: () => { throw new Error('свёрнутая секция не должна рисовать строки'); },
+    subheadItem: () => { throw new Error('свёрнутая секция не должна рисовать строки'); },
+    SECTION: {
+      key: 'past', label: 'Not running', kind: 'sessions', count: 47,
+      lastAt: 0, collapsed: true, rows: new Array(47).fill({ id: 'old' }),
+    },
+  });
+  const items = vm.runInContext(
+    `${pageFunctions('sectionItem(section)', 'itemsOfSection(section, nowSec)')}
+     itemsOfSection(SECTION, 0);`,
+    ctx, { filename: 'sessions.html' });
+  assert.strictEqual(items.length, 1);
+  assert.strictEqual(rows.length, 1);
+  assert.ok(items[0].html.includes('Not running - 47'), items[0].html);
+});
+
+test('стрелки уходят в навигацию только на краю запроса и без выделения', () => {
+  // Поле поиска сфокусировано всегда, и отнять у него стрелки насовсем значило
+  // бы лишить человека правки запроса.
+  const ctx = vm.createContext({});
+  const check = (value, start, end, key) => {
+    ctx.search = { value, selectionStart: start, selectionEnd: end };
+    return vm.runInContext(
+      `${pageFunctions('atQueryEdge(key)')}\natQueryEdge(${JSON.stringify(key)});`,
+      ctx, { filename: 'sessions.html' });
+  };
+  assert.strictEqual(check('picker', 0, 0, 'ArrowLeft'), true);
+  assert.strictEqual(check('picker', 6, 6, 'ArrowRight'), true);
+  assert.strictEqual(check('picker', 3, 3, 'ArrowLeft'), false);
+  assert.strictEqual(check('picker', 3, 3, 'ArrowRight'), false);
+  // Есть выделение — стрелки остаются полю: ими его снимают.
+  assert.strictEqual(check('picker', 0, 6, 'ArrowLeft'), false);
+});
