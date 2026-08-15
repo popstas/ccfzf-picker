@@ -30,15 +30,26 @@ test('пресет заполняет оба поля, а не одно', () => 
   // Человеку, у которого стоит iTerm2, иначе пришлось бы знать и путь, и флаг.
   const kitty = presetById('kitty');
   assert.strictEqual(kitty.file, '/opt/homebrew/bin/kitty');
-  assert.deepStrictEqual(kitty.args, ['--single-instance']);
+  assert.deepStrictEqual(kitty.args, ['--single-instance', '--hold']);
   assert.strictEqual(presetById('нет такого'), null);
+});
+
+test('оба kitty держат окно открытым после команды', () => {
+  // Без `--hold` окно закрывается вместе с сессией агента, и чем та кончилась
+  // — не прочитать. Флаг один и тот же на обеих системах: спутать его с
+  // `--hide` (которого у kitty нет) или с `--start-as=hidden` (тот прячет
+  // окно, то есть делает обратное) уже случалось.
+  for (const id of ['kitty', 'kitty-linux']) {
+    assert.ok(presetById(id).args.includes('--hold'), id);
+  }
 });
 
 test('выбранный пресет считается по полям, а не хранится отдельно', () => {
   // Второй источник правды разошёлся бы с полями, которые правят руками, и
   // выпадашка обещала бы iTerm2 там, где в поле стоит kitty.
   assert.strictEqual(
-    matchPreset({ file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] }, 'MacIntel'),
+    matchPreset({ file: '/opt/homebrew/bin/kitty', args: ['--single-instance', '--hold'] },
+      'MacIntel'),
     'kitty');
   // Тот же путь без флага — уже не пресет: флаг и есть половина пресета.
   assert.strictEqual(
@@ -46,6 +57,16 @@ test('выбранный пресет считается по полям, а н�
   assert.strictEqual(matchPreset({ file: '/usr/local/bin/kitty', args: ['--single-instance'] },
     'MacIntel'), CUSTOM);
   assert.strictEqual(matchPreset(null, 'MacIntel'), CUSTOM);
+});
+
+test('прежний kitty из config.yaml показывается как Custom, а не как kitty', () => {
+  // Цена добавления `--hold`, и она видна человеку: у того, кто сохранил kitty
+  // до этой правки, в файле лежит один `--single-instance`, и выпадашка обязана
+  // сказать «Custom» — иначе она обещала бы пресет, которого в полях нет.
+  // Лечится выбором пресета заново.
+  assert.strictEqual(
+    matchPreset({ file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] }, 'MacIntel'),
+    CUSTOM);
 });
 
 test('пресет чужой системы своим не считается', () => {
@@ -72,10 +93,10 @@ function argvFor(id) {
 test('kitty исполняет хвост argv как есть', () => {
   const argv = argvFor('kitty');
   assert.strictEqual(argv[0], '/opt/homebrew/bin/kitty');
-  assert.strictEqual(argv[1], '--single-instance');
+  assert.deepStrictEqual(argv.slice(1, 3), ['--single-instance', '--hold']);
   // Команда идёт отдельными элементами: кавычить и экранировать нечего.
-  assert.deepStrictEqual(argv.slice(2, 5), ['ssh', '-t', 'host-a']);
-  assert.ok(argv[5].includes('claude'), argv[5]);
+  assert.deepStrictEqual(argv.slice(3, 6), ['ssh', '-t', 'host-a']);
+  assert.ok(argv[6].includes('claude'), argv[6]);
 });
 
 test('Ghostty получает команду после -e', () => {

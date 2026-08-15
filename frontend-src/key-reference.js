@@ -27,7 +27,15 @@
     { key: '↑ / ↓', label: 'Move between rows' },
     { key: '← / →', label: 'Move between blocks (wide view)' },
     { key: 'Enter', label: 'Open the selected row' },
-    { key: 'Esc', label: 'Hide the picker' },
+    // Две роли на одной клавише названы одной строкой, а не двумя: строки
+    // справочника читаются как «клавиша — что делает», и две записи про Esc
+    // выглядели бы двумя разными клавишами. Порядок в строке — порядок
+    // срабатывания.
+    { key: 'Esc', label: 'Clear the search, then hide the picker' },
+    // Оговорка «when it is not focused» не для полноты: без неё строка
+    // обещала бы, что `/` — команда всегда, а в поле поиска это обычный знак,
+    // с которого начинаются префиксы режимов.
+    { key: '/', label: 'Back to the search box (when it is not focused)' },
     { key: 'F1', label: 'This list' },
     { key: 'Shift+click', label: 'Mark seen or unread' },
     { key: 'Right click', label: 'Session menu' },

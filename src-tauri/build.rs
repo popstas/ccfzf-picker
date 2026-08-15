@@ -18,6 +18,20 @@ fn main() {
     // директивами.
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=Cargo.toml");
+    // Фронтенд — тоже вход сборки, но каталог его лежит вне пакета
+    // (`frontendDist` — `../frontend`), и сам себя он здесь не объявляет:
+    // `tauri_build::build()` печатает директиву только на `tauri.conf.json` и
+    // `capabilities`, а статику вшивает `generate_context!` уже на
+    // компиляции. Без этой строки выкатка с одними правками страницы
+    // оставляла скрипт свежим, и штамп в трее показывал прошлую сборку —
+    // ровно то, за чем в него и смотрят после деплоя.
+    //
+    // На саму статику это не влияет и не влияло: пути фронтенда попадают в
+    // dep-info крейта (`target/debug/ccfzf-picker.d`, все 29 файлов), то есть
+    // правку страницы cargo замечает и крейт пересобирает. Проверено
+    // измерением: правка одного файла во `frontend/` из чистого состояния
+    // даёт «Compiling ccfzf-picker». Врал только штамп.
+    println!("cargo:rerun-if-changed=../frontend");
     let stamp = if std::env::var_os("CCFZF_RELEASE").is_some() {
         0
     } else {

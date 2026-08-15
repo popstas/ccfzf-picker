@@ -99,9 +99,13 @@
   // снимок целиком значило бы откатывать чужую правку, да ещё и рассылать
   // пикеру приказ перечитать этот откат.
   const dirtyAxes = new Map();
-  // Панели, которых человек касался в этом окне. Нужны затем же, зачем
-  // dirtyAxes: ui.json пишут двое, и сохранять снимок целиком значило бы
-  // откатывать то, что пикер записал, пока окно было открыто.
+  // Панели, которых человек касался в этом окне, — «раскладка:ключ». Нужны
+  // затем же, зачем dirtyAxes: ui.json пишут двое, и сохранять снимок целиком
+  // значило бы откатывать то, что пикер записал, пока окно было открыто.
+  //
+  // Раскладка в пометке обязательна: половинки у панели свои у узкой и у
+  // широкой, и один ключ на обе переносил бы правку туда, где человек её не
+  // делал.
   const dirtyPanels = new Set();
   let current = 'general';
   const tabs = document.getElementById('tabs');
@@ -197,33 +201,58 @@
   }
 
   /**
-   * Панели широкого режима: показывать ли, в какой колонке и развёрнутой ли.
+   * Панели одной раскладки: показывать ли, в какой колонке и развёрнутой ли.
    *
-   * Правит она ui.json, а не config.yaml, — как и вкладка UI, — и потому у
-   * неё свой код и своё сохранение. Речь только про широкий режим (`^F`): в
-   * узком списке колонок нет вовсе, а порядок там человек задаёт
-   * перетаскиванием.
+   * Осей у широкой три, у узкой две: колонок в узком списке нет вовсе, и
+   * показанный там выбор колонки был бы выбором без последствий — хуже, чем
+   * его отсутствие. Поэтому таблицы две, а не одна с пустой ячейкой.
    */
-  function panelsTableHtml() {
-    const rows = window.PickerPanels.panelRows(ui);
+  function panelTableHtml(layout, title, hint) {
+    const wide = layout !== 'narrow';
+    const rows = window.PickerPanels.panelRows(ui, layout);
     const column = (row) => [0, 1, 2, 3].map(n =>
       `<option value="${n}"${row.column === n ? ' selected' : ''}>`
       + `${n === 0 ? 'default' : n}</option>`).join('');
-    return '<div class="field"><label>Panels in the wide view (Ctrl+F)</label>'
+    const box = (row, prop, on) => `<td><input type="checkbox" data-panel="${esc(row.key)}"`
+      + ` data-layout="${esc(layout)}" data-prop="${prop}"${on ? ' checked' : ''}></td>`;
+    return `<div class="field"><label>${esc(title)}</label>`
       + '<table class="axes"><tr><th>Panel</th>'
       + `<th title="${esc('Show this panel at all')}">show</th>`
-      + `<th title="${esc('Which column it goes to; default means by meaning')}">column</th>`
+      + (wide ? `<th title="${esc('Which column it goes to; default means by meaning')}">column</th>` : '')
       + `<th title="${esc('Expanded, not folded to its header')}">expanded</th></tr>`
       + rows.map(row => `<tr><td>${esc(row.label)}</td>`
-        + `<td><input type="checkbox" data-panel="${esc(row.key)}" data-prop="show"${
-          row.hidden ? '' : ' checked'}></td>`
-        + `<td><select data-panel="${esc(row.key)}" data-prop="column">${column(row)}</select></td>`
-        + `<td><input type="checkbox" data-panel="${esc(row.key)}" data-prop="expanded"${
-          row.collapsed ? '' : ' checked'}></td></tr>`).join('')
-      + '</table>'
-      + '<div class="hint">Order inside a column is set by dragging a section header '
-      + 'in the picker. A hidden panel stays hidden while searching, but a mode '
-      + 'prefix (Ctrl+H, Ctrl+P, Ctrl+S) still shows it.</div></div>';
+        + box(row, 'show', !row.hidden)
+        + (wide ? `<td><select data-panel="${esc(row.key)}" data-layout="${esc(layout)}"`
+          + ` data-prop="column">${column(row)}</select></td>` : '')
+        + box(row, 'expanded', !row.collapsed) + '</tr>').join('')
+      + `</table><div class="hint">${esc(hint)}</div></div>`;
+  }
+
+  /**
+   * Вкладка Panels: обе раскладки, каждая своей таблицей.
+   *
+   * Правит она ui.json, а не config.yaml, — как и вкладка UI, — и потому у
+   * неё свой код и своё сохранение.
+   *
+   * Набор строк у раскладок разный не только по осям. В широкой ключи
+   * постоянны, и таблица написана заранее; в узкой чужие сессии идут по
+   * машинам (`remote:<host>`), а история умеет делиться по рабочим столам
+   * (`past:<N>`) — то есть набор панелей зависит от того, что сейчас приехало
+   * от агрегатора, а окно настроек этого ответа не видит вовсе. Ключи оно
+   * берёт из ui.json, поэтому машина появляется в списке только после того,
+   * как её хоть раз свернули или перетащили в пикере. Цена известна и
+   * выбрана осознанно: вторая дорога для данных между окнами стоила бы
+   * дороже, чем эта задержка.
+   */
+  function panelsTableHtml() {
+    return panelTableHtml('wide', 'Panels in the wide view (Ctrl+F)',
+      'Order inside a column is set by dragging a section header in the picker. '
+      + 'A hidden panel stays hidden while searching, but a mode prefix '
+      + '(Ctrl+H, Ctrl+P, Ctrl+S) still shows it.')
+      + panelTableHtml('narrow', 'Panels in the narrow view',
+        'There are no columns here; order is set by dragging a section header in '
+        + 'the picker. Remote machines and history desktops show up in this list '
+        + 'once you have folded or moved them at least once.');
   }
 
   function renderPage() {
@@ -248,21 +277,24 @@
       input.addEventListener('change', () => {
         const key = input.dataset.panel;
         const prop = input.dataset.prop;
+        const half = input.dataset.layout === 'narrow' ? 'narrow' : 'wide';
         if (prop === 'show') {
           // Галка называется «показывать», а поле — «спрятана»: в файле
           // отсутствие ключа значит «как по умолчанию», и умолчание тут —
           // показывать. Хранить обратное значение значило бы писать в ui.json
           // строку про каждую панель, которую человек не трогал.
-          ui.hidden = { ...ui.hidden, wide: { ...(ui.hidden || {}).wide, [key]: !input.checked } };
+          ui.hidden = { ...ui.hidden, [half]: { ...(ui.hidden || {})[half], [key]: !input.checked } };
         } else if (prop === 'expanded') {
           ui.collapsed = {
             ...ui.collapsed,
-            wide: { ...(ui.collapsed || {}).wide, [key]: !input.checked },
+            [half]: { ...(ui.collapsed || {})[half], [key]: !input.checked },
           };
         } else {
+          // Колонка бывает только у широкой раскладки — выпадашки в узкой
+          // таблице нет вовсе, и половинку тут спрашивать не у чего.
           ui.order = window.PickerPanels.withColumn(ui.order, key, Number(input.value));
         }
-        dirtyPanels.add(key);
+        dirtyPanels.add(`${half}:${key}`);
       });
     }
     for (const input of page.querySelectorAll('[data-axis]')) {
@@ -303,13 +335,22 @@
         // здесь. Пикер пишет тот же файл, пока окно открыто, — сохранив
         // снимок целиком, мы откатили бы его перетаскивания.
         const fresh = window.UiState.normalizeUiState(await invoke('load_ui'), UI_DEFAULTS);
-        for (const key of dirtyPanels) {
-          fresh.hidden.wide[key] = ((ui.hidden || {}).wide || {})[key] === true;
-          fresh.collapsed.wide[key] = ((ui.collapsed || {}).wide || {})[key] === true;
+        for (const mark of dirtyPanels) {
+          // Помечено «раскладка:ключ», а в ключе своё двоеточие бывает
+          // (`remote:<host>`, `past:2`) — поэтому режется по длине известного
+          // имени раскладки, а не по первому попавшемуся разделителю.
+          const half = mark.startsWith('narrow:') ? 'narrow' : 'wide';
+          const key = mark.slice(half.length + 1);
+          fresh.hidden[half][key] = ((ui.hidden || {})[half] || {})[key] === true;
+          fresh.collapsed[half][key] = ((ui.collapsed || {})[half] || {})[key] === true;
           // Колонка живёт не картой, а порядком: ключ лежит внутри своей
           // колонки, и переставить его надо тем же помощником, что и в форме.
-          fresh.order = window.PickerPanels.withColumn(
-            fresh.order, key, window.PickerPanels.columnOf(ui, key));
+          // У узкой раскладки колонок нет, и порядок её здесь не трогается
+          // вовсе — им распоряжается перетаскивание в пикере.
+          if (half === 'wide') {
+            fresh.order = window.PickerPanels.withColumn(
+              fresh.order, key, window.PickerPanels.columnOf(ui, key));
+          }
         }
         await invoke('save_ui', {
           ui: window.UiState.uiStateToSave(

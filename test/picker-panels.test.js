@@ -1,14 +1,106 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { KNOWN_PANELS, panelRows, withColumn, columnOf, labelForUnknown } =
-  require('../frontend-src/picker-panels');
+const {
+  KNOWN_PANELS, knownPanelsFor, panelRows, withColumn, columnOf, labelForUnknown,
+  defaultCollapsedFor,
+} = require('../frontend-src/picker-panels');
 const { normalizeUiState } = require('../frontend-src/ui-state');
+const { buildSections } = require('../frontend-src/picker-sections');
 
 const EMPTY = normalizeUiState({}, { toggles: {} });
 
 function ui(raw) {
   return normalizeUiState(raw, { toggles: {} });
 }
+
+// ── узкий список ────────────────────────────────────────────────────────────
+
+test('в узком списке нет строки «Remote sessions»', () => {
+  // Постоянный ключ `remote` заводит только широкая раскладка: там чужие
+  // группы склеиваются в один блок, потому что блок занимает колонку. В узком
+  // каждая машина идёт своим `remote:<host>`, и строка `remote` предлагала бы
+  // настройку панели, которой на экране не бывает.
+  const keys = panelRows(EMPTY, 'narrow').map(r => r.key);
+  assert.deepStrictEqual(keys, ['live', 'past', 'zellij', 'projects', 'snapshots']);
+  assert.deepStrictEqual(knownPanelsFor('narrow').map(p => p.key), keys);
+  // А в широком — есть, и список там прежний.
+  assert.deepStrictEqual(knownPanelsFor('wide').map(p => p.key),
+    KNOWN_PANELS.map(p => p.key));
+});
+
+test('у узкой строки нет колонки вовсе, а не ноль', () => {
+  // Ноль значит «колонка по умолчанию», то есть обещал бы выбор; колонок в
+  // узком списке нет, и обещать нечего.
+  for (const row of panelRows(EMPTY, 'narrow')) {
+    assert.ok(!('column' in row), `${row.key}: ${JSON.stringify(row)}`);
+  }
+  assert.strictEqual(panelRows(EMPTY, 'wide')[0].column, 0);
+});
+
+test('узкие половинки ui.json читаются, а широкие в них не подмешиваются', () => {
+  const state = ui({
+    collapsed: { narrow: { live: true }, wide: { projects: true } },
+    hidden: { narrow: { snapshots: true }, wide: { zellij: true } },
+  });
+  const rows = panelRows(state, 'narrow');
+  const at = (key) => rows.find(r => r.key === key);
+  assert.strictEqual(at('live').collapsed, true);
+  assert.strictEqual(at('snapshots').hidden, true);
+  // Спрятанное в широком режиме про узкий не говорит ничего.
+  assert.strictEqual(at('zellij').hidden, false);
+});
+
+test('машина попадает в узкий список, только если её уже трогали', () => {
+  // Цена выбранного устройства, и она известна: набор узких панелей зависит
+  // от того, что приехало от агрегатора, а окно настроек ответа не видит.
+  // Ключи берутся из ui.json — значит, спрятать машину можно после того, как
+  // её хоть раз свернули или перетащили в пикере.
+  assert.ok(!panelRows(EMPTY, 'narrow').some(r => r.key.startsWith('remote:')));
+  const state = ui({ order: { narrow: ['remote:alpha-host', 'live'] } });
+  const row = panelRows(state, 'narrow').find(r => r.key === 'remote:alpha-host');
+  assert.ok(row, 'машины из узкого порядка нет в списке');
+  assert.strictEqual(row.label, 'Remote: alpha-host');
+  // Узкий порядок — плоский список ключей, широкий — список колонок; разбор
+  // half'ов один, и на плоском он не должен спотыкаться.
+  assert.ok(!panelRows(state, 'wide').some(r => r.key === 'remote:alpha-host'));
+});
+
+test('умолчание свёрнутости в узком списке — не «развёрнута»', () => {
+  // История оттесняет вниз то, что работает сейчас, а проекты и снимки —
+  // справочники: все три приходят свёрнутыми. Нарисуй окно настроек галку
+  // «expanded» без оглядки на это, и она врала бы про три строки из пяти.
+  const rows = panelRows(EMPTY, 'narrow');
+  const collapsed = rows.filter(r => r.collapsed).map(r => r.key);
+  assert.deepStrictEqual(collapsed, ['past', 'projects', 'snapshots']);
+  // В широком у каждой своя колонка, и оттеснять там некого.
+  assert.deepStrictEqual(panelRows(EMPTY, 'wide').filter(r => r.collapsed), []);
+});
+
+test('умолчание свёрнутости совпадает с тем, по которому живёт пикер', () => {
+  // Считается оно тут от ключа, а в picker-sections.js — от собранной секции:
+  // секций окно настроек не видит. Второй источник правды неизбежен, поэтому
+  // он сверяется явно — разойдись они, галка показывала бы одно, а пикер
+  // рисовал другое, и поймать это можно было бы только глазами.
+  const groups = [
+    { key: 'live', label: 'Active sessions', sessions: [], remote: false },
+    { key: 'remote:alpha-host', label: 'Active on alpha-host', sessions: [], remote: true, host: 'alpha-host' },
+    { key: 'past', label: 'Not running', past: true, sessions: [] },
+    { key: 'past:2', label: 'Not running - desktop 2', past: true, sessions: [] },
+    { key: 'zellij', label: 'Zellij', sessions: [] },
+  ];
+  for (const layout of ['narrow', 'wide']) {
+    const sections = buildSections({
+      groups, projects: [{ id: 'p1', kind: 'project', label: 'x', cwd: '/x' }],
+      snapshots: [{ key: 'sn:1', kind: 'snapshot', label: 'w', total: 1 }],
+      mode: 'sessions', query: '', trackerHere: true, collapsed: {}, layout,
+    });
+    assert.ok(sections.length >= 5, `${layout}: секций мало`);
+    for (const section of sections) {
+      assert.strictEqual(section.collapsed, defaultCollapsedFor(section.key, layout),
+        `${layout}/${section.key}`);
+    }
+  }
+});
 
 test('в списке есть все известные панели, даже пустые сейчас', () => {
   // Пустая история не повод прятать её настройку: спрятанную панель иначе

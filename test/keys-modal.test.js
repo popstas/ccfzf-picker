@@ -11,14 +11,38 @@ const path = require('node:path');
 
 const SESSIONS_HTML = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
 
-test('кнопка `?` стоит перед шестерёнкой', () => {
-  // `#settings-button` прижат вправо своим margin-left:auto, и поставленная
-  // после него кнопка отобрала бы у шестерёнки место последней.
+test('кнопки статуслайна идут в своём порядке: `?`, раскладка, шестерёнка', () => {
+  // Порядок этот человек видит и к нему привыкает, а держится он на одной
+  // строке CSS: вправо ряд прижимает первая кнопка. Переставь их местами — и
+  // отступ окажется в середине ряда, то есть дырой во всю ширину.
   const keys = SESSIONS_HTML.indexOf('id="keys-button"');
+  const wide = SESSIONS_HTML.indexOf('id="wide-button"');
   const gear = SESSIONS_HTML.indexOf('id="settings-button"');
   assert.ok(keys > 0, 'кнопки `?` нет в разметке');
+  assert.ok(wide > 0, 'кнопки раскладки нет в разметке');
   assert.ok(gear > 0, 'шестерёнки нет в разметке');
-  assert.ok(keys < gear, 'кнопка `?` оказалась после шестерёнки');
+  assert.ok(keys < wide, 'кнопка раскладки оказалась перед `?`');
+  assert.ok(wide < gear, 'кнопка раскладки оказалась после шестерёнки');
+});
+
+test('все три кнопки статуслайна несут общий класс', () => {
+  // На нём висит и курсор, и подсветка, и отступ. Кнопка без класса выглядела
+  // бы нерабочей: ни руки-курсора, ни отклика на наведение.
+  for (const id of ['keys-button', 'wide-button', 'settings-button']) {
+    const tag = SESSIONS_HTML.match(new RegExp(`<span id="${id}"[^>]*>`));
+    assert.ok(tag, `${id} пропал из разметки`);
+    assert.match(tag[0], /class="icon-button"/, `${id} без класса icon-button`);
+  }
+});
+
+test('вправо ряд прижимает ровно одна кнопка', () => {
+  // Здесь стояла цепочка из двух правил — отступ у `?` и его гашение у
+  // шестерёнки соседним селектором, — и третья кнопка между ними разорвала бы
+  // её молча. Второй `margin-left: auto` в ряду означал бы дыру.
+  const styles = SESSIONS_HTML.split('</style>')[0];
+  const pushers = (styles.match(/#(keys|wide|settings)-button[^{]*\{[^}]*margin-left:\s*auto/g) || []);
+  assert.strictEqual(pushers.length, 1, `прижимающих правил ${pushers.length}: ${pushers.join(' | ')}`);
+  assert.match(pushers[0], /#keys-button/, 'прижимает не первая кнопка ряда');
 });
 
 test('справочник собирается помощником, а не переписан в странице', () => {
