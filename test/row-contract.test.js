@@ -1084,18 +1084,23 @@ test('фильтры и колонки разделены в обоих окна
 // заметить это можно только сравнив с содержимым config.yaml. Поэтому здесь
 // вычитывается настоящий regroup, тем же приёмом, что renderChecks выше, и
 // проверяется, что уезжает в buildSessionsPayload при всех четырёх сочетаниях.
-function regroupWith(configOnlyLive, toggles) {
+// Показанные режим и запрос подставные, а `activeFilters` — настоящая, из
+// session-groups.js: правило «спрошенное перебивает отобранное» проверяется
+// здесь вместе с проводкой, а не вместо неё.
+function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query: '' }) {
   const source = SESSIONS_HTML.match(/\n {2}function regroup\(\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'regroup не найден в sessions.html — тест сторожит не то');
   let opts = null;
   const ctx = {
     window: {
       SessionGroups: {
+        activeFilters: Groups.activeFilters,
         buildSessionsPayload: (_state, sort, o) => { opts = o; return { groups: [], sort }; },
       },
     },
     CONFIG: { onlyLive: configOnlyLive, windowHost: 'win-host' },
     toggles,
+    shownModeAndQuery: () => shown,
     lastSessions: [],
     lastState: {},
     seen: {},
@@ -1132,6 +1137,58 @@ test('onlyWindow едет мимо showAll', () => {
   // отключало бы фильтр по окнам.
   const opts = regroupWith(true, { showAll: true, onlyWindow: true });
   assert.strictEqual(opts.onlyWindow, true);
+});
+
+// ── Спрошенное перебивает отобранное ───────────────────────────────────────
+//
+// Правило живёт в activeFilters, но доехать до buildSessionsPayload оно может
+// только через regroup — и вот эту проводку здесь и сторожат. Отсев при поиске
+// не сообщает о себе ничем: найденного просто нет в списке, и почему, не
+// сказано ни словом.
+
+test('непустой запрос снимает оба отсева', () => {
+  const opts = regroupWith(true, { showAll: false, onlyWindow: true }, {
+    mode: 'sessions', query: 'ccfzf',
+  });
+  assert.strictEqual(opts.onlyLive, false);
+  assert.strictEqual(opts.onlyWindow, false);
+});
+
+test('префикс режима снимает отсевы и на пустом запросе', () => {
+  // `/h` — просьба про историю, а история неживая и без окон по определению:
+  // с обоими отсевами она пуста всегда, сколько бы её ни было, и подпись
+  // «Nothing in history.» врала бы про причину.
+  const opts = regroupWith(true, { showAll: false, onlyWindow: true }, {
+    mode: 'history', query: '',
+  });
+  assert.strictEqual(opts.onlyLive, false);
+  assert.strictEqual(opts.onlyWindow, false);
+});
+
+test('пустой запрос без префикса отсевы не трогает', () => {
+  // Отступление временное и кончается вместе с запросом: сними оно отсевы
+  // насовсем, галка и настройка перестали бы значить хоть что-нибудь.
+  const opts = regroupWith(true, { showAll: false, onlyWindow: true }, {
+    mode: 'sessions', query: '   ',
+  });
+  assert.strictEqual(opts.onlyLive, true);
+  assert.strictEqual(opts.onlyWindow, true);
+});
+
+test('правка запроса пересчитывает состав списка, а не только рисунок', () => {
+  // От запроса зависит не только рисунок, но и то, что вообще попадает в
+  // список. С одним только render отмена отсевов срабатывала бы к следующему
+  // ответу агрегатора — а на скрытом окне тот приходит через минуты, и
+  // неизменившееся состояние отсекается по отпечатку. Текстовый сторож:
+  // поведением это не поймать, список на видимом окне догонит сам через
+  // секунду, и ошибка видна лишь на скрытом.
+  const source = SESSIONS_HTML.match(/\n {2}function onSearchInput\(\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(source, 'onSearchInput не найден в sessions.html — тест сторожит не то');
+  assert.match(source[0], /\bregroup\(\)/);
+  assert.ok(
+    !/\brender\(\)/.test(source[0]),
+    'onSearchInput зовёт render напрямую — regroup сделает это сам, а два вызова рисуют список дважды',
+  );
 });
 
 // ── Выбор виден поверх наведения ───────────────────────────────────────────

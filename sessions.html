@@ -1391,6 +1391,23 @@
    * находить что-либо.
    */
   function regroup() {
+    // Режим и запрос берутся у той же shownModeAndQuery, по которой живёт
+    // отрисовка: второй разбор строки поиска разошёлся бы с первым, и отсевы
+    // отступали бы не там, где человек видит режим.
+    const shown = shownModeAndQuery();
+    // Спрошенное перебивает отобранное: непустой запрос и любой префикс
+    // отменяют оба отсева. Правило живёт рядом с самими отсевами, в
+    // session-groups.js, — здесь только подача.
+    const filters = window.SessionGroups.activeFilters({
+      mode: shown.mode,
+      query: shown.query,
+      // showAll перекрывает onlyLive, а не заменяет его: конфиг задаёт, с чем
+      // пикер открывается, галка — разовое «покажи и мёртвые тоже». Обратной
+      // галки нет намеренно: включённый onlyLive и есть умолчание, а вторая
+      // галка «только живые» поверх настройки читалась бы как второй фильтр.
+      onlyLive: CONFIG.onlyLive && !toggles.showAll,
+      onlyWindow: toggles.onlyWindow,
+    });
     const payload = window.SessionGroups.buildSessionsPayload(
       // Верхние поля ответа переезжают сюда поимённо: на старом агрегаторе
       // только они и называют машину окна, а пересобранный ответ их терял.
@@ -1399,15 +1416,7 @@
         windowHost: lastState.windowHost, windowPid: lastState.windowPid,
       },
       sortMode,
-      // showAll перекрывает onlyLive, а не заменяет его: конфиг задаёт, с чем
-      // пикер открывается, галка — разовое «покажи и мёртвые тоже». Обратной
-      // галки нет намеренно: включённый onlyLive и есть умолчание, а вторая
-      // галка «только живые» поверх настройки читалась бы как второй фильтр.
-      {
-        onlyLive: CONFIG.onlyLive && !toggles.showAll,
-        onlyWindow: toggles.onlyWindow,
-        configHost: CONFIG.windowHost,
-      },
+      { ...filters, configHost: CONFIG.windowHost },
     );
     groups = payload.groups;
     sortMode = payload.sort;
@@ -1951,10 +1960,21 @@
     return openSession(row);
   }
 
+  /**
+   * Строка поиска изменилась: пересобрать список и перерисовать.
+   *
+   * Через regroup, а не render: от запроса зависит не только то, что рисуется,
+   * но и то, что вообще попадает в список — непустой запрос отменяет отсевы
+   * `onlyLive` и `onlyWindow` (`activeFilters` в session-groups.js). С одним
+   * только render отмена срабатывала бы к следующему ответу агрегатора — а тот
+   * может не прийти вовсе: на скрытом окне такт уходит в минуты, а
+   * неизменившееся состояние отсекается по отпечатку. Та же мина, что уже
+   * сработала на галках-фильтрах в статуслайне.
+   */
   function onSearchInput() {
     active = 0;
     selectionReset = true;
-    render();
+    regroup();
   }
 
   /**
