@@ -27,7 +27,7 @@
            Раскладка колонок задана человеком и держится на смысле строк:
            слева свои живые сессии, посередине чужие и под ними проекты,
            справа история и под ней снимки. Номер колонки блоку ставит
-           picker-blocks.js — по тому же признаку, по которому блок собран.
+           picker-sections.js — по тому же признаку, по которому блок собран.
 
            Верхний уровень — flex-строка из flex-колонок, а не сетка. Сеткой
            это не делается: главному списку отдана вся высота, а это значит
@@ -465,7 +465,7 @@
 <script src="picker-mode.js"></script>
 <script src="project-list.js"></script>
 <script src="picker-list-sync.js"></script>
-<script src="picker-blocks.js"></script>
+<script src="picker-sections.js"></script>
 <script src="action-icons.js"></script>
 <script>
   let groups = [];
@@ -991,9 +991,10 @@
   }
 
   function renderBlocks(mode, query, nowSec) {
-    const blocks = window.PickerBlocks.buildBlocks({
+    const blocks = window.PickerSections.buildSections({
       groups, projects: projectRows, snapshots: snapshotItemsFor(query),
       mode, query, trackerHere: trackerIsHere(), collapsed: collapsedBlocks,
+      layout: 'wide',
     });
     const shape = blocks.map(b => `${b.key}|${b.label}|${b.column}`).join('\n');
     if (shape !== blocksShape) {
@@ -1023,7 +1024,7 @@
       // арифметика «строк ровно столько же, сколько элементов» на нём врёт.
       const before = rows.length;
       const items = itemsOfBlock(block, nowSec);
-      // Номер блока — на строке: по нему ходят стрелки (picker-blocks.js).
+      // Номер блока — на строке: по нему ходят стрелки (picker-sections.js).
       for (let n = before; n < rows.length; n++) rows[n].block = i;
       const body = blockBodies.get(block.key);
       const plan = window.PickerListSync.planListSync(
@@ -1333,7 +1334,7 @@
     // В широком режиме — внутри своего блока, с упором в края; в узком — по
     // кругу, как было: там список один, и круг возвращает к его началу.
     active = fullscreen
-      ? window.PickerBlocks.moveInBlocks(rows, active, delta)
+      ? window.PickerSections.moveInBlocks(rows, active, delta)
       : (active + delta + rows.length) % rows.length;
     paint();
     scrollActiveIntoView();
@@ -1341,7 +1342,7 @@
 
   function moveBlock(delta) {
     if (!rows.length) return;
-    active = window.PickerBlocks.moveBetweenBlocks(rows, active, delta);
+    active = window.PickerSections.moveBetweenBlocks(rows, active, delta);
     paint();
     scrollActiveIntoView();
   }

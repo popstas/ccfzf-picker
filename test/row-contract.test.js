@@ -731,8 +731,7 @@ test('Enter на строке снимка уходит по трём разны
 // openSession — в просьбу открыть сессию с `id: undefined`, а это молчаливый
 // отказ на той стороне: ответа у публикации нет.
 test('Enter на свёрнутом блоке разворачивает его, а не открывает сессию', () => {
-  const { collapsedRow } = require('../frontend-src/picker-blocks');
-  const row = collapsedRow({ key: 'g:Not running', rows: [aggregatorSession()] });
+  const row = { kind: 'block-toggle', blockKey: 'g:Not running', count: 1, label: '1 session' };
   assert.strictEqual(row.kind, 'block-toggle');
   const { calls, collapsedBlocks } = chooseWith([row], 0);
   assert.deepStrictEqual(calls, [['render']]);

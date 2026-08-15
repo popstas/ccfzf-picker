@@ -67,19 +67,19 @@ test('порядок тегов таков, что каждый модуль н�
     ).map(r => r.kind)],
     ['snapshot', 'snapshot-session'],
   );
-  // picker-blocks берёт filterSessions/filterProjects у picker-filter на
+  // picker-sections берёт filterSessions/filterProjects у picker-filter на
   // загрузке. Запрос обязан быть непустым по той же причине, что и у снимков:
   // с пустым отбор коротит и до соседа не доходит. Переставь кто-нибудь тег
-  // picker-blocks выше picker-filter — buildBlocks бросил бы на первом же ^F,
-  // а весь набор остался бы зелёным: в picker-blocks.test.js сосед приезжает
-  // по require, и порядок тегов там не проверяется вовсе.
+  // picker-sections выше picker-filter — buildSections бросил бы на первой же
+  // отрисовке, а весь набор остался бы зелёным: в picker-sections.test.js
+  // сосед приезжает по require, и порядок тегов там не проверяется вовсе.
   assert.deepStrictEqual(
-    [...ctx.PickerBlocks.buildBlocks({
-      groups: [{ label: 'Running', sessions: [{ id: 'a', label: 'ccfzf', cwd: '/home/user/projects/ccfzf' }] }],
+    [...ctx.PickerSections.buildSections({
+      groups: [{ key: 'live', label: 'Running', sessions: [{ id: 'a', label: 'ccfzf', cwd: '/home/user/projects/ccfzf' }] }],
       projects: [{ label: 'other', cwd: '/home/user/projects/other' }],
       query: 'ccfzf',
     }).map(b => b.key)],
-    ['g:Running'],
+    ['live'],
   );
 });
 
