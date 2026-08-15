@@ -155,6 +155,11 @@
         // формулировки молча выключила бы и колонку, и сворачивание.
         groups.set(key, {
           desktop, past: true, sessions: [],
+          // Ключ — стабильный, заголовок — то, что видит человек. Счёт в
+          // заголовке не стоит намеренно: он меняется каждые несколько секунд,
+          // и входи он в ключ, свёрнутость секции сбрасывалась бы сама собой.
+          // Приписывает счёт сборка секции (picker-sections.js).
+          key: desktop === null ? 'past' : `past:${desktop}`,
           label: desktop === null ? 'Not running' : `Desktop ${desktop}`,
         });
       }
@@ -166,7 +171,7 @@
     past.sort((a, b) => (a.desktop ?? DESKTOP_UNKNOWN) - (b.desktop ?? DESKTOP_UNKNOWN));
 
     const tail = zellij.length
-      ? [{ desktop: null, label: `Zellij - ${zellij.length}`, sessions: sortGroupSessions(zellij, mode) }]
+      ? [{ desktop: null, key: 'zellij', label: 'Zellij', sessions: sortGroupSessions(zellij, mode) }]
       : [];
 
     if (!open.length) return [...past, ...tail];
@@ -209,12 +214,12 @@
   function activeGroups(open) {
     const remote = open.filter(s => s.windowHost);
     if (!remote.length) {
-      return [{ desktop: null, label: `Active sessions - ${open.length}`, sessions: open, remote: false, host: '' }];
+      return [{ desktop: null, key: 'live', label: 'Active sessions', sessions: open, remote: false, host: '' }];
     }
     const local = open.filter(s => !s.windowHost);
     const groups = [];
     if (local.length) {
-      groups.push({ desktop: null, label: `Active local sessions - ${local.length}`, sessions: local, remote: false, host: '' });
+      groups.push({ desktop: null, key: 'live', label: 'Active local sessions', sessions: local, remote: false, host: '' });
     }
     const byHost = new Map();
     for (const s of remote) {
@@ -223,7 +228,7 @@
     }
     for (const host of [...byHost.keys()].sort((a, b) => a.localeCompare(b))) {
       const sessions = byHost.get(host);
-      groups.push({ desktop: null, label: `Active on ${host} - ${sessions.length}`, sessions, remote: true, host });
+      groups.push({ desktop: null, key: `remote:${host}`, label: `Active on ${host}`, sessions, remote: true, host });
     }
     return groups;
   }

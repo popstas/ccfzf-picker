@@ -287,7 +287,7 @@ test('labelSessions вызывается на настоящем пути, а н
   assert.ok(Object.prototype.hasOwnProperty.call(row, 'label'));
   // И групповой заголовок — тоже label, но группы, а не сессии.
   const payload = buildSessionsPayload({ ok: true, sessions: [aggregatorSession()] }, 'cost');
-  assert.strictEqual(payload.groups[0].label, 'Active sessions - 1');
+  assert.strictEqual(payload.groups[0].label, 'Active sessions');
 });
 
 test('ошибочный ответ агрегатора не доходит до сборки строк', () => {
@@ -1296,12 +1296,12 @@ test('строка зелийной сессии доезжает до отри�
   // отрисовщик спросит поле, которого у неё нет.
   const state = { ok: true, sessions: [], zellij: [{ name: 'home', created: 1785591360, agents: 0 }] };
   const payload = buildSessionsPayload(state, 'recent');
-  const group = payload.groups.find(g => g.label === 'Zellij - 1');
+  const group = payload.groups.find(g => g.label === 'Zellij');
   assert.ok(group, payload.groups.map(g => g.label));
 
   const { items } = renderSessionRows(state);
   const html = items.map(i => i.html).join('\n');
-  assert.ok(html.includes('Zellij - 1'), html);
+  assert.ok(html.includes('Zellij'), html);
   assert.ok(html.includes('home'), html);
   assert.ok(!html.includes('undefined'), html);
   // Ключ строки — с префиксом: он же уходит в picker-list-sync, и столкнись
