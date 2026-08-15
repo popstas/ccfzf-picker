@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const {
-  BUILTIN_ACTION_KEYS, parseHotkey, isReserved, matchesHotkey, formatHotkey,
+  BUILTIN_ACTION_KEYS, RESERVED_CODES, parseHotkey, isReserved, matchesHotkey, formatHotkey,
 } = require('../frontend-src/action-hotkey');
 
 /** Событие клавиатуры в том объёме, в каком его читает matchesHotkey. */
@@ -59,9 +59,10 @@ test('голая буква без модификатора не комбина�
 
 // Прямые клавиши действий гасят событие через preventDefault, а поле поиска в
 // пикере сфокусировано всегда. Буква действия, совпавшая с правкой текста,
-// отобрала бы её насовсем: `^V` перестал бы вставлять то, что ищут. `^A` в этот
-// список не входит намеренно — он отдан ярлыку `/a` сознательно, цена записана
-// в docs/TODO.md.
+// отобрала бы её насовсем: `^V` перестал бы вставлять то, что ищут. Ярлыки
+// режимов (`^P`, `^L`, `^H`, `^S`) в этот список не входят намеренно: они
+// клавишу тоже отнимают, но сознательно, и цена `^H` на macOS записана в
+// action-hotkey.js.
 test('буква действия не отбирает у поиска буфер обмена', () => {
   const editing = ['c', 'v', 'x', 'z'];
   for (const [id, letter] of Object.entries(BUILTIN_ACTION_KEYS)) {
@@ -76,10 +77,17 @@ test('занятыми считаются встроенные клавиши о
   }
   // Меню — не действие, но клавишу занимает.
   assert.strictEqual(isReserved(parseHotkey('Ctrl+K')), true);
-  // И `^A` — тоже не действие, а ярлык `/a ` в строке поиска; отдавать эту
+  // И `^P` — тоже не действие, а ярлык `/p ` в строке поиска; отдавать эту
   // букву настроенному действию нельзя, встроенная ветка перехватит первой.
-  assert.strictEqual(isReserved(parseHotkey('Ctrl+A')), true);
-  assert.strictEqual(isReserved(parseHotkey('Cmd+A')), true);
+  assert.strictEqual(isReserved(parseHotkey('Ctrl+P')), true);
+  assert.strictEqual(isReserved(parseHotkey('Cmd+P')), true);
+  // `^L` и `^H` — ярлыки своих сессий и истории, по тому же правилу.
+  assert.strictEqual(isReserved(parseHotkey('Ctrl+L')), true);
+  assert.strictEqual(isReserved(parseHotkey('Ctrl+H')), true);
+  // А `^A` вернулся полю поиска: ярлык проектов уехал на `^P`, и «выделить
+  // всё» в строке поиска снова работает.
+  assert.strictEqual(isReserved(parseHotkey('Ctrl+A')), false);
+  assert.strictEqual(isReserved(parseHotkey('Cmd+A')), false);
   // ^S — ярлык режима снимков, не действие. Отдать его настроенному действию
   // значило бы увести `^S` в действие, а режим оставить только набором руками.
   assert.strictEqual(isReserved(parseHotkey('Ctrl+S')), true);
@@ -145,4 +153,18 @@ test('непонятную строку formatHotkey отдаёт как ест�
   assert.strictEqual(formatHotkey('  Ctrl+  '), 'Ctrl+');
   assert.strictEqual(formatHotkey(''), '');
   assert.strictEqual(formatHotkey(null), '');
+});
+
+test('ярлыки режимов заняли свои буквы, а pr уступил свою', () => {
+  // `^P` отдан ярлыку проектов, поэтому `pr` переехал на свободную `g`
+  // (GitHub). Без переезда встроенная ветка перехватывала бы первой, и
+  // действие молчало бы — ровно та поломка, за которую уже заплачено списком
+  // `c v x z` и правилом про `KeyF`.
+  assert.strictEqual(BUILTIN_ACTION_KEYS.pr, 'g');
+  for (const code of ['KeyP', 'KeyL', 'KeyH', 'KeyS', 'KeyF', 'KeyK', 'KeyG']) {
+    assert.ok(RESERVED_CODES.includes(code), code);
+  }
+  // `^A` вернулся полю поиска: ярлык проектов ушёл на `^P`, и «выделить всё»
+  // в строке поиска снова работает.
+  assert.ok(!RESERVED_CODES.includes('KeyA'));
 });

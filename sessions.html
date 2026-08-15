@@ -722,7 +722,8 @@
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
     // Про `/s` рассказываем только там, где он работает: подсказка о режиме,
     // которого нет, обманывает ровно так же, как молчащий Enter.
-    menuHint.textContent = '^K / right click - Session menu, ^N - new session, ^A - all projects, ^F - wide view'
+    menuHint.textContent = '^K / right click - Session menu, ^N - new session, '
+      + '^P - projects, ^L - local, ^H - history, ^F - wide view'
       + (trackerIsHere() ? ', ^S - snapshots' : '');
   }
 
@@ -2138,16 +2139,29 @@
       openMenu();
       return;
     }
-    if (plainCtrl && e.code === 'KeyA') {
-      // Ставит `/a ` в начало строки поиска. Не режим и не переключатель:
+    if (plainCtrl && e.code === 'KeyP') {
+      // Ставит `/p ` в начало строки поиска. Не режим и не переключатель:
       // состояние живёт в самом тексте, и стирание префикса возвращает к
-      // сессиям. Цена — `^A` больше не «выделить всё» в поле поиска.
+      // сессиям. preventDefault обязателен и здесь: без него Ctrl+P в webview
+      // уйдёт в печать.
       e.preventDefault();
       showProjects();
       return;
     }
+    if (plainCtrl && e.code === 'KeyL') {
+      // `/l ` — только свои живые сессии.
+      e.preventDefault();
+      showMode('local');
+      return;
+    }
+    if (plainCtrl && e.code === 'KeyH') {
+      // `/h ` — история. Цена клавиши записана в action-hotkey.js.
+      e.preventDefault();
+      showMode('history');
+      return;
+    }
     if (plainCtrl && e.code === 'KeyS') {
-      // Ставит `/s ` в начало строки поиска — как `^A` ставит `/a `. Режим
+      // Ставит `/s ` в начало строки поиска — как `^P` ставит `/p `. Режим
       // живёт в самом тексте, стирание префикса возвращает к сессиям.
       //
       // Молча ничего не делает там, где восстановление невыполнимо: тот же
@@ -2158,7 +2172,7 @@
       return;
     }
     if (plainCtrl && e.code === 'KeyF') {
-      // Режим окна — не префикс в строке поиска, в отличие от `^A` и `^S`: он
+      // Режим окна — не префикс в строке поиска, в отличие от `^P` и `^S`: он
       // меняет раскладку, а не то, что показано, и потому живёт флагом и
       // помнится в ui.json.
       e.preventDefault();
@@ -2169,8 +2183,8 @@
       render();
       return;
     }
-    // ^P/^U/^I — те же три действия, что и в меню. preventDefault здесь
-    // обязателен: иначе Ctrl+P в webview уйдёт в печать.
+    // ^G/^U/^I и прочие действия — те же, что и в меню. preventDefault здесь
+    // обязателен: иначе Ctrl+P в webview уйдёт в печать, а Ctrl+G — в поиск.
     if (plainCtrl) {
       const directActionId = CODE_TO_ACTION[e.code];
       if (directActionId) {
@@ -2194,7 +2208,7 @@
     // на краю запроса: внутри набранного текста они правят его, как раньше.
     // Поле поиска сфокусировано всегда, и отнять у него стрелки насовсем
     // значило бы лишить человека правки запроса — ту же цену уже заплатили за
-    // `^A`, второй раз она ни к чему.
+    // буквы ярлыков, второй раз она ни к чему.
     else if (fullscreen && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && atQueryEdge(e.key)) {
       e.preventDefault();
       moveBlock(e.key === 'ArrowRight' ? 1 : -1);
