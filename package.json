@@ -1,6 +1,6 @@
 {
   "name": "ccfzf-picker",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Cross-platform picker for claude-wt sessions",
   "private": true,
   "scripts": {
