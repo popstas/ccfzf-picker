@@ -1,7 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const {
-  BUILTIN_ACTION_KEYS, RESERVED_CODES, parseHotkey, isReserved, matchesHotkey, formatHotkey,
+  BUILTIN_ACTION_KEYS, BUILTIN_SHORTCUTS, RESERVED_CODES,
+  parseHotkey, isReserved, matchesHotkey, formatHotkey, builtinGlyph,
 } = require('../frontend-src/action-hotkey');
 
 /** Событие клавиатуры в том объёме, в каком его читает matchesHotkey. */
@@ -104,6 +105,53 @@ test('занятыми считаются встроенные клавиши о
   assert.strictEqual(isReserved(parseHotkey('Ctrl+Cmd+P')), false);
   assert.strictEqual(isReserved(parseHotkey('Ctrl+Shift+E')), false);
   assert.strictEqual(isReserved(null), false);
+});
+
+// Справочник клавиш (модалка по `?`/F1) и RESERVED_CODES обязаны расти из
+// одной таблицы. Написанный руками второй список разошёлся бы с первым молча:
+// окно показывало бы клавишу, которую никто не слушает, — или, наоборот,
+// незанятая буква досталась бы настроенному действию, которое встроенная
+// ветка съедала бы первой. Ровно за это уже заплачено списком `c v x z` и
+// правилом про `KeyF`.
+test('RESERVED_CODES вырастает из таблицы справочника, а не пишется рядом', () => {
+  assert.deepStrictEqual(RESERVED_CODES, BUILTIN_SHORTCUTS.map(s => s.code),
+    'два списка разошлись — значит, один из них написан руками');
+});
+
+test('у каждой клавиши в таблице есть подпись', () => {
+  // Пустая подпись — строка в справочнике, которая ничего не объясняет.
+  for (const entry of BUILTIN_SHORTCUTS) {
+    assert.ok(entry.code, `запись без code: ${JSON.stringify(entry)}`);
+    assert.ok(entry.label && entry.label.trim(), `клавиша ${entry.code} без подписи`);
+  }
+});
+
+test('каждое встроенное действие названо в таблице своей клавишей', () => {
+  // Иначе действие есть, клавиша работает, а в справочнике её нет.
+  for (const [id, letter] of Object.entries(BUILTIN_ACTION_KEYS)) {
+    const code = `Key${letter.toUpperCase()}`;
+    const entry = BUILTIN_SHORTCUTS.find(s => s.code === code);
+    assert.ok(entry, `действие ${id} (${code}) выпало из таблицы`);
+    assert.strictEqual(entry.action, id, `${code} назван не тем действием`);
+  }
+});
+
+test('условная клавиша помечена в таблице, а не отбирается по месту', () => {
+  // `^S` показывается только там, где трекер жив: подсказка про режим,
+  // которого нет, обманывает так же, как молчащий Enter. Признак живёт в
+  // таблице, чтобы справочник не пересказывал условие своими словами.
+  const snapshots = BUILTIN_SHORTCUTS.find(s => s.code === 'KeyS');
+  assert.strictEqual(snapshots.needsTracker, true);
+  const other = BUILTIN_SHORTCUTS.filter(s => s.needsTracker);
+  assert.deepStrictEqual(other.map(s => s.code), ['KeyS'], 'условная клавиша ровно одна');
+});
+
+test('встроенная клавиша показывается в том же виде, что и в статуслайне', () => {
+  assert.strictEqual(builtinGlyph('KeyK'), '^K');
+  assert.strictEqual(builtinGlyph('KeyF'), '^F');
+  // Не буква — отдаётся как есть: у `Comma` своего знака нет, и выдумывать
+  // его ради одной строки незачем.
+  assert.strictEqual(builtinGlyph('Comma'), '^,');
 });
 
 test('событие сверяется по физической клавише', () => {
