@@ -51,6 +51,10 @@
       ],
     },
     { id: 'ui', title: 'UI', fields: [] },
+    // Полей у неё нет по той же причине, что и у `ui`: правит она ui.json, а
+    // не config.yaml, и рисуется своим кодом в settings.html — таблицей
+    // панелей широкого режима.
+    { id: 'panels', title: 'Panels', fields: [] },
     {
       id: 'hotkeys',
       title: 'Hotkeys',

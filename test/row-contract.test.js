@@ -820,6 +820,8 @@ function saveUiWith(uiToggles, fullscreen) {
     // смене сортировки — та же мина, что уже сработала на fullscreen и на
     // collapsed.
     order: { narrow: [], wide: [[], [], []] },
+    // Шестой — спрятанные панели, той же формы, что и свёрнутость.
+    hidden: { narrow: {}, wide: {} },
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nsaveUi();`, ctx, { filename: 'sessions.html' });
@@ -844,6 +846,7 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
     collapsed: { narrow: {}, wide: {} },
     // Порядка не назначал — тоже пусто, то есть «как по умолчанию».
     order: { narrow: [], wide: [[], [], []] },
+    hidden: { narrow: {}, wide: {} },
   });
 });
 

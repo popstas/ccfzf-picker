@@ -68,7 +68,7 @@
    * ui.json. Нелогические значения выбрасываются вместе с чужими раскладками —
    * файл правят чем угодно, а испорченный вид списка чинить изнутри нечем.
    */
-  function normalizeCollapsed(raw) {
+  function normalizeFlagMap(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
     const out = {};
     for (const layout of COLLAPSE_LAYOUTS) {
@@ -81,6 +81,20 @@
     }
     return out;
   }
+
+  const normalizeCollapsed = normalizeFlagMap;
+
+  /**
+   * Спрятанные панели: та же форма, что у свёрнутости, и то же правило про
+   * отсутствующий ключ — «как по умолчанию», то есть показывать.
+   *
+   * Отдельное поле, а не третье состояние свёрнутости: свернуть и спрятать —
+   * разные просьбы. Свёрнутая панель остаётся строкой, по которой видно, что
+   * она есть и сколько в ней; спрятанной на экране нет вовсе, и вернуть её
+   * можно только из окна настроек. Поэтому же прячут её оттуда, а не
+   * клавишей: случайно нажатая клавиша убрала бы панель без следа.
+   */
+  const normalizeHidden = normalizeFlagMap;
 
   // Колонок в широкой раскладке ровно три, и это свойство раскладки, а не
   // файла: прочитай пикер длину из ui.json — номер колонки стал бы зависеть
@@ -164,6 +178,8 @@
       collapsed: normalizeCollapsed(src.collapsed),
       // Пятое, рядом с ними же: порядок секций, свой у каждой раскладки.
       order: normalizeOrder(src.order),
+      // Шестое: спрятанные панели, той же формы, что и свёрнутость.
+      hidden: normalizeHidden(src.hidden),
     };
   }
 
@@ -172,9 +188,9 @@
    * пишет — файл маленький и человекочитаемый, и заглянувший в него не должен
    * гадать, что из этого пикер и правда помнит.
    */
-  function uiStateToSave(sort, toggles, fullscreen, collapsed, order) {
+  function uiStateToSave(sort, toggles, fullscreen, collapsed, order, hidden) {
     return normalizeUiState(
-      { sort, toggles, fullscreen, collapsed, order }, { toggles: toggles || {} });
+      { sort, toggles, fullscreen, collapsed, order, hidden }, { toggles: toggles || {} });
   }
 
   /**

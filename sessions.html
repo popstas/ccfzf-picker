@@ -716,6 +716,10 @@
   // последовательность ключей, в широком три последовательности, по одной на
   // колонку. Разбор и умолчания — в ui-state.js.
   let order = { narrow: [], wide: [[], [], []] };
+  // Спрятанные панели. Шестое поле ui.json; ставится только из окна настроек —
+  // клавиши для этого нет намеренно: случайно нажатая убрала бы панель без
+  // следа, а вернуть её можно было бы только там же, в настройках.
+  let hidden = { narrow: {}, wide: {} };
 
   /** Имя текущей раскладки: им же именуются половинки `collapsed`. */
   function layoutName() {
@@ -853,7 +857,7 @@
     // uiToggles, не toggles: тот плоский и не помнит ось statusline — запись
     // плоской картой обнулила бы её при первом же save_ui, включая тот, что
     // зовётся сменой сортировки (ниже, не только из чекбокса).
-    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen, collapsed, order) })
+    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen, collapsed, order, hidden) })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -1142,6 +1146,7 @@
       // Половинка своей раскладки, как и у collapsed: формы у них разные, и
       // выбирать нужную обязан тот, кто знает раскладку.
       order: order[layoutName()],
+      hidden: hidden[layoutName()],
     });
   }
 
@@ -2833,6 +2838,7 @@
       fullscreen = ui.fullscreen;
       collapsed = ui.collapsed;
       order = ui.order;
+      hidden = ui.hidden;
       // Размер просим у Rust сразу: окно открывается с размером из
       // tauri.conf.json, и без этого широкий режим помнился бы, а окно
       // осталось бы узким. Просим безусловно, в обе стороны: узкий режим —
@@ -2909,6 +2915,7 @@
         fullscreen = ui.fullscreen;
         collapsed = ui.collapsed;
         order = ui.order;
+        hidden = ui.hidden;
         // Тот же размер, что и при первой загрузке, и так же безусловно:
         // дорога сюда гоночная (настройки перечитывают ui.json между ^F и
         // записью saveUi), и `if (fullscreen)` приводил бы ровно в то

@@ -7,7 +7,8 @@ test('страницы перечисляют поля без повторов',
   // ключа: сохранив одну страницу, человек молча откатил бы вторую.
   const ids = PAGES.flatMap(p => p.fields.map(f => f.id));
   assert.deepStrictEqual([...new Set(ids)], ids);
-  assert.deepStrictEqual(PAGES.map(p => p.id), ['general', 'ui', 'hotkeys', 'integrations']);
+  assert.deepStrictEqual(PAGES.map(p => p.id),
+    ['general', 'ui', 'panels', 'hotkeys', 'integrations']);
 });
 
 test('конфиг раскладывается по полям формы', () => {

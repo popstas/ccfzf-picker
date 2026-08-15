@@ -23,6 +23,7 @@ test('пустой файл даёт вид по умолчанию', () => {
     fullscreen: false,
     collapsed: { narrow: {}, wide: {} },
     order: { narrow: [], wide: [[], [], []] },
+    hidden: { narrow: {}, wide: {} },
   });
   assert.deepStrictEqual(normalizeUiState(null, DEFAULTS), normalizeUiState({}, DEFAULTS));
   assert.deepStrictEqual(normalizeUiState('мусор', DEFAULTS), normalizeUiState({}, DEFAULTS));
@@ -39,6 +40,7 @@ test('сохранённый вид возвращается как был', () 
     fullscreen: true,
     collapsed: { narrow: { past: true }, wide: {} },
     order: { narrow: ['past', 'live'], wide: [['live'], [], ['past']] },
+    hidden: { narrow: { projects: true }, wide: {} },
   };
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
 });
@@ -147,7 +149,8 @@ test('в файл уходит ровно то, что читается обра
   const saved = uiStateToSave('name', toggles);
   assert.deepStrictEqual(saved,
     { sort: 'name', toggles, fullscreen: false, collapsed: { narrow: {}, wide: {} },
-      order: { narrow: [], wide: [[], [], []] } });
+      order: { narrow: [], wide: [[], [], []] },
+      hidden: { narrow: {}, wide: {} } });
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
   // Мусорная сортировка не должна попасть даже в файл: перезапуск молча
   // починит её, но человек, заглянувший в ui.json, увидел бы неправду.

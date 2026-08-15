@@ -487,3 +487,41 @@ test('в узком списке свёрнутая секция никуда н
   const sections = buildSections(base({ layout: 'narrow', collapsed: { past: true } }));
   assert.deepStrictEqual(sections.map(s => s.key), ['live', 'past', 'projects', 'snapshots']);
 });
+
+// Спрятанные панели: третья ось поверх колонки и свёрнутости. Ставится только
+// из окна настроек — случайной клавишей панель не убрать.
+
+test('спрятанная панель не попадает в список вовсе', () => {
+  const sections = buildSections(base({ layout: 'wide', hidden: { past: true } }));
+  assert.ok(!sections.some(s => s.key === 'past'), sections.map(s => s.key).join(' '));
+  // Остальные на месте: прячется названная, а не всё подряд.
+  assert.ok(sections.some(s => s.key === 'live'));
+});
+
+test('прятанье переживает непустой запрос', () => {
+  // Свернуть значит «покажи одной строкой», спрятать — «убери». Запрос
+  // разворачивает свёрнутое, но отменять просьбу убрать ему не за чем.
+  const sections = buildSections(base({ layout: 'wide', query: 'a', hidden: { past: true } }));
+  assert.ok(!sections.some(s => s.key === 'past'), sections.map(s => s.key).join(' '));
+});
+
+test('префикс сильнее прятанья — он спрашивает про панель поимённо', () => {
+  // `/h` при спрятанной истории иначе показал бы пустой экран, а это то же
+  // самое, что молчащий Enter.
+  const sections = buildSections(base({
+    layout: 'wide', mode: 'history', hidden: { past: true },
+  }));
+  assert.deepStrictEqual(sections.map(s => s.key), ['past']);
+});
+
+test('прятанье работает и в узком списке', () => {
+  const sections = buildSections(base({ layout: 'narrow', hidden: { projects: true } }));
+  assert.ok(!sections.some(s => s.key === 'projects'), sections.map(s => s.key).join(' '));
+});
+
+test('мусор вместо карты спрятанных ничего не прячет', () => {
+  for (const hidden of [null, 'нет', 42, { past: 'да' }]) {
+    const sections = buildSections(base({ layout: 'wide', hidden }));
+    assert.ok(sections.some(s => s.key === 'past'), JSON.stringify(hidden));
+  }
+});

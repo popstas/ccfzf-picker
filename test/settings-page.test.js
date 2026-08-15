@@ -191,7 +191,8 @@ test('вкладка UI возвращает в файл всё, чем расп
   assert.ok(call, 'вызов uiStateToSave не найден в settings.html — тест сторожит не то');
   const args = call[1].split(',').map(s => s.trim());
   assert.deepStrictEqual(args,
-    ['fresh.sort', 'fresh.toggles', 'fresh.fullscreen', 'fresh.collapsed', 'fresh.order']);
+    ['fresh.sort', 'fresh.toggles', 'fresh.fullscreen', 'fresh.collapsed', 'fresh.order',
+      'fresh.hidden']);
 });
 
 test('пикер тоже зовёт uiStateToSave всеми аргументами', () => {
@@ -201,5 +202,88 @@ test('пикер тоже зовёт uiStateToSave всеми аргумента
   const call = source.match(/uiStateToSave\(([^)]*)\)/);
   assert.ok(call, 'вызов uiStateToSave не найден в sessions.html — тест сторожит не то');
   const args = call[1].split(',').map(s => s.trim());
-  assert.deepStrictEqual(args, ['sortMode', 'uiToggles', 'fullscreen', 'collapsed', 'order']);
+  assert.deepStrictEqual(args,
+    ['sortMode', 'uiToggles', 'fullscreen', 'collapsed', 'order', 'hidden']);
+});
+
+// ── вкладка Panels ─────────────────────────────────────────────────────────
+//
+// Та же мина, что и у вкладки UI: ui.json пишут двое, окно читает его один раз
+// при загрузке, а пикер тем временем правит тот же файл перетаскиванием
+// заголовков. Сохранение снимком откатывало бы чужую правку.
+
+const PickerPanels = require('../frontend-src/picker-panels');
+
+/** Прогнать настоящий save() на вкладке Panels. */
+async function savePanelsTab({ onDisk, snapshot, dirty }) {
+  const defaultsSrc = sourceOf(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/, 'UI_DEFAULTS');
+  const saveSrc = sourceOf(/\n {2}async function save\(\) \{[\s\S]*?\n {2}\}\n/, 'save');
+  const calls = [];
+  const status = { className: '', textContent: '' };
+  const ctx = {
+    window: { UiState, PickerPanels },
+    document: { getElementById: () => status },
+    invoke: (cmd, args) => {
+      calls.push({ cmd, args });
+      return Promise.resolve(cmd === 'load_ui' ? onDisk : undefined);
+    },
+    current: 'panels',
+    ui: snapshot,
+    dirtyPanels: new Set(dirty || []),
+    dirtyAxes: new Map(),
+    renderPage: () => {},
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${defaultsSrc}\n${saveSrc}\nvar done = save();`, ctx, { filename: 'settings.html' });
+  await ctx.done;
+  const saved = calls.find(c => c.cmd === 'save_ui');
+  assert.ok(saved, 'save_ui не позван');
+  return { saved: saved.args.ui, ui: ctx.ui, dirtyPanels: ctx.dirtyPanels };
+}
+
+test('перетаскивание пикера переживает сохранение вкладки Panels', async () => {
+  // Пикер, пока окно настроек было открыто, перетащил снимки в первую колонку.
+  const onDisk = defaults();
+  onDisk.order = { narrow: [], wide: [['snapshots'], [], []] };
+  // В окне тронули другую панель — спрятали историю.
+  const snapshot = defaults();
+  snapshot.hidden = { narrow: {}, wide: { past: true } };
+
+  const { saved } = await savePanelsTab({ onDisk, snapshot, dirty: ['past'] });
+
+  assert.strictEqual(saved.hidden.wide.past, true, 'правка окна записана');
+  assert.deepStrictEqual(saved.order.wide[0], ['snapshots'],
+    'перетаскивание пикера не откатилось');
+});
+
+test('нетронутая панель из файла, а не из снимка загрузки', async () => {
+  const onDisk = defaults();
+  onDisk.hidden = { narrow: {}, wide: { snapshots: true } };
+  const snapshot = defaults();
+  // Снимок про snapshots ничего не знает: окно загрузилось раньше.
+  snapshot.collapsed = { narrow: {}, wide: { past: true } };
+
+  const { saved } = await savePanelsTab({ onDisk, snapshot, dirty: ['past'] });
+
+  assert.strictEqual(saved.hidden.wide.snapshots, true, 'чужая правка пережила');
+  assert.strictEqual(saved.collapsed.wide.past, true, 'своя правка записана');
+});
+
+test('сохранение вкладки Panels не трогает сортировку и режим окна', async () => {
+  // Ими распоряжается пикер — то же правило, что и на вкладке UI.
+  const onDisk = defaults();
+  onDisk.sort = 'name';
+  onDisk.fullscreen = true;
+  const { saved } = await savePanelsTab({ onDisk, snapshot: defaults(), dirty: [] });
+  assert.strictEqual(saved.sort, 'name');
+  assert.strictEqual(saved.fullscreen, true);
+});
+
+test('счёт правок вкладки Panels начинается заново после сохранения', async () => {
+  // Иначе следующее сохранение снова наложило бы уже применённое.
+  const snapshot = defaults();
+  snapshot.hidden = { narrow: {}, wide: { past: true } };
+  const { dirtyPanels } = await savePanelsTab(
+    { onDisk: defaults(), snapshot, dirty: ['past'] });
+  assert.strictEqual(dirtyPanels.size, 0);
 });
