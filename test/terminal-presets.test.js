@@ -69,6 +69,26 @@ test('прежний kitty из config.yaml показывается как Cust
     CUSTOM);
 });
 
+test('прежний iTerm2 из config.yaml показывается как Custom', () => {
+  // Та же цена, что у kitty с `--hold`, и платится она по той же причине:
+  // в файле у того, кто выбрал iTerm2 до этой правки, лежит форма с
+  // `command`, а она не работает вовсе — команду разбирает токенизатор
+  // iTerm2. Выпадашка обязана сказать «Custom»: пообещай она iTerm2,
+  // человек решил бы, что пресет у него уже верный, и не выбрал бы заново —
+  // то есть остался бы с окном, закрывающимся сразу после открытия.
+  // Форм, побывавших в конфигах, две: первая отдавала команду параметру
+  // `command` (её ломал токенизатор), вторая печатала её в сессию через
+  // `write text` (работала, но простыню экранирования было видно). Обе обязаны
+  // читаться как Custom.
+  for (const args of [
+    ['-e', 'tell application "iTerm" to create window with default profile command "{command}"'],
+    ['-e', 'tell application "iTerm" to tell (create window with default profile) to tell current session to write text "{command}"'],
+  ]) {
+    assert.strictEqual(matchPreset({ file: '/usr/bin/osascript', args }, 'MacIntel'), CUSTOM,
+      args[1]);
+  }
+});
+
 test('пресет чужой системы своим не считается', () => {
   // Иначе на Windows выпадашка показывала бы «kitty», хотя такого пути там нет.
   assert.strictEqual(
@@ -84,8 +104,11 @@ test('пресет чужой системы своим не считается'
 
 const ROW = { id: 'sess-1', cwd: '/home/user/projects/x', live: false };
 
+const HELPER = '/home/user/.config/ccfzf-picker/open-terminal.sh';
+
 function argvFor(id) {
-  const cmd = buildOpenCommand(ROW, 'resume', { sshHost: 'host-a', terminal: presetById(id) });
+  const cmd = buildOpenCommand(ROW, 'resume',
+    { sshHost: 'host-a', terminal: presetById(id), helperPath: HELPER });
   assert.ok(cmd, `команда для ${id} не собралась`);
   return cmd.argv;
 }
@@ -121,23 +144,70 @@ test('iTerm2 получает команду одной строкой внут�
   assert.strictEqual(argv.length, 3, 'команда не должна доезжать отдельными элементами');
   const script = argv[2];
   assert.ok(script.startsWith('tell application "iTerm"'), script.slice(0, 40));
-  assert.ok(!script.includes('{command}'), 'подстановка не сработала');
-  assert.ok(script.includes('ssh'), 'команды нет в скрипте');
+  assert.ok(!script.includes('{helper}') && !script.includes('{commandBase64}'),
+    'подстановка не сработала');
+  assert.ok(script.includes(HELPER), 'помощника нет в скрипте');
 });
 
-test('кавычки команды экранируются для двойных кавычек AppleScript', () => {
+test('iTerm2 не получает ни одной кавычки команды', () => {
+  // Токенизатор iTerm2 обрабатывает `\` и внутри одинарных кавычек, поэтому
+  // отдавать ему команду нельзя ни в каком виде — ни параметром `command`, ни
+  // печатью в сессию. Отдаются два токена: путь помощника и base64. Кавычки в
+  // скрипте остаются только свои, AppleScript'овые, вокруг пары токенов.
+  const argv = argvFor('iterm2');
+  const script = argv[2];
+  const inside = script.slice(script.indexOf('command "') + 'command "'.length, -1);
+  assert.match(inside, /^\S+ [A-Za-z0-9+/]+={0,2}$/, inside);
+  assert.ok(!inside.includes("'"), `одинарная кавычка доехала до iTerm2: ${inside}`);
+  assert.ok(!inside.includes('\\'), `обратный слэш доехал до iTerm2: ${inside}`);
+});
+
+test('команду разбирает шелл, а не токенизатор iTerm2', () => {
+  // Параметр `command` у `create window` разбирает сам iTerm2, своим
+  // токенизатором, — и тот, в отличие от POSIX-шелла, обрабатывает `\` и
+  // внутри одинарных кавычек. Идиома `'\''`, которой `q` закрывает кавычку,
+  // от этого рассыпается. Замер на живом маке (2026-08-15) — одна и та же
+  // строка, два разбора:
+  //
+  //   sh:     exec $SHELL -ic 'cd -- '\''/home/user/x'\'' && claude --resume …
+  //   iTerm2: exec $SHELL -ic 'cd -- '\\\/home/user/x\''' && claude --resume …
+  //
+  // До ssh доезжала вторая, падала мгновенно, и окно закрывалось — ровно тот
+  // симптом, с которого началась задача. Лечится это не подбором
+  // экранирования, а тем, что кавычек в строке не остаётся вовсе: команда
+  // едет в base64 и разворачивается помощником, уже в шелле.
   const script = argvFor('iterm2')[2];
+  const b64 = script.slice(script.lastIndexOf(' ') + 1, script.lastIndexOf('"'));
+  const restored = Buffer.from(b64, 'base64').toString('utf8');
+  // Развёрнутое — та же командная строка, что уехала бы хвостом argv у kitty.
+  assert.ok(restored.includes("'ssh' '-t' 'host-a'"), restored);
+  assert.ok(restored.includes('exec $SHELL -ic'), restored);
+  assert.ok(restored.includes('claude --resume'), restored);
+});
+
+// Пресетами `{command}` больше не пользуется никто — iTerm2 ушёл на помощника,
+// — но механизм жив: на нём держатся терминалы, настроенные человеком руками.
+// Поэтому проверяется он теперь напрямую, а не через пресет.
+
+const ONE_STRING = { file: 'osascript', args: ['-e', 'run "{command}"'] };
+
+function oneStringScript() {
+  return buildOpenCommand(ROW, 'resume',
+    { sshHost: 'host-a', terminal: ONE_STRING }).argv[2];
+}
+
+test('кавычки команды экранируются для двойных кавычек', () => {
   // Внутри двойных кавычек AppleScript живые `"` порвали бы строку, и
   // osascript отказал бы на разборе — молча для пикера.
-  const body = script.slice(script.indexOf('command "') + 'command "'.length, -1);
+  const script = oneStringScript();
+  const body = script.slice(script.indexOf('"') + 1, script.lastIndexOf('"'));
   assert.ok(!/(^|[^\\])"/.test(body), `неэкранированная кавычка: ${body}`);
 });
 
 test('подстановка не съедает `$` из команды', () => {
   // В команде стоит `exec $SHELL -ic ...`. У replace со строкой замены свои
   // значения у `$&` и `$'`, и подстановка молча съела бы кусок команды.
-  const script = argvFor('iterm2')[2];
-  assert.ok(script.includes('$SHELL'), script);
+  assert.ok(oneStringScript().includes('$SHELL'), oneStringScript());
 });
 
 test('терминал без подстановки ведёт себя как раньше', () => {

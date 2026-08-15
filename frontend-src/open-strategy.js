@@ -33,6 +33,39 @@
    */
   const COMMAND_PLACEHOLDER = '{command}';
 
+  /**
+   * Подстановки для терминала, которому нельзя отдать ни одной кавычки.
+   *
+   * `{command}` выше держится на том, что чужой разборщик поймёт POSIX-кавычки
+   * так же, как их понимает sh. iTerm2 их так не понимает: его токенизатор
+   * обрабатывает `\` и внутри одинарных кавычек, и идиома `'\''` у него
+   * рассыпается (замер 2026-08-15 — см. правило про iTerm2 в CLAUDE.md).
+   * Чинится это не подбором экранирования, а тем, что кавычек в строке не
+   * остаётся вовсе: терминал получает путь помощника и base64 команды, а
+   * разворачивает и кавычит уже настоящий шелл.
+   *
+   * В алфавите base64 нет ни кавычки, ни пробела, ни обратного слэша, поэтому
+   * делить такой токен не на чем — что бы ни лежало в команде.
+   */
+  const HELPER_PLACEHOLDER = '{helper}';
+  const COMMAND_B64_PLACEHOLDER = '{commandBase64}';
+
+  /**
+   * Строка — в base64, байтами UTF-8 и одной строкой.
+   *
+   * `btoa` берёт только знаки до 255, а каталог с кириллицей — обычное дело:
+   * кодировать надо байты, а не символы. Переносов быть не должно тем более —
+   * перенос разорвал бы токен надвое, и хвост уехал бы отдельным аргументом.
+   */
+  function toBase64(s) {
+    const text = String(s == null ? '' : s);
+    if (typeof Buffer === 'function') return Buffer.from(text, 'utf8').toString('base64');
+    const bytes = new TextEncoder().encode(text);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+
   /** Элементы argv — в одну строку для `sh -c`. */
   function joinCommand(parts) {
     return parts.map(q).join(' ');
@@ -201,22 +234,53 @@
     }
 
     if (remote === null) return null;
+    const argv = terminalArgv(terminal, ['ssh', '-t', String(sshHost || ''), remote], opts);
+    return argv === null ? null : { argv, destructive };
+  }
+
+  /**
+   * argv терминала для уже собранной команды.
+   *
+   * Единственное место, где команда встречается с терминалом, — и это не
+   * вкусовщина. `newSession` в `sessions.html` собирал argv у себя,
+   * `[file, ...args, 'ssh', …]`, то есть про подстановку не знал вовсе: у
+   * iTerm2 это давало окно, в которое печатается литеральный `{command}`, а
+   * `ssh` с аргументами уезжает osascript в никуда. Поймано живьём
+   * 2026-08-15, и починка тут одна — не второе исправление, а отсутствие
+   * второй сборки.
+   *
+   * Дорог три, и терминал выбирает свою сам, содержимым аргументов:
+   *   без подстановок  — команда хвостом argv, элементами (kitty, Ghostty, wt);
+   *   `{command}`      — одной строкой, для тех, кто хвост argv не берёт;
+   *   `{helper}`       — путь помощника и base64, для тех, кому нельзя отдать
+   *                      ни одной кавычки (iTerm2).
+   *
+   * `null` — отказ: помощник назван, а пути его нет. Молчать тут нельзя,
+   * пустой токен превратил бы base64 в имя программы, и окно закрылось бы
+   * сразу после открытия — ровно тот симптом, из-за которого всё и затевалось.
+   */
+  function terminalArgv(terminal, parts, opts) {
     const term = terminal || { file: 'open', args: [] };
     const args = (term.args || []).map(a => String(a));
-    const parts = ['ssh', '-t', String(sshHost || ''), remote];
-    // Терминал, который команду из argv не берёт, называет ей место сам —
-    // подстановкой в своих аргументах. См. COMMAND_PLACEHOLDER.
-    if (args.some(a => a.includes(COMMAND_PLACEHOLDER))) {
-      const one = quoteForDoubleQuoted(joinCommand(parts));
-      return {
-        // split/join, а не replace: у replace в строке замены свои значения
-        // у `$&`, `$'` и прочих, а в команде стоит `exec $SHELL` и одинарные
-        // кавычки рядом — подстановка молча съела бы кусок команды.
-        argv: [term.file, ...args.map(a => a.split(COMMAND_PLACEHOLDER).join(one))],
-        destructive,
-      };
+    const has = ph => args.some(a => a.includes(ph));
+    // split/join, а не replace: у replace в строке замены свои значения у
+    // `$&`, `$'` и прочих, а в команде стоит `exec $SHELL` и одинарные кавычки
+    // рядом — подстановка молча съела бы кусок команды.
+    const put = (a, ph, value) => a.split(ph).join(value);
+
+    if (has(HELPER_PLACEHOLDER) || has(COMMAND_B64_PLACEHOLDER)) {
+      const helper = String((opts || {}).helperPath || '');
+      if (!helper) return null;
+      const blob = toBase64(joinCommand(parts));
+      return [term.file, ...args.map(a => put(
+        put(a, HELPER_PLACEHOLDER, helper), COMMAND_B64_PLACEHOLDER, blob,
+      ))];
     }
-    return { argv: [term.file, ...args, ...parts], destructive };
+    if (has(COMMAND_PLACEHOLDER)) {
+      const one = quoteForDoubleQuoted(joinCommand(parts));
+      return [term.file, ...args.map(a => put(a, COMMAND_PLACEHOLDER, one))];
+    }
+    return [term.file, ...args, ...parts];
   }
 
   /**
@@ -272,6 +336,7 @@
   // рано или поздно разойдётся с первым.
   return {
     q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
-    newSessionCommand, newSessionName,
+    newSessionCommand, newSessionName, terminalArgv, toBase64,
+    HELPER_PLACEHOLDER, COMMAND_B64_PLACEHOLDER,
   };
 });

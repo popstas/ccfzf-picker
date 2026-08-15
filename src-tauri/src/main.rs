@@ -1083,6 +1083,50 @@ pub(crate) fn save_json(name: &str, value: &serde_json::Value) -> Result<(), Str
     std::fs::rename(&tmp, &path).map_err(|e| format!("cannot rename onto {}: {e}", path.display()))
 }
 
+/// Помощник, разворачивающий команду на месте.
+///
+/// Заведён ради терминала, которому нельзя отдать ни одной кавычки: токенизатор
+/// iTerm2 обрабатывает `\` и внутри одинарных кавычек, и `'\''` у него
+/// рассыпается (разбор — в правиле про iTerm2 в CLAUDE.md). Поэтому терминал
+/// получает два токена без единого опасного знака — путь этого файла и base64
+/// команды, — а кавычки разбирает уже настоящий шелл, здесь.
+///
+/// `eval` не роскошь: развёрнутое — это готовая командная строка с кавычками
+/// (`'ssh' '-t' 'host' '<команда>'`), и её надо именно разобрать, а не
+/// выполнить как одно имя программы.
+///
+/// Хвост `exec $SHELL -i` держит окно открытым после сессии. Без него профиль
+/// iTerm2 по умолчанию закрывает окно вместе с агентом, и чем тот кончился —
+/// не прочитать: ровно та слепота, из-за которой поломку с токенизатором
+/// искали дольше, чем следовало. Забота та же, что у kitty с `--hold`.
+const TERMINAL_HELPER: &str = r#"#!/bin/sh
+# Пишется пикером: правки здесь переживут ровно до следующего запуска.
+eval "$(printf %s "$1" | base64 -d)"
+exec "${SHELL:-/bin/sh}" -i
+"#;
+
+/// Положить помощника на место и назвать путь.
+///
+/// Переписывается на каждый спрос, а не только при отсутствии: файл этот —
+/// продолжение бинаря, и разойтись с ним он не должен. Дёшево: спрашивают его
+/// лишь те терминалы, у которых в аргументах стоит `{helper}`.
+#[tauri::command]
+fn terminal_helper() -> Result<String, String> {
+    let path = state_path("open-terminal.sh")?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    std::fs::write(&path, TERMINAL_HELPER)
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("cannot chmod {}: {e}", path.display()))?;
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Отметки «эту сессию человек уже видел», id -> epoch-секунды.
 #[tauri::command]
 fn load_seen() -> Result<serde_json::Value, String> {
@@ -1314,6 +1358,7 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             hide_picker, set_picker_size, poll_now, spawn_detached, load_seen, save_seen, load_config,
+            terminal_helper,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, open_session_mqtt, open_project_mqtt, new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons
@@ -2023,6 +2068,22 @@ actions:
         let conf: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         assert_eq!(conf["build"]["frontendDist"].as_str().unwrap(), "../frontend");
+    }
+
+    /// Помощник обязан разворачивать base64 и держать окно после сессии.
+    ///
+    /// Обе строки — плата за уже случившееся. Без разбора base64 терминалу
+    /// пришлось бы отдавать кавычки, а их токенизатор iTerm2 понимает не так,
+    /// как шелл. Без `exec $SHELL` профиль закрыл бы окно вместе с агентом, и
+    /// причину отказа снова стало бы не прочитать — слепота, из-за которой
+    /// поломку искали дольше, чем следовало.
+    #[test]
+    fn terminal_helper_decodes_and_holds_the_window() {
+        assert!(TERMINAL_HELPER.contains("base64 -d"), "{TERMINAL_HELPER}");
+        assert!(TERMINAL_HELPER.contains("eval "), "{TERMINAL_HELPER}");
+        assert!(TERMINAL_HELPER.contains("exec \"${SHELL:-/bin/sh}\" -i"), "{TERMINAL_HELPER}");
+        // Первой строкой — шебанг: файл зовут по пути, а не через `sh <файл>`.
+        assert!(TERMINAL_HELPER.starts_with("#!/bin/sh\n"), "{TERMINAL_HELPER}");
     }
 
     /// Узкий размер обязан совпадать с тем, что стоит в tauri.conf.json:
