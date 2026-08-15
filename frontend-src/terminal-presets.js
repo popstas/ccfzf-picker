@@ -28,11 +28,22 @@
    * `--single-instance` у kitty — не украшение: `open -n` каждый раз поднимал
    * бы новый экземпляр приложения, а этот флаг отдаёт окно уже запущенному
    * процессу и сразу выходит.
+   *
+   * `--hold` — «remain open, at a shell prompt, after child process exits»: без
+   * него окно закрывается вместе с сессией агента, и прочитать, чем та
+   * кончилась, нельзя. Флага `--hide` у kitty нет вовсе, а `--start-as=hidden`
+   * прячет окно — то есть делает ровно противоположное; путать их легко, и
+   * ошибка эта уже была записана в задачу.
+   *
+   * Оговорка kitty к `--hold` — «only affects the first window» — с
+   * `--single-instance` в одном ряду читается тревожно: второе окно отдаёт уже
+   * запущенный экземпляр, и до него флаг может не доехать. Проверять это
+   * можно только живьём, здесь ни одного из этих терминалов нет.
    */
   const PRESETS = [
     {
       id: 'kitty', label: 'kitty', os: 'macos',
-      file: '/opt/homebrew/bin/kitty', args: ['--single-instance'],
+      file: '/opt/homebrew/bin/kitty', args: ['--single-instance', '--hold'],
     },
     {
       id: 'ghostty', label: 'Ghostty', os: 'macos',
@@ -45,7 +56,7 @@
     },
     {
       id: 'kitty-linux', label: 'kitty', os: 'linux',
-      file: '/usr/bin/kitty', args: ['--single-instance'],
+      file: '/usr/bin/kitty', args: ['--single-instance', '--hold'],
     },
     {
       id: 'ghostty-linux', label: 'Ghostty', os: 'linux',
