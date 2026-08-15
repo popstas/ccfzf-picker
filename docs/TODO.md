@@ -2,6 +2,32 @@
 
 # next
 
+- [ ] **Выбранный в пикере терминал обязан главенствовать и на машине с
+  менеджером — wt и WezTerm на Windows равноправны.** Поймано на popstas-pc:
+  выбран пресет `wezterm-windows`, `config.yaml` записан верно
+  (`file: wezterm-gui.exe`, `args: [start, --]`), а открывается Windows
+  Terminal. Пресет не при чём — на этой машине пикер терминал не открывает
+  вовсе: хост совпал с `windowHost`, брокер настроен, и `chooseEnterAction`
+  (`frontend-src/open-transport.js`) отдаёт `manager`. Терминал поднимает
+  windows11-manager своим конфигом (`launch`/`launchNew` — `wt.exe -w -1 …`),
+  а поле `terminal` в `config.yaml` читается только на запасной местной
+  дороге, то есть на этой машине почти никогда.
+
+  Переносится не одна команда: `-w -1` («в текущее окно») у `wezterm start`
+  прямого аналога не имеет, а `applyWtProfile` вставляет `-p <профиль>` — весь
+  маппинг `claudeWt.projects → profile` это понятие Windows Terminal, у
+  WezTerm профилей нет вовсе. Дизайн решён и записан:
+  [docs/superpowers/specs/2026-08-16-terminal-registry-design.md](superpowers/specs/2026-08-16-terminal-registry-design.md)
+  — имя терминала едет в просьбе, определения живут реестром у менеджера,
+  профили становятся картой по имени терминала. Работа на три репозитория:
+  windows11-manager, ccfzf-picker, macos-windows-manager (последний учится
+  открывать сессии и объявляет `openSession: true`).
+
+- [ ] **Пресет WezTerm на маке сессию не открывает.** Это местная дорога
+  пикера, и она остаётся живой и после реестра терминалов. Проверить живьём: в
+  бандле лежит и `wezterm`, и `wezterm-gui`, а пресет в
+  `frontend-src/terminal-presets.js` называет первый.
+
 # future
 
 - [ ] **Завести местный режим — работу без отдельного хоста для агентов.**
