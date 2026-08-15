@@ -1442,7 +1442,9 @@ test('renderWide: номер строки в разметке совпадает
     },
     // Каркас считается уже собранным: тогда renderWide не трогает `list`
     // вовсе, и двойник DOM нужен только на тела секций.
-    blocksShape: SECTIONS.map(s => `${s.key}|${s.column}`).join('\n'),
+    // Тот же вид отпечатка, что и в renderWide: свёрнутость входит в него,
+    // потому что от неё зависит класс блока.
+    blocksShape: SECTIONS.map(s => `${s.key}|${s.column}|${s.collapsed ? 1 : 0}`).join('\n'),
     renderedBlocks: new Map(),
     blockBodies: new Map(SECTIONS.map(s => [s.key, { children: [] }])),
     applyPlan: () => {},

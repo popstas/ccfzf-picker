@@ -271,25 +271,30 @@
    */
   function applyWideOrder(sections, order) {
     const columns = Array.isArray(order) ? order.filter(Array.isArray) : [];
-    if (!columns.length) {
-      return sections
-        .map((section, at) => ({ section, at }))
-        .sort((a, b) => (a.section.column - b.section.column) || (a.at - b.at))
-        .map(({ section }) => section);
-    }
     const placed = sections.map((section, at) => {
-      const col = columns.findIndex(keys => keys.includes(section.key));
+      // Колонка из файла главнее колонки по смыслу — но только для той
+      // секции, которую в файле назвали.
+      const col = columns.length ? columns.findIndex(keys => keys.includes(section.key)) : -1;
       return {
-        // Колонка из файла главнее колонки по смыслу — но только для той
-        // секции, которую в файле назвали.
         section: col === -1 ? section : { ...section, column: col + 1 },
         at,
         place: col === -1 ? UNPLACED : columns[col].indexOf(section.key),
+        // Свёрнутая — в низ своей колонки, поверх любого назначенного места.
+        // Свёрнутая секция это одна строка заголовка, а доля колонки ей
+        // достаётся такая же, как развёрнутому соседу: измерено, свёрнутая
+        // история занимала 260 пикселей из 417 при содержимом в 25, и в
+        // WebKit то же — 347 из 504. Полколонки пустоты, а рядом сосед,
+        // которому не хватило.
+        //
+        // Опускание живёт здесь, а не в CSS: по этому же списку считается
+        // `rows` и порядок блоков, по которому ходят `←/→`. Подвинь мы блок
+        // одним оформлением — стрелка уводила бы не туда, куда смотрит глаз.
+        sunk: section.collapsed === true ? 1 : 0,
       };
     });
     return placed
       .sort((a, b) => (a.section.column - b.section.column)
-        || (a.place - b.place) || (a.at - b.at))
+        || (a.sunk - b.sunk) || (a.place - b.place) || (a.at - b.at))
       .map(({ section }) => section);
   }
 

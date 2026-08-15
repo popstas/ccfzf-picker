@@ -416,3 +416,74 @@ test('мусор вместо порядка не роняет список', ()
     assert.ok(wide.length, JSON.stringify(order));
   }
 });
+
+// Свёрнутая секция в широком режиме опускается в низ своей колонки.
+//
+// Свёрнутая секция — это одна строка заголовка, а доля колонки ей достаётся
+// такая же, как развёрнутому соседу: измерено, свёрнутая история занимала 260
+// пикселей из 417 при содержимом в 25, и в WebKit то же самое — 347 из 504.
+// Полколонки пустоты, а рядом сосед, которому не хватило.
+//
+// Опускание сделано сортировкой здесь, а не CSS-трюком в раскладке: по этому
+// же списку считается `rows` и порядок блоков, по которому ходят `←/→`.
+// Подвинь мы блок одним оформлением — стрелка уводила бы не туда, куда
+// смотрит глаз, и это ровно та поломка, от которой бережёт правило про
+// порядок чтения.
+
+test('свёрнутая секция опускается в низ своей колонки', () => {
+  const sections = buildSections(base({ layout: 'wide', collapsed: { past: true } }));
+  const third = sections.filter(s => s.column === 3).map(s => s.key);
+  // Умолчание колонки — история сверху, снимки под ней. Свёрнутая история
+  // уходит вниз, снимкам достаётся вся высота.
+  assert.deepStrictEqual(third, ['snapshots', 'past']);
+});
+
+test('развёрнутые секции колонки сохраняют свой порядок', () => {
+  // Опускание трогает только свёрнутые: остальные стоят там, где стояли.
+  const sections = buildSections(base({
+    layout: 'wide', groups: REMOTE_GROUPS, collapsed: { projects: true },
+  }));
+  const second = sections.filter(s => s.column === 2).map(s => s.key);
+  assert.deepStrictEqual(second, ['remote', 'projects']);
+});
+
+test('две свёрнутые секции ложатся вниз в своём прежнем порядке', () => {
+  const sections = buildSections(base({
+    layout: 'wide', collapsed: { past: true, snapshots: true },
+  }));
+  const third = sections.filter(s => s.column === 3).map(s => s.key);
+  // Обе свёрнуты — двигать друг относительно друга их незачем.
+  assert.deepStrictEqual(third, ['past', 'snapshots']);
+});
+
+test('опускание сильнее назначенного порядка, но только внутри колонки', () => {
+  // Человек перетащил историю наверх третьей колонки, потом свернул её.
+  // Свёрнутая она всё равно уходит вниз: полоска-заголовок наверху колонки
+  // отнимала бы высоту у того, ради чего колонку и открыли. Колонку при этом
+  // назначенный порядок задаёт по-прежнему.
+  const sections = buildSections(base({
+    layout: 'wide',
+    order: [[], [], ['past', 'snapshots']],
+    collapsed: { past: true },
+  }));
+  const third = sections.filter(s => s.column === 3).map(s => s.key);
+  assert.deepStrictEqual(third, ['snapshots', 'past']);
+});
+
+test('порядок чтения остаётся порядком чтения и после опускания', () => {
+  // По нему ходят ←/→, и разъедься он с видимым — стрелка уводила бы не туда.
+  const sections = buildSections(base({
+    layout: 'wide', groups: REMOTE_GROUPS, collapsed: { past: true, projects: true },
+  }));
+  const columns = sections.map(s => s.column);
+  assert.deepStrictEqual(columns, [...columns].sort((a, b) => a - b),
+    'секции идут не колонка за колонкой');
+});
+
+test('в узком списке свёрнутая секция никуда не уезжает', () => {
+  // Там секции идут одним потоком, «низа колонки» не существует, а свёрнутая
+  // секция и так занимает ровно строку заголовка. Уехавшая вниз история
+  // выглядела бы самовольной перестановкой списка.
+  const sections = buildSections(base({ layout: 'narrow', collapsed: { past: true } }));
+  assert.deepStrictEqual(sections.map(s => s.key), ['live', 'past', 'projects', 'snapshots']);
+});
