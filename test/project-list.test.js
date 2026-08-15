@@ -11,6 +11,52 @@ const STATE = {
   ],
 };
 
+// Полдень по местным часам: ключ сортировки округляется до абсолютной минуты,
+// и от полудня он одинаков в любом часовом поясе, где гоняются тесты.
+const NOON = Math.floor(new Date(2026, 7, 12, 12, 0).getTime() / 1000);
+
+test('проекты идут по свежести, а не в том порядке, в каком приехали', () => {
+  const rows = buildProjectList({
+    projects: [
+      { path: '/p/old', name: 'old', mtime: NOON - 3600 },
+      { path: '/p/fresh', name: 'fresh', mtime: NOON },
+      { path: '/p/never', name: 'never', mtime: 0 },
+    ],
+  });
+  assert.deepStrictEqual(rows.map(r => r.label), ['fresh', 'old', 'never']);
+});
+
+test('порядок проектов не скачет от секунд', () => {
+  // Та же беда, ради которой у сессий заведён recentKey: mtime двигают
+  // записи в каталоге, подача тикает раз в секунду, и два почти одинаково
+  // свежих проекта менялись местами на каждом опросе — попасть мышью по такой
+  // строке нельзя. Ключ округляется до минуты, а равных разводит tieBreak по
+  // имени, поэтому порядок один и тот же в обе стороны.
+  const within = (aTime, bTime) => buildProjectList({
+    projects: [
+      { path: '/p/beta', name: 'beta', mtime: aTime },
+      { path: '/p/alpha', name: 'alpha', mtime: bTime },
+    ],
+  }).map(r => r.label);
+  // Полминуты разницы — одна корзина, и решает имя.
+  assert.deepStrictEqual(within(NOON + 30, NOON), ['alpha', 'beta']);
+  assert.deepStrictEqual(within(NOON, NOON + 30), ['alpha', 'beta']);
+  // А целая минута — уже разные корзины, и свежесть главнее имени.
+  assert.deepStrictEqual(within(NOON + 60, NOON), ['beta', 'alpha']);
+});
+
+test('проект без отметки времени тонет вниз, а не всплывает', () => {
+  // Ноль — «неизвестно когда», и missingLast топит такие строки в конец: без
+  // этого проект, про который ничего не известно, стоял бы первым.
+  const rows = buildProjectList({
+    projects: [
+      { path: '/p/never', name: 'never', mtime: 0 },
+      { path: '/p/stale', name: 'stale', mtime: 1 },
+    ],
+  });
+  assert.deepStrictEqual(rows.map(r => r.label), ['stale', 'never']);
+});
+
 test('строка проекта несёт всё, что рисует список', () => {
   const [a, b] = buildProjectList(STATE);
   assert.strictEqual(a.kind, 'project');
