@@ -16,8 +16,9 @@ const GROUPS = [
   { key: 'past', label: 'Not running', past: true, sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
 ];
 
-// Список с двумя чужими машинами: в узком списке это две секции, в широком —
-// одна. Пометка `remote` приезжает из groupSessions.
+// Список с двумя чужими машинами: секция из них выходит одна в обеих
+// раскладках, машины названы подзаголовками внутри. Пометка `remote` приезжает
+// из groupSessions.
 const REMOTE_GROUPS = [
   { key: 'live', label: 'Active local sessions', sessions: [session('a')], remote: false },
   { key: 'remote:alpha-host', label: 'Active on alpha-host', sessions: [session('x')], remote: true, host: 'alpha-host' },
@@ -58,9 +59,9 @@ test('раскладка по колонкам: свои живые слева, 
 });
 
 test('чужие машины склеиваются в одну секцию', () => {
-  // Секция занимает колонку, и пять машин дали бы пять узких колонок. Деление
-  // по машинам живёт в узком списке, где строки идут сверху вниз и лишний
-  // заголовок ничего не стоит.
+  // В широкой раскладке секция занимает колонку, и пять машин дали бы пять
+  // узких колонок на то, что человек читает как одно «не здесь». В узкой
+  // причина другая — постоянный ключ, — но склейка та же (см. ниже).
   const blocks = buildSections(base({ groups: REMOTE_GROUPS }));
   assert.deepStrictEqual(blocks.map(b => b.label), [
     'Active local sessions', 'Active remote sessions',
@@ -164,15 +165,20 @@ test('в широкой раскладке история приходит ра�
   assert.deepStrictEqual(history.rows.map(r => r.id), ['old']);
 });
 
-test('узкая раскладка не склеивает чужие группы и не считает колонок', () => {
-  // Склейка — правило раскладки, а не группировки: в широком блок занимает
-  // колонку, и пять трекеров дали бы пять узких колонок на то, что человек
-  // читает как одно «не здесь». В узком строки идут сверху вниз, и лишний
-  // заголовок там ничего не стоит.
+test('узкая раскладка склеивает чужие группы, но колонок не считает', () => {
+  // Склейка — не правило раскладки: ключ `remote:<host>` живёт ровно столько,
+  // сколько машина видна, и панель с таким ключом не попадает в `order`, пока
+  // её не перетащили. После первого перетаскивания чего угодно другого она
+  // уезжает в конец списка — под историю, проекты и снимки, то есть с глаз.
+  // Постоянный `remote` этим не болеет, а машины названы подзаголовками.
   const narrow = buildSections(base({ groups: REMOTE_GROUPS, layout: 'narrow' }));
   assert.deepStrictEqual(narrow.map(s => s.key), [
-    'live', 'remote:alpha-host', 'remote:zeta-host', 'past', 'projects', 'snapshots',
+    'live', 'remote', 'past', 'projects', 'snapshots',
   ]);
+  assert.deepStrictEqual(narrow[1].rows.map(r => r.kind === 'block-subhead' ? r.label : r.id), [
+    'alpha-host - 1', 'x', 'zeta-host - 2', 'y', 'z',
+  ]);
+  // А колонок в узком списке нет вовсе — в том числе у склеенной секции.
   assert.ok(narrow.every(s => s.column === undefined));
 });
 
@@ -239,7 +245,7 @@ test('префикс оставляет одну секцию и развора�
   assert.deepStrictEqual(local.map(s => s.key), ['live']);
 
   const remote = buildSections(base({ groups: REMOTE_GROUPS, layout: 'narrow', mode: 'remote' }));
-  assert.deepStrictEqual(remote.map(s => s.key), ['remote:alpha-host', 'remote:zeta-host']);
+  assert.deepStrictEqual(remote.map(s => s.key), ['remote']);
 
   const projects = buildSections(base({ layout: 'narrow', mode: 'projects' }));
   assert.deepStrictEqual(projects.map(s => s.key), ['projects']);
