@@ -133,8 +133,10 @@ backgroundRefresh: true
 # id       — короткое имя, любое; по нему действие отличается от соседей.
 # label    — подпись в меню Ctrl+K. Не задана — берётся id.
 # hotkey   — комбинация в окне пикера, например Ctrl+Shift+E. Занятую самим
-#            окном (Ctrl или Cmd с N, P, U, R, I, K, A) взять не выйдет: действие
-#            останется в меню, но без клавиши. Ctrl и Cmd здесь разные.
+#            окном (Ctrl или Cmd с D, F, G, H, I, K, L, N, P, R, S, U) взять не
+#            выйдет: действие останется в меню, но без клавиши. Список этот
+#            растёт — сверяйтесь со справочником клавиш по F1, там показано
+#            занятое на самом деле. Ctrl и Cmd здесь разные.
 # argv     — команда. Плейсхолдеры:
 #              {localPath}      путь на этой машине
 #              {localPathSlash} он же прямыми слэшами — нужен для `cmd /c
@@ -156,7 +158,7 @@ backgroundRefresh: true
 #     icon: '%SystemRoot%\explorer.exe'
 #   - id: cursor
 #     label: Open in Cursor
-#     hotkey: Ctrl+Shift+C
+#     hotkey: Ctrl+O
 #     argv: ['cursor', '{localPath}']
 #   # macOS: Finder и VS Code.
 #   - id: finder
