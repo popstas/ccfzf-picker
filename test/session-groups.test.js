@@ -442,3 +442,37 @@ test('ключи чужих групп, истории и зелия', () => {
   assert.strictEqual(byKey['past'], 'Not running');
   assert.strictEqual(byKey['zellij'], 'Zellij');
 });
+
+test('чужие машины идут по свежести, свежая первой', () => {
+  // Машина, на которой только что говорили, должна стоять сверху. Раньше
+  // порядок был алфавитным, и `zeta-host` с полуминутной сессией уходил вниз
+  // под `alpha-host`, где последний раз говорили час назад.
+  const now = Math.floor(Date.now() / 1000);
+  const row = (id, host, ago) => ({
+    id, label: id, cwd: `/w/${id}`, live: true,
+    windowHost: host, lastActivity: now - ago,
+  });
+  const groups = groupSessions([
+    row('a', 'alpha-host', 3600),
+    row('z', 'zeta-host', 30),
+  ]);
+  assert.deepStrictEqual(
+    groups.filter(g => g.remote).map(g => g.key),
+    ['remote:zeta-host', 'remote:alpha-host'],
+  );
+});
+
+test('на равной свежести машины разводятся по имени', () => {
+  // Иначе две одинаково свежие менялись бы местами от опроса к опросу — тот же
+  // класс дрожания, из-за которого свежесть меряется минутами, а не секундами.
+  const now = Math.floor(Date.now() / 1000);
+  const row = (id, host) => ({
+    id, label: id, cwd: `/w/${id}`, live: true,
+    windowHost: host, lastActivity: now,
+  });
+  const groups = groupSessions([row('z', 'zeta-host'), row('a', 'alpha-host')]);
+  assert.deepStrictEqual(
+    groups.filter(g => g.remote).map(g => g.key),
+    ['remote:alpha-host', 'remote:zeta-host'],
+  );
+});

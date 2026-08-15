@@ -226,7 +226,20 @@
       if (!byHost.has(s.windowHost)) byHost.set(s.windowHost, []);
       byHost.get(s.windowHost).push(s);
     }
-    for (const host of [...byHost.keys()].sort((a, b) => a.localeCompare(b))) {
+    // Порядок машин — по свежести самой свежей сессии в группе, свежая первой.
+    // Алфавитный порядок ставил ту машину, на которой только что говорили,
+    // вниз, если её имя начинается на «w».
+    //
+    // Ключ тот же, которым меряется свежесть строк внутри группы (`recentKey`,
+    // минуты), а не новый: второй разошёлся бы с первым. Минуты здесь нужны и
+    // сами по себе — на секундах две почти одинаково свежие машины менялись бы
+    // местами от опроса к опросу. На равном ключе они разводятся по имени: у
+    // имён машин другого устойчивого порядка нет, а устойчивый нужен — список
+    // перерисовывается раз в секунду.
+    const freshness = (sessions) => sessions.reduce((max, s) => Math.max(max, recentKey(s)), 0);
+    const hosts = [...byHost.keys()].sort((a, b) =>
+      (freshness(byHost.get(b)) - freshness(byHost.get(a))) || a.localeCompare(b));
+    for (const host of hosts) {
       const sessions = byHost.get(host);
       groups.push({ desktop: null, key: `remote:${host}`, label: `Active on ${host}`, sessions, remote: true, host });
     }
