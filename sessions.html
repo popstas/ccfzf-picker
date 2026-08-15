@@ -186,7 +186,29 @@
         .status-checks {
             display: flex; align-items: center; gap: 12px; margin-left: auto;
         }
-        #settings-button { margin-left: auto; cursor: pointer; padding: 0 2px; }
+        /* Кнопки статуслайна — общим классом, а не поимённо.
+           Здесь стояла цепочка из двух правил: `margin-left: auto` у `?` и
+           `#keys-button + #settings-button { margin-left: 0 }`, гасивший такой
+           же отступ у шестерёнки. Селектор соседний, и третья кнопка, вставшая
+           между ними, перестала бы ему соответствовать — шестерёнка снова
+           отжалась бы вправо, и между ней и новой кнопкой встала бы дыра во всю
+           ширину. Теперь отступ есть только у первой кнопки ряда, и вставленной
+           между ними не нужно ничего: гасить второй отступ больше не приходится.
+           (`:first-of-type` тут не годится — он считает по типу элемента, а не
+           по классу, и первым span'ом в статуслайне идёт переключатель
+           сортировки.) */
+        .icon-button { cursor: pointer; padding: 0 2px; }
+        /* Ряд кнопок прижимает вправо первая из них. Появится кнопка левее `?` —
+           отступ переезжает на неё. */
+        #keys-button { margin-left: auto; }
+        /* Подсветка при наведении — у всех трёх. Раньше её не было у
+           шестерёнки: ряд из одной кнопки не выглядел рядом, а в ряду из трёх
+           неподсвеченная читалась бы как нерабочая. */
+        .icon-button:hover { color: #a8adb5; }
+        /* Включённый широкий режим: кнопка светлее ряда. Состояние показано
+           цветом, а не вторым глифом, — чем меньше разных знаков, тем меньше
+           шансов на квадратик-заглушку в чужом системном шрифте. */
+        #wide-button.on { color: #d4d8de; }
         .status-check {
             display: flex; align-items: center; gap: 6px;
             cursor: pointer; color: #7d838c;
@@ -485,14 +507,6 @@
         #list.blocks .block-col.drop-zone {
             flex: 0 0 96px; border: 1px dashed #3a3d42; border-radius: 8px;
         }
-        /* Кнопка `?` — перед шестерёнкой: та прижата вправо своим
-           margin-left:auto, и поставленная после неё кнопка отобрала бы у
-           шестерёнки место последней. */
-        #keys-button { margin-left: auto; cursor: pointer; padding: 0 2px; }
-        #keys-button:hover { color: #a8adb5; }
-        /* Шестерёнка перестаёт быть той, кто отжимает пару вправо: теперь это
-           делает кнопка `?`, а шестерёнка просто идёт следом. */
-        #keys-button + #settings-button { margin-left: 0; }
     </style>
 </head>
 <body>
@@ -507,11 +521,17 @@
   <!-- Наполняется из TOGGLE_CHECKS: разметка и обработчики не должны
        расходиться в именах ключей. -->
   <span class="status-checks" id="status-checks"></span>
-  <!-- Перед шестерёнкой: та прижата вправо, и поставленная после неё кнопка
-       отобрала бы у шестерёнки место последней. -->
-  <span id="keys-button" title="Keyboard shortcuts (F1)"><span class="icon">?</span></span>
+  <!-- Три кнопки одним рядом, прижатым вправо. Прижимает первая из них
+       (`.icon-button:first-of-type`), а не названная поимённо: правило,
+       написанное на конкретный id, пришлось бы переписывать при каждой новой
+       кнопке — и один раз это уже чуть не стоило дыры во всю ширину. -->
+  <span id="keys-button" class="icon-button" title="Keyboard shortcuts (F1)"><span class="icon">?</span></span>
+  <!-- Подпись и подсветку ставит paintToggles: режим переключается ещё и из
+       окна настроек (событие `ui-changed`), и покрась мы кнопку по клику, она
+       врала бы после чужой правки. -->
+  <span id="wide-button" class="icon-button"><span class="icon">⛶</span></span>
   <!-- Справа и последним: это не часть ряда галок, а выход в другое окно. -->
-  <span id="settings-button" title="Settings (Ctrl+,)"><span class="icon">⚙</span></span>
+  <span id="settings-button" class="icon-button" title="Settings (Ctrl+,)"><span class="icon">⚙</span></span>
 </div>
 <div id="actions-backdrop" aria-hidden="true">
   <div id="actions-menu" role="menu">
@@ -759,6 +779,7 @@
   const sortLabel = document.getElementById('sort-label');
   const statusChecks = document.getElementById('status-checks');
   const settingsButton = document.getElementById('settings-button');
+  const wideButton = document.getElementById('wide-button');
   const menuHint = document.getElementById('menu-hint');
   const actionsBackdrop = document.getElementById('actions-backdrop');
   const actionsTitle = document.getElementById('actions-title');
@@ -835,8 +856,20 @@
     invoke('open_settings').catch((err) => { error = String(err); render(); });
   });
 
+  // Та же остановка всплытия и по той же причине, что у шестерёнки: клик по
+  // статуслайну крутит сортировку, и переключение раскладки заодно меняло бы
+  // её. Работу делает общая с `^F` toggleFullscreen.
+  wideButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleFullscreen();
+  });
+
   function paintToggles() {
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
+    // Подпись называет то, что кнопка сделает, а не то, что показано сейчас:
+    // так читается всякая кнопка, а состояние видно подсветкой рядом.
+    wideButton.title = fullscreen ? 'Narrow view (Ctrl+F)' : 'Wide view (Ctrl+F)';
+    wideButton.classList.toggle('on', fullscreen);
     // Одна строка на всё окно места не имеет: клавиш стало столько, что
     // подсказка занимала весь статуслайн и всё равно недоговаривала —
     // встроенных действий, настроенных человеком и глобальных в ней не было
@@ -1874,6 +1907,58 @@
     render();
   }
 
+  /**
+   * Переключить раскладку окна: узкая ↔ широкая.
+   *
+   * Входов сюда два — `^F` и кнопка в статуслайне, — и код у них общий
+   * намеренно: вторая копия `set_picker_size` + `saveUi` разъехалась бы с
+   * первой, а увидеть это можно было бы только глазами, на живом окне.
+   *
+   * Размер ставит Rust: у окна нет декораций, и `window.resizeTo` на нём не
+   * работает. Отказ уходит в общую строку ошибки — промолчи мы, человек решил
+   * бы, что режим переключился, а рама осталась прежней.
+   */
+  function toggleFullscreen() {
+    fullscreen = !fullscreen;
+    invoke('set_picker_size', { fullscreen })
+      .catch((err) => { error = String(err); });
+    saveUi();
+    // Кнопку красит paintToggles, а `render` её не зовёт: на дороге от
+    // настроек (`ui-changed`) до неё доходит `regroup`, а отсюда — никто.
+    // Без этой строки кнопка отставала бы на одно нажатие, показывая прошлую
+    // раскладку до следующего ответа агрегатора.
+    paintToggles();
+    render();
+  }
+
+  /**
+   * Esc: сначала очистить строку поиска, и только на пустой — погасить окно.
+   *
+   * Режим живёт префиксом в самой строке (`/p`, `/h`, `/s`), то есть выйти из
+   * режима — это стереть текст. Гасил бы Esc окно сразу, единственным способом
+   * вернуться к обычному списку было бы стирание руками, а самая привычная
+   * клавиша отмены уводила бы из пикера вовсе.
+   *
+   * Очистка одношаговая — вместе с префиксом, а не «сначала текст, потом
+   * префикс»: выход из `/p foo` тремя нажатиями читался бы как заедание
+   * клавиши. Отсюда и обещание в справочнике: два нажатия, не больше.
+   *
+   * Зовётся та же onSearchInput, что и при правке строки руками. Без неё
+   * `active` и `selectionReset` остались бы от прежнего запроса, и выбор
+   * повис бы на строке, которой в новом списке нет.
+   *
+   * На свежепоказанном окне строка пуста всегда (`beginShow`), так что первый
+   * же Esc после открытия гасит пикер, как и раньше.
+   */
+  function onEscape() {
+    if (search.value) {
+      search.value = '';
+      onSearchInput();
+      return;
+    }
+    invoke('hide_picker');
+  }
+
   function closeMenu() {
     menuOpen = false;
     menuActions = [];
@@ -2627,11 +2712,7 @@
       // меняет раскладку, а не то, что показано, и потому живёт флагом и
       // помнится в ui.json.
       e.preventDefault();
-      fullscreen = !fullscreen;
-      invoke('set_picker_size', { fullscreen })
-        .catch((err) => { error = String(err); });
-      saveUi();
-      render();
+      toggleFullscreen();
       return;
     }
     // ^G/^U/^I и прочие действия — те же, что и в меню. preventDefault здесь
@@ -2665,7 +2746,7 @@
       moveBlock(e.key === 'ArrowRight' ? 1 : -1);
     }
     else if (e.key === 'Enter') { e.preventDefault(); choose(); }
-    else if (e.key === 'Escape') { e.preventDefault(); invoke('hide_picker'); }
+    else if (e.key === 'Escape') { e.preventDefault(); onEscape(); }
   });
 
   list.addEventListener('click', (e) => {
