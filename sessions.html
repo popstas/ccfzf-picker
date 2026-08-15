@@ -27,7 +27,7 @@
            Раскладка колонок задана человеком и держится на смысле строк:
            слева свои живые сессии, посередине чужие и под ними проекты,
            справа история и под ней снимки. Номер колонки блоку ставит
-           picker-blocks.js — по тому же признаку, по которому блок собран.
+           picker-sections.js — по тому же признаку, по которому блок собран.
 
            Верхний уровень — flex-строка из flex-колонок, а не сетка. Сеткой
            это не делается: главному списку отдана вся высота, а это значит
@@ -193,6 +193,15 @@
         .row:hover { background: #26282d; }
         .row.active { background: #31343a; }
         .row.active .cwd { color: #9aa0a8; }
+        /* Заголовок секции — строка списка, но читается заголовком: те же
+           мелкие прописные, что и у подписи группы, которой он пришёл на
+           смену. Строкой он стал затем, чтобы секцию было чем свернуть, и
+           подсветку выбора с наведением поэтому сохраняет: по ней и жмут. */
+        .row.section { padding: 9px 18px 5px; }
+        .row.section .name {
+            font-size: 10px; letter-spacing: .08em;
+            text-transform: uppercase; color: #7d838c;
+        }
         .dot {
             flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%;
             background: #6e7681;
@@ -465,12 +474,19 @@
 <script src="picker-mode.js"></script>
 <script src="project-list.js"></script>
 <script src="picker-list-sync.js"></script>
-<script src="picker-blocks.js"></script>
+<script src="picker-sections.js"></script>
 <script src="action-icons.js"></script>
 <script>
   let groups = [];
   let rows = [];
   let active = 0;
+  // Сброс выбора просит render() поставить его на первую строку, которая не
+  // заголовок секции. Заголовок — обычная строка списка, и первой строкой он
+  // бывает всегда: Enter сразу после открытия окна свернул бы верхнюю секцию
+  // вместо того, чтобы открыть верхнюю сессию. Снимает выбор с заголовка
+  // только сброс — наведённый стрелками или кликом остаётся где стоит, иначе
+  // свернуть первую секцию с клавиатуры было бы нечем.
+  let selectionReset = true;
   // Умолчание — из session-groups, а не литералом: иначе список открывался бы
   // в одном порядке, а ui.json без сохранённой сортировки нормализовался бы в
   // другой.
@@ -592,11 +608,17 @@
   // чекбоксы статуслайна. Пересчитывается из uiToggles одной функцией, чтобы
   // две формы не разъехались.
   let toggles = window.UiState.listColumns(uiToggles);
-  // Режим окна и свёрнутые блоки. Первый живёт в ui.json (отступление от
-  // умолчания запоминается, как сортировка и showAll), второе — только до
-  // перерисовки: развёрнутость истории это умолчание блока, а не настройка.
+  // Режим окна и свёрнутые секции. Оба живут в ui.json: отступление от
+  // умолчания запоминается, как сортировка и showAll. Свёрнутость — своя у
+  // каждой раскладки: умолчания у них разные и по разным причинам (см.
+  // defaultCollapsed в picker-sections.js).
   let fullscreen = false;
-  let collapsedBlocks = [];
+  let collapsed = { narrow: {}, wide: {} };
+
+  /** Имя текущей раскладки: им же именуются половинки `collapsed`. */
+  function layoutName() {
+    return fullscreen ? 'wide' : 'narrow';
+  }
   let menuOpen = false;
   let menuActions = [];
   let menuActive = 0;
@@ -707,7 +729,8 @@
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
     // Про `/s` рассказываем только там, где он работает: подсказка о режиме,
     // которого нет, обманывает ровно так же, как молчащий Enter.
-    menuHint.textContent = '^K / right click - Session menu, ^N - new session, ^A - all projects, ^F - wide view'
+    menuHint.textContent = '^K / right click - Session menu, ^N - new session, '
+      + '^P - projects, ^L - local, ^H - history, ^F - wide view'
       + (trackerIsHere() ? ', ^S - snapshots' : '');
   }
 
@@ -723,7 +746,7 @@
     // uiToggles, не toggles: тот плоский и не помнит ось statusline — запись
     // плоской картой обнулила бы её при первом же save_ui, включая тот, что
     // зовётся сменой сортировки (ниже, не только из чекбокса).
-    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen) })
+    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen, collapsed) })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -760,6 +783,10 @@
   // Строка списка — одна функция на вид строки. Обход у узкого и широкого
   // режимов разный, а разметка одна: вторая копия разошлась бы с первой на
   // первой же правке колонок.
+  //
+  // У проектов ни групп, ни сортировки: порядок задаёт агрегатор (свежие
+  // сверху), а переключатель sort — про сессии. Правые колонки (usage, window,
+  // id) пусты не по недосмотру: у каталога нет ни записи агента, ни окна.
   function projectItem(project, nowSec) {
     const index = rows.length;
     rows.push(project);
@@ -795,19 +822,6 @@
       ageHtml(project, nowSec) +
       `</div></div>`;
     return { key: `p:${project.id}`, html };
-  }
-
-  /**
-   * Строки проектов.
-   *
-   * Ни групп, ни сортировки: порядок задаёт агрегатор (свежие сверху), а
-   * переключатель sort — про сессии. Правые колонки (usage, window, id, hk)
-   * пусты не по недосмотру: у каталога нет ни записи агента, ни окна.
-   */
-  function renderProjects(query, items, nowSec) {
-    for (const project of window.PickerFilter.filterProjects(projectRows, query)) {
-      items.push(projectItem(project, nowSec));
-    }
   }
 
   // `nowSec` в сигнатуре — ради единообразия с соседями: строки снимков
@@ -846,23 +860,14 @@
     };
   }
 
-  // Строки снимков считаются здесь, а не в рисовальщике: их спрашивают обе
-  // раскладки — узкий renderSnapshots и блок `snapshots` широкого режима, — и
-  // второй расчёт разошёлся бы с первым на первой же правке отбора.
+  // Строки снимков считаются здесь, а не в рисовальщике: их спрашивает сборка
+  // секций, и второй расчёт разошёлся бы с первым на первой же правке отбора.
+  // Заголовок раскладки едет в них вместе с её сессиями и в `rows` попадает
+  // наравне со строками: у него есть своё действие — Enter поднимает раскладку
+  // целиком, — поэтому у него класс `row`, а не `group-label`.
   function snapshotItemsFor(query) {
     const open = window.PickerSnapshots.openIdsFromState(lastState);
     return window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query);
-  }
-
-  /**
-   * Строки снимков: заголовок раскладки и её сессии одним потоком.
-   *
-   * Заголовок в `rows` не кладётся вместе с сессиями по одному правилу с
-   * группами сессий — но здесь кладётся: у него есть своё действие, Enter
-   * поднимает раскладку целиком. Поэтому и класс `row`, а не `group-label`.
-   */
-  function renderSnapshots(query, items, nowSec) {
-    for (const row of snapshotItemsFor(query)) items.push(snapshotItem(row, nowSec));
   }
 
   function sessionItem(session, nowSec) {
@@ -915,28 +920,37 @@
     return { key: `s:${session.id}`, html };
   }
 
-  function renderSessions(query, items, nowSec) {
-    const visible = window.PickerFilter.filterSessions(groups, query);
-    // Одна отметка времени на всю отрисовку: иначе строки одного и того же
-    // списка считали бы возраст от чуть разных «сейчас».
-    for (const group of visible) {
-      items.push({
-        key: `g:${group.label}`,
-        html: `<div class="group-label">${escapeHtml(group.label)}</div>`,
-      });
-      for (const session of group.sessions) items.push(sessionItem(session, nowSec));
+  /**
+   * Заголовок секции — обычная строка списка.
+   *
+   * Строкой, а не подписью: свернуть секцию иначе нечем. Раньше здесь была
+   * отдельная строка-переключатель, показывавшаяся только у уже свёрнутой
+   * секции, — развернуть можно было, свернуть обратно нет. Теперь свёрнутая и
+   * развёрнутая формы — одна и та же строка, и вид строки `block-toggle`
+   * исчез вместе с этой развилкой.
+   *
+   * Значок `▾`/`▸` — часть подписи, а не отдельная колонка: у заголовка нет ни
+   * точки состояния, ни правых колонок, и ставить ради него сетку не за чем.
+   */
+  function sectionItem(section) {
+    const text = window.PickerSections.sectionHeaderText(section);
+    // Под запросом и под префиксом сворачивать нечего: секция там развёрнута
+    // назначением сверху, и переключатель молчал бы. Заголовок в этом случае —
+    // подпись, а не строка: ни `data-index`, ни класса `row`, и в `rows` он не
+    // попадает — стрелки под запросом ходят прямо по найденному.
+    if (!section.foldable) {
+      return {
+        key: `sec:${section.key}`,
+        html: `<div class="group-label">${escapeHtml(text)}</div>`,
+      };
     }
-  }
-
-  /** Строка свёрнутого блока: Enter на ней разворачивает блок. */
-  function blockToggleItem(row) {
     const index = rows.length;
-    rows.push(row);
+    rows.push({ kind: 'section', sectionKey: section.key, collapsed: section.collapsed });
+    const mark = section.collapsed ? '▸' : '▾';
     return {
-      key: `bt:${row.blockKey}`,
-      html: `<div class="row block-toggle" data-index="${index}">` +
-        `<div class="dot"></div>` +
-        `<div class="text"><div class="name">${escapeHtml(row.label)}</div></div>` +
+      key: `sec:${section.key}`,
+      html: `<div class="row section" data-index="${index}">` +
+        `<div class="text"><div class="name">${escapeHtml(`${mark} ${text}`)}</div></div>` +
         `</div>`,
     };
   }
@@ -946,8 +960,11 @@
   // память заставляла бы его пересобирать все блоки на каждое изменение
   // любого. Ключ — тот же key блока.
   let renderedBlocks = new Map();
-  // Каркас, который сейчас в DOM: ключи и подписи блоков. Сменился — контейнеры
-  // пересобираются целиком; строки внутри правит planListSync, как и раньше.
+  // Каркас, который сейчас в DOM: ключи секций и их колонки. Сменился —
+  // контейнеры пересобираются целиком; строки внутри правит planListSync, как
+  // и раньше. Подписи в отпечатке нет намеренно: счёт в заголовке меняется
+  // каждые несколько секунд, и входи он сюда, каркас пересобирался бы в такт
+  // опросу.
   //
   // `null`, а не `''`, и это не придирка: пустая строка — законный каркас,
   // ровно тот, что получается из пустого набора блоков. Отмечай она заодно и
@@ -961,9 +978,11 @@
   // с порядком блоков.
   let blockBodies = new Map();
 
-  function blockCellHtml(block) {
-    return `<div class="block" data-block="${escapeHtml(block.key)}">` +
-      `<div class="group-label">${escapeHtml(block.label)}</div>` +
+  // Подписи в каркасе нет: заголовок стал строкой и живёт внутри `.block-rows`
+  // вместе с остальными. Снаружи он не был бы строкой, а его счёт менялся бы
+  // каждые несколько секунд и пересобирал бы каркас в такт опросу.
+  function blockCellHtml(section) {
+    return `<div class="block" data-block="${escapeHtml(section.key)}">` +
       `<div class="block-rows"></div></div>`;
   }
 
@@ -982,20 +1001,45 @@
     };
   }
 
-  function itemsOfBlock(block, nowSec) {
-    if (block.collapsed) return block.rows.map(blockToggleItem);
-    if (block.kind === 'projects') return block.rows.map(r => projectItem(r, nowSec));
-    if (block.kind === 'snapshots') return block.rows.map(r => snapshotItem(r, nowSec));
-    return block.rows.map(s => (
-      s.kind === 'block-subhead' ? subheadItem(s) : sessionItem(s, nowSec)));
+  /**
+   * Элементы одной секции: её заголовок и, если она развёрнута, её строки.
+   *
+   * Свёрнутая секция отдаёт один заголовок — строки при этом остаются в
+   * `section.rows` нетронутыми, потому что по ним считается счёт в подписи.
+   */
+  function itemsOfSection(section, nowSec) {
+    const items = [sectionItem(section)];
+    if (section.collapsed) return items;
+    if (section.kind === 'projects') {
+      for (const row of section.rows) items.push(projectItem(row, nowSec));
+    } else if (section.kind === 'snapshots') {
+      for (const row of section.rows) items.push(snapshotItem(row, nowSec));
+    } else {
+      for (const row of section.rows) {
+        items.push(row.kind === 'block-subhead' ? subheadItem(row) : sessionItem(row, nowSec));
+      }
+    }
+    return items;
   }
 
-  function renderBlocks(mode, query, nowSec) {
-    const blocks = window.PickerBlocks.buildBlocks({
+  /** Секции текущего режима и раскладки. Один вызов на обе ветки render(). */
+  function sectionsFor(mode, query) {
+    return window.PickerSections.buildSections({
       groups, projects: projectRows, snapshots: snapshotItemsFor(query),
-      mode, query, trackerHere: trackerIsHere(), collapsed: collapsedBlocks,
+      mode, query, trackerHere: trackerIsHere(),
+      layout: layoutName(), collapsed: collapsed[layoutName()],
     });
-    const shape = blocks.map(b => `${b.key}|${b.label}|${b.column}`).join('\n');
+  }
+
+  /** Узкий список: секции одним потоком, сверху вниз. */
+  function renderNarrow(sections, nowSec, items) {
+    for (const section of sections) {
+      for (const item of itemsOfSection(section, nowSec)) items.push(item);
+    }
+  }
+
+  function renderWide(sections, nowSec) {
+    const shape = sections.map(s => `${s.key}|${s.column}`).join('\n');
     if (shape !== blocksShape) {
       // Колонки — flex-строка из flex-колонок, а не сетка. Сеткой это не
       // делается: колонка во всю высоту требует охватить все ряды, а
@@ -1005,9 +1049,9 @@
       //
       // Пустая колонка не рисуется вовсе: она забрала бы у соседей свою долю
       // ширины ради пустоты. Поэтому же ширину колонки задаёт `flex`, а не
-      // доля от трёх, — на `/a` и `/s` колонка остаётся одна и занимает экран.
+      // доля от трёх, — на `/p` и `/s` колонка остаётся одна и занимает экран.
       const byColumn = [1, 2, 3]
-        .map(column => blocks.filter(b => b.column === column))
+        .map(column => sections.filter(s => s.column === column))
         .filter(column => column.length);
       list.innerHTML = byColumn.map(column =>
         `<div class="block-col col-${column[0].column}">` +
@@ -1017,21 +1061,20 @@
       blockBodies = new Map(Array.from(list.querySelectorAll('.block'),
         el => [el.getAttribute('data-block'), el.querySelector('.block-rows')]));
     }
-    blocks.forEach((block, i) => {
-      // Сколько строк было до блока — считается ДО сборки его элементов, а не
+    sections.forEach((section, i) => {
+      // Сколько строк было до секции — считается ДО сборки её элементов, а не
       // вычитанием их числа: подзаголовок машины — элемент без строки, и
       // арифметика «строк ровно столько же, сколько элементов» на нём врёт.
       const before = rows.length;
-      const items = itemsOfBlock(block, nowSec);
-      // Номер блока — на строке: по нему ходят стрелки (picker-blocks.js).
+      const items = itemsOfSection(section, nowSec);
+      // Номер секции — на строке: по нему ходят стрелки (picker-sections.js).
       for (let n = before; n < rows.length; n++) rows[n].block = i;
-      const body = blockBodies.get(block.key);
+      const body = blockBodies.get(section.key);
       const plan = window.PickerListSync.planListSync(
-        renderedBlocks.get(block.key), items, body.children.length);
+        renderedBlocks.get(section.key), items, body.children.length);
       applyPlan(body, plan);
-      renderedBlocks.set(block.key, { keys: plan.keys, html: plan.html });
+      renderedBlocks.set(section.key, { keys: plan.keys, html: plan.html });
     });
-    return blocks.length;
   }
 
   /**
@@ -1067,18 +1110,17 @@
     window.ProjectList.markHotkeysTaken(projectRows, hotkeysTaken);
     const { mode, query } = shownModeAndQuery();
     list.classList.toggle('blocks', fullscreen);
+    const sections = sectionsFor(mode, query);
     if (fullscreen) {
       // Узкое состояние отрисовки сбрасывается: вернувшись, planListSync
       // сравнил бы новые строки со старым снимком чужой раскладки и правил бы
       // не те элементы. Тот же сброс в обратную сторону — ниже.
       rendered = { keys: [], html: [] };
-      renderBlocks(mode, query, nowSec);
+      renderWide(sections, nowSec);
     } else {
       blocksShape = null;
       renderedBlocks = new Map();
-      if (mode === 'projects') renderProjects(query, items, nowSec);
-      else if (mode === 'snapshots') renderSnapshots(query, items, nowSec);
-      else renderSessions(query, items, nowSec);
+      renderNarrow(sections, nowSec, items);
       syncList(items);
     }
     // Отказ показывается и поверх непустого списка: строки в нём с прошлого
@@ -1100,7 +1142,14 @@
     } else {
       message.style.display = rows.length ? 'none' : 'block';
       if (!rows.length) {
-        message.textContent = mode === 'projects'
+        // Отката в поиск по сессиям у этих трёх режимов нет намеренно: пустая
+        // история — факт, а не непонятая команда, и подмена списка молча врала
+        // бы про причину. Способность гейтит только снимки, и их откат живёт в
+        // shownModeAndQuery.
+        message.textContent = mode === 'local' ? 'No sessions on this machine.'
+          : mode === 'remote' ? 'No sessions on other machines.'
+          : mode === 'history' ? 'Nothing in history.'
+          : mode === 'projects'
           // Пустой список проектов почти всегда значит «агрегатор на той
           // стороне ещё не отдаёт projects», и молчать об этом нельзя: на вид
           // это не отличить от «ничего не нашлось». Но на холодном окне и
@@ -1122,6 +1171,11 @@
                 : 'Loading…')
             : (groups.length ? 'Nothing matches.' : 'No claude sessions yet.');
       }
+    }
+    if (selectionReset) {
+      selectionReset = false;
+      const first = rows.findIndex(r => r.kind !== 'section');
+      active = first === -1 ? 0 : first;
     }
     if (active >= rows.length) active = Math.max(0, rows.length - 1);
     paint();
@@ -1333,7 +1387,7 @@
     // В широком режиме — внутри своего блока, с упором в края; в узком — по
     // кругу, как было: там список один, и круг возвращает к его началу.
     active = fullscreen
-      ? window.PickerBlocks.moveInBlocks(rows, active, delta)
+      ? window.PickerSections.moveInBlocks(rows, active, delta)
       : (active + delta + rows.length) % rows.length;
     paint();
     scrollActiveIntoView();
@@ -1341,7 +1395,7 @@
 
   function moveBlock(delta) {
     if (!rows.length) return;
-    active = window.PickerBlocks.moveBetweenBlocks(rows, active, delta);
+    active = window.PickerSections.moveBetweenBlocks(rows, active, delta);
     paint();
     scrollActiveIntoView();
   }
@@ -1423,18 +1477,23 @@
    * где Shift+клик ничего не сделает.
    */
   /**
-   * Открыть список проектов: поставить `/a ` в начало строки поиска.
+   * Открыть список названного режима: поставить его префикс в начало строки
+   * поиска.
    *
-   * Входов два и код у них общий: `^A` внутри окна и глобальный хоткей,
-   * приезжающий событием `picker-projects` от Rust. Режим живёт префиксом в
-   * тексте, а не отдельным флагом, поэтому «открыть в режиме проектов» — это
-   * правка строки поиска, и сделать её может только страница.
+   * Режим живёт префиксом в тексте, а не отдельным флагом, поэтому «открыть в
+   * режиме X» — это правка строки поиска, и сделать её может только страница.
+   * Входов у проектов два и код у них общий: `^P` внутри окна и глобальный
+   * хоткей, приезжающий событием `picker-projects` от Rust.
    */
-  function showProjects() {
-    search.value = window.PickerMode.withProjectPrefix(search.value);
+  function showMode(mode) {
+    search.value = window.PickerMode.withPrefix(search.value, mode);
     search.focus();
     search.setSelectionRange(search.value.length, search.value.length);
     onSearchInput();
+  }
+
+  function showProjects() {
+    showMode('projects');
   }
 
   function markToggleId(row) {
@@ -1649,11 +1708,16 @@
   function choose() {
     const row = rows[active];
     if (!row) return;
-    // Строка свёрнутого блока: Enter на ней не открывает ничего, а разворачивает
-    // блок. Стоит до разбора обычных видов строк: сессии за ней нет вовсе, и
-    // любая ветка ниже приняла бы её за строку без id.
-    if (row.kind === 'block-toggle') {
-      collapsedBlocks = collapsedBlocks.filter(key => key !== row.blockKey);
+    // Заголовок секции: Enter на нём не открывает ничего, а сворачивает или
+    // разворачивает секцию. Стоит до разбора обычных видов строк: сессии за
+    // ним нет вовсе, и любая ветка ниже приняла бы его за строку без id.
+    if (row.kind === 'section') {
+      const layout = layoutName();
+      collapsed = {
+        ...collapsed,
+        [layout]: { ...collapsed[layout], [row.sectionKey]: !row.collapsed },
+      };
+      saveUi();
       render();
       return;
     }
@@ -1674,6 +1738,7 @@
 
   function onSearchInput() {
     active = 0;
+    selectionReset = true;
     render();
   }
 
@@ -1783,6 +1848,10 @@
   function openMenu() {
     const session = rows[active];
     if (!session) return;
+    // У заголовка секции нет ни id, ни имени: меню на нём вышло бы озаглавленным
+    // словом «undefined» и без единого работающего пункта. Его действие одно —
+    // Enter, он же клик.
+    if (session.kind === 'section') return;
     // Меню считается здесь же, а не спрашивается у бэкенда: всё, из чего оно
     // складывается, уже лежит в строке.
     renderMenu({
@@ -2097,46 +2166,52 @@
       openMenu();
       return;
     }
-    if (plainCtrl && e.code === 'KeyA') {
-      // Ставит `/a ` в начало строки поиска. Не режим и не переключатель:
+    if (plainCtrl && e.code === 'KeyP') {
+      // Ставит `/p ` в начало строки поиска. Не режим и не переключатель:
       // состояние живёт в самом тексте, и стирание префикса возвращает к
-      // сессиям. Цена — `^A` больше не «выделить всё» в поле поиска.
+      // сессиям. preventDefault обязателен и здесь: без него Ctrl+P в webview
+      // уйдёт в печать.
       e.preventDefault();
       showProjects();
       return;
     }
+    if (plainCtrl && e.code === 'KeyL') {
+      // `/l ` — только свои живые сессии.
+      e.preventDefault();
+      showMode('local');
+      return;
+    }
+    if (plainCtrl && e.code === 'KeyH') {
+      // `/h ` — история. Цена клавиши записана в action-hotkey.js.
+      e.preventDefault();
+      showMode('history');
+      return;
+    }
     if (plainCtrl && e.code === 'KeyS') {
-      // Ставит `/s ` в начало строки поиска — как `^A` ставит `/a `. Режим
+      // Ставит `/s ` в начало строки поиска — как `^P` ставит `/p `. Режим
       // живёт в самом тексте, стирание префикса возвращает к сессиям.
       //
       // Молча ничего не делает там, где восстановление невыполнимо: тот же
       // отказ, что и у подсказки, и лучше молчащего режима с молчащим Enter.
       e.preventDefault();
       if (!trackerIsHere()) return;
-      search.value = window.PickerMode.withSnapshotPrefix(search.value);
-      search.focus();
-      search.setSelectionRange(search.value.length, search.value.length);
-      onSearchInput();
+      showMode('snapshots');
       return;
     }
     if (plainCtrl && e.code === 'KeyF') {
-      // Режим окна — не префикс в строке поиска, в отличие от `^A` и `^S`: он
+      // Режим окна — не префикс в строке поиска, в отличие от `^P` и `^S`: он
       // меняет раскладку, а не то, что показано, и потому живёт флагом и
       // помнится в ui.json.
       e.preventDefault();
       fullscreen = !fullscreen;
-      // Свёрнутые блоки — состояние одной раскладки: вернувшись в широкий
-      // режим, человек ждёт его умолчания, а не того, что сворачивал в
-      // прошлый раз.
-      collapsedBlocks = [];
       invoke('set_picker_size', { fullscreen })
         .catch((err) => { error = String(err); });
       saveUi();
       render();
       return;
     }
-    // ^P/^U/^I — те же три действия, что и в меню. preventDefault здесь
-    // обязателен: иначе Ctrl+P в webview уйдёт в печать.
+    // ^G/^U/^I и прочие действия — те же, что и в меню. preventDefault здесь
+    // обязателен: иначе Ctrl+P в webview уйдёт в печать, а Ctrl+G — в поиск.
     if (plainCtrl) {
       const directActionId = CODE_TO_ACTION[e.code];
       if (directActionId) {
@@ -2160,7 +2235,7 @@
     // на краю запроса: внутри набранного текста они правят его, как раньше.
     // Поле поиска сфокусировано всегда, и отнять у него стрелки насовсем
     // значило бы лишить человека правки запроса — ту же цену уже заплатили за
-    // `^A`, второй раз она ни к чему.
+    // буквы ярлыков, второй раз она ни к чему.
     else if (fullscreen && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && atQueryEdge(e.key)) {
       e.preventDefault();
       moveBlock(e.key === 'ArrowRight' ? 1 : -1);
@@ -2244,6 +2319,7 @@
     closeInfo();
     search.value = '';
     active = 0;
+    selectionReset = true;
     // Показ начинается с чистого состояния: Shift, зажатый перед вызовом
     // пикера (или отпущенный, пока окно было скрыто и события до него не
     // доходили), не должен продолжать рисовать подсказку в новом сеансе.
@@ -2320,6 +2396,7 @@
       // именно его, а не эту плоскую карту, пишет saveUi().
       toggles = window.UiState.listColumns(uiToggles);
       fullscreen = ui.fullscreen;
+      collapsed = ui.collapsed;
       // Размер просим у Rust сразу: окно открывается с размером из
       // tauri.conf.json, и без этого широкий режим помнился бы, а окно
       // осталось бы узким. Просим безусловно, в обе стороны: узкий режим —
@@ -2394,6 +2471,7 @@
         uiToggles = ui.toggles;
         toggles = window.UiState.listColumns(uiToggles);
         fullscreen = ui.fullscreen;
+        collapsed = ui.collapsed;
         // Тот же размер, что и при первой загрузке, и так же безусловно:
         // дорога сюда гоночная (настройки перечитывают ui.json между ^F и
         // записью saveUi), и `if (fullscreen)` приводил бы ровно в то

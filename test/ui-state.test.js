@@ -21,6 +21,7 @@ test('пустой файл даёт вид по умолчанию', () => {
       showCost: { list: true, statusline: false },
     },
     fullscreen: false,
+    collapsed: { narrow: {}, wide: {} },
   });
   assert.deepStrictEqual(normalizeUiState(null, DEFAULTS), normalizeUiState({}, DEFAULTS));
   assert.deepStrictEqual(normalizeUiState('мусор', DEFAULTS), normalizeUiState({}, DEFAULTS));
@@ -35,6 +36,7 @@ test('сохранённый вид возвращается как был', () 
       showCost: { list: true, statusline: true },
     },
     fullscreen: true,
+    collapsed: { narrow: { past: true }, wide: {} },
   };
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
 });
@@ -141,9 +143,40 @@ test('в файл уходит ровно то, что читается обра
     showCost: { list: true, statusline: false },
   };
   const saved = uiStateToSave('name', toggles);
-  assert.deepStrictEqual(saved, { sort: 'name', toggles, fullscreen: false });
+  assert.deepStrictEqual(saved,
+    { sort: 'name', toggles, fullscreen: false, collapsed: { narrow: {}, wide: {} } });
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
   // Мусорная сортировка не должна попасть даже в файл: перезапуск молча
   // починит её, но человек, заглянувший в ui.json, увидел бы неправду.
   assert.strictEqual(uiStateToSave('нет такой', toggles).sort, 'recent');
+});
+
+test('свёрнутость читается по раскладкам и чистится от мусора', () => {
+  const ui = normalizeUiState({
+    collapsed: {
+      narrow: { past: true, projects: 'да', snapshots: false },
+      wide: { past: false },
+      garbage: { x: true },
+    },
+  }, { toggles: {} });
+  assert.deepStrictEqual(ui.collapsed, {
+    narrow: { past: true, snapshots: false },
+    wide: { past: false },
+  });
+});
+
+test('старый ui.json без collapsed читается как «человек ничего не трогал»', () => {
+  // Не поняв старый файл, первый же запуск после обновления сбросил бы
+  // человеку настройки — и выглядело бы это потерей, а не сменой формата.
+  for (const raw of [{}, { collapsed: null }, { collapsed: 'нет' }, { collapsed: [] }]) {
+    assert.deepStrictEqual(
+      normalizeUiState(raw, { toggles: {} }).collapsed,
+      { narrow: {}, wide: {} },
+    );
+  }
+});
+
+test('свёрнутость доезжает до файла четвёртым аргументом', () => {
+  const saved = uiStateToSave('cost', {}, false, { narrow: { past: true }, wide: {} });
+  assert.deepStrictEqual(saved.collapsed, { narrow: { past: true }, wide: {} });
 });

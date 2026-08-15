@@ -54,6 +54,34 @@
     };
   }
 
+  // Раскладок две, и умолчания свёрнутости у них разные и по разным причинам:
+  // в узкой история оттесняет живые сессии вниз, в широкой у неё своя колонка
+  // и она никому не мешает. Один список на обе значил бы, что свёрнутая в
+  // узком история опустошает колонку в широком.
+  const COLLAPSE_LAYOUTS = ['narrow', 'wide'];
+
+  /**
+   * Свёрнутые секции из файла: только то, что человек трогал руками.
+   *
+   * Отсутствие ключа — не «развёрнута», а «как по умолчанию»: умолчание живёт
+   * в коде (picker-sections.js), и так его можно менять, не переписывая людям
+   * ui.json. Нелогические значения выбрасываются вместе с чужими раскладками —
+   * файл правят чем угодно, а испорченный вид списка чинить изнутри нечем.
+   */
+  function normalizeCollapsed(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const out = {};
+    for (const layout of COLLAPSE_LAYOUTS) {
+      const saved = src[layout] && typeof src[layout] === 'object' ? src[layout] : {};
+      const one = {};
+      for (const key of Object.keys(saved)) {
+        if (typeof saved[key] === 'boolean') one[key] = saved[key];
+      }
+      out[layout] = one;
+    }
+    return out;
+  }
+
   function normalizeUiState(raw, defaults) {
     const base = defaults || {};
     const baseToggles = base.toggles || {};
@@ -72,6 +100,8 @@
       // значение читается как узкое окно: испорченный файл не должен
       // открывать окно, которого человек не просил.
       fullscreen: src.fullscreen === true,
+      // Четвёртое поле верхнего уровня, рядом с sort/toggles/fullscreen.
+      collapsed: normalizeCollapsed(src.collapsed),
     };
   }
 
@@ -80,8 +110,8 @@
    * пишет — файл маленький и человекочитаемый, и заглянувший в него не должен
    * гадать, что из этого пикер и правда помнит.
    */
-  function uiStateToSave(sort, toggles, fullscreen) {
-    return normalizeUiState({ sort, toggles, fullscreen }, { toggles: toggles || {} });
+  function uiStateToSave(sort, toggles, fullscreen, collapsed) {
+    return normalizeUiState({ sort, toggles, fullscreen, collapsed }, { toggles: toggles || {} });
   }
 
   /**

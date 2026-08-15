@@ -28,7 +28,7 @@ test('onlyLive оставляет одни работающие', () => {
   const payload = buildSessionsPayload(RAW, 'name', { onlyLive: true });
   assert.deepStrictEqual(idsOf(payload), ['live-1', 'live-2']);
   // Группа «Not running» при этом не остаётся пустой — её просто нет.
-  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active sessions - 2']);
+  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active sessions']);
 });
 
 test('onlyLive не отбирает у живой сессии её фонового агента', () => {
@@ -285,7 +285,7 @@ test('зелийные сессии идут своей группой, и он�
   };
   const out = buildSessionsPayload(res, 'recent');
   const labels = out.groups.map(g => g.label);
-  assert.strictEqual(labels[labels.length - 1], 'Zellij - 1');
+  assert.strictEqual(labels[labels.length - 1], 'Zellij');
   const last = out.groups[out.groups.length - 1].sessions;
   assert.strictEqual(last.length, 1);
   assert.strictEqual(last[0].kind, 'zellij');
@@ -309,7 +309,7 @@ test('отсев onlyLive и onlyWindow зелийных строк не кас�
     zellij: [{ name: 'home', created: 50 }],
   };
   const out = buildSessionsPayload(res, 'recent', { onlyWindow: true });
-  assert.ok(out.groups.some(g => g.label === 'Zellij - 1'));
+  assert.ok(out.groups.some(g => g.label === 'Zellij'));
 });
 
 // ── живые сессии делятся по машине окна ─────────────────────────────────────
@@ -334,7 +334,7 @@ const TWO_HOSTS = {
 test('живые сессии делятся на свои и чужие по машине окна', () => {
   const payload = buildSessionsPayload(TWO_HOSTS, 'name', { configHost: 'win-host' });
   assert.deepStrictEqual(payload.groups.map(g => g.label),
-    ['Active local sessions - 2', 'Active on mac-host - 1']);
+    ['Active local sessions', 'Active on mac-host']);
   // Сессия без окна — своя: чужой её делает только названная чужая машина.
   const local = payload.groups[0].sessions.map(s => s.id).sort();
   assert.deepStrictEqual(local, ['here', 'nowhere']);
@@ -345,7 +345,7 @@ test('без единого чужого окна группа остаётся 
   // На машине с одним трекером делить нечего, и «Active local sessions» без
   // пары читалось бы вопросом «а где тогда остальные».
   const payload = buildSessionsPayload(RAW, 'name', { onlyLive: true, configHost: 'win-host' });
-  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active sessions - 2']);
+  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active sessions']);
 });
 
 test('когда своих живых нет, пустая группа не заводится', () => {
@@ -354,7 +354,7 @@ test('когда своих живых нет, пустая группа не з
     sessions: TWO_HOSTS.sessions.filter(s => s.id === 'there'),
   };
   const payload = buildSessionsPayload(onlyThere, 'name', { configHost: 'win-host' });
-  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active on mac-host - 1']);
+  assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active on mac-host']);
 });
 
 // Трекеров несколько, и «чужое» перестало быть одним местом: сессия на соседнем
@@ -382,7 +382,7 @@ const MANY_HOSTS = {
 test('чужие живые сессии делятся по машинам, своя группа впереди', () => {
   const payload = buildSessionsPayload(MANY_HOSTS, 'name', { configHost: 'win-host' });
   assert.deepStrictEqual(payload.groups.map(g => g.label),
-    ['Active local sessions - 1', 'Active on alpha-host - 1', 'Active on zeta-host - 2']);
+    ['Active local sessions', 'Active on alpha-host', 'Active on zeta-host']);
   assert.deepStrictEqual(payload.groups[2].sessions.map(s => s.id), ['z1', 'z2']);
 });
 
@@ -414,4 +414,65 @@ test('мёртвые сессии делению не подлежат', () => {
   };
   const payload = buildSessionsPayload(dead, 'name', { configHost: 'win-host' });
   assert.ok(!payload.groups.some(g => /Active/.test(g.label)), payload.groups.map(g => g.label));
+});
+
+test('ключ группы стабилен, а счёт из заголовка убран', () => {
+  // Ключ — то, по чему помнится свёрнутость секции. Считайся он от заголовка
+  // со счётом, уснувшая сессия меняла бы ключ и сбрасывала бы состояние.
+  const live = (id) => ({ id, label: id, cwd: `/w/${id}`, live: true });
+  const one = groupSessions([live('a')]);
+  const two = groupSessions([live('a'), live('b')]);
+  assert.strictEqual(one[0].key, 'live');
+  assert.strictEqual(two[0].key, 'live');
+  assert.strictEqual(one[0].label, 'Active sessions');
+  assert.strictEqual(two[0].label, 'Active sessions');
+});
+
+test('ключи чужих групп, истории и зелия', () => {
+  const row = (id, extra) => ({ id, label: id, cwd: `/w/${id}`, live: true, ...extra });
+  const groups = groupSessions([
+    row('a'),
+    row('x', { windowHost: 'alpha-host' }),
+    row('old', { live: false }),
+    row('z', { kind: 'zellij' }),
+  ]);
+  const byKey = Object.fromEntries(groups.map(g => [g.key, g.label]));
+  assert.strictEqual(byKey['live'], 'Active local sessions');
+  assert.strictEqual(byKey['remote:alpha-host'], 'Active on alpha-host');
+  assert.strictEqual(byKey['past'], 'Not running');
+  assert.strictEqual(byKey['zellij'], 'Zellij');
+});
+
+test('чужие машины идут по свежести, свежая первой', () => {
+  // Машина, на которой только что говорили, должна стоять сверху. Раньше
+  // порядок был алфавитным, и `zeta-host` с полуминутной сессией уходил вниз
+  // под `alpha-host`, где последний раз говорили час назад.
+  const now = Math.floor(Date.now() / 1000);
+  const row = (id, host, ago) => ({
+    id, label: id, cwd: `/w/${id}`, live: true,
+    windowHost: host, lastActivity: now - ago,
+  });
+  const groups = groupSessions([
+    row('a', 'alpha-host', 3600),
+    row('z', 'zeta-host', 30),
+  ]);
+  assert.deepStrictEqual(
+    groups.filter(g => g.remote).map(g => g.key),
+    ['remote:zeta-host', 'remote:alpha-host'],
+  );
+});
+
+test('на равной свежести машины разводятся по имени', () => {
+  // Иначе две одинаково свежие менялись бы местами от опроса к опросу — тот же
+  // класс дрожания, из-за которого свежесть меряется минутами, а не секундами.
+  const now = Math.floor(Date.now() / 1000);
+  const row = (id, host) => ({
+    id, label: id, cwd: `/w/${id}`, live: true,
+    windowHost: host, lastActivity: now,
+  });
+  const groups = groupSessions([row('z', 'zeta-host'), row('a', 'alpha-host')]);
+  assert.deepStrictEqual(
+    groups.filter(g => g.remote).map(g => g.key),
+    ['remote:alpha-host', 'remote:zeta-host'],
+  );
 });

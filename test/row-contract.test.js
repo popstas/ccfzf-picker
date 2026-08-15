@@ -287,7 +287,7 @@ test('labelSessions вызывается на настоящем пути, а н
   assert.ok(Object.prototype.hasOwnProperty.call(row, 'label'));
   // И групповой заголовок — тоже label, но группы, а не сессии.
   const payload = buildSessionsPayload({ ok: true, sessions: [aggregatorSession()] }, 'cost');
-  assert.strictEqual(payload.groups[0].label, 'Active sessions - 1');
+  assert.strictEqual(payload.groups[0].label, 'Active sessions');
 });
 
 test('ошибочный ответ агрегатора не доходит до сборки строк', () => {
@@ -323,6 +323,29 @@ const SESSIONS_HTML = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'
  * Сигнатура сверяется целиком, как и раньше: переименованный параметр или
  * лишний аргумент обязаны уронить тест, а не молча вычитать соседнюю функцию.
  */
+const PickerSections = require('../frontend-src/picker-sections');
+
+/**
+ * Строки секции без её заголовка.
+ *
+ * Заголовок — такая же строка списка, как и остальные, и в `rows` он стоит
+ * первым; тесты ниже про содержимое секции, а не про её подпись, и сверяют
+ * строки от первой настоящей. Смещение на единицу поэтому написано прямо в
+ * ожиданиях `data-index` — их и правда сдвинул заголовок.
+ */
+function withoutHeader(items, rows) {
+  // Array.from — не украшение: массив приезжает из vm, у него другой Object, и
+  // deepStrictEqual сравнивает ещё и прототип.
+  //
+  // Отбор по виду, а не по месту: под пустым запросом заголовок секции —
+  // строка списка и занимает место в `rows`, под непустым — подпись, и в
+  // `rows` его нет вовсе. Срез по единице врал бы в одном из двух случаев.
+  return {
+    items: Array.from(items).filter(i => !String(i.key).startsWith('sec:')),
+    rows: rows.filter(r => r.kind !== 'section'),
+  };
+}
+
 function pageFunctions(...signatures) {
   return signatures.map((signature) => {
     // Экранируются только скобки: в сигнатурах других знаков регулярного
@@ -356,15 +379,17 @@ const PROJECTS_NOW = 1786045920; // минута после mtime первого
  * знает только эта машина.
  */
 function renderProjectRows(projects, query, toggles, taken) {
-  const source = pageFunctions('projectItem(project, nowSec)', 'renderProjects(query, items, nowSec)');
+  const source = pageFunctions(
+    'projectItem(project, nowSec)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)');
   const projectRows = buildProjectList({ projects });
   markHotkeysTaken(projectRows, taken || []);
   const ctx = {
-    // Ровно то, чем renderProjects пользуется снаружи себя.
-    window: { PickerFilter: { filterProjects } },
+    // Ровно то, чем itemsOfSection пользуется снаружи себя. Секция собирается
+    // настоящей buildSections — отбор и порядок строк идут той же дорогой, что
+    // и на экране, а не переписанной в тесте.
+    window: { PickerSections },
     projectRows,
     rows: [],
-    items: [],
     toggles: toggles || { showPaths: true },
     escapeHtml: Glyph.escapeHtml,
     shortPath: Glyph.shortPath,
@@ -375,8 +400,11 @@ function renderProjectRows(projects, query, toggles, taken) {
     nowSec: PROJECTS_NOW,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${source}\nrenderProjects(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
-  return { items: ctx.items, rows: ctx.rows };
+  const items = vm.runInContext(`${source}
+    var section = window.PickerSections.buildSections({
+      projects: projectRows, mode: 'projects', query, layout: 'narrow' })[0];
+    section ? itemsOfSection(section, nowSec) : [];`, ctx, { filename: 'sessions.html' });
+  return withoutHeader(items, ctx.rows);
 }
 
 test('строка проекта доезжает с настоящего пути до разметки списка', () => {
@@ -415,6 +443,8 @@ test('строка проекта доезжает с настоящего пу�
   assert.ok(!items[1].html.includes('mark'), items[1].html);
 
   // data-index — это индекс в rows, по нему меню и клик находят строку.
+  // Нумерация с нуля: под префиксом (а этот режим и есть префикс `/p`)
+  // заголовок секции — подпись, а не строка, и места в `rows` не занимает.
   for (let i = 0; i < items.length; i += 1) {
     assert.ok(items[i].html.includes(`data-index="${i}"`), items[i].html);
     assert.strictEqual(rows[i].id, AGGREGATOR_PROJECTS[i].path);
@@ -439,6 +469,8 @@ test('отбор проектов и порядок строк — тот же, 
   // после набора в строке поиска клик открывал бы соседний проект.
   const { items, rows } = renderProjectRows(AGGREGATOR_PROJECTS, 'empty');
   assert.strictEqual(items.length, 1);
+  // Под непустым запросом заголовок секции — подпись, а не строка, поэтому
+  // нумерация снова начинается с нуля.
   assert.ok(items[0].html.includes('data-index="0"'), items[0].html);
   assert.strictEqual(rows[0].id, '/home/user/projects/empty');
 
@@ -525,16 +557,16 @@ function renderSnapshotRows(snapshots, query, options) {
   // Строки снимков считает snapshotItemsFor — она вычитывается вместе с
   // рисовальщиком по той же причине, что и snapshotItem: живёт снаружи его тела.
   const source = pageFunctions(
-    'snapshotItem(row, nowSec)', 'snapshotItemsFor(query)', 'renderSnapshots(query, items, nowSec)');
+    'snapshotItem(row, nowSec)', 'snapshotItemsFor(query)',
+    'sectionItem(section)', 'itemsOfSection(section, nowSec)');
   const opts = options || {};
   const ctx = {
-    // Ровно то, чем renderSnapshots пользуется снаружи себя.
-    window: { PickerSnapshots: { buildSnapshotRows, openIdsFromState } },
+    // Ровно то, чем itemsOfSection пользуется снаружи себя.
+    window: { PickerSnapshots: { buildSnapshotRows, openIdsFromState }, PickerSections },
     snapshotRows: snapshots,
     // Открытые окна приезжают тем же ответом, что и весь список.
     lastState: { sessions: (opts.open || []).map(id => ({ id, window: { hwnd: 1 } })) },
     rows: [],
-    items: [],
     toggles: opts.toggles || { showPaths: true },
     escapeHtml: Glyph.escapeHtml,
     shortPath: Glyph.shortPath,
@@ -542,8 +574,12 @@ function renderSnapshotRows(snapshots, query, options) {
     nowSec: PROJECTS_NOW,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${source}\nrenderSnapshots(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
-  return { items: ctx.items, rows: ctx.rows };
+  const items = vm.runInContext(`${source}
+    var section = window.PickerSections.buildSections({
+      snapshots: snapshotItemsFor(query), mode: 'snapshots',
+      query, trackerHere: true, layout: 'narrow' })[0];
+    section ? itemsOfSection(section, nowSec) : [];`, ctx, { filename: 'sessions.html' });
+  return withoutHeader(items, ctx.rows);
 }
 
 test('строка снимка доезжает с настоящего пути до разметки списка', () => {
@@ -555,6 +591,7 @@ test('строка снимка доезжает с настоящего пут�
   assert.deepStrictEqual(items.map(i => i.key),
     ['g:snap:snap-1', 'snap:snap-1:aaa', 'snap:snap-1:bbb']);
   for (let i = 0; i < items.length; i += 1) {
+    // С нуля по той же причине, что и у проектов: режим снимков — префикс.
     assert.ok(items[i].html.includes(`data-index="${i}"`), items[i].html);
     assert.ok(!items[i].html.includes('undefined'), items[i].html);
   }
@@ -653,7 +690,7 @@ test('с трекером `/s` остаётся режимом снимков, �
 
 test('режим проектов и обычный поиск от трекера не зависят', () => {
   for (const here of [true, false]) {
-    assert.deepStrictEqual(shownFor('/a foo', here), { mode: 'projects', query: 'foo' });
+    assert.deepStrictEqual(shownFor('/p foo', here), { mode: 'projects', query: 'foo' });
     assert.deepStrictEqual(shownFor('foo', here), { mode: 'sessions', query: 'foo' });
   }
 });
@@ -667,9 +704,9 @@ test('обе раскладки берут режим из одного мест
     'render() обязан спрашивать режим у shownModeAndQuery');
   assert.ok(!source.includes('parseQuery'),
     'render() снова разбирает строку поиска сам — раскладки разойдутся');
-  // Блоки получают ровно то же, что и узкий список: ни своего разбора строки,
-  // ни своей развилки по трекеру.
-  assert.ok(source.includes('renderBlocks(mode, query, nowSec)'), source);
+  // Секции обе раскладки берут у одной sectionsFor: ни своего разбора строки,
+  // ни своей развилки по трекеру, ни второй сборки.
+  assert.ok(source.includes('sectionsFor(mode, query)'), source);
 });
 
 // ── Куда Enter уводит строку снимка ──────────────────────────────────────────
@@ -689,9 +726,13 @@ function chooseWith(rows, active) {
   const ctx = {
     rows,
     active,
-    // Строка свёрнутого блока не открывает ничего, а разворачивает блок: имя
-    // блока уходит из collapsedBlocks, а список рисуется заново.
-    collapsedBlocks: ['g:Not running'],
+    // Заголовок секции не открывает ничего, а переключает свёрнутость: ключ
+    // секции меняется в своей половинке `collapsed`, состояние уходит в файл,
+    // а список рисуется заново.
+    fullscreen: false,
+    collapsed: { narrow: { past: true }, wide: {} },
+    layoutName: () => 'narrow',
+    saveUi: () => calls.push(['saveUi']),
     render: () => calls.push(['render']),
     // Array.from — не украшение: массив, собранный внутри vm, приходит с
     // прототипом другого realm, и deepStrictEqual сравнивает в том числе его.
@@ -702,7 +743,9 @@ function chooseWith(rows, active) {
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nchoose();`, ctx, { filename: 'sessions.html' });
-  return { calls, collapsedBlocks: Array.from(ctx.collapsedBlocks) };
+  // JSON-круг — не украшение: объект пересобран внутри vm, у него другой
+  // Object, и deepStrictEqual сравнивает ещё и прототип.
+  return { calls, collapsed: JSON.parse(JSON.stringify(ctx.collapsed)) };
 }
 
 test('Enter на строке снимка уходит по трём разным веткам', () => {
@@ -726,17 +769,26 @@ test('Enter на строке снимка уходит по трём разны
   assert.deepStrictEqual(chooseWith(rows, 2).calls, [['restoreSnapshot', 'snap-1', ['bbb']]]);
 });
 
-// Строка свёрнутого блока приходит из buildBlocks и сессией не является вовсе:
-// у неё нет ни id, ни cwd. Не разбери её choose первой, она ушла бы в
+// Заголовок секции приходит из buildSections и сессией не является вовсе: у
+// него нет ни id, ни cwd. Не разбери его choose первым, он ушёл бы в
 // openSession — в просьбу открыть сессию с `id: undefined`, а это молчаливый
 // отказ на той стороне: ответа у публикации нет.
-test('Enter на свёрнутом блоке разворачивает его, а не открывает сессию', () => {
-  const { collapsedRow } = require('../frontend-src/picker-blocks');
-  const row = collapsedRow({ key: 'g:Not running', rows: [aggregatorSession()] });
-  assert.strictEqual(row.kind, 'block-toggle');
-  const { calls, collapsedBlocks } = chooseWith([row], 0);
-  assert.deepStrictEqual(calls, [['render']]);
-  assert.deepStrictEqual(collapsedBlocks, []);
+test('Enter на заголовке секции переключает её, а не открывает сессию', () => {
+  const { calls, collapsed } = chooseWith(
+    [{ kind: 'section', sectionKey: 'past', collapsed: true }], 0);
+  assert.deepStrictEqual(calls, [['saveUi'], ['render']]);
+  // Свёрнутая развернулась, и это запомнилось в своей половинке.
+  assert.deepStrictEqual(collapsed, { narrow: { past: false }, wide: {} });
+
+  // И обратно: одна и та же строка сворачивает и разворачивает — прежняя
+  // строка-переключатель умела только разворачивать.
+  const back = chooseWith([{ kind: 'section', sectionKey: 'past', collapsed: false }], 0);
+  assert.deepStrictEqual(back.collapsed, { narrow: { past: true }, wide: {} });
+
+  // Чужая половинка не трогается: умолчания у раскладок разные, и свёрнутая в
+  // узком списке история не должна опустошать колонку в широком.
+  const other = chooseWith([{ kind: 'section', sectionKey: 'projects', collapsed: true }], 0);
+  assert.deepStrictEqual(other.collapsed.wide, {});
 });
 
 // ── saveUi сохраняет достоверный uiToggles, а не плоскую toggles (C1, round 1 fix) ──
@@ -761,6 +813,8 @@ function saveUiWith(uiToggles, fullscreen) {
     // Режим окна — третий аргумент uiStateToSave: не передай его saveUi, и
     // широкий режим забывался бы при первом же сохранении вида списка.
     fullscreen: Boolean(fullscreen),
+    // Четвёртый — свёрнутые секции, по половинке на раскладку.
+    collapsed: { narrow: {}, wide: {} },
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nsaveUi();`, ctx, { filename: 'sessions.html' });
@@ -781,6 +835,8 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
     },
     // Узкое окно — это и есть умолчание режима.
     fullscreen: false,
+    // Свёрнутых секций человек не трогал — обе половинки пусты.
+    collapsed: { narrow: {}, wide: {} },
   });
 });
 
@@ -1242,12 +1298,13 @@ function renderSessionRows(state, query, toggles) {
   // от неё зависит класс `markable`, то есть обещание про Shift+клик, и копия
   // разошлась бы с настоящим правилом молча.
   const source = pageFunctions(
-    'markToggleId(row)', 'sessionItem(session, nowSec)', 'renderSessions(query, items, nowSec)');
+    'markToggleId(row)', 'sessionItem(session, nowSec)', 'subheadItem(row)',
+    'sectionItem(section)', 'itemsOfSection(section, nowSec)');
   const ctx = {
-    // Ровно то, чем renderSessions пользуется снаружи себя.
+    // Ровно то, чем itemsOfSection пользуется снаружи себя.
     window: {
-      PickerFilter: { filterSessions },
       SessionActions: { availableActions },
+      PickerSections,
     },
     groups: buildSessionsPayload(state, 'recent').groups,
     rows: [],
@@ -1269,8 +1326,11 @@ function renderSessionRows(state, query, toggles) {
     nowSec: NOW,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${source}\nrenderSessions(query, items, nowSec);`, ctx, { filename: 'sessions.html' });
-  return { items: ctx.items, rows: ctx.rows };
+  const items = vm.runInContext(`${source}
+    window.PickerSections.buildSections({ groups, mode: 'sessions', query, layout: 'narrow' })
+      .flatMap(function (section) { return itemsOfSection(section, nowSec); });`,
+  ctx, { filename: 'sessions.html' });
+  return { items: Array.from(items), rows: ctx.rows };
 }
 
 // Shift+клик один, а отметки две. Развилку решает markToggleId, и она же
@@ -1296,12 +1356,12 @@ test('строка зелийной сессии доезжает до отри�
   // отрисовщик спросит поле, которого у неё нет.
   const state = { ok: true, sessions: [], zellij: [{ name: 'home', created: 1785591360, agents: 0 }] };
   const payload = buildSessionsPayload(state, 'recent');
-  const group = payload.groups.find(g => g.label === 'Zellij - 1');
+  const group = payload.groups.find(g => g.label === 'Zellij');
   assert.ok(group, payload.groups.map(g => g.label));
 
   const { items } = renderSessionRows(state);
   const html = items.map(i => i.html).join('\n');
-  assert.ok(html.includes('Zellij - 1'), html);
+  assert.ok(html.includes('Zellij'), html);
   assert.ok(html.includes('home'), html);
   assert.ok(!html.includes('undefined'), html);
   // Ключ строки — с префиксом: он же уходит в picker-list-sync, и столкнись
@@ -1318,14 +1378,190 @@ test('строка зелийной сессии доезжает до отри�
 test('вид строки назван классом: сессия — session, зелийная — zellij', () => {
   const { items } = renderSessionRows({ ok: true, sessions: [aggregatorSession()] });
   assert.ok(items.length, 'сессия не доехала до отрисовки');
-  const session = items.find(i => i.html.includes('class="row '));
+  // Ищется по ключу строки, а не по `class="row `: заголовок секции — теперь
+  // тоже строка списка, и он стоит первым.
+  const session = items.find(i => i.key.startsWith('s:'));
   assert.ok(/class="row session(?:[ "])/.test(session.html), session.html);
 
   const { items: zellij } = renderSessionRows(
     { ok: true, sessions: [], zellij: [{ name: 'home', created: 1785591360, agents: 0 }] });
-  const row = zellij.find(i => i.html.includes('class="row '));
+  const row = zellij.find(i => i.key.startsWith('s:'));
   assert.ok(/class="row zellij(?:[ "])/.test(row.html), row.html);
   // И не «session» заодно: строка с двумя классами сразу поймалась бы обеими
   // проверками, а карточкой всё равно стала бы.
   assert.ok(!row.html.includes('row session'), row.html);
+});
+
+test('renderWide: номер строки в разметке совпадает с её местом в rows', () => {
+  // По индексу строки ходит клик, по номеру секции — `←/→`. Подзаголовок
+  // машины при этом элемент без строки, и арифметика «строк ровно столько же,
+  // сколько элементов» на нём врёт — ради этого случая тест и написан.
+  const SECTIONS = [
+    {
+      key: 'live', label: 'Active local sessions', kind: 'sessions',
+      count: 1, lastAt: 0, collapsed: false, foldable: true, column: 1,
+      rows: [{ id: 'a' }],
+    },
+    {
+      key: 'remote', label: 'Active remote sessions', kind: 'sessions',
+      count: 2, lastAt: 0, collapsed: false, foldable: true, column: 2,
+      rows: [
+        { kind: 'block-subhead', key: 'sub:alpha-host', label: 'alpha-host - 2' },
+        { id: 'x' }, { id: 'y' },
+      ],
+    },
+  ];
+
+  const rows = [];
+  // Заглушка строки: делает ровно то, что делают настоящие sessionItem и
+  // соседи, — кладёт строку в rows и подписывает разметку её номером.
+  const stubItem = (row) => {
+    const index = rows.length;
+    rows.push(row);
+    return { key: `k:${index}`, html: `<div class="row" data-index="${index}"></div>` };
+  };
+
+  const ctx = vm.createContext({
+    rows,
+    escapeHtml: (s) => String(s),
+    window: {
+      PickerSections,
+      // Отдаёт элементы как есть: что попало в план, то и нарисовано.
+      PickerListSync: {
+        planListSync: (_prev, items) => ({
+          mode: 'rebuild', keys: items.map(i => i.key), html: items.map(i => i.html),
+        }),
+      },
+    },
+    // Каркас считается уже собранным: тогда renderWide не трогает `list`
+    // вовсе, и двойник DOM нужен только на тела секций.
+    blocksShape: SECTIONS.map(s => `${s.key}|${s.column}`).join('\n'),
+    renderedBlocks: new Map(),
+    blockBodies: new Map(SECTIONS.map(s => [s.key, { children: [] }])),
+    applyPlan: () => {},
+    sessionItem: stubItem,
+    projectItem: stubItem,
+    snapshotItem: stubItem,
+    // Подзаголовок — подпись, а не строка: в rows он не попадает.
+    subheadItem: (row) => ({ key: `sh:${row.key}`, html: '<div class="group-label"></div>' }),
+    SECTIONS,
+  });
+
+  vm.runInContext(
+    `${pageFunctions('sectionItem(section)', 'itemsOfSection(section, nowSec)', 'renderWide(sections, nowSec)')}
+     renderWide(SECTIONS, 0);`,
+    ctx, { filename: 'sessions.html' });
+
+  // Две строки-заголовка и три сессии; подзаголовок машины строкой не стал.
+  assert.deepStrictEqual(rows.map(r => r.kind || r.id), ['section', 'a', 'section', 'x', 'y']);
+  // Номер секции стоит у каждой строки, включая заголовки.
+  assert.deepStrictEqual(rows.map(r => r.block), [0, 0, 1, 1, 1]);
+  // Заголовок знает свой ключ и своё состояние — по ним choose() переключает.
+  assert.deepStrictEqual(
+    rows.filter(r => r.kind === 'section').map(r => r.sectionKey),
+    ['live', 'remote'],
+  );
+});
+
+test('свёрнутая секция отдаёт один заголовок, но счёт в нём полный', () => {
+  const rows = [];
+  const ctx = vm.createContext({
+    rows,
+    escapeHtml: (s) => String(s),
+    window: { PickerSections },
+    sessionItem: () => { throw new Error('свёрнутая секция не должна рисовать строки'); },
+    projectItem: () => { throw new Error('свёрнутая секция не должна рисовать строки'); },
+    snapshotItem: () => { throw new Error('свёрнутая секция не должна рисовать строки'); },
+    subheadItem: () => { throw new Error('свёрнутая секция не должна рисовать строки'); },
+    SECTION: {
+      key: 'past', label: 'Not running', kind: 'sessions', count: 47,
+      lastAt: 0, collapsed: true, foldable: true,
+      rows: new Array(47).fill({ id: 'old' }),
+    },
+  });
+  const items = vm.runInContext(
+    `${pageFunctions('sectionItem(section)', 'itemsOfSection(section, nowSec)')}
+     itemsOfSection(SECTION, 0);`,
+    ctx, { filename: 'sessions.html' });
+  assert.strictEqual(items.length, 1);
+  assert.strictEqual(rows.length, 1);
+  assert.ok(items[0].html.includes('Not running - 47'), items[0].html);
+});
+
+test('стрелки уходят в навигацию только на краю запроса и без выделения', () => {
+  // Поле поиска сфокусировано всегда, и отнять у него стрелки насовсем значило
+  // бы лишить человека правки запроса.
+  const ctx = vm.createContext({});
+  const check = (value, start, end, key) => {
+    ctx.search = { value, selectionStart: start, selectionEnd: end };
+    return vm.runInContext(
+      `${pageFunctions('atQueryEdge(key)')}\natQueryEdge(${JSON.stringify(key)});`,
+      ctx, { filename: 'sessions.html' });
+  };
+  assert.strictEqual(check('picker', 0, 0, 'ArrowLeft'), true);
+  assert.strictEqual(check('picker', 6, 6, 'ArrowRight'), true);
+  assert.strictEqual(check('picker', 3, 3, 'ArrowLeft'), false);
+  assert.strictEqual(check('picker', 3, 3, 'ArrowRight'), false);
+  // Есть выделение — стрелки остаются полю: ими его снимают.
+  assert.strictEqual(check('picker', 0, 6, 'ArrowLeft'), false);
+});
+
+test('сброс выбора уводит его с заголовка секции, а наведённый — нет', () => {
+  // Заголовок секции — обычная строка списка и всегда первая. Не снимай сброс
+  // выбор с него, Enter сразу после открытия окна сворачивал бы верхнюю
+  // секцию вместо того, чтобы открыть верхнюю сессию. А наведённый стрелками
+  // выбор трогать нельзя: свернуть первую секцию с клавиатуры было бы нечем.
+  const source = pageFunctions('render()');
+  assert.ok(source.includes('selectionReset'),
+    'render() обязан спрашивать про сброс выбора');
+  assert.ok(source.includes("r.kind !== 'section'"),
+    'сброс обязан искать первую строку, которая не заголовок');
+  // Просят сброс ровно два места, и оба — начало нового отбора: новая строка
+  // поиска и новый показ окна.
+  for (const fn of ['onSearchInput()', 'beginShow()']) {
+    assert.ok(pageFunctions(fn).includes('selectionReset = true;'), fn);
+  }
+});
+
+test('меню не открывается на заголовке секции', () => {
+  // Ни id, ни имени у него нет: меню вышло бы озаглавленным «undefined» и без
+  // единого работающего пункта.
+  const source = SESSIONS_HTML.match(/\n {2}function openMenu\(\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(source, 'openMenu не найден в sessions.html — тест сторожит не то');
+  const calls = [];
+  const ctx = {
+    rows: [{ kind: 'section', sectionKey: 'live', collapsed: false }],
+    active: 0,
+    actionsFor: () => { throw new Error('меню на заголовке секции собираться не должно'); },
+    renderMenu: () => calls.push(['renderMenu']),
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${source[0]}\nopenMenu();`, ctx, { filename: 'sessions.html' });
+  assert.deepStrictEqual(calls, []);
+});
+
+test('заголовок несворачиваемой секции — подпись, а не строка списка', () => {
+  // Под запросом и под префиксом свернуть секцию нечем, и заголовок обязан
+  // перестать быть строкой: иначе Enter на нём молчал бы, а стрелки ходили бы
+  // через строку, по которой ничего не открывается.
+  const rows = [];
+  const ctx = vm.createContext({
+    rows,
+    escapeHtml: (s) => String(s),
+    window: { PickerSections },
+    SECTION: {
+      key: 'past', label: 'Not running', kind: 'sessions', count: 3,
+      lastAt: 0, collapsed: false, foldable: false, rows: [],
+    },
+  });
+  const item = vm.runInContext(
+    `${pageFunctions('sectionItem(section)')}\nsectionItem(SECTION);`,
+    ctx, { filename: 'sessions.html' });
+  assert.ok(item.html.includes('class="group-label"'), item.html);
+  assert.ok(!item.html.includes('data-index'), item.html);
+  assert.ok(!item.html.includes('▾'), item.html);
+  // Главное: в rows он не попал, то есть ни стрелке, ни клику не виден.
+  assert.strictEqual(rows.length, 0);
+  // Счёт при этом на месте — подпись остаётся подписью секции.
+  assert.ok(item.html.includes('Not running - 3'), item.html);
 });
