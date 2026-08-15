@@ -32,6 +32,7 @@ const FILES = [
   'frontend-src/picker-list-sync.js',
   'frontend-src/open-strategy.js',
   'frontend-src/session-name.js',
+  'frontend-src/terminal-presets.js',
   'frontend-src/settings-form.js',
   'frontend-src/action-icons.js',
   'frontend-src/picker-sections.js',

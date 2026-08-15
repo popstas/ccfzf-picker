@@ -16,7 +16,8 @@
   #page { flex: 1; overflow-y: auto; padding: 18px 22px; }
   .field { margin-bottom: 14px; }
   .field label { display: block; margin-bottom: 4px; }
-  .field input[type=text], .field input[type=password], .field input[type=number], .field textarea {
+  .field input[type=text], .field input[type=password], .field input[type=number],
+  .field textarea, .field select {
     width: 100%; box-sizing: border-box; padding: 5px 7px;
     background: #2a2a2e; color: inherit; border: 1px solid #444; border-radius: 4px;
     font: inherit;
@@ -41,6 +42,10 @@
 <!-- action-hotkey до settings-form: тот берёт из него список занятых окном
      комбинаций в момент загрузки. -->
 <script src="action-hotkey.js"></script>
+<!-- terminal-presets до settings-form: тот берёт из него список терминалов
+     при отрисовке поля, а не на загрузке, но порядок держим тот же, что и у
+     остальных пар, чтобы не заводить второго правила. -->
+<script src="terminal-presets.js"></script>
 <script src="settings-form.js"></script>
 <script>
 (async function () {
@@ -108,9 +113,32 @@
     }
   }
 
+  /** Система, по которой отбираются пресеты терминалов. */
+  function platform() {
+    const nav = typeof navigator === 'object' && navigator ? navigator : {};
+    return String(nav.platform || nav.userAgent || '');
+  }
+
+  /** Построчные аргументы формы — обратно в список, как их держит конфиг. */
+  function linesToArgs(value) {
+    return String(value == null ? '' : value).split('\n').map(s => s.trim()).filter(Boolean);
+  }
+
   function fieldHtml(field) {
     const value = fields[field.id];
     const hint = field.hint ? `<div class="hint">${esc(field.hint)}</div>` : '';
+    if (field.type === 'preset') {
+      // Что выбрано — считается по содержимому полей, а не хранится рядом:
+      // второй источник правды разошёлся бы с тем, что человек правит руками.
+      const current = window.TerminalPresets.matchPreset(
+        { file: fields['terminal.file'], args: linesToArgs(fields['terminal.args']) },
+        platform());
+      const options = window.TerminalPresets.presetsFor(platform())
+        .map(p => `<option value="${esc(p.id)}"${p.id === current ? ' selected' : ''}>`
+          + `${esc(p.label)}</option>`).join('');
+      return `<div class="field"><label>${esc(field.label)}</label>`
+        + `<select data-preset>${options}</select>${hint}</div>`;
+    }
     if (field.type === 'bool') {
       return `<div class="field"><label><input type="checkbox" data-field="${field.id}"${
         value ? ' checked' : ''}> ${esc(field.label)}</label>${hint}</div>`;
@@ -185,6 +213,21 @@
         ui.toggles[key] = { ...ui.toggles[key], [axis]: input.checked };
         if (!dirtyAxes.has(key)) dirtyAxes.set(key, new Set());
         dirtyAxes.get(key).add(axis);
+      });
+    }
+    for (const select of page.querySelectorAll('[data-preset]')) {
+      select.addEventListener('change', () => {
+        const preset = window.TerminalPresets.presetById(select.value);
+        // «Custom» ничего не подставляет: это не терминал, а признак того, что
+        // набранное не совпало ни с одним пресетом. Стирать им поля значило бы
+        // терять путь, который человек только что написал.
+        if (!preset) return;
+        fields['terminal.file'] = preset.file;
+        // Аргументы форма держит построчной строкой — тип `lines`.
+        fields['terminal.args'] = preset.args.join('\n');
+        // Перерисовка, а не правка двух input'ов по месту: поля рисует
+        // fieldHtml, и вторая дорога к их значению разошлась бы с первой.
+        renderPage();
       });
     }
     document.getElementById('save').addEventListener('click', save);
