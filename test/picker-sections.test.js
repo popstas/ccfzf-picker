@@ -13,7 +13,7 @@ const AUG_12 = Math.floor(new Date(2026, 7, 12, 12, 0).getTime() / 1000);
 
 const GROUPS = [
   { key: 'live', label: 'Active local sessions', sessions: [session('a'), session('b')], remote: false },
-  { key: 'past', label: 'Not running', past: true, sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
+  { key: 'past', label: 'History', past: true, sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
 ];
 
 // Список с двумя чужими машинами: секция из них выходит одна в обеих
@@ -23,7 +23,7 @@ const REMOTE_GROUPS = [
   { key: 'live', label: 'Active local sessions', sessions: [session('a')], remote: false },
   { key: 'remote:alpha-host', label: 'Active on alpha-host', sessions: [session('x')], remote: true, host: 'alpha-host' },
   { key: 'remote:zeta-host', label: 'Active on zeta-host', sessions: [session('y'), session('z')], remote: true, host: 'zeta-host' },
-  { key: 'past', label: 'Not running', past: true, sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
+  { key: 'past', label: 'History', past: true, sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
 ];
 const PROJECTS = [{ id: 'p1', kind: 'project', label: 'picker', cwd: '/home/user/picker' }];
 const SNAPSHOTS = [{ key: 'sn:1', kind: 'snapshot', label: 'work', total: 3 }];
@@ -40,7 +40,7 @@ test('каждая группа сессий становится секцией
   const blocks = buildSections(base());
   // Порядок — порядок чтения: колонка за колонкой, сверху вниз внутри колонки.
   assert.deepStrictEqual(blocks.map(b => b.label), [
-    'Active local sessions', 'Projects', 'Not running', 'Snapshots',
+    'Active local sessions', 'Projects', 'History', 'Snapshots',
   ]);
   assert.deepStrictEqual(blocks.map(b => b.kind), ['sessions', 'projects', 'sessions', 'snapshots']);
 });
@@ -53,7 +53,7 @@ test('раскладка по колонкам: свои живые слева, 
     ['Active local sessions', 1],
     ['Active remote sessions', 2],
     ['Projects', 2],
-    ['Not running', 3],
+    ['History', 3],
     ['Snapshots', 3],
   ]);
 });
@@ -65,7 +65,7 @@ test('чужие машины склеиваются в одну секцию', 
   const blocks = buildSections(base({ groups: REMOTE_GROUPS }));
   assert.deepStrictEqual(blocks.map(b => b.label), [
     'Active local sessions', 'Active remote sessions',
-    'Projects', 'Not running', 'Snapshots',
+    'Projects', 'History', 'Snapshots',
   ]);
   // Строки — все чужие подряд, в порядке групп: сортировка внутри группы уже
   // сделана, а порядок машин задан groupSessions.
@@ -101,7 +101,7 @@ test('единственная чужая машина тоже становит
   const groups = REMOTE_GROUPS.filter(g => g.host !== 'zeta-host');
   const blocks = buildSections(base({ groups, projects: [], snapshots: [] }));
   assert.deepStrictEqual(blocks.map(b => b.label),
-    ['Active local sessions', 'Active remote sessions', 'Not running']);
+    ['Active local sessions', 'Active remote sessions', 'History']);
 });
 
 test('колонку истории выбирает пометка группы, а не её заголовок', () => {
@@ -160,7 +160,7 @@ test('в широкой раскладке история приходит ра�
   // Сворачивалась она затем, чтобы «что было раньше» не оттесняло вниз «что
   // работает сейчас». Со своей колонкой во всю высоту она никого не оттесняет.
   const blocks = buildSections(base());
-  const history = blocks.find(b => b.label === 'Not running');
+  const history = blocks.find(b => b.label === 'History');
   assert.strictEqual(history.collapsed, false);
   assert.deepStrictEqual(history.rows.map(r => r.id), ['old']);
 });
@@ -200,11 +200,15 @@ test('счёт секции не считает подзаголовки, а з�
   assert.strictEqual(sectionHeaderText(remote), 'Active remote sessions - 3');
 });
 
-test('у свёрнутой истории в заголовке дата последней сессии', () => {
-  const past = { key: 'past', label: 'Not running', count: 1, lastAt: AUG_12, collapsed: true };
-  assert.strictEqual(sectionHeaderText(past), 'Not running - 1 · last Aug 12');
-  // Развёрнутая дату не показывает: строки видны, и подпись повторяла бы их.
-  assert.strictEqual(sectionHeaderText({ ...past, collapsed: false }), 'Not running - 1');
+test('в заголовке секции только подпись и счёт — даты нет ни в каком виде', () => {
+  // Свёрнутая история носила хвост `· last Aug 12`. Обещал он больше, чем
+  // стоил: в истории сотни строк за все времена, и дата самой свежей не
+  // отвечает ни на один вопрос, с которым в неё приходят. Сторож смотрит на
+  // свёрнутую секцию, у которой поле `lastAt` ещё и передано, — так ловится
+  // и возврат подписи, и остаток старого поля.
+  const past = { key: 'past', label: 'History', count: 1, lastAt: AUG_12, collapsed: true };
+  assert.strictEqual(sectionHeaderText(past), 'History - 1');
+  assert.strictEqual(sectionHeaderText({ ...past, collapsed: false }), 'History - 1');
 });
 
 test('умолчание свёрнутости зависит от раскладки', () => {

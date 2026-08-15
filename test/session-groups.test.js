@@ -27,7 +27,7 @@ test('без onlyLive в списке остаются все сессии', () 
 test('onlyLive оставляет одни работающие', () => {
   const payload = buildSessionsPayload(RAW, 'name', { onlyLive: true });
   assert.deepStrictEqual(idsOf(payload), ['live-1', 'live-2']);
-  // Группа «Not running» при этом не остаётся пустой — её просто нет.
+  // Группа «History» при этом не остаётся пустой — её просто нет.
   assert.deepStrictEqual(payload.groups.map(g => g.label), ['Active sessions']);
 });
 
@@ -274,6 +274,25 @@ test('onlyWindow считает окном и окно на соседней м�
   );
 });
 
+test('onlyWindow историю не трогает: окна у неё не бывает по определению', () => {
+  // Отсев спрашивает «покажи то, что сейчас на экране», и живой сессии без
+  // окна отвечает честно. История же вычищалась им целиком — не потому, что
+  // человек её не просил, а потому, что окна у закрытой сессии нет и быть не
+  // может. Выглядело это пропажей: с `show all` галка «only windowed»
+  // опустошала историю до заголовка, и причину было не прочитать нигде.
+  const res = {
+    ok: true,
+    sessions: [
+      { id: 'live-win', title: 'С окном', live: true,
+        window: { title: 'С окном', host: 'desktop-box', pid: 42, canFocus: true, lastSeen: 1 } },
+      { id: 'live-bare', title: 'Без окна', live: true },
+      { id: 'past-1', title: 'Закрытая', live: false },
+    ],
+  };
+  const out = buildSessionsPayload(res, 'name', { onlyWindow: true });
+  assert.deepStrictEqual(idsOf(out), ['live-win', 'past-1']);
+});
+
 test('зелийные сессии идут своей группой, и она последняя', () => {
   const res = {
     ok: true,
@@ -439,7 +458,7 @@ test('ключи чужих групп, истории и зелия', () => {
   const byKey = Object.fromEntries(groups.map(g => [g.key, g.label]));
   assert.strictEqual(byKey['live'], 'Active local sessions');
   assert.strictEqual(byKey['remote:alpha-host'], 'Active on alpha-host');
-  assert.strictEqual(byKey['past'], 'Not running');
+  assert.strictEqual(byKey['past'], 'History');
   assert.strictEqual(byKey['zellij'], 'Zellij');
 });
 

@@ -73,7 +73,7 @@ test('рабочий стол попадает в узкий список, то�
   const state = ui({ order: { narrow: ['past:2', 'live'] } });
   const row = panelRows(state, 'narrow').find(r => r.key === 'past:2');
   assert.ok(row, 'рабочего стола из узкого порядка нет в списке');
-  assert.strictEqual(row.label, 'Not running: desktop 2');
+  assert.strictEqual(row.label, 'History: desktop 2');
   // Узкий порядок — плоский список ключей, широкий — список колонок; разбор
   // half'ов один, и на плоском он не должен спотыкаться.
   assert.ok(!panelRows(state, 'wide').some(r => r.key === 'past:2'));
@@ -98,8 +98,8 @@ test('умолчание свёрнутости совпадает с тем, п
   const groups = [
     { key: 'live', label: 'Active sessions', sessions: [], remote: false },
     { key: 'remote:alpha-host', label: 'Active on alpha-host', sessions: [], remote: true, host: 'alpha-host' },
-    { key: 'past', label: 'Not running', past: true, sessions: [] },
-    { key: 'past:2', label: 'Not running - desktop 2', past: true, sessions: [] },
+    { key: 'past', label: 'History', past: true, sessions: [] },
+    { key: 'past:2', label: 'History - desktop 2', past: true, sessions: [] },
     { key: 'zellij', label: 'Zellij', sessions: [] },
   ];
   for (const layout of ['narrow', 'wide']) {
@@ -156,7 +156,7 @@ test('незнакомые ключи из файла показаны под п
   const rows = panelRows(state);
   const desktop = rows.find(r => r.key === 'past:2');
   assert.ok(desktop, rows.map(r => r.key).join(' '));
-  assert.strictEqual(desktop.label, 'Not running: desktop 2');
+  assert.strictEqual(desktop.label, 'History: desktop 2');
   // И идут они после известных, а не вперемешку.
   assert.ok(rows.findIndex(r => r.key === 'past:2') >= KNOWN_PANELS.length);
 });

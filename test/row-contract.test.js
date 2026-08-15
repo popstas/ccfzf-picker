@@ -1543,7 +1543,7 @@ test('свёрнутая секция отдаёт один заголовок, 
     snapshotItem: () => { throw new Error('свёрнутая секция не должна рисовать строки'); },
     subheadItem: () => { throw new Error('свёрнутая секция не должна рисовать строки'); },
     SECTION: {
-      key: 'past', label: 'Not running', kind: 'sessions', count: 47,
+      key: 'past', label: 'History', kind: 'sessions', count: 47,
       lastAt: 0, collapsed: true, foldable: true,
       rows: new Array(47).fill({ id: 'old' }),
     },
@@ -1554,7 +1554,7 @@ test('свёрнутая секция отдаёт один заголовок, 
     ctx, { filename: 'sessions.html' });
   assert.strictEqual(items.length, 1);
   assert.strictEqual(rows.length, 1);
-  assert.ok(items[0].html.includes('Not running - 47'), items[0].html);
+  assert.ok(items[0].html.includes('History - 47'), items[0].html);
 });
 
 test('стрелки уходят в навигацию только на краю запроса и без выделения', () => {
@@ -1619,7 +1619,7 @@ test('заголовок несворачиваемой секции — под�
     escapeHtml: (s) => String(s),
     window: { PickerSections },
     SECTION: {
-      key: 'past', label: 'Not running', kind: 'sessions', count: 3,
+      key: 'past', label: 'History', kind: 'sessions', count: 3,
       lastAt: 0, collapsed: false, foldable: false, rows: [],
     },
   });
@@ -1632,5 +1632,5 @@ test('заголовок несворачиваемой секции — под�
   // Главное: в rows он не попал, то есть ни стрелке, ни клику не виден.
   assert.strictEqual(rows.length, 0);
   // Счёт при этом на месте — подпись остаётся подписью секции.
-  assert.ok(item.html.includes('Not running - 3'), item.html);
+  assert.ok(item.html.includes('History - 3'), item.html);
 });

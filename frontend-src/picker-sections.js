@@ -23,31 +23,21 @@
   const COLUMN_NEAR = 2;
   const COLUMN_PAST = 3;
 
-  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
   /**
-   * Заголовок секции: подпись, счёт и — у свёрнутой истории — дата последней
-   * сессии.
+   * Заголовок секции: подпись и счёт.
    *
    * Одна функция на обе раскладки. Счёт приписывается здесь, а не в
    * `groupSessions`: там он попадал бы в `label`, а по `label` считался ключ —
    * и уснувшая сессия сбрасывала бы свёрнутость секции.
    *
-   * Месяц из своей таблицы, а не toLocaleDateString: у того вид зависит от
-   * локали системы, а всё видимое человеку у нас английское. Дата местная
-   * (getMonth/getDate), потому что «когда я в это заходил» человек меряет
-   * своими часами.
+   * Даты последней сессии в заголовке больше нет. Свёрнутая история носила
+   * хвост `· last Aug 12`, и обещал он больше, чем стоил: у истории сотни
+   * строк за все времена, и дата самой свежей из них не отвечает ни на один
+   * вопрос, с которым в историю приходят, — а место в узком заголовке
+   * занимала. Сама `lastActivity` никуда не делась, она видна у каждой строки.
    */
   function sectionHeaderText(section) {
-    const head = `${section.label} - ${section.count}`;
-    if (!section.collapsed || !section.lastAt) return head;
-    const d = new Date(section.lastAt * 1000);
-    return `${head} · last ${MONTHS[d.getMonth()]} ${d.getDate()}`;
-  }
-
-  function lastActivityOf(sessions) {
-    return sessions.reduce((max, s) => Math.max(max, (s || {}).lastActivity || 0), 0);
+    return `${section.label} - ${section.count}`;
   }
 
   // Заголовок склеенной секции: тот же, каким чужие сессии назывались до
@@ -156,7 +146,7 @@
           if (!remote) {
             remote = {
               key: REMOTE_KEY, label: REMOTE_LABEL, kind: 'sessions',
-              rows: [], count: 0, lastAt: 0, past: false,
+              rows: [], count: 0, past: false,
               ...(wide ? { column: COLUMN_NEAR } : {}),
             };
             sections.push(remote);
@@ -168,7 +158,6 @@
         sections.push({
           key: group.key, label: group.label, kind: 'sessions',
           rows: group.sessions, count: group.sessions.length,
-          lastAt: lastActivityOf(group.sessions),
           past: group.past === true,
           ...(wide ? { column: group.past ? COLUMN_PAST : COLUMN_LIVE } : {}),
         });
@@ -210,7 +199,7 @@
         // ней невозможен. Тот же приём, что у подзаголовка машины внутри
         // склеенного блока, — и по той же причине она не входит в `count`.
         rows: [{ kind: 'block-subhead', key: 'live:none', label: 'No local sessions.' }],
-        count: 0, lastAt: 0, past: false,
+        count: 0, past: false,
         ...(wide ? { column: COLUMN_LIVE } : {}),
       });
     }
@@ -222,7 +211,7 @@
       if (rows.length) {
         sections.push({
           key: 'projects', label: 'Projects', kind: 'projects',
-          rows, count: rows.length, lastAt: 0, past: false,
+          rows, count: rows.length, past: false,
           ...(wide ? { column: COLUMN_NEAR } : {}),
         });
       }
@@ -235,7 +224,7 @@
       if (rows.length) {
         sections.push({
           key: 'snapshots', label: 'Snapshots', kind: 'snapshots',
-          rows, count: rows.length, lastAt: 0, past: false,
+          rows, count: rows.length, past: false,
           ...(wide ? { column: COLUMN_PAST } : {}),
         });
       }
