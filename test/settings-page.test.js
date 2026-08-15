@@ -175,3 +175,15 @@ test('сохранение без правок ничего не меняет', 
   assert.deepStrictEqual(ui, onDisk);
   assert.strictEqual(dirtyAxes.size, 0);
 });
+
+test('вкладка UI возвращает в файл и режим окна, и свёрнутость секций', () => {
+  // Ни тем, ни другим окно настроек не распоряжается — ими распоряжается
+  // пикер (`^F` и Enter на заголовке секции). Не верни их uiStateToSave
+  // четвёртым и третьим аргументом, и первое же сохранение вкладки UI забыло
+  // бы и раскладку, и все свёрнутые секции.
+  const source = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  const call = source.match(/uiStateToSave\(([^)]*)\)/);
+  assert.ok(call, 'вызов uiStateToSave не найден в settings.html — тест сторожит не то');
+  const args = call[1].split(',').map(s => s.trim());
+  assert.deepStrictEqual(args, ['fresh.sort', 'fresh.toggles', 'fresh.fullscreen', 'fresh.collapsed']);
+});
