@@ -255,6 +255,9 @@
            порядок — иначе наведение на выбранную строку гасило бы выбор. */
         .row:hover { background: #26282d; }
         .row.active { background: #31343a; }
+        .row.stale { opacity: var(--stale-opacity, 0.5); }
+        .row.stale:hover,
+        .row.stale.active { opacity: 1; }
         .row.active .cwd { color: #9aa0a8; }
         /* Заголовок секции — строка списка, но читается заголовком: те же
            мелкие прописные, что и у подписи группы, которой он пришёл на
@@ -619,6 +622,7 @@
 <script src="key-reference.js"></script>
 <script src="session-actions.js"></script>
 <script src="config-shape.js"></script>
+<script src="stale-items.js"></script>
 <script src="picker-filter.js"></script>
 <script src="picker-snapshots.js"></script>
 <script src="picker-mode.js"></script>
@@ -849,6 +853,11 @@
 
   const search = document.getElementById('search');
   const list = document.getElementById('list');
+
+  /** Передать одно нормализованное значение всем stale-строкам через CSS. */
+  function applyStaleOpacity() {
+    list.style.setProperty('--stale-opacity', String(CONFIG.stale.opacity));
+  }
   const message = document.getElementById('message');
   const statusline = document.getElementById('statusline');
   const sortControl = document.getElementById('sort-control');
@@ -1008,6 +1017,7 @@
   // сверху), а переключатель sort — про сессии. Правые колонки (usage, window,
   // id) пусты не по недосмотру: у каталога нет ни записи агента, ни окна.
   function projectItem(project, nowSec) {
+    const stale = window.StaleItems.staleClass(project, nowSec, CONFIG.stale, 'project');
     const index = rows.length;
     rows.push(project);
     // Зелёная точка у проекта, где кто-то работает прямо сейчас: тот же
@@ -1019,7 +1029,7 @@
     // Подсказка — через тот же titleAttr, что у сессий: иначе в ней висел бы
     // полный путь, а строкой ниже, в теле строки, — тот же путь через
     // shortPath, и одна строка показывала бы каталог двумя разными видами.
-    const html = `<div class="row project" data-index="${index}"${titleAttr(project)}>` +
+    const html = `<div class="row project${stale}" data-index="${index}"${titleAttr(project)}>` +
       `<div class="${dotClass}"></div>` +
       `<div class="text"><div class="name">` +
       (project.mark ? '<span class="mark">★</span> ' : '') +
@@ -1134,7 +1144,8 @@
     // выросла бы на строку — поэтому её вид назван своим классом `zellij`, а
     // не `session`.
     const rowKind = session.kind === 'zellij' ? 'zellij' : 'session';
-    const html = `<div class="row ${rowKind}${session.live ? '' : ' closed'}${markable ? ' markable' : ''}" data-index="${index}"${titleAttr(session)}>` +
+    const stale = window.StaleItems.staleClass(session, nowSec, CONFIG.stale, rowKind);
+    const html = `<div class="row ${rowKind}${session.live ? '' : ' closed'}${markable ? ' markable' : ''}${stale}" data-index="${index}"${titleAttr(session)}>` +
       statusDotHtml(session) +
       `<div class="text"><div class="name">${escapeHtml(session.label)}` +
       `${prBadgeHtml(session)}` +
@@ -3112,6 +3123,7 @@
     } catch (e) {
       error = String(e);
     }
+    applyStaleOpacity();
 
     // Вид списка — до первой отрисовки: иначе первый показ рисуется чужой
     // сортировкой и перекладывается на глазах.
@@ -3238,6 +3250,7 @@
       } catch (e) {
         error = String(e);
       }
+      applyStaleOpacity();
       // regroup() иконок не читает — их читает только renderMenu; список не
       // обязан ждать похода за иконками, чтобы перерисоваться.
       regroup();
