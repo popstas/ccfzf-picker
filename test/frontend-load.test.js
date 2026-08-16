@@ -44,6 +44,14 @@ test('порядок тегов таков, что каждый модуль н�
     1,
   );
   assert.strictEqual(ctx.ConfigShape.normalizeConfig(null).onlyLive, true);
+  assert.strictEqual(
+    ctx.StaleItems.isStale(
+      { lastActivity: 1 }, 7201,
+      { enabled: true, sessionHours: 2, projectDays: 7, opacity: 0.5 },
+      'session',
+    ),
+    true,
+  );
   // С непустым actions — иначе разбор конфига до ActionHotkey не доходит вовсе
   // и порядок этой пары тегов остался бы непроверенным.
   assert.strictEqual(

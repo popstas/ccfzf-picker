@@ -20,6 +20,7 @@ const { buildSessionInfoRows } = require('../frontend-src/session-info');
 const { filterSessions, filterProjects } = require('../frontend-src/picker-filter');
 const { buildProjectList, markHotkeysTaken } = require('../frontend-src/project-list');
 const { availableActions } = require('../frontend-src/session-actions');
+const StaleItems = require('../frontend-src/stale-items');
 
 // Форма — с живого ответа `ccfzf --state` (см. scripts/check-state.js), поля
 // в том же порядке и с теми же именами.
@@ -378,7 +379,7 @@ const PROJECTS_NOW = 1786045920; // минута после mtime первого
  * внутри buildProjectList — она про ответ агрегатора, а занятость клавиши
  * знает только эта машина.
  */
-function renderProjectRows(projects, query, toggles, taken) {
+function renderProjectRows(projects, query, toggles, taken, stale) {
   const source = pageFunctions(
     'projectItem(project, nowSec)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)');
   const projectRows = buildProjectList({ projects });
@@ -387,7 +388,10 @@ function renderProjectRows(projects, query, toggles, taken) {
     // Ровно то, чем itemsOfSection пользуется снаружи себя. Секция собирается
     // настоящей buildSections — отбор и порядок строк идут той же дорогой, что
     // и на экране, а не переписанной в тесте.
-    window: { PickerSections },
+    window: { PickerSections, StaleItems },
+    CONFIG: {
+      stale: stale || { enabled: false, sessionHours: 2, projectDays: 7, opacity: 0.5 },
+    },
     projectRows,
     rows: [],
     toggles: toggles || { showPaths: true },
@@ -1421,7 +1425,7 @@ test('при открытом меню правый клик ничего не �
  * опустевшая колонка видна только здесь, где строку рисуют настоящей
  * renderSessions из sessions.html, а не вызовом отрисовщика по одному.
  */
-function renderSessionRows(state, query, toggles) {
+function renderSessionRows(state, query, toggles, stale) {
   // markToggleId вычитывается из той же страницы, а не подставляется заглушкой:
   // от неё зависит класс `markable`, то есть обещание про Shift+клик, и копия
   // разошлась бы с настоящим правилом молча.
@@ -1433,6 +1437,10 @@ function renderSessionRows(state, query, toggles) {
     window: {
       SessionActions: { availableActions },
       PickerSections,
+      StaleItems,
+    },
+    CONFIG: {
+      stale: stale || { enabled: false, sessionHours: 2, projectDays: 7, opacity: 0.5 },
     },
     groups: buildSessionsPayload(state, 'recent').groups,
     rows: [],
@@ -1455,7 +1463,7 @@ function renderSessionRows(state, query, toggles) {
   };
   vm.createContext(ctx);
   const items = vm.runInContext(`${source}
-    window.PickerSections.buildSections({ groups, mode: 'sessions', query, layout: 'narrow' })
+    window.PickerSections.buildSections({ groups, mode: 'sessions', query, layout: 'narrow', collapsed: { past: false } })
       .flatMap(function (section) { return itemsOfSection(section, nowSec); });`,
   ctx, { filename: 'sessions.html' });
   return { items: Array.from(items), rows: ctx.rows };
@@ -1701,4 +1709,50 @@ test('заголовок несворачиваемой секции — под�
   assert.strictEqual(rows.length, 0);
   // Счёт при этом на месте — подпись остаётся подписью секции.
   assert.ok(item.html.includes('History - 3'), item.html);
+});
+
+test('старые обычные сессии и проекты получают stale, а Zellij нет', () => {
+  const stale = { enabled: true, sessionHours: 2, projectDays: 7, opacity: 0.4 };
+  const { items: sessions } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({
+      live: false,
+      window: null,
+      // buildSessionList берёт lastActivity из agent.updated, не из mtime.
+      agent: { updated: NOW - 7200 },
+    })],
+  }, '', undefined, stale);
+  const session = sessions.find(item => item.key.startsWith('s:'));
+  assert.match(session.html, /class="row session[^"]*\bstale\b/);
+
+  const { items: projects } = renderProjectRows([{
+    path: '/p/old', name: 'old', sessions: 1, live: 0,
+    mtime: PROJECTS_NOW - 7 * 86400,
+  }], '', undefined, undefined, stale);
+  assert.match(projects[0].html, /class="row project stale"/);
+
+  const { items: zellij } = renderSessionRows({
+    ok: true,
+    sessions: [],
+    zellij: [{ name: 'home', created: NOW - 999999, agents: 0 }],
+  }, '', undefined, stale);
+  assert.ok(!zellij.find(item => item.key.startsWith('s:')).html.includes(' stale'));
+});
+
+test('stale CSS затемняет, но hover и active возвращают opacity 1', () => {
+  assert.match(SESSIONS_HTML, /\.row\.stale\s*\{[^}]*var\(--stale-opacity,\s*0\.5\)/);
+  assert.match(SESSIONS_HTML, /\.row\.stale:hover[\s\S]*?opacity:\s*1/);
+  assert.match(SESSIONS_HTML, /\.row\.stale\.active[\s\S]*?opacity:\s*1/);
+});
+
+test('настроенная stale opacity записывается в CSS property', () => {
+  const source = pageFunctions('applyStaleOpacity()');
+  const calls = [];
+  const ctx = {
+    CONFIG: { stale: { opacity: 0.4 } },
+    list: { style: { setProperty: (key, value) => calls.push([key, value]) } },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${source}\napplyStaleOpacity();`, ctx, { filename: 'sessions.html' });
+  assert.deepStrictEqual(calls, [['--stale-opacity', '0.4']]);
 });

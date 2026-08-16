@@ -70,6 +70,14 @@
         { id: 'backgroundRefresh', label: 'Keep polling while the window is closed', type: 'bool',
           default: true,
           hint: 'Keeps the aggregator dump fresh: the openHASP panel lives off it.' },
+        { id: 'stale.enabled', label: 'Dim stale sessions and projects',
+          type: 'bool', default: false },
+        { id: 'stale.sessionHours', label: 'Sessions become stale after, hours',
+          type: 'number', default: 2 },
+        { id: 'stale.projectDays', label: 'Projects become stale after, days',
+          type: 'number', default: 7 },
+        { id: 'stale.opacity', label: 'Stale opacity', type: 'number', default: 0.5,
+          hint: 'From 0.1 (very dim) to 1.0 (fully opaque).' },
         { id: 'caps.reptyr', label: 'Allow moving the process (reptyr)', type: 'bool' },
         { id: 'caps.takeover', label: 'Allow taking a session over', type: 'bool' },
       ],
@@ -159,7 +167,7 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
    */
   function emptyFor(field) {
     if (field.type === 'bool') return Boolean(field.default);
-    if (field.type === 'number') return '';
+    if (field.type === 'number') return field.default === undefined ? '' : field.default;
     // Ноль, а не пустая строка: у выбора нет состояния «не заполнено» — первый
     // пункт списка и есть умолчание, и отсутствующий ключ обязан показать
     // именно его.
@@ -174,7 +182,12 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
     // «оставить прежний» — так и написано в подсказке.
     if (field.type === 'password') return '';
     if (value === undefined || value === null) return emptyFor(field);
-    if (field.type === 'bool') return Boolean(value);
+    if (field.type === 'bool') {
+      if (field.id === 'stale.enabled') {
+        return typeof value === 'boolean' ? value : emptyFor(field);
+      }
+      return Boolean(value);
+    }
     if (field.type === 'lines') return (Array.isArray(value) ? value : []).join('\n');
     // Число, а не строка: значение из конфига сравнивается с тем, что отдаст
     // `<select>` (а тот отдаёт строку всегда), и оба конца приводит `fromField`
@@ -288,6 +301,21 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
     if (projects && hotkey && projects.toLowerCase() === hotkey.toLowerCase()) {
       problems.push(`${projects} is set for both hotkeys — only one of them will work`);
     }
+    const validNumber = (id, min, max, message) => {
+      // Частичные вызовы validate в тестах старых полей не обязаны знать про
+      // новое поле; настоящая форма всегда передаёт все четыре stale-ключа.
+      if (fields[id] === undefined) return;
+      const raw = fields[id];
+      const numeric = typeof raw === 'number'
+        || (typeof raw === 'string' && raw.trim());
+      const value = numeric ? Number(raw) : NaN;
+      if (!Number.isFinite(value) || value < min || value > max) {
+        problems.push(`${id} ${message}`);
+      }
+    };
+    validNumber('stale.sessionHours', Number.MIN_VALUE, Infinity, 'must be greater than 0');
+    validNumber('stale.projectDays', Number.MIN_VALUE, Infinity, 'must be greater than 0');
+    validNumber('stale.opacity', 0.1, 1, 'must be between 0.1 and 1.0');
     return problems;
   }
 
