@@ -105,7 +105,7 @@ claudeWt: {
 Карта у записи проекта, ключ — имя терминала:
 
 ```js
-projects: [{ name: 'site', cwd: 'D:\\projects\\site', hotkey: 'Ctrl+F11',
+projects: [{ name: 'site', cwd: 'X:\\projects\\site', hotkey: 'Ctrl+F11',
              profiles: { wt: 'Site', iterm2: 'Site' } }]
 ```
 
