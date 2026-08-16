@@ -1,4 +1,4 @@
-// Loaded twice: as a <script> in sessions.html and as a module in the tests.
+// Загружается дважды: как <script> в sessions.html и как модуль в тестах.
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.StaleItems = factory();
@@ -13,7 +13,9 @@
    */
   function isStale(row, nowSec, stale, kind) {
     if (!stale || stale.enabled !== true || !SECONDS[kind]) return false;
-    const lastActivity = Number(row && row.lastActivity);
+    const rawLastActivity = row && row.lastActivity;
+    if (typeof rawLastActivity !== 'number' || !Number.isFinite(rawLastActivity)) return false;
+    const lastActivity = rawLastActivity;
     const now = Number(nowSec);
     const amount = Number(kind === 'project' ? stale.projectDays : stale.sessionHours);
     const threshold = amount * SECONDS[kind];

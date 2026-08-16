@@ -44,3 +44,9 @@ test('выключенный режим и неизвестный возраст
   assert.strictEqual(isStale({ lastActivity: NOW - 999999 }, NOW, STALE, 'zellij'), false);
   assert.strictEqual(staleClass({}, NOW, STALE, 'session'), '');
 });
+
+test('логический и строковый lastActivity не считаются возрастом', () => {
+  for (const lastActivity of [true, false, String(NOW - 7200)]) {
+    assert.strictEqual(isStale({ lastActivity }, NOW, STALE, 'session'), false);
+  }
+});
