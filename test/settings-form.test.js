@@ -202,3 +202,50 @@ test('возврат к встроенному размеру записывае
   const patch = fieldsToPatch({ ...fields, 'pickerSize.narrow.height': '0' }, config);
   assert.deepStrictEqual(patch, { pickerSize: { narrow: { height: 0 } } });
 });
+
+// ── Затемнение старых строк ────────────────────────────────────────────────
+
+test('stale-настройки находятся в General и показывают defaults', () => {
+  const ids = PAGES.find(page => page.id === 'general').fields.map(field => field.id);
+  assert.ok(ids.includes('stale.enabled'), ids);
+  assert.ok(ids.includes('stale.sessionHours'), ids);
+  assert.ok(ids.includes('stale.projectDays'), ids);
+  assert.ok(ids.includes('stale.opacity'), ids);
+
+  const fields = configToFields({});
+  assert.strictEqual(fields['stale.enabled'], false);
+  assert.strictEqual(fields['stale.sessionHours'], 2);
+  assert.strictEqual(fields['stale.projectDays'], 7);
+  assert.strictEqual(fields['stale.opacity'], 0.5);
+  assert.deepStrictEqual(fieldsToPatch(fields, {}), {});
+});
+
+test('stale-настройка уезжает точечным числовым патчем', () => {
+  const original = { stale: { enabled: true, sessionHours: 2, projectDays: 7, opacity: 0.5 } };
+  const fields = configToFields(original);
+  assert.deepStrictEqual(
+    fieldsToPatch({ ...fields, 'stale.opacity': '0.7' }, original),
+    { stale: { opacity: 0.7 } },
+  );
+  assert.deepStrictEqual(
+    fieldsToPatch({ ...fields, 'stale.projectDays': '14' }, original),
+    { stale: { projectDays: 14 } },
+  );
+});
+
+test('форма отвергает плохие stale-пороги и opacity', () => {
+  const valid = { ...configToFields({}), sshHost: 'host' };
+  assert.deepStrictEqual(validate(valid), []);
+
+  for (const [id, value] of [
+    ['stale.sessionHours', ''],
+    ['stale.sessionHours', 0],
+    ['stale.projectDays', -1],
+    ['stale.opacity', 0.09],
+    ['stale.opacity', 1.01],
+    ['stale.opacity', 'none'],
+  ]) {
+    const problems = validate({ ...valid, [id]: value });
+    assert.ok(problems.some(problem => problem.includes(id)), `${id}=${value}: ${problems}`);
+  }
+});
