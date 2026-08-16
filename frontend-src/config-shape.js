@@ -184,11 +184,16 @@
    */
   function normalizeStale(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
+    const asNumber = (value) => {
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string' && value.trim()) return Number(value);
+      return NaN;
+    };
     const positive = (value, fallback) => {
-      const number = Number(value);
+      const number = asNumber(value);
       return Number.isFinite(number) && number > 0 ? number : fallback;
     };
-    const opacity = Number(src.opacity);
+    const opacity = asNumber(src.opacity);
     return {
       enabled: typeof src.enabled === 'boolean' ? src.enabled : DEFAULTS.stale.enabled,
       sessionHours: positive(src.sessionHours, DEFAULTS.stale.sessionHours),

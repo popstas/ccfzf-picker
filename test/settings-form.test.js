@@ -1,5 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
+const { normalizeConfig } = require('../frontend-src/config-shape');
 const { PAGES, configToFields, fieldsToPatch, validate } = require('../frontend-src/settings-form');
 
 test('страницы перечисляют поля без повторов', () => {
@@ -233,9 +234,29 @@ test('stale-настройка уезжает точечным числовым 
   );
 });
 
+test('stale.enabled одинаково строго читается runtime и формой', () => {
+  for (const enabled of ['yes', 1, [], {}]) {
+    const config = { stale: { enabled } };
+    assert.strictEqual(normalizeConfig(config).stale.enabled, false, String(enabled));
+    assert.strictEqual(configToFields(config)['stale.enabled'], false, String(enabled));
+  }
+
+  for (const enabled of [true, false]) {
+    assert.strictEqual(configToFields({ stale: { enabled } })['stale.enabled'], enabled);
+  }
+  assert.strictEqual(configToFields({ onlyLive: 'yes' }).onlyLive, true);
+});
+
 test('форма отвергает плохие stale-пороги и opacity', () => {
   const valid = { ...configToFields({}), sshHost: 'host' };
   assert.deepStrictEqual(validate(valid), []);
+
+  assert.deepStrictEqual(validate({
+    ...valid,
+    'stale.sessionHours': '3.5',
+    'stale.projectDays': '14',
+    'stale.opacity': '0.7',
+  }), []);
 
   for (const [id, value] of [
     ['stale.sessionHours', ''],
@@ -247,5 +268,22 @@ test('форма отвергает плохие stale-пороги и opacity',
   ]) {
     const problems = validate({ ...valid, [id]: value });
     assert.ok(problems.some(problem => problem.includes(id)), `${id}=${value}: ${problems}`);
+  }
+});
+
+test('валидация stale-чисел отвергает значения других типов до Number coercion', () => {
+  const valid = { ...configToFields({}), sshHost: 'host' };
+  for (const [id, validValue] of [
+    ['stale.sessionHours', 3.5],
+    ['stale.projectDays', 14],
+    ['stale.opacity', 0.7],
+  ]) {
+    for (const malformed of [true, [validValue], { valueOf: () => validValue }]) {
+      const problems = validate({ ...valid, [id]: malformed });
+      assert.ok(
+        problems.some(problem => problem.includes(id)),
+        `${id} принял ${Object.prototype.toString.call(malformed)}: ${problems}`,
+      );
+    }
   }
 });

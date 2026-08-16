@@ -266,13 +266,26 @@ test('stale по умолчанию выключен и несёт оба пор
 
 test('корректные stale-настройки проходят числами', () => {
   assert.deepStrictEqual(normalizeConfig({
-    stale: { enabled: true, sessionHours: '3.5', projectDays: 14, opacity: '0.7' },
+    stale: { enabled: true, sessionHours: '3.5', projectDays: '14', opacity: '0.7' },
   }).stale, {
     enabled: true,
     sessionHours: 3.5,
     projectDays: 14,
     opacity: 0.7,
   });
+});
+
+test('stale-числа не принимают значения других типов через Number coercion', () => {
+  for (const [id, validValue, fallback] of [
+    ['sessionHours', 3.5, 2],
+    ['projectDays', 14, 7],
+    ['opacity', 0.7, 0.5],
+  ]) {
+    for (const malformed of [true, [validValue], { valueOf: () => validValue }]) {
+      const actual = normalizeConfig({ stale: { [id]: malformed } }).stale[id];
+      assert.strictEqual(actual, fallback, `${id} принял ${Object.prototype.toString.call(malformed)}`);
+    }
+  }
 });
 
 test('испорченное stale-поле сбрасывает только себя', () => {
