@@ -83,6 +83,9 @@
     // ключ описан затем же, зачем и `hideOnBlur`, — чтобы форма конфига была в
     // одном месте и проверялась одним тестом.
     pickerSize: { narrow: { width: 0, height: 0 }, wide: { width: 0, height: 0 } },
+    // Визуальное приглушение старых строк выключено, пока человек сам его не
+    // попросил. Пороги остаются в конфиге и при выключенной галке.
+    stale: { enabled: false, sessionHours: 2, projectDays: 7, opacity: 0.5 },
   };
 
   /**
@@ -173,6 +176,29 @@
     };
   }
 
+  /**
+   * Пороги старых строк и их прозрачность.
+   *
+   * Каждое поле нормализуется отдельно: опечатка в opacity не должна стирать
+   * выбранный человеком недельный порог проектов.
+   */
+  function normalizeStale(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const positive = (value, fallback) => {
+      const number = Number(value);
+      return Number.isFinite(number) && number > 0 ? number : fallback;
+    };
+    const opacity = Number(src.opacity);
+    return {
+      enabled: typeof src.enabled === 'boolean' ? src.enabled : DEFAULTS.stale.enabled,
+      sessionHours: positive(src.sessionHours, DEFAULTS.stale.sessionHours),
+      projectDays: positive(src.projectDays, DEFAULTS.stale.projectDays),
+      opacity: Number.isFinite(opacity) && opacity >= 0.1 && opacity <= 1
+        ? opacity
+        : DEFAULTS.stale.opacity,
+    };
+  }
+
   function normalizeConfig(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
 
@@ -206,6 +232,7 @@
       pathMap: normalizePathMap(src.pathMap),
       actions: normalizeActions(src.actions),
       pickerSize: normalizePickerSize(src.pickerSize),
+      stale: normalizeStale(src.stale),
     };
   }
 

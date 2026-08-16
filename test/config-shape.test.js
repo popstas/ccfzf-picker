@@ -252,3 +252,42 @@ test('границы доли те же, по которым судит Rust', (
   assert.ok(fn, 'scale_axis не найдена в main.rs — тест сторожит не то');
   assert.ok(fn[0].includes('(1.0..=100.0)'), 'диапазон в Rust разошёлся с диапазоном здесь');
 });
+
+// ── Затемнение старых строк ────────────────────────────────────────────────
+
+test('stale по умолчанию выключен и несёт оба порога с opacity', () => {
+  assert.deepStrictEqual(normalizeConfig({}).stale, {
+    enabled: false,
+    sessionHours: 2,
+    projectDays: 7,
+    opacity: 0.5,
+  });
+});
+
+test('корректные stale-настройки проходят числами', () => {
+  assert.deepStrictEqual(normalizeConfig({
+    stale: { enabled: true, sessionHours: '3.5', projectDays: 14, opacity: '0.7' },
+  }).stale, {
+    enabled: true,
+    sessionHours: 3.5,
+    projectDays: 14,
+    opacity: 0.7,
+  });
+});
+
+test('испорченное stale-поле сбрасывает только себя', () => {
+  assert.deepStrictEqual(normalizeConfig({
+    stale: { enabled: 'yes', sessionHours: 0, projectDays: 10, opacity: 2 },
+  }).stale, {
+    enabled: false,
+    sessionHours: 2,
+    projectDays: 10,
+    opacity: 0.5,
+  });
+  assert.deepStrictEqual(normalizeConfig({ stale: null }).stale, {
+    enabled: false,
+    sessionHours: 2,
+    projectDays: 7,
+    opacity: 0.5,
+  });
+});
