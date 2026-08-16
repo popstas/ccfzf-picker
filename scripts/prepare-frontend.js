@@ -24,6 +24,7 @@ const FILES = [
   'frontend-src/key-reference.js',
   'frontend-src/session-actions.js',
   'frontend-src/config-shape.js',
+  'frontend-src/stale-items.js',
   'frontend-src/picker-filter.js',
   'frontend-src/picker-snapshots.js',
   'frontend-src/picker-mode.js',
