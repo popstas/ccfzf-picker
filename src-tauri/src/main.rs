@@ -829,9 +829,9 @@ async fn focus_window_mqtt(id: String, base: Option<String>) -> Result<(), Strin
 #[tauri::command]
 async fn unread_session_mqtt(id: String, bases: Vec<String>) -> Result<(), String> {
     let broker = configured_broker()?;
-    // Адрес называет трекер той машины, где стоит окно, и таких машин бывает
-    // две: сессию открывают на обеих. Пустой список — трекер прежней версии
-    // или строка без окон, тогда остаётся база своего конфига.
+    // Адрес называет трекер той машины, где стоит окно, и машин этих бывает
+    // несколько: сессию открывают на всех сразу. Пустой список — трекер
+    // прежней версии или строка без окон, тогда остаётся база своего конфига.
     let bases = mqtt::unread_bases(&broker, &bases);
     tauri::async_runtime::spawn_blocking(move || {
         let mut first_err: Option<String> = None;
