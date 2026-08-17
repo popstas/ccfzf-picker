@@ -9,7 +9,7 @@ test('страницы перечисляют поля без повторов',
   const ids = PAGES.flatMap(p => p.fields.map(f => f.id));
   assert.deepStrictEqual([...new Set(ids)], ids);
   assert.deepStrictEqual(PAGES.map(p => p.id),
-    ['general', 'window', 'ui', 'panels', 'hotkeys', 'integrations']);
+    ['general', 'stale', 'window', 'ui', 'panels', 'hotkeys', 'integrations']);
 });
 
 test('конфиг раскладывается по полям формы', () => {
@@ -206,32 +206,94 @@ test('возврат к встроенному размеру записывае
 
 // ── Затемнение старых строк ────────────────────────────────────────────────
 
-test('stale-настройки находятся в General и показывают defaults', () => {
-  const ids = PAGES.find(page => page.id === 'general').fields.map(field => field.id);
-  assert.ok(ids.includes('stale.enabled'), ids);
-  assert.ok(ids.includes('stale.sessionHours'), ids);
-  assert.ok(ids.includes('stale.projectDays'), ids);
-  assert.ok(ids.includes('stale.opacity'), ids);
+test('stale-настройки находятся только на отдельной вкладке', () => {
+  const general = PAGES.find(page => page.id === 'general');
+  const stale = PAGES.find(page => page.id === 'stale');
+  assert.strictEqual(stale.title, 'Dim stale sessions');
+  assert.deepStrictEqual(stale.fields.map(field => field.id), [
+    'stale.enabled',
+    'stale.sessionHours',
+    'stale.projectHours',
+    'stale.opacity',
+  ]);
+  assert.ok(!general.fields.some(field => field.id.startsWith('stale.')));
 
+  const opacity = stale.fields.find(field => field.id === 'stale.opacity');
+  assert.deepStrictEqual(
+    { type: opacity.type, min: opacity.min, max: opacity.max, step: opacity.step },
+    { type: 'range', min: 0.1, max: 1, step: 0.1 },
+  );
+});
+
+test('stale-настройки показывают defaults', () => {
   const fields = configToFields({});
   assert.strictEqual(fields['stale.enabled'], false);
   assert.strictEqual(fields['stale.sessionHours'], 2);
-  assert.strictEqual(fields['stale.projectDays'], 7);
+  assert.strictEqual(fields['stale.projectHours'], 24);
   assert.strictEqual(fields['stale.opacity'], 0.5);
   assert.deepStrictEqual(fieldsToPatch(fields, {}), {});
 });
 
+test('stale-умолчания и границы opacity не расходятся между config-shape и формой', () => {
+  // Умолчания и граница 0.1..1 продублированы намеренно, в трёх местах:
+  // DEFAULTS/normalizeConfig в config-shape.js, поле stale.opacity в PAGES и
+  // validNumber в validate() — оба в settings-form.js. Второй источник правды
+  // тут неизбежен (форма не может звать normalizeConfig ради одной цифры на
+  // каждый рендер), а вот молчаливый он быть не должен: как у
+  // defaultCollapsedFor в picker-panels.js и у диапазона pickerSize, эта
+  // дублированная правда сверяется тестом, который гоняет настоящие функции с
+  // обеих сторон, — иначе правка одного DEFAULTS оставила бы форму показывать
+  // старое число, и заметить это можно было бы только диффом двух файлов.
+  const normalized = normalizeConfig({}).stale;
+  const fields = configToFields({});
+  for (const key of ['enabled', 'sessionHours', 'projectHours', 'opacity']) {
+    assert.strictEqual(fields[`stale.${key}`], normalized[key], key);
+  }
+
+  const opacityField = PAGES.flatMap(p => p.fields).find(f => f.id === 'stale.opacity');
+  assert.strictEqual(opacityField.type, 'range');
+
+  for (const bound of [opacityField.min, opacityField.max]) {
+    // Границы слайдера обязаны быть значениями, которые normalizeConfig
+    // пропускает без изменений, — иначе ползунок предлагал бы человеку
+    // значение, которое рантайм тут же откатит на умолчание, — и которые
+    // validate принимает без единой жалобы.
+    assert.strictEqual(
+      normalizeConfig({ stale: { opacity: bound } }).stale.opacity,
+      bound,
+      `граница ${bound} не пережила normalizeConfig`,
+    );
+    // sshHost задан отдельно от stale-полей: пустой хост сам по себе проблема
+    // (см. validate), а тут проверяется только граница opacity.
+    const problems = validate({ ...fields, sshHost: 'host', 'stale.opacity': bound });
+    assert.deepStrictEqual(problems, [], `граница ${bound}: ${JSON.stringify(problems)}`);
+  }
+});
+
 test('stale-настройка уезжает точечным числовым патчем', () => {
-  const original = { stale: { enabled: true, sessionHours: 2, projectDays: 7, opacity: 0.5 } };
+  const original = {
+    stale: { enabled: true, sessionHours: 2, projectHours: 24, opacity: 0.5 },
+  };
   const fields = configToFields(original);
   assert.deepStrictEqual(
     fieldsToPatch({ ...fields, 'stale.opacity': '0.7' }, original),
     { stale: { opacity: 0.7 } },
   );
   assert.deepStrictEqual(
-    fieldsToPatch({ ...fields, 'stale.projectDays': '14' }, original),
-    { stale: { projectDays: 14 } },
+    fieldsToPatch({ ...fields, 'stale.projectHours': '36' }, original),
+    { stale: { projectHours: 36 } },
   );
+});
+
+test('старый ключ stale.projectDays формой не читается и не пишется', () => {
+  // Task 1 перевела рантайм на stale.projectHours; форма не должна знать
+  // про старое имя ключа вовсе — ни при чтении, ни при записи патча.
+  const fields = configToFields({ stale: { projectDays: 30 } });
+  assert.strictEqual(fields['stale.projectHours'], 24);
+  assert.ok(!('stale.projectDays' in fields), Object.keys(fields).join(' '));
+
+  const patch = fieldsToPatch({ ...fields, 'stale.projectDays': '99' }, {});
+  assert.deepStrictEqual(patch, {}, JSON.stringify(patch));
 });
 
 test('stale.enabled одинаково строго читается runtime и формой', () => {
@@ -254,14 +316,14 @@ test('форма отвергает плохие stale-пороги и opacity',
   assert.deepStrictEqual(validate({
     ...valid,
     'stale.sessionHours': '3.5',
-    'stale.projectDays': '14',
+    'stale.projectHours': '36',
     'stale.opacity': '0.7',
   }), []);
 
   for (const [id, value] of [
     ['stale.sessionHours', ''],
     ['stale.sessionHours', 0],
-    ['stale.projectDays', -1],
+    ['stale.projectHours', -1],
     ['stale.opacity', 0.09],
     ['stale.opacity', 1.01],
     ['stale.opacity', 'none'],
@@ -275,7 +337,7 @@ test('валидация stale-чисел отвергает значения д
   const valid = { ...configToFields({}), sshHost: 'host' };
   for (const [id, validValue] of [
     ['stale.sessionHours', 3.5],
-    ['stale.projectDays', 14],
+    ['stale.projectHours', 36],
     ['stale.opacity', 0.7],
   ]) {
     for (const malformed of [true, [validValue], { valueOf: () => validValue }]) {
