@@ -212,3 +212,29 @@ test('без своей машины в конфиге называются вс
   })[0];
   assert.strictEqual(row.windowHost, 'mac-host');
 });
+
+test('строка несёт все окна, а чужие машины названы через запятую', () => {
+  const state = { sessions: [] };
+  const [row] = buildSessionList({
+    sessions: [{ id: 'a', title: 'x', windows: [
+      { host: 'mac-host', app: 'kitty', focusedAt: 0 },
+      { host: 'windows-box', app: 'WindowsTerminal.exe', focusedAt: 0 },
+    ] }],
+    seen: {}, state, configHost: 'windows-box',
+  });
+  assert.deepStrictEqual(row.windows.map(w => w.host), ['mac-host', 'windows-box']);
+  // Своя машина по-прежнему названа пустотой: имя пикера в каждой строке шум.
+  assert.strictEqual(row.windowHost, 'mac-host');
+});
+
+test('отметка «просмотрено» складывается по всем окнам, а не по первому', () => {
+  // Смотрели на сессию, а не на окно: взгляд на любое из её окон гасит зов.
+  const [row] = buildSessionList({
+    sessions: [{ id: 'a', title: 'x', windows: [
+      { host: 'mac-host', focusedAt: 10 },
+      { host: 'windows-box', focusedAt: 900 },
+    ] }],
+    seen: {}, state: { sessions: [] }, configHost: 'mac-host',
+  });
+  assert.strictEqual(row.focusedAt, 900);
+});
