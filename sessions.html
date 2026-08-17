@@ -661,6 +661,7 @@
 <script src="project-list.js"></script>
 <script src="picker-list-sync.js"></script>
 <script src="picker-sections.js"></script>
+<script src="project-dim.js"></script>
 <script src="action-icons.js"></script>
 <script>
   let groups = [];
@@ -1793,51 +1794,11 @@
     paintProjectDim();
   }
 
-  /**
-   * Какие строки гасить при наведении на проект: чистая часть, поэтому
-   * отдельно от записи в DOM.
-   *
-   * Заголовки секций и дней не гаснут: погашенный заголовок читался бы как
-   * свёрнутая панель. Подзаголовки машин в `rows` не попадают вовсе.
-   */
-  function dimsForHover(rows, cwd) {
-    // Ни одна строка не несёт этот каталог — значит наведение устарело
-    // (список успел пересобраться под ним) или само стало осадком прошлого
-    // показа. Гасить всё подряд в этом случае значило бы притушить весь
-    // список без единой яркой строки под курсором.
-    if (!cwd || !rows.some(row => row.cwd === cwd)) return rows.map(() => false);
-    return rows.map(row => !HEADER_KINDS.has(row.kind) && row.cwd !== cwd);
-  }
-
-  /**
-   * По какому каталогу гасим: наведение главнее фокуса — мышь жест более
-   * свежий и намеренный, а выбор стоит на строке всегда, в том числе сам
-   * собой после открытия окна.
-   *
-   * Фокус гасит только со строки проекта и только в смешанном списке. Второе
-   * условие записано свойством самого списка («есть строка не-проект и не
-   * заголовок»), а не именем режима: в `/p` строк других видов нет, значит
-   * гашение само не включится, — и точно так же не включится под запросом,
-   * отобравшим одни проекты. Читай мы `mode`, это был бы второй источник
-   * правды рядом с содержимым списка, и разошлись бы они на первой правке
-   * префиксов. Отделять там всё равно нечего: выбор подсвечен и без гашения.
-   */
-  function dimCwd(rows, active, hoverCwd) {
-    // Галка гасится здесь, в самой нижней точке: обработчики мыши и
-    // paintProjectDim о ней не знают вовсе. Две точки отключения — два
-    // места, где о ней можно забыть, и забытая вторая дала бы галку,
-    // работающую через раз.
-    if (!toggles.dimProject) return '';
-    if (hoverCwd) return hoverCwd;
-    const row = rows[active];
-    if (!row || row.kind !== 'project' || !row.cwd) return '';
-    const mixed = rows.some(r => !HEADER_KINDS.has(r.kind) && r.kind !== 'project');
-    return mixed ? row.cwd : '';
-  }
-
   /** Разложить решение dimsForHover по узлам списка. */
   function paintProjectDim() {
-    const dims = dimsForHover(rows, dimCwd(rows, active, hoverProjectCwd));
+    const dim = window.ProjectDim;
+    const cwd = dim.dimCwd(rows, active, hoverProjectCwd, toggles.dimProject, HEADER_KINDS);
+    const dims = dim.dimsForHover(rows, cwd, HEADER_KINDS);
     const nodes = list.querySelectorAll('.row');
     nodes.forEach((node, i) => node.classList.toggle('dim-other', Boolean(dims[i])));
   }

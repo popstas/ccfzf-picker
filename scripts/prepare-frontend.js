@@ -37,6 +37,7 @@ const FILES = [
   'frontend-src/settings-form.js',
   'frontend-src/action-icons.js',
   'frontend-src/picker-sections.js',
+  'frontend-src/project-dim.js',
   'frontend-src/picker-panels.js',
 ];
 
