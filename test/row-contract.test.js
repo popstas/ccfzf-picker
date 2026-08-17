@@ -889,12 +889,87 @@ test('наведение, которого не несёт ни одна стр�
   assert.deepStrictEqual(Array.from(dims), [false, false]);
 });
 
-test('подсветка восстанавливается после отрисовки', () => {
+test('подсветка восстанавливается после каждой смены выбора', () => {
   // Подача тикает раз в секунду, и planListSync правит изменившиеся
-  // элементы: без вызова из render класс исчезал бы на первом же такте — то
+  // элементы: без восстановления класс исчезал бы на первом же такте — то
   // есть почти сразу и без всякой видимой причины.
-  const source = pageFunctions('render()');
-  assert.match(source, /paintProjectDim\(\)/, 'render не восстанавливает подсветку проекта');
+  //
+  // Красит именно paint, а не render: гашение теперь зависит и от того, где
+  // стоит выбор, а стрелки render не зовут вовсе — с вызовом в render
+  // гашение по фокусу отставало бы до секунды, до следующего ответа
+  // агрегатора. paint — единственная воронка, через которую проходят все
+  // смены выбора, включая сам render.
+  const paintSource = pageFunctions('paint()');
+  assert.match(paintSource, /paintProjectDim\(\)/, 'paint не восстанавливает подсветку проекта');
+});
+
+// ── Каталог, по которому гасим: наведение или фокус ──────────────────────────
+
+test('наведение перебивает фокус', () => {
+  // Мышь — жест более свежий и намеренный, чем выбор, который стоит на
+  // строке всегда и сам собой.
+  const source = pageFunctions('dimCwd(rows, active, hoverCwd)');
+  const ctx = { HEADER_KINDS: new Set(['section', 'snapshot-day']) };
+  vm.createContext(ctx);
+  const rows = [
+    { kind: 'project', cwd: '/home/user/a' },
+    { kind: 'session', cwd: '/home/user/b' },
+  ];
+  const cwd = vm.runInContext(
+    `${source}\ndimCwd(${JSON.stringify(rows)}, 0, '/home/user/b');`,
+    ctx, { filename: 'sessions.html' });
+  assert.equal(cwd, '/home/user/b');
+});
+
+test('фокус на строке проекта гасит остальное в смешанном списке', () => {
+  const source = pageFunctions('dimCwd(rows, active, hoverCwd)');
+  const ctx = { HEADER_KINDS: new Set(['section', 'snapshot-day']) };
+  vm.createContext(ctx);
+  const rows = [
+    { kind: 'section' },
+    { kind: 'project', cwd: '/home/user/a' },
+    { kind: 'session', cwd: '/home/user/b' },
+  ];
+  const cwd = vm.runInContext(
+    `${source}\ndimCwd(${JSON.stringify(rows)}, 1, '');`,
+    ctx, { filename: 'sessions.html' });
+  assert.equal(cwd, '/home/user/a');
+});
+
+test('в списке из одних проектов фокус не гасит ничего', () => {
+  // Так выглядит режим /p — и так же выглядит запрос, отобравший одни
+  // проекты. Признак берётся у самого списка, а не у имени режима: второй
+  // источник правды разошёлся бы с первым, а отделять здесь всё равно нечего
+  // — выбор и так подсвечен.
+  const source = pageFunctions('dimCwd(rows, active, hoverCwd)');
+  const ctx = { HEADER_KINDS: new Set(['section', 'snapshot-day']) };
+  vm.createContext(ctx);
+  const rows = [
+    { kind: 'section' },
+    { kind: 'project', cwd: '/home/user/a' },
+    { kind: 'project', cwd: '/home/user/b' },
+  ];
+  const cwd = vm.runInContext(
+    `${source}\ndimCwd(${JSON.stringify(rows)}, 1, '');`,
+    ctx, { filename: 'sessions.html' });
+  assert.equal(cwd, '');
+});
+
+test('фокус на строке сессии не гасит ничего', () => {
+  // Просьба была про проект. Сессия своей строкой уже подсвечена, а гашение
+  // по ней притушило бы соседей по тому же проекту — то есть ровно то, что
+  // человек в этот момент и разглядывает.
+  const source = pageFunctions('dimCwd(rows, active, hoverCwd)');
+  const ctx = { HEADER_KINDS: new Set(['section', 'snapshot-day']) };
+  vm.createContext(ctx);
+  const rows = [
+    { kind: 'project', cwd: '/home/user/a' },
+    { kind: 'session', cwd: '/home/user/b' },
+  ];
+  const cwd = vm.runInContext(
+    `${source}\ndimCwd(${JSON.stringify(rows)}, 1, '');`,
+    ctx, { filename: 'sessions.html' });
+  assert.equal(cwd, '');
 });
 
 // ── Куда Enter уводит строку снимка ──────────────────────────────────────────

@@ -1561,9 +1561,6 @@
     }
     if (active >= rows.length) active = Math.max(0, rows.length - 1);
     paint();
-    // Подсветка держится отдельно от разметки строки и потому переживает
-    // planListSync только так — восстановлением после каждой отрисовки.
-    paintProjectDim();
   }
 
   /**
@@ -1778,6 +1775,13 @@
     // себя, разошлись бы, а забытый шестой дал бы прыжок через экран — ровно
     // тот, ради которого всё затевалось.
     activePanel = (rows[active] || {}).panel || '';
+    // Здесь же и гашение: оно зависит от того, где стоит выбор, а стрелки
+    // render не зовут вовсе — с вызовом в render гашение по фокусу отставало
+    // бы до секунды, до следующего ответа агрегатора. Подсветка держится
+    // отдельно от разметки строки и переживает planListSync только так —
+    // восстановлением после каждой смены выбора, включая ту, что делает сам
+    // render.
+    paintProjectDim();
   }
 
   /**
@@ -1796,9 +1800,30 @@
     return rows.map(row => !HEADER_KINDS.has(row.kind) && row.cwd !== cwd);
   }
 
+  /**
+   * По какому каталогу гасим: наведение главнее фокуса — мышь жест более
+   * свежий и намеренный, а выбор стоит на строке всегда, в том числе сам
+   * собой после открытия окна.
+   *
+   * Фокус гасит только со строки проекта и только в смешанном списке. Второе
+   * условие записано свойством самого списка («есть строка не-проект и не
+   * заголовок»), а не именем режима: в `/p` строк других видов нет, значит
+   * гашение само не включится, — и точно так же не включится под запросом,
+   * отобравшим одни проекты. Читай мы `mode`, это был бы второй источник
+   * правды рядом с содержимым списка, и разошлись бы они на первой правке
+   * префиксов. Отделять там всё равно нечего: выбор подсвечен и без гашения.
+   */
+  function dimCwd(rows, active, hoverCwd) {
+    if (hoverCwd) return hoverCwd;
+    const row = rows[active];
+    if (!row || row.kind !== 'project' || !row.cwd) return '';
+    const mixed = rows.some(r => !HEADER_KINDS.has(r.kind) && r.kind !== 'project');
+    return mixed ? row.cwd : '';
+  }
+
   /** Разложить решение dimsForHover по узлам списка. */
   function paintProjectDim() {
-    const dims = dimsForHover(rows, hoverProjectCwd);
+    const dims = dimsForHover(rows, dimCwd(rows, active, hoverProjectCwd));
     const nodes = list.querySelectorAll('.row');
     nodes.forEach((node, i) => node.classList.toggle('dim-other', Boolean(dims[i])));
   }
