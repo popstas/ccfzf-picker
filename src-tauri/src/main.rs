@@ -214,6 +214,16 @@ fn hide_picker(app: tauri::AppHandle) {
     hide_window(&app);
 }
 
+/// Версия для шапки справочника клавиш (F1) на странице.
+///
+/// Номер уже читает пункт-подпись трея (`version_item_label` ниже) — здесь
+/// та же константа компиляции, а не второе поле в конфиге: разошлась бы с
+/// `Cargo.toml` при следующем релизе, и заметить это было бы нечем.
+#[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 /// Размеры окна пикера.
 ///
 /// Узкий обязан совпадать с `tauri.conf.json` — с ним пикер открывается, к
@@ -1637,7 +1647,7 @@ fn main() {
         // шлёт событие, и перепутать их нечем.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            hide_picker, set_picker_size, poll_now, spawn_detached, load_seen, save_seen, load_config,
+            hide_picker, app_version, set_picker_size, poll_now, spawn_detached, load_seen, save_seen, load_config,
             terminal_helper,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, open_session_mqtt, open_project_mqtt, new_session_mqtt,

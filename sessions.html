@@ -494,7 +494,23 @@
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
             border-bottom: 1px solid #3a3d42;
         }
+        /* У справочника клавиш заголовок и подпись разнесены: строка выше —
+           имя и версия приложения, эта — прежний текст «Keyboard shortcuts».
+           Граница переезжает на подпись, #info-title её не теряет. */
+        #keys-title { border-bottom: none; padding-bottom: 2px; }
+        #keys-subtitle {
+            padding: 0 16px 8px; font-size: 11px; color: #7d838c;
+            border-bottom: 1px solid #3a3d42;
+        }
         #info-rows, #keys-rows { padding: 8px 0; }
+        /* Подвал: версия — не только в заголовке, лицензия и ссылка на
+           репозиторий. Та же серая палитра карточки, граница сверху отделяет
+           его от списка клавиш. */
+        #keys-footer {
+            padding: 8px 16px 12px; font-size: 11px; color: #7d838c;
+            border-top: 1px solid #3a3d42;
+        }
+        #keys-footer a { color: #6aa9ff; }
         .info-row { display: flex; gap: 12px; padding: 3px 16px; font-size: 12px; }
         .info-row .k { flex: 0 0 96px; color: #7d838c; }
         .info-row .v { min-width: 0; word-break: break-word; }
@@ -586,8 +602,16 @@
 <div id="drop-line"></div>
 <div id="keys-backdrop" aria-hidden="true">
   <div id="keys-card" role="dialog">
-    <div id="keys-title">Keyboard shortcuts</div>
+    <!-- Версию дописывает страница после загрузки (invoke('app_version')):
+         зашитая сюда строка разошлась бы с Cargo.toml на первом же релизе, и
+         разошедшееся никто бы не заметил. -->
+    <div id="keys-title">ccfzf-picker</div>
+    <div id="keys-subtitle">Keyboard shortcuts</div>
     <div id="keys-rows"></div>
+    <!-- Вне #keys-rows: openKeys() переписывает keysRows.innerHTML целиком
+         при каждом открытии, и подвал внутри него пришлось бы дорисовывать
+         заново на каждый F1. -->
+    <div id="keys-footer">MIT License &middot; <a href="https://github.com/popstas/ccfzf-picker" target="_blank" rel="noopener">github.com/popstas/ccfzf-picker</a></div>
   </div>
 </div>
 <script src="state-shape.js"></script>
@@ -884,6 +908,7 @@
   const infoRows = document.getElementById('info-rows');
   const keysButton = document.getElementById('keys-button');
   const keysBackdrop = document.getElementById('keys-backdrop');
+  const keysTitle = document.getElementById('keys-title');
   const keysRows = document.getElementById('keys-rows');
 
   function paintSort() {
@@ -3115,7 +3140,30 @@
     }
   }
 
+  /**
+   * Версия в шапке справочника клавиш (F1).
+   *
+   * Зовём через invoke() — тот сам возвращает Promise.resolve() без моста,
+   * и без него заголовок остаётся тем, что уже в разметке («ccfzf-picker»
+   * без номера): в тестах, где __TAURI__ нет вовсе, это рабочее состояние, а
+   * не ошибка. Строка в исходник не зашивается намеренно — она разошлась бы
+   * с Cargo.toml на первом же релизе, и заметить это было бы нечем.
+   */
+  async function loadAppVersion() {
+    try {
+      const version = await invoke('app_version');
+      if (version) keysTitle.textContent = `ccfzf-picker v${version}`;
+    } catch (e) {
+      // Тихо: карточка клавиш не критична для работы пикера, а без версии
+      // заголовок и так читаем — просто без номера.
+    }
+  }
+
   async function start() {
+    // До проверки моста: без __TAURI__ start() тут же выходит, а
+    // loadAppVersion() безопасна и без него — invoke() внутри неё сама
+    // возвращает Promise.resolve(), просто ничего не меняя в заголовке.
+    loadAppVersion();
     if (!window.__TAURI__) { message.textContent = 'No backend detected.'; return; }
     const { listen } = window.__TAURI__.event;
     const { getCurrentWindow } = window.__TAURI__.window;
