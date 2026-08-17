@@ -381,20 +381,27 @@ const PROJECTS_NOW = 1786045920; // минута после mtime первого
  */
 function renderProjectRows(projects, query, toggles, taken, stale) {
   const source = pageFunctions(
-    'projectItem(project, nowSec)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)');
+    'projectItem(project, nowSec)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)',
+    'staleSettings()');
   const projectRows = buildProjectList({ projects });
   markHotkeysTaken(projectRows, taken || []);
+  const staleConfig = stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 };
+  // Галка dimStale — как в normalizeUiState на живой странице: если тест её
+  // не назвал явно, умолчание берётся из CONFIG.stale.enabled, а не гасит
+  // затемнение молча.
+  const toggleState = toggles || { showPaths: true };
+  if (toggleState.dimStale === undefined) toggleState.dimStale = staleConfig.enabled;
   const ctx = {
     // Ровно то, чем itemsOfSection пользуется снаружи себя. Секция собирается
     // настоящей buildSections — отбор и порядок строк идут той же дорогой, что
     // и на экране, а не переписанной в тесте.
     window: { PickerSections, StaleItems },
     CONFIG: {
-      stale: stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 },
+      stale: staleConfig,
     },
     projectRows,
     rows: [],
-    toggles: toggles || { showPaths: true },
+    toggles: toggleState,
     escapeHtml: Glyph.escapeHtml,
     shortPath: Glyph.shortPath,
     projectLine: Glyph.projectLine,
@@ -427,11 +434,10 @@ test('строка проекта доезжает с настоящего пу�
   assert.ok(items[0].html.includes('<div class="count">12 · 2●</div>'), items[0].html);
   assert.ok(items[1].html.includes('<div class="count">0</div>'), items[1].html);
 
-  // Точка: зелёная там, где кто-то работает, обычная серая — где никого.
-  // `closed` (прозрачная) у проекта не появляется: она про закрытую сессию.
+  // Точка: зелёная там, где кто-то работает; у проекта без единой сессии —
+  // прозрачная. Второй проект фикстуры именно такой (`sessions: 0`).
   assert.ok(items[0].html.includes('<div class="dot active"></div>'), items[0].html);
-  assert.ok(items[1].html.includes('<div class="dot"></div>'), items[1].html);
-  assert.ok(!items[1].html.includes('closed'), items[1].html);
+  assert.ok(items[1].html.includes('<div class="dot closed"></div>'), items[1].html);
 
   // Подсказка остаётся полным путём через shortPath — это не поменялось.
   assert.ok(items[0].html.includes('title="~/projects/ccfzf"'), items[0].html);
@@ -459,6 +465,21 @@ test('строка проекта доезжает с настоящего пу�
     assert.strictEqual(rows[i].kind, 'project');
   }
   assert.strictEqual(rows.length, items.length);
+});
+
+test('кружок проекта различает живое, прошлое и пустое', () => {
+  // Три состояния, а не два: серый кружок у закладки, в которой не работали
+  // никогда, обещал историю, которой нет. Прозрачный оставляет место пустым —
+  // ровно как у закрытой сессии.
+  const { items } = renderProjectRows([
+    { path: '/home/user/projects/a', name: 'a', mark: false, sessions: 12, live: 2, mtime: 1786045860 },
+    { path: '/home/user/projects/b', name: 'b', mark: false, sessions: 5, live: 0, mtime: 1786045800 },
+    { path: '/home/user/projects/c', name: 'c', mark: false, sessions: 0, live: 0, mtime: 0 },
+  ]);
+  assert.strictEqual(items.length, 3);
+  assert.ok(items[0].html.includes('<div class="dot active"></div>'), items[0].html);
+  assert.ok(items[1].html.includes('<div class="dot"></div>'), items[1].html);
+  assert.ok(items[2].html.includes('<div class="dot closed"></div>'), items[2].html);
 });
 
 // Обратный случай: имя проекта ничего не говорит про каталог, и строка
@@ -785,6 +806,55 @@ test('обе раскладки берут режим из одного мест
   assert.ok(source.includes('sectionsFor(mode, query)'), source);
 });
 
+test('панель строки проставляется одним местом на обе раскладки', () => {
+  // itemsOfSection — единственный, кто знает и секцию, и добавленные ею
+  // строки. Проставь панель renderWide, и в узком списке память была бы
+  // пустой, а сброс — прежним.
+  const source = pageFunctions('itemsOfSection(section, nowSec)');
+  assert.match(source, /rows\[i\]\.panel = section\.key/,
+    'itemsOfSection не проставляет row.panel');
+});
+
+test('память об активной панели пишется в paint, а не в render', () => {
+  // Через paint проходят все смены выбора — стрелки, ←/→, клик, правая
+  // кнопка и сам render. Записывай мы память в конце render, выбор,
+  // наведённый стрелками за секунду до набора запроса, помнился бы прежним.
+  const paint = pageFunctions('paint()');
+  assert.match(paint, /activePanel = \(rows\[active\] \|\| \{\}\)\.panel \|\| ''/,
+    'paint не запоминает панель активной строки');
+  assert.match(SESSIONS_HTML, /firstRowInPanel\(rows, activePanel, HEADER_KINDS\)/,
+    'сброс выбора не спрашивает запомненную панель');
+});
+
+test('показ окна забывает панель прошлого показа', () => {
+  // Иначе выбор вставал бы на панель, которой на экране может уже не быть.
+  const source = pageFunctions('beginShow()');
+  assert.match(source, /activePanel = ''/, 'beginShow не чистит activePanel');
+});
+
+test('показ окна забывает наведение на проект прошлого показа', () => {
+  // Указатель мог стоять на строке проекта в прошлом сеансе; beginShow
+  // намеренно оставляет старый список на экране первым кадром, и без сброса
+  // paintProjectDim погасил бы его по каталогу, наведённому в прошлый раз —
+  // ни одна строка при этом яркой не остаётся.
+  const source = pageFunctions('beginShow()');
+  assert.match(source, /hoverProjectCwd = ''/, 'beginShow не чистит hoverProjectCwd');
+});
+
+test('подсветка восстанавливается после каждой смены выбора', () => {
+  // Подача тикает раз в секунду, и planListSync правит изменившиеся
+  // элементы: без восстановления класс исчезал бы на первом же такте — то
+  // есть почти сразу и без всякой видимой причины.
+  //
+  // Красит именно paint, а не render: гашение теперь зависит и от того, где
+  // стоит выбор, а стрелки render не зовут вовсе — с вызовом в render
+  // гашение по фокусу отставало бы до секунды, до следующего ответа
+  // агрегатора. paint — единственная воронка, через которую проходят все
+  // смены выбора, включая сам render.
+  const paintSource = pageFunctions('paint()');
+  assert.match(paintSource, /paintProjectDim\(\)/, 'paint не восстанавливает подсветку проекта');
+});
+
 // ── Куда Enter уводит строку снимка ──────────────────────────────────────────
 //
 // Единственное место, которое различает три исхода — поднять всю раскладку,
@@ -935,7 +1005,7 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
     // Свёрнутых секций человек не трогал — обе половинки пусты.
     collapsed: { narrow: {}, wide: {} },
     // Порядка не назначал — тоже пусто, то есть «как по умолчанию».
-    order: { narrow: [], wide: [[], [], []] },
+    order: { narrow: [], wide: [[], [], [], [], []] },
     hidden: { narrow: {}, wide: {} },
   });
 });
@@ -1479,7 +1549,12 @@ function renderSessionRows(state, query, toggles, stale) {
   // разошлась бы с настоящим правилом молча.
   const source = pageFunctions(
     'markToggleId(row)', 'sessionItem(session, nowSec)', 'subheadItem(row)',
-    'sectionItem(section)', 'itemsOfSection(section, nowSec)');
+    'sectionItem(section)', 'itemsOfSection(section, nowSec)', 'staleSettings()');
+  const staleConfig = stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 };
+  // Та же подстановка умолчания, что и в renderProjectRows: тест, назвавший
+  // только stale.enabled, не должен молча получить погашенную галку.
+  const toggleState = toggles || { showPaths: true };
+  if (toggleState.dimStale === undefined) toggleState.dimStale = staleConfig.enabled;
   const ctx = {
     // Ровно то, чем itemsOfSection пользуется снаружи себя.
     window: {
@@ -1488,12 +1563,12 @@ function renderSessionRows(state, query, toggles, stale) {
       StaleItems,
     },
     CONFIG: {
-      stale: stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 },
+      stale: staleConfig,
     },
     groups: buildSessionsPayload(state, 'recent').groups,
     rows: [],
     items: [],
-    toggles: toggles || { showPaths: true },
+    toggles: toggleState,
     escapeHtml: Glyph.escapeHtml,
     shortPath: Glyph.shortPath,
     projectLine: Glyph.projectLine,
@@ -1720,8 +1795,10 @@ test('сброс выбора уводит его с заголовка, а на
   const source = pageFunctions('render()');
   assert.ok(source.includes('selectionReset'),
     'render() обязан спрашивать про сброс выбора');
-  assert.ok(source.includes('HEADER_KINDS.has(r.kind)'),
-    'сброс обязан искать первую строку, которая не заголовок');
+  // Поиск первой не-заголовка переехал в firstRowInPanel — она же несёт и
+  // память о панели, см. отдельный тест ниже.
+  assert.ok(source.includes('window.PickerSections.firstRowInPanel(rows, activePanel, HEADER_KINDS)'),
+    'сброс обязан искать первую строку, которая не заголовок, через firstRowInPanel');
   assert.match(SESSIONS_HTML, /const HEADER_KINDS = new Set\(\['section', 'snapshot-day'\]\)/,
     'оба вида заголовков обязаны стоять в HEADER_KINDS');
   // Просят сброс ровно два места, и оба — начало нового отбора: новая строка
@@ -1802,10 +1879,11 @@ test('старые обычные сессии и проекты получаю�
   assert.ok(!zellij.find(item => item.key.startsWith('s:')).html.includes(' stale'));
 });
 
-test('stale CSS затемняет, но hover и active возвращают opacity 1', () => {
+test('stale CSS затемняет, но hover возвращает opacity 1, active не трогает', () => {
   assert.match(SESSIONS_HTML, /\.row\.stale\s*\{[^}]*var\(--stale-opacity,\s*0\.5\)/);
   assert.match(SESSIONS_HTML, /\.row\.stale:hover[\s\S]*?opacity:\s*1/);
-  assert.match(SESSIONS_HTML, /\.row\.stale\.active[\s\S]*?opacity:\s*1/);
+  assert.ok(!/\.row\.stale\.active/.test(SESSIONS_HTML),
+    'выбор больше не снимает затемнение stale — первая строка не станет самой яркой');
 });
 
 test('настроенная stale opacity записывается в CSS property', () => {
@@ -1818,4 +1896,55 @@ test('настроенная stale opacity записывается в CSS prope
   vm.createContext(ctx);
   vm.runInContext(`${source}\napplyStaleOpacity();`, ctx, { filename: 'sessions.html' });
   assert.deepStrictEqual(calls, [['--stale-opacity', '0.4']]);
+});
+
+test('меню подписывает пункты и слушает клавиши одним списком букв', () => {
+  // Две копии счёта букв разошлись бы на первом же столкновении: подпись
+  // обещала бы клавишу, которую обработчик отдал соседу.
+  assert.match(SESSIONS_HTML, /menuKeysShown = window\.ActionHotkey\.menuKeys\(menuActions\)/,
+    'renderMenu не считает буквы через ActionHotkey.menuKeys');
+  assert.match(SESSIONS_HTML, /menuKeysShown\.indexOf\(letter\)/,
+    'обработчик меню ищет букву не в том же списке');
+});
+
+test('буква пункта берётся по тому же index, что и сам пункт', () => {
+  // Два предыдущих ассерта проверяют только присутствие фрагментов где-то в
+  // файле — замена `menuKeysShown[index]` на литеральный индекс (скажем,
+  // `menuKeysShown[0]`) прошла бы их нетронутой: все строки получили бы букву
+  // первого пункта, и обработчик отзывался бы только на неё. Регэксп
+  // связывает объявление `index` в `.map((action, index) => …)` с тем же
+  // `index`, которым читается menuKeysShown чуть ниже, — ровно ту связку,
+  // которая и превращает подпись в рабочую клавишу, а не в украшение.
+  assert.match(SESSIONS_HTML,
+    /menuActions\.map\(\(action, index\) => \{[\s\S]*?const letter = menuKeysShown\[index\];/,
+    'буква пункта не привязана к index своего колбэка — подпись может разойтись с действием');
+});
+
+test('буква в меню сверяется по e.code', () => {
+  // e.key в русской раскладке приходит кириллицей, и меню перестало бы
+  // слушаться ровно у того, кто набирает вслепую.
+  assert.match(SESSIONS_HTML, /e\.code\.match\(\/\^Key\(\[A-Z\]\)\$\/\)/,
+    'буква пункта меню разбирается не из e.code');
+});
+
+test('число колонок написано ровно один раз', () => {
+  // Оно было написано пять раз: разбор ui.json, окно настроек, сборка
+  // колонок, зоны перетаскивания и выпадашка. Поднятое в четырёх из пяти,
+  // оно даёт панель, которая из файла читается, а на экране не рисуется, —
+  // и молча.
+  const files = ['frontend-src/ui-state.js', 'frontend-src/picker-panels.js',
+    'sessions.html', 'settings.html'];
+  const declarations = files.flatMap((rel) => {
+    const src = fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
+    return (src.match(/WIDE_COLUMNS = \d/g) || []).map(m => `${rel}: ${m}`);
+  });
+  assert.deepStrictEqual(declarations, ['frontend-src/ui-state.js: WIDE_COLUMNS = 5']);
+  // Литералы списков колонок — тоже объявление числа, просто другой формы.
+  assert.ok(!/\[1, 2, 3\]/.test(SESSIONS_HTML), 'в sessions.html остался литерал [1, 2, 3]');
+  assert.ok(!/\['1', '2', '3'\]/.test(SESSIONS_HTML), "в sessions.html остался литерал ['1', '2', '3']");
+  // Стартовый `order.wide` — того же рода литерал: до загрузки ui.json это
+  // единственный порядок, который есть у страницы, и короткий список оставил
+  // бы commitDrag дыру в массиве при переносе в четвёртую колонку.
+  assert.ok(!/wide: \[\[\], \[\], \[\]\]/.test(SESSIONS_HTML),
+    'в sessions.html остался литерал wide: [[], [], []]');
 });

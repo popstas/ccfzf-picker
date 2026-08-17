@@ -154,6 +154,10 @@
         // Откуда брать иконку пункта. Пусто — берётся argv[0]; ключ нужен
         // там, где argv[0] не приложение: `cmd /c start` у проводника.
         icon: nonEmpty(item.icon) ? item.icon.trim() : '',
+        // Буква пункта в меню ^K, без Ctrl. Пусто — пункт буквы не получает;
+        // годность (одна латинская буква, никем не занятая) решает menuKeys в
+        // action-hotkey.js, в одном месте на встроенные и настроенные.
+        menuKey: nonEmpty(item.menuKey) ? item.menuKey.trim().toLowerCase() : '',
         argv,
       });
     }

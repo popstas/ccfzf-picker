@@ -18,12 +18,65 @@
     return String(id ?? '').toLowerCase().startsWith(q);
   }
 
+  /**
+   * Раскладка ЙЦУКЕН → QWERTY, по позиции клавиши.
+   *
+   * Только буквы: знаки препинания сюда не входят намеренно. `.` → `/`
+   * выглядит полезным для путей, но запрос из одной точки превратился бы в
+   * запрос из одной косой черты — то есть нашёл бы каждый путь разом.
+   */
+  const PUNTO_RU = {
+    й: 'q', ц: 'w', у: 'e', к: 'r', е: 't', н: 'y', г: 'u', ш: 'i', щ: 'o', з: 'p',
+    ф: 'a', ы: 's', в: 'd', а: 'f', п: 'g', р: 'h', о: 'j', л: 'k', д: 'l',
+    я: 'z', ч: 'x', с: 'c', м: 'v', и: 'b', т: 'n', ь: 'm',
+    ё: '`', ж: ';', э: "'", б: ',', ю: '.', х: '[', ъ: ']',
+  };
+
+  /**
+   * Запрос, переложенный из русской раскладки в латинскую, — или пустая
+   * строка, если кириллицы в нём нет вовсе.
+   *
+   * Переводится **запрос**, а не строки списка: запрос один, строк сотни, и
+   * перевод обратим. Обратной половины (латиница → кириллица) нет: кириллицы
+   * в именах сессий и путях не бывает, а заведённая «на всякий случай» она
+   * давала бы ложные попадания.
+   */
+  function puntoRu(q) {
+    let has = false;
+    let out = '';
+    for (const ch of String(q ?? '')) {
+      const mapped = PUNTO_RU[ch];
+      if (mapped) has = true;
+      out += mapped || ch;
+    }
+    return has ? out : '';
+  }
+
+  /**
+   * Единственный отбор по тексту на весь пикер: сессии, проекты и снимки.
+   *
+   * Совпадение по «исходный ИЛИ переложенный» — иначе `home`, набранное
+   * верно, перестало бы находить само себя. Три копии `includes(q)` тут и
+   * были причиной завести общую функцию: перевод, положенный в две из трёх,
+   * дал бы поиск, который работает в сессиях и молчит в снимках.
+   *
+   * `q` приходит уже приведённым к нижнему регистру и обрезанным — так его
+   * готовят все три звонящих.
+   */
+  function matchesText(text, q) {
+    if (!q) return true;
+    const hay = String(text ?? '').toLowerCase();
+    if (hay.includes(q)) return true;
+    const punto = puntoRu(q);
+    return Boolean(punto) && hay.includes(punto);
+  }
+
   function filterSessions(groups, query) {
     const q = String(query ?? '').trim().toLowerCase();
     if (!q) return groups;
     return groups
       .map(g => ({ ...g, sessions: g.sessions.filter(s =>
-        `${s.label} ${searchableCwd(s.cwd)}`.toLowerCase().includes(q)
+        matchesText(`${s.label} ${searchableCwd(s.cwd)}`, q)
         || matchesId(s.id, q)) }))
       .filter(g => g.sessions.length > 0);
   }
@@ -39,9 +92,8 @@
     const list = Array.isArray(rows) ? rows : [];
     const q = String(query ?? '').trim().toLowerCase();
     if (!q) return list;
-    return list.filter(r =>
-      `${r.label} ${searchableCwd(r.cwd)}`.toLowerCase().includes(q));
+    return list.filter(r => matchesText(`${r.label} ${searchableCwd(r.cwd)}`, q));
   }
 
-  return { filterSessions, filterProjects, searchableCwd };
+  return { filterSessions, filterProjects, searchableCwd, matchesText };
 });

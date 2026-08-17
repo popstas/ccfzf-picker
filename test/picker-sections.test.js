@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { buildSections, sectionHeaderText, moveInBlocks, moveBetweenBlocks } = require('../frontend-src/picker-sections');
+const PickerSections = require('../frontend-src/picker-sections');
+const { buildSections, sectionHeaderText, moveInBlocks, moveBetweenBlocks } = PickerSections;
 
 /** Живая сессия в том объёме, в каком её читают секции. */
 function session(id, extra) {
@@ -610,4 +611,34 @@ test('мусор вместо карты спрятанных ничего не 
     const sections = buildSections(base({ layout: 'wide', hidden }));
     assert.ok(sections.some(s => s.key === 'past'), JSON.stringify(hidden));
   }
+});
+
+test('сброс выбора встаёт на первую строку своей панели', () => {
+  // Панель помнится ключом секции, а не номером: номер съезжает, стоит
+  // соседней панели опустеть, и выбор уехал бы в чужую.
+  const HEADERS = new Set(['section', 'snapshot-day']);
+  const rows = [
+    { kind: 'section', panel: 'live' },
+    { kind: 'session', panel: 'live' },
+    { kind: 'section', panel: 'projects' },
+    { kind: 'project', panel: 'projects' },
+    { kind: 'project', panel: 'projects' },
+  ];
+  assert.strictEqual(PickerSections.firstRowInPanel(rows, 'projects', HEADERS), 3);
+  assert.strictEqual(PickerSections.firstRowInPanel(rows, 'live', HEADERS), 1);
+});
+
+test('панель без совпадений отдаёт выбор первой строке списка', () => {
+  // Запрос может не оставить в прежней панели ни строки — тогда работает
+  // прежнее умолчание, и заголовок оно по-прежнему пропускает.
+  const HEADERS = new Set(['section', 'snapshot-day']);
+  const rows = [
+    { kind: 'section', panel: 'live' },
+    { kind: 'session', panel: 'live' },
+  ];
+  assert.strictEqual(PickerSections.firstRowInPanel(rows, 'snapshots', HEADERS), 1);
+  // Пустая память — то же умолчание: так ведёт себя свежепоказанное окно.
+  assert.strictEqual(PickerSections.firstRowInPanel(rows, '', HEADERS), 1);
+  // Список из одних заголовков не оставляет выбора вовсе.
+  assert.strictEqual(PickerSections.firstRowInPanel([{ kind: 'section', panel: 'live' }], 'live', HEADERS), 0);
 });

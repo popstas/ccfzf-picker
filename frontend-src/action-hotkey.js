@@ -23,6 +23,34 @@
   const BUILTIN_ACTION_KEYS = { new: 'n', pr: 'g', unread: 'u', seen: 'd', attach: 'r', info: 'i' };
 
   /**
+   * Буква на пункт меню `^K` — в том же порядке, что и сами пункты.
+   *
+   * Одна функция на два дела: ею подписывают пункт и ею же находят пункт по
+   * нажатой клавише. Два счёта разошлись бы ровно там, где это дороже всего —
+   * меню обещало бы букву, которая ничего не делает.
+   *
+   * Встроенные берут букву из BUILTIN_ACTION_KEYS, настроенные — из своего
+   * `menuKey`. Из Ctrl-хоткея настроенного действия букву взять нельзя:
+   * ^O занят сортировкой, ^P/^L/^H/^S — режимами, то есть у «открыть в
+   * Cursor» глобальной комбинации не бывает вовсе, а в меню `o` свободна. В
+   * этом весь смысл буквы без Ctrl.
+   *
+   * Только латиница: нажатие сверяется по `e.code` (`KeyO`), и ни кириллицу,
+   * ни цифру им не назвать.
+   */
+  function menuKeys(actions) {
+    const used = new Set();
+    return (Array.isArray(actions) ? actions : []).map((action) => {
+      const a = action || {};
+      const raw = BUILTIN_ACTION_KEYS[a.id] || a.menuKey || '';
+      const key = String(raw).trim().toLowerCase();
+      if (!/^[a-z]$/.test(key) || used.has(key)) return '';
+      used.add(key);
+      return key;
+    });
+  }
+
+  /**
    * Подписи встроенных действий для справочника клавиш.
    *
    * Слова взяты у меню `^K` (`availableActions` в session-actions.js), а не
@@ -236,6 +264,6 @@
 
   return {
     BUILTIN_ACTION_KEYS, BUILTIN_SHORTCUTS, RESERVED_CODES,
-    parseHotkey, formatHotkey, builtinGlyph, isReserved, matchesHotkey,
+    parseHotkey, formatHotkey, builtinGlyph, isReserved, matchesHotkey, menuKeys,
   };
 });

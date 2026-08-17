@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   BUILTIN_ACTION_KEYS, BUILTIN_SHORTCUTS, RESERVED_CODES,
-  parseHotkey, isReserved, matchesHotkey, formatHotkey, builtinGlyph,
+  parseHotkey, isReserved, matchesHotkey, formatHotkey, builtinGlyph, menuKeys,
 } = require('../frontend-src/action-hotkey');
 
 /** Событие клавиатуры в том объёме, в каком его читает matchesHotkey. */
@@ -215,4 +215,37 @@ test('ярлыки режимов заняли свои буквы, а pr уст
   // `^A` вернулся полю поиска: ярлык проектов ушёл на `^P`, и «выделить всё»
   // в строке поиска снова работает.
   assert.ok(!RESERVED_CODES.includes('KeyA'));
+});
+
+test('буквы пунктов меню: встроенные из таблицы, настроенные из menuKey', () => {
+  // Вторая таблица тех же букв разошлась бы с первой, поэтому встроенные
+  // берутся из BUILTIN_ACTION_KEYS, а не переписываются здесь.
+  const keys = menuKeys([
+    { id: 'new', label: 'New session' },
+    { id: 'cursor', label: 'Open in Cursor', menuKey: 'o' },
+    { id: 'info', label: 'Session info' },
+  ]);
+  assert.deepStrictEqual(keys, ['n', 'o', 'i']);
+});
+
+test('букву забирает первый сверху пункт', () => {
+  // Порядок меню человек видит глазами; второй список приоритетов разошёлся
+  // бы с ним, а молчащая буква хуже отсутствующей.
+  const keys = menuKeys([
+    { id: 'new', label: 'New session' },
+    { id: 'note', label: 'Note', menuKey: 'n' },
+  ]);
+  assert.deepStrictEqual(keys, ['n', '']);
+});
+
+test('буквой бывает только латинская буква', () => {
+  // Нажатие сверяется по e.code (`KeyO`), а кириллицу и знаки им не назвать
+  // вовсе: подпись обещала бы клавишу, которой не нажать.
+  const keys = menuKeys([
+    { id: 'a', label: 'A', menuKey: 'щ' },
+    { id: 'b', label: 'B', menuKey: '5' },
+    { id: 'c', label: 'C', menuKey: 'X' },
+    { id: 'd', label: 'D' },
+  ]);
+  assert.deepStrictEqual(keys, ['', '', 'x', '']);
 });

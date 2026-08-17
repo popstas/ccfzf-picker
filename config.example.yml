@@ -60,7 +60,7 @@ hideOnBlur: true
 # отрицательное, нецелое (кроме дробной доли или дробных пикселей, которые
 # сами по себе годятся) и не-число читаются как мусор и откатываются на
 # встроенный размер — со строкой в stderr. Окно настроек предлагает выбор из
-# готовых долей и отдельное поле пикселей (вкладка Window size), но вписанное
+# готовых долей и отдельное поле пикселей (вкладка Window popup), но вписанное
 # сюда руками оно покажет как есть.
 pickerSize:
   narrow:
@@ -153,6 +153,8 @@ backgroundRefresh: true
 #            выйдет: действие останется в меню, но без клавиши. Список этот
 #            растёт — сверяйтесь со справочником клавиш по F1, там показано
 #            занятое на самом деле. Ctrl и Cmd здесь разные.
+# menuKey  — необязательный: одна латинская буква без Ctrl/Cmd, работающая
+#            только при открытом меню Ctrl+K. Пример — у cursor ниже.
 # argv     — команда. Плейсхолдеры:
 #              {localPath}      путь на этой машине
 #              {localPathSlash} он же прямыми слэшами — нужен для `cmd /c
@@ -174,7 +176,9 @@ backgroundRefresh: true
 #     icon: '%SystemRoot%\explorer.exe'
 #   - id: cursor
 #     label: Open in Cursor
-#     hotkey: Ctrl+O
+#     # Ctrl+O is the picker's own sort switch, so this action gets no global
+#     # hotkey. In the Ctrl+K menu it answers to a bare `o`.
+#     menuKey: o
 #     argv: ['cursor', '{localPath}']
 #   # macOS: Finder и VS Code.
 #   - id: finder

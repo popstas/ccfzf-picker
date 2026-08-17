@@ -90,6 +90,11 @@
     showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
     showCost: 'cost', showContext: 'context', showWindow: 'window',
     showWindowHost: 'window host', showTerminalIcon: 'terminal icon',
+    // Не колонка (`side: 'dim'` в sessions.html, а не показ/скрытие поля), но
+    // сюда идёт по тому же правилу, что и showTerminalIcon: TOGGLE_LABELS —
+    // всё, что не FILTER_LABELS, и парность двух окон проверяет именно это.
+    dimStale: 'dim stale',
+    dimProject: 'dim project',
   };
   const FILTER_LABELS = { onlyWindow: 'only sessions with a window', showAll: 'show all sessions' };
   const UI_DEFAULTS = {
@@ -108,6 +113,18 @@
       onlyWindow: { list: false, statusline: false },
       showAll: { list: false, statusline: true },
       showTerminalIcon: { list: false, statusline: false },
+      // `list` тут — плейсхолдер: настоящее значение переписывает строка
+      // `UI_DEFAULTS.toggles.dimStale.list = Boolean(config?.stale?.enabled)`
+      // ниже, сразу после загрузки config. `statusline: true` остаётся
+      // литералом — этой осью распоряжается только человек, ни один конфиг
+      // её не выводит.
+      dimStale: { list: true, statusline: true },
+      // Плейсхолдера тут нет: у dimProject нет ключа в config.yaml, из
+      // которого выводилось бы умолчание, — оба числа литеральные и обязаны
+      // совпадать с уиToggles пикера дословно. Разойдись они, окно настроек
+      // показывало бы галку не в том состоянии, в каком её видит человек в
+      // списке, — ровно та болезнь, которой уже болел dimStale.
+      dimProject: { list: true, statusline: false },
     },
   };
 
@@ -323,6 +340,11 @@
     showWindow: '▣',
     showWindowHost: '⌂',
     showTerminalIcon: '⌨',
+    // Обе галки затемнения — не колонки, но в таблице стоят строками наравне
+    // с ними, и без глифа выглядели бы голее соседей. Знак один на обе, он
+    // про приглушение как таковое; что именно приглушается, говорит подсказка.
+    dimStale: '◐',
+    dimProject: '◐',
   };
 
   // Подсказка на подписи — только там, где название колонки само не говорит,
@@ -339,15 +361,28 @@
       + 'Windows trackers report wt, WezTerm, kitty, Ghostty and Alacritty; macOS ones report '
       + 'kitty, WezTerm, Ghostty, iTerm2, Terminal and Alacritty. A window whose tracker does '
       + 'not name the app keeps the plain glyph.',
+    // Обе галки не рисуют колонку, а приглушают строки, и по названию это не
+    // очевидно — соседи в этой таблице отвечают на вопрос «что показать», а
+    // эти две на «что притушить».
+    dimStale: 'Dims sessions and projects nobody has touched for a while. '
+      + 'The threshold comes from stale in config.yaml; this checkbox only turns the dimming on and off.',
+    dimProject: 'Dims rows belonging to other projects while the pointer or the selection '
+      + 'rests on a project row. In a list of projects alone there is nothing to separate, so it stays off there.',
   };
 
   // Recommended — всё, кроме редко нужного: agent event и cost читаются не
   // на каждый взгляд, а terminal icon — новая строка, включённая по умолчанию
-  // выключенной. Считается от TOGGLE_LABELS, а не вторым списком ключей: та
-  // же причина, по которой FILTER_KEYS в sessions.html считается от
-  // TOGGLE_CHECKS, а не пишется рядом заново.
+  // выключенной. Обе галки затемнения сюда тоже не идут: это не колонки, и
+  // щёлкнутый заголовок Recommended не должен решать за них заодно.
+  // Считается от TOGGLE_LABELS, а не вторым списком ключей: та же причина, по
+  // которой FILTER_KEYS в sessions.html считается от TOGGLE_CHECKS, а не
+  // пишется рядом заново.
+  // Список отдельной константой не выносить: тесты вычитывают из страницы
+  // кусок исходника и гоняют его в vm — объявление, стоящее выше куска, там
+  // просто не существует, и падает всё, что зовёт RECOMMENDED_KEYS.
   const RECOMMENDED_KEYS = Object.keys(TOGGLE_LABELS).filter(
-    key => key !== 'showEvent' && key !== 'showCost' && key !== 'showTerminalIcon',
+    key => key !== 'showEvent' && key !== 'showCost' && key !== 'showTerminalIcon'
+      && key !== 'dimStale' && key !== 'dimProject',
   );
 
   /**
@@ -466,7 +501,11 @@
   function panelTableHtml(layout, title, hint) {
     const wide = layout !== 'narrow';
     const rows = window.PickerPanels.panelRows(ui, layout);
-    const column = (row) => [0, 1, 2, 3].map(n =>
+    // Ноль — «колонку назначает смысл секции»; остальные номера — от одного
+    // до числа колонок раскладки, и это то же число, которым живёт пикер.
+    const columnNumbers = [0, ...Array.from(
+      { length: window.PickerPanels.WIDE_COLUMNS }, (_, i) => i + 1)];
+    const column = (row) => columnNumbers.map(n =>
       `<option value="${n}"${row.column === n ? ' selected' : ''}>`
       + `${n === 0 ? 'default' : n}</option>`).join('');
     const box = (row, prop, on) => `<td><input type="checkbox" data-panel="${esc(row.key)}"`
@@ -919,6 +958,13 @@
     config = {};
   }
   fields = configToFields(config);
+  // Умолчание dimStale — от того же config.stale.enabled, что видит пикер в
+  // toggleDefaults() (sessions.html), а не от литерала true чуть выше: без
+  // этого свежая установка (stale.enabled: false по умолчанию, см.
+  // config-shape.js) рисовала бы галку в окне настроек нажатой, пока сам
+  // список остаётся без затемнения, — расхождение двух окон об одной
+  // настройке.
+  UI_DEFAULTS.toggles.dimStale.list = Boolean(config?.stale?.enabled);
   try {
     ui = window.UiState.normalizeUiState(await invoke('load_ui'), UI_DEFAULTS);
   } catch (e) {
