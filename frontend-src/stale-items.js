@@ -3,7 +3,7 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.StaleItems = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
-  const SECONDS = { session: 3600, project: 86400 };
+  const SECONDS = { session: 3600, project: 3600 };
 
   /**
    * Достигла ли обычная сессия или проект своего порога старости.
@@ -17,7 +17,7 @@
     if (typeof rawLastActivity !== 'number' || !Number.isFinite(rawLastActivity)) return false;
     const lastActivity = rawLastActivity;
     const now = Number(nowSec);
-    const amount = Number(kind === 'project' ? stale.projectDays : stale.sessionHours);
+    const amount = Number(kind === 'project' ? stale.projectHours : stale.sessionHours);
     const threshold = amount * SECONDS[kind];
     return Number.isFinite(lastActivity)
       && lastActivity > 0

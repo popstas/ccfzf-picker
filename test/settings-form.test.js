@@ -210,27 +210,27 @@ test('stale-настройки находятся в General и показыва
   const ids = PAGES.find(page => page.id === 'general').fields.map(field => field.id);
   assert.ok(ids.includes('stale.enabled'), ids);
   assert.ok(ids.includes('stale.sessionHours'), ids);
-  assert.ok(ids.includes('stale.projectDays'), ids);
+  assert.ok(ids.includes('stale.projectHours'), ids);
   assert.ok(ids.includes('stale.opacity'), ids);
 
   const fields = configToFields({});
   assert.strictEqual(fields['stale.enabled'], false);
   assert.strictEqual(fields['stale.sessionHours'], 2);
-  assert.strictEqual(fields['stale.projectDays'], 7);
+  assert.strictEqual(fields['stale.projectHours'], 168);
   assert.strictEqual(fields['stale.opacity'], 0.5);
   assert.deepStrictEqual(fieldsToPatch(fields, {}), {});
 });
 
 test('stale-настройка уезжает точечным числовым патчем', () => {
-  const original = { stale: { enabled: true, sessionHours: 2, projectDays: 7, opacity: 0.5 } };
+  const original = { stale: { enabled: true, sessionHours: 2, projectHours: 168, opacity: 0.5 } };
   const fields = configToFields(original);
   assert.deepStrictEqual(
     fieldsToPatch({ ...fields, 'stale.opacity': '0.7' }, original),
     { stale: { opacity: 0.7 } },
   );
   assert.deepStrictEqual(
-    fieldsToPatch({ ...fields, 'stale.projectDays': '14' }, original),
-    { stale: { projectDays: 14 } },
+    fieldsToPatch({ ...fields, 'stale.projectHours': '14' }, original),
+    { stale: { projectHours: 14 } },
   );
 });
 
@@ -254,14 +254,14 @@ test('форма отвергает плохие stale-пороги и opacity',
   assert.deepStrictEqual(validate({
     ...valid,
     'stale.sessionHours': '3.5',
-    'stale.projectDays': '14',
+    'stale.projectHours': '14',
     'stale.opacity': '0.7',
   }), []);
 
   for (const [id, value] of [
     ['stale.sessionHours', ''],
     ['stale.sessionHours', 0],
-    ['stale.projectDays', -1],
+    ['stale.projectHours', -1],
     ['stale.opacity', 0.09],
     ['stale.opacity', 1.01],
     ['stale.opacity', 'none'],
@@ -275,7 +275,7 @@ test('валидация stale-чисел отвергает значения д
   const valid = { ...configToFields({}), sshHost: 'host' };
   for (const [id, validValue] of [
     ['stale.sessionHours', 3.5],
-    ['stale.projectDays', 14],
+    ['stale.projectHours', 14],
     ['stale.opacity', 0.7],
   ]) {
     for (const malformed of [true, [validValue], { valueOf: () => validValue }]) {

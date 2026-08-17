@@ -74,8 +74,8 @@
           type: 'bool', default: false },
         { id: 'stale.sessionHours', label: 'Sessions become stale after, hours',
           type: 'number', default: 2 },
-        { id: 'stale.projectDays', label: 'Projects become stale after, days',
-          type: 'number', default: 7 },
+        { id: 'stale.projectHours', label: 'Projects become stale after, hours',
+          type: 'number', default: 168 },
         { id: 'stale.opacity', label: 'Stale opacity', type: 'number', default: 0.5,
           hint: 'From 0.1 (very dim) to 1.0 (fully opaque).' },
         { id: 'caps.reptyr', label: 'Allow moving the process (reptyr)', type: 'bool' },
@@ -314,7 +314,7 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
       }
     };
     validNumber('stale.sessionHours', Number.MIN_VALUE, Infinity, 'must be greater than 0');
-    validNumber('stale.projectDays', Number.MIN_VALUE, Infinity, 'must be greater than 0');
+    validNumber('stale.projectHours', Number.MIN_VALUE, Infinity, 'must be greater than 0');
     validNumber('stale.opacity', 0.1, 1, 'must be between 0.1 and 1.0');
     return problems;
   }

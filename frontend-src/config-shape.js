@@ -85,7 +85,7 @@
     pickerSize: { narrow: { width: 0, height: 0 }, wide: { width: 0, height: 0 } },
     // Визуальное приглушение старых строк выключено, пока человек сам его не
     // попросил. Пороги остаются в конфиге и при выключенной галке.
-    stale: { enabled: false, sessionHours: 2, projectDays: 7, opacity: 0.5 },
+    stale: { enabled: false, sessionHours: 2, projectHours: 168, opacity: 0.5 },
   };
 
   /**
@@ -194,10 +194,20 @@
       return Number.isFinite(number) && number > 0 ? number : fallback;
     };
     const opacity = asNumber(src.opacity);
+    // Разовая миграция, только на чтение: старый `projectDays` пересчитывается
+    // в часы, лишь если `projectHours` вовсе не задан. Заданный (даже
+    // испорченный) `projectHours` главнее — иначе опечатка в новом поле молча
+    // откатывала бы человека к старому.
+    const fromDays = Number.isFinite(asNumber(src.projectDays)) && src.projectHours == null
+      ? asNumber(src.projectDays) * 24
+      : NaN;
     return {
       enabled: typeof src.enabled === 'boolean' ? src.enabled : DEFAULTS.stale.enabled,
       sessionHours: positive(src.sessionHours, DEFAULTS.stale.sessionHours),
-      projectDays: positive(src.projectDays, DEFAULTS.stale.projectDays),
+      projectHours: positive(
+        src.projectHours != null ? src.projectHours : fromDays,
+        DEFAULTS.stale.projectHours,
+      ),
       opacity: Number.isFinite(opacity) && opacity >= 0.1 && opacity <= 1
         ? opacity
         : DEFAULTS.stale.opacity,

@@ -259,18 +259,18 @@ test('stale по умолчанию выключен и несёт оба пор
   assert.deepStrictEqual(normalizeConfig({}).stale, {
     enabled: false,
     sessionHours: 2,
-    projectDays: 7,
+    projectHours: 168,
     opacity: 0.5,
   });
 });
 
 test('корректные stale-настройки проходят числами', () => {
   assert.deepStrictEqual(normalizeConfig({
-    stale: { enabled: true, sessionHours: '3.5', projectDays: '14', opacity: '0.7' },
+    stale: { enabled: true, sessionHours: '3.5', projectHours: '14', opacity: '0.7' },
   }).stale, {
     enabled: true,
     sessionHours: 3.5,
-    projectDays: 14,
+    projectHours: 14,
     opacity: 0.7,
   });
 });
@@ -278,7 +278,7 @@ test('корректные stale-настройки проходят числа�
 test('stale-числа не принимают значения других типов через Number coercion', () => {
   for (const [id, validValue, fallback] of [
     ['sessionHours', 3.5, 2],
-    ['projectDays', 14, 7],
+    ['projectHours', 14, 168],
     ['opacity', 0.7, 0.5],
   ]) {
     for (const malformed of [true, [validValue], { valueOf: () => validValue }]) {
@@ -290,17 +290,29 @@ test('stale-числа не принимают значения других т�
 
 test('испорченное stale-поле сбрасывает только себя', () => {
   assert.deepStrictEqual(normalizeConfig({
-    stale: { enabled: 'yes', sessionHours: 0, projectDays: 10, opacity: 2 },
+    stale: { enabled: 'yes', sessionHours: 0, projectHours: 10, opacity: 2 },
   }).stale, {
     enabled: false,
     sessionHours: 2,
-    projectDays: 10,
+    projectHours: 10,
     opacity: 0.5,
   });
   assert.deepStrictEqual(normalizeConfig({ stale: null }).stale, {
     enabled: false,
     sessionHours: 2,
-    projectDays: 7,
+    projectHours: 168,
     opacity: 0.5,
   });
+});
+
+test('projectDays без projectHours переводится в часы', () => {
+  assert.strictEqual(normalizeConfig({
+    stale: { enabled: true, projectDays: 7 },
+  }).stale.projectHours, 168);
+});
+
+test('projectHours главнее устаревшего projectDays', () => {
+  assert.strictEqual(normalizeConfig({
+    stale: { projectDays: 7, projectHours: 3 },
+  }).stale.projectHours, 3);
 });

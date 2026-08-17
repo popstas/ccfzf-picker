@@ -390,7 +390,7 @@ function renderProjectRows(projects, query, toggles, taken, stale) {
     // и на экране, а не переписанной в тесте.
     window: { PickerSections, StaleItems },
     CONFIG: {
-      stale: stale || { enabled: false, sessionHours: 2, projectDays: 7, opacity: 0.5 },
+      stale: stale || { enabled: false, sessionHours: 2, projectHours: 168, opacity: 0.5 },
     },
     projectRows,
     rows: [],
@@ -1440,7 +1440,7 @@ function renderSessionRows(state, query, toggles, stale) {
       StaleItems,
     },
     CONFIG: {
-      stale: stale || { enabled: false, sessionHours: 2, projectDays: 7, opacity: 0.5 },
+      stale: stale || { enabled: false, sessionHours: 2, projectHours: 168, opacity: 0.5 },
     },
     groups: buildSessionsPayload(state, 'recent').groups,
     rows: [],
@@ -1712,7 +1712,7 @@ test('заголовок несворачиваемой секции — под�
 });
 
 test('старые обычные сессии и проекты получают stale, а Zellij нет', () => {
-  const stale = { enabled: true, sessionHours: 2, projectDays: 7, opacity: 0.4 };
+  const stale = { enabled: true, sessionHours: 2, projectHours: 168, opacity: 0.4 };
   const { items: sessions } = renderSessionRows({
     ok: true,
     sessions: [aggregatorSession({
