@@ -158,6 +158,20 @@ test('settings.html грузит те же модули, что и зовёт', 
   assert.ok(html.includes('id="page"'));
 });
 
+test('ui-state.js в settings.html стоит раньше picker-panels.js', () => {
+  // Браузерная ветка UMD-шима у picker-panels.js читает `WIDE_COLUMNS` из
+  // globalThis.UiState прямо на загрузке модуля, а не при первом вызове.
+  // Переставь теги местами — и окно настроек упадёт на загрузке, до единой
+  // нарисованной строки. Тестом это не ловится ничем другим: в Node оба
+  // модуля идут через require, где порядок не значит ничего, и сборка
+  // остаётся зелёной до живого запуска окна.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  const uiState = html.indexOf('src="ui-state.js"');
+  const panels = html.indexOf('src="picker-panels.js"');
+  assert.ok(uiState !== -1 && panels !== -1, 'нет тега ui-state.js или picker-panels.js');
+  assert.ok(uiState < panels, 'picker-panels.js грузится раньше ui-state.js — окно настроек упадёт на загрузке');
+});
+
 test('settings.html попадает в сборку', () => {
   const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'prepare-frontend.js'), 'utf8');
   // Страница, не попавшая в frontend/, откроется пустым окном в собранном
