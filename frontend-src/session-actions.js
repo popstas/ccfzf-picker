@@ -51,7 +51,7 @@
       const forProject = [{ id: 'new', label: 'New session' }];
       if (pathApi.mapPath(row.cwd, cfg.pathMap) !== null) {
         for (const a of cfg.actions || []) {
-          forProject.push({ id: a.id, label: a.label, hotkey: a.hotkey });
+          forProject.push({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey });
         }
       }
       return forProject;
@@ -97,14 +97,14 @@
       const forSnapshot = [];
       if (pathApi.mapPath(row.cwd, cfg.pathMap) !== null) {
         for (const a of cfg.actions || []) {
-          forSnapshot.push({ id: a.id, label: a.label, hotkey: a.hotkey });
+          forSnapshot.push({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey });
         }
       }
       if (row.cwd) forSnapshot.push({ id: 'new', label: 'New session' });
       return forSnapshot;
     }
     if (pathApi.mapPath((row || {}).cwd, cfg.pathMap) !== null) {
-      for (const a of cfg.actions || []) actions.push({ id: a.id, label: a.label, hotkey: a.hotkey });
+      for (const a of cfg.actions || []) actions.push({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey });
     }
     const num = prNumber((row || {}).pr_url);
     if (num) actions.push({ id: 'pr', label: `Open PR #${num}` });

@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { availableActions, prNumber } = require('../frontend-src/session-actions');
 const { prBadgeHtml } = require('../frontend-src/session-glyph');
+const { normalizeConfig } = require('../frontend-src/config-shape');
+const { menuKeys } = require('../frontend-src/action-hotkey');
 
 // Конфиг с одним настроенным действием открытия. UNC вместо буквы диска — см.
 // комментарий в test/path-map.test.js.
@@ -40,6 +42,34 @@ test('настроенное действие доносит до меню св�
   const [action] = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED);
   assert.strictEqual(action.label, 'Open in Explorer');
   assert.strictEqual(action.hotkey, 'Ctrl+Shift+E');
+});
+
+// Сквозной сторож на весь шов настроенной буквы: normalizeConfig кладёт
+// menuKey в разобранное действие, availableActions обязана пронести его
+// в объект пункта меню, а menuKeys — превратить в настоящую букву. Тест на
+// объектах availableActions с уже готовым menuKey (как в CONFIGURED выше) эту
+// дорогу не проверяет: он не видит normalizeConfig и не поймал бы потерю поля
+// при пересборке пункта — что и произошло во всех трёх ветках availableActions.
+test('буква из config.yaml доезжает до меню всей дорогой: normalizeConfig → availableActions → menuKeys', () => {
+  const cfg = normalizeConfig({
+    pathMap: { remote: '/home/user', local: '\\\\nas\\home' },
+    actions: [{ id: 'cursor', label: 'Open in Cursor', menuKey: 'o', argv: ['cursor', '{localPath}'] }],
+  });
+
+  const sessionRow = { id: 'a', cwd: '/home/user/x' };
+  const projectRow = { kind: 'project', id: '/home/user/x', cwd: '/home/user/x' };
+  const snapshotSessionRow = { kind: 'snapshot-session', id: 'a', cwd: '/home/user/x' };
+
+  for (const row of [sessionRow, projectRow, snapshotSessionRow]) {
+    const menuActions = availableActions(row, cfg);
+    const letters = menuKeys(menuActions);
+    const index = menuActions.findIndex(a => a.id === 'cursor');
+    assert.ok(index >= 0, `настроенное действие пропало у строки kind=${row.kind}`);
+    assert.strictEqual(
+      letters[index], 'o',
+      `буква настроенного действия не дошла до меню у строки kind=${row.kind}`,
+    );
+  }
 });
 
 test('переклейку предлагают только живой сессии с pid', () => {
