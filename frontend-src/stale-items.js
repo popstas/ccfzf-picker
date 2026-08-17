@@ -17,8 +17,9 @@
     if (typeof rawLastActivity !== 'number' || !Number.isFinite(rawLastActivity)) return false;
     const lastActivity = rawLastActivity;
     const now = Number(nowSec);
-    const amount = Number(kind === 'project' ? stale.projectDays : stale.sessionHours);
-    const threshold = amount * SECONDS[kind];
+    const amount = Number(kind === 'project' ? stale.projectHours : stale.sessionHours);
+    if (!Number.isFinite(amount) || amount <= 0) return false;
+    const threshold = amount * 3600;
     return Number.isFinite(lastActivity)
       && lastActivity > 0
       && Number.isFinite(now)

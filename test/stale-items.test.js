@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { isStale, staleClass } = require('../frontend-src/stale-items');
 
 const NOW = 2_000_000;
-const STALE = { enabled: true, sessionHours: 2, projectDays: 7, opacity: 0.5 };
+const STALE = { enabled: true, sessionHours: 2, projectHours: 24, opacity: 0.5 };
 
 test('сессия становится старой ровно на пороге', () => {
   assert.strictEqual(isStale({ lastActivity: NOW - 7199 }, NOW, STALE, 'session'), false);
@@ -22,13 +22,13 @@ test('live и window не дают исключений старой сесси�
   }
 });
 
-test('проект пользуется своим недельным порогом', () => {
+test('проект становится stale на часовом пороге включительно', () => {
   assert.strictEqual(
-    isStale({ lastActivity: NOW - 2 * 86400 }, NOW, STALE, 'project'),
+    isStale({ lastActivity: NOW - 24 * 3600 + 1 }, NOW, STALE, 'project'),
     false,
   );
   assert.strictEqual(
-    isStale({ lastActivity: NOW - 7 * 86400 }, NOW, STALE, 'project'),
+    isStale({ lastActivity: NOW - 24 * 3600 }, NOW, STALE, 'project'),
     true,
   );
 });

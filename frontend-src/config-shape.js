@@ -85,7 +85,7 @@
     pickerSize: { narrow: { width: 0, height: 0 }, wide: { width: 0, height: 0 } },
     // Визуальное приглушение старых строк выключено, пока человек сам его не
     // попросил. Пороги остаются в конфиге и при выключенной галке.
-    stale: { enabled: false, sessionHours: 2, projectDays: 7, opacity: 0.5 },
+    stale: { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 },
   };
 
   /**
@@ -180,7 +180,7 @@
    * Пороги старых строк и их прозрачность.
    *
    * Каждое поле нормализуется отдельно: опечатка в opacity не должна стирать
-   * выбранный человеком недельный порог проектов.
+   * выбранный человеком часовой порог проектов.
    */
   function normalizeStale(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
@@ -197,7 +197,7 @@
     return {
       enabled: typeof src.enabled === 'boolean' ? src.enabled : DEFAULTS.stale.enabled,
       sessionHours: positive(src.sessionHours, DEFAULTS.stale.sessionHours),
-      projectDays: positive(src.projectDays, DEFAULTS.stale.projectDays),
+      projectHours: positive(src.projectHours, DEFAULTS.stale.projectHours),
       opacity: Number.isFinite(opacity) && opacity >= 0.1 && opacity <= 1
         ? opacity
         : DEFAULTS.stale.opacity,
