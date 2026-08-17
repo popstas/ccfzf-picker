@@ -580,11 +580,11 @@ test('windowHtml оставляет прежний глиф без записи 
 test('windowHtml меняет глиф, когда трекер назвал знакомый терминал', () => {
   assert.strictEqual(
     windowHtml({ window: { hwnd: 1, app: 'wezterm-gui.exe' } }, true, true),
-    '<div class="win open" title="WezTerm">w</div>',
+    '<div class="win open" title="WezTerm">z</div>',
   );
   assert.strictEqual(
     windowHtml({ window: { hwnd: 1, process: 'WindowsTerminal.exe' } }, true, true),
-    '<div class="win open" title="Windows Terminal">t</div>',
+    '<div class="win open" title="Windows Terminal">w</div>',
   );
 });
 
@@ -592,8 +592,8 @@ test('терминалы Windows различаются между собой �
   // Ради этого правило и заведено поимённым: на popstas-pc рядом живут оба, и
   // общий знак ⌨ на них двоих не отвечал бы на единственный вопрос к пометке.
   const glyph = (named) => windowHtml({ window: { app: named } }, true, true);
-  assert.strictEqual(glyph('wt.exe'), '<div class="win open" title="Windows Terminal">t</div>');
-  assert.strictEqual(glyph('wezterm-gui.exe'), '<div class="win open" title="WezTerm">w</div>');
+  assert.strictEqual(glyph('wt.exe'), '<div class="win open" title="Windows Terminal">w</div>');
+  assert.strictEqual(glyph('wezterm-gui.exe'), '<div class="win open" title="WezTerm">z</div>');
   assert.notStrictEqual(glyph('wt.exe'), glyph('wezterm-gui.exe'));
 });
 
@@ -606,7 +606,7 @@ test('маковский Terminal.app не читается как Windows Termi
   );
   assert.strictEqual(
     windowHtml({ window: { app: 'WindowsTerminal.exe' } }, true, true),
-    '<div class="win open" title="Windows Terminal">t</div>',
+    '<div class="win open" title="Windows Terminal">w</div>',
   );
 });
 

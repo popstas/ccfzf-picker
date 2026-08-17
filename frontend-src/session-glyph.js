@@ -179,11 +179,14 @@
    * `wt` — тот совпадал в любом слове с этими двумя буквами подряд.
    */
   const TERMINAL_GLYPHS = [
-    { re: /wezterm/i, glyph: 'w', name: 'WezTerm' },
+    // `z` у WezTerm, а `w` у Windows Terminal — выбор владельца, и он не
+    // произвольный: первая буква достаётся тому, у кого имя с неё начинается,
+    // а WezTerm узнаётся по своей второй, характерной.
+    { re: /wezterm/i, glyph: 'z', name: 'WezTerm' },
     { re: /kitty/i, glyph: 'k', name: 'kitty' },
     { re: /ghostty/i, glyph: 'g', name: 'Ghostty' },
     { re: /iterm/i, glyph: 'i', name: 'iTerm2' },
-    { re: /windowsterminal|(^|[\\/])wt(\.exe)?$/i, glyph: 't', name: 'Windows Terminal' },
+    { re: /windowsterminal|(^|[\\/])wt(\.exe)?$/i, glyph: 'w', name: 'Windows Terminal' },
     { re: /alacritty/i, glyph: 'a', name: 'Alacritty' },
     { re: /^terminal(\.app)?$/i, glyph: 'T', name: 'Terminal' },
   ];
