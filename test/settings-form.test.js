@@ -234,6 +234,42 @@ test('stale-настройки показывают defaults', () => {
   assert.deepStrictEqual(fieldsToPatch(fields, {}), {});
 });
 
+test('stale-умолчания и границы opacity не расходятся между config-shape и формой', () => {
+  // Умолчания и граница 0.1..1 продублированы намеренно, в трёх местах:
+  // DEFAULTS/normalizeConfig в config-shape.js, поле stale.opacity в PAGES и
+  // validNumber в validate() — оба в settings-form.js. Второй источник правды
+  // тут неизбежен (форма не может звать normalizeConfig ради одной цифры на
+  // каждый рендер), а вот молчаливый он быть не должен: как у
+  // defaultCollapsedFor в picker-panels.js и у диапазона pickerSize, эта
+  // дублированная правда сверяется тестом, который гоняет настоящие функции с
+  // обеих сторон, — иначе правка одного DEFAULTS оставила бы форму показывать
+  // старое число, и заметить это можно было бы только диффом двух файлов.
+  const normalized = normalizeConfig({}).stale;
+  const fields = configToFields({});
+  for (const key of ['enabled', 'sessionHours', 'projectHours', 'opacity']) {
+    assert.strictEqual(fields[`stale.${key}`], normalized[key], key);
+  }
+
+  const opacityField = PAGES.flatMap(p => p.fields).find(f => f.id === 'stale.opacity');
+  assert.strictEqual(opacityField.type, 'range');
+
+  for (const bound of [opacityField.min, opacityField.max]) {
+    // Границы слайдера обязаны быть значениями, которые normalizeConfig
+    // пропускает без изменений, — иначе ползунок предлагал бы человеку
+    // значение, которое рантайм тут же откатит на умолчание, — и которые
+    // validate принимает без единой жалобы.
+    assert.strictEqual(
+      normalizeConfig({ stale: { opacity: bound } }).stale.opacity,
+      bound,
+      `граница ${bound} не пережила normalizeConfig`,
+    );
+    // sshHost задан отдельно от stale-полей: пустой хост сам по себе проблема
+    // (см. validate), а тут проверяется только граница opacity.
+    const problems = validate({ ...fields, sshHost: 'host', 'stale.opacity': bound });
+    assert.deepStrictEqual(problems, [], `граница ${bound}: ${JSON.stringify(problems)}`);
+  }
+});
+
 test('stale-настройка уезжает точечным числовым патчем', () => {
   const original = {
     stale: { enabled: true, sessionHours: 2, projectHours: 24, opacity: 0.5 },
@@ -257,7 +293,7 @@ test('старый ключ stale.projectDays формой не читается
   assert.ok(!('stale.projectDays' in fields), Object.keys(fields).join(' '));
 
   const patch = fieldsToPatch({ ...fields, 'stale.projectDays': '99' }, {});
-  assert.ok(!patch.stale || !('projectDays' in patch.stale), JSON.stringify(patch));
+  assert.deepStrictEqual(patch, {}, JSON.stringify(patch));
 });
 
 test('stale.enabled одинаково строго читается runtime и формой', () => {

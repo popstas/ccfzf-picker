@@ -168,6 +168,9 @@
         + `<select data-field="${field.id}">${html}</select>${hint}</div>`;
     }
     if (field.type === 'range') {
+      // `data-field` тот же атрибут, что у текстовых и числовых полей: ползунок
+      // сохраняется через тот же единственный обработчик и `fieldsToPatch`,
+      // второго пути записи здесь нет.
       return `<div class="field"><label>${esc(field.label)}</label>`
         + '<div class="range-row">'
         + `<input type="range" data-field="${field.id}" value="${esc(value)}"`
@@ -281,6 +284,9 @@
   }
 
   function updateRangeCurrent(input) {
+    // Подпись правится на каждый `input` — человеку нужно видеть число, пока
+    // он двигает ползунок, — а само сохранение остаётся отдельным нажатием
+    // Save, как у любого другого поля формы.
     if (input.type !== 'range') return;
     const output = input.parentElement.querySelector('[data-range-current]');
     if (output) output.textContent = `Current: ${input.value}`;

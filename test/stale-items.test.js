@@ -50,3 +50,27 @@ test('логический и строковый lastActivity не считаю�
     assert.strictEqual(isStale({ lastActivity }, NOW, STALE, 'session'), false);
   }
 });
+
+test('испорченный порог не роняет isStale — проверка стоит после умножения', () => {
+  // Ранней проверки по amount больше нет: она была лишней (хвостовая по
+  // threshold ловит те же случаи), а переполнение произведения (amount ->
+  // Infinity) она не замечала бы вовсе, потому что смотрела на amount, а не
+  // на итог умножения.
+  const row = { lastActivity: NOW - 999999 };
+  for (const kind of ['session', 'project']) {
+    for (const projectHours of [0, -1, NaN]) {
+      assert.strictEqual(
+        isStale(row, NOW, { ...STALE, projectHours, sessionHours: projectHours }, kind),
+        false,
+        `${kind}/${projectHours}`,
+      );
+    }
+    // amount * 3600 переполняется до Infinity — тем самым его отсекает
+    // именно проверка threshold, а не отдельная граница до умножения.
+    assert.strictEqual(
+      isStale(row, NOW, { ...STALE, projectHours: 1e308, sessionHours: 1e308 }, kind),
+      false,
+      `${kind}/overflow`,
+    );
+  }
+});
