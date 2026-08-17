@@ -560,13 +560,13 @@ Call `scrim::set_visible` from `show_picker` (after `show()`), `hide_picker` (be
 
 ```js
 test('ccfzf_picker совпадает с ccfzf-picker', () => {
-  assert.strictEqual(hidesProject('ccfzf_picker', '/home/u/ccfzf-picker'), true);
-  assert.strictEqual(projectLine('ccfzf_picker', '/home/u/ccfzf-picker'), '');
+  assert.strictEqual(hidesProject('ccfzf_picker', '/x/ccfzf-picker'), true);
+  assert.strictEqual(projectLine('ccfzf_picker', '/x/ccfzf-picker'), '');
 });
 
 test('mac-wezterm показывает basename', () => {
-  assert.strictEqual(hidesProject('mac-wezterm', '/home/u/projects/js/ccfzf-picker'), false);
-  assert.strictEqual(projectLine('mac-wezterm', '/home/u/ccfzf-picker'), 'ccfzf-picker');
+  assert.strictEqual(hidesProject('mac-wezterm', '/x/projects/js/ccfzf-picker'), false);
+  assert.strictEqual(projectLine('mac-wezterm', '/x/ccfzf-picker'), 'ccfzf-picker');
 });
 
 test('короткое picker гасит ccfzf-picker', () => {
