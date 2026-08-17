@@ -792,6 +792,11 @@
     { key: 'showWindowHost', label: 'window host', side: 'right' },
     { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
     { key: 'showAll', label: 'show all', side: 'filter' },
+    // Четвёртая группа, `dim`, — и не колонка, и не фильтр. Состав списка
+    // затемнение не меняет (класс вешает отрисовщик строки), поэтому
+    // обработчику хватает render(); попади ключ в FILTER_KEYS, каждое
+    // нажатие пересобирало бы группы впустую.
+    { key: 'dimStale', label: 'dim stale', side: 'dim' },
     // `glyph` — не колонка со своим текстом и не фильтр: включённая ось list
     // подменяет глиф окна иконкой терминала (Task 11), а статуслайну эта
     // галка не сдаётся вовсе — подмена живёт только в колонке окна, второй
@@ -831,6 +836,10 @@
     // config.yaml: галка — это отступление от настройки, а не вторая
     // настройка. Отступление запоминается в ui.json, как и все остальные.
     showAll: { list: false, statusline: true },
+    // Умолчание подставляется при загрузке ui.json (toggleDefaults): здесь
+    // CONFIG ещё пустой — load_config идёт позже, — и значение застыло бы на
+    // встроенном. `true` тут только затем, чтобы ключ существовал.
+    dimStale: { list: true, statusline: true },
     // Выключена по обеим осям: без неё в колонке окна остаётся нынешний
     // глиф, а не пресет пикера — у соседних строк терминалы разные, общий
     // пресет врал бы. Ось statusline тут не читается вовсе (см. renderChecks).
@@ -893,6 +902,27 @@
   /** Передать одно нормализованное значение всем stale-строкам через CSS. */
   function applyStaleOpacity() {
     list.style.setProperty('--stale-opacity', String(CONFIG.stale.opacity));
+  }
+
+  /**
+   * Настройка затемнения, какой её видит отрисовщик строки.
+   *
+   * Вето у конфига нет намеренно. `CONFIG.stale.enabled && dimStale` дал бы
+   * нажатую галку, от которой ничего не происходит, — ровно та болезнь, что
+   * уже живёт у `show all` при выключенном `onlyLive`. Конфиг решает, с чем
+   * пикер открывается (умолчание галки), дальше решает галка.
+   */
+  function staleSettings() {
+    return { ...CONFIG.stale, enabled: toggles.dimStale };
+  }
+
+  /**
+   * Умолчания галок для normalizeUiState — с оглядкой на уже загруженный
+   * конфиг. Одна функция на обе дороги (первая загрузка и `ui-changed`):
+   * второе такое же выражение разошлось бы с первым молча.
+   */
+  function toggleDefaults() {
+    return { ...uiToggles, dimStale: { ...uiToggles.dimStale, list: CONFIG.stale.enabled } };
   }
   const message = document.getElementById('message');
   const statusline = document.getElementById('statusline');
@@ -1058,7 +1088,7 @@
   // сверху), а переключатель sort — про сессии. Правые колонки (usage, window,
   // id) пусты не по недосмотру: у каталога нет ни записи агента, ни окна.
   function projectItem(project, nowSec) {
-    const stale = window.StaleItems.staleClass(project, nowSec, CONFIG.stale, 'project');
+    const stale = window.StaleItems.staleClass(project, nowSec, staleSettings(), 'project');
     const index = rows.length;
     rows.push(project);
     // Зелёная точка у проекта, где кто-то работает прямо сейчас: тот же
@@ -1193,7 +1223,7 @@
     // выросла бы на строку — поэтому её вид назван своим классом `zellij`, а
     // не `session`.
     const rowKind = session.kind === 'zellij' ? 'zellij' : 'session';
-    const stale = window.StaleItems.staleClass(session, nowSec, CONFIG.stale, rowKind);
+    const stale = window.StaleItems.staleClass(session, nowSec, staleSettings(), rowKind);
     // Basename каталога, а не сокращённый путь — и вовсе без строки, когда
     // имя сессии уже назвало тот же проект (projectLine, Task 11). Полный
     // путь остаётся в titleAttr ниже, через shortPath — подсказка не меняется.
@@ -3208,7 +3238,7 @@
       // считала бы, что statusline у всех ключей по умолчанию false (что
       // сегодня и так верно, но с сохранением объекта, а не булевой карты).
       const ui = window.UiState.normalizeUiState(await invoke('load_ui'), {
-        sort: sortMode, toggles: uiToggles,
+        sort: sortMode, toggles: toggleDefaults(),
       });
       sortMode = ui.sort;
       uiToggles = ui.toggles;
@@ -3292,7 +3322,7 @@
         // что и при первой загрузке — иначе ось statusline у нетронутых
         // человеком ключей молча обнулилась бы при следующем saveUi().
         const ui = window.UiState.normalizeUiState(await invoke('load_ui'), {
-          sort: sortMode, toggles: uiToggles,
+          sort: sortMode, toggles: toggleDefaults(),
         });
         sortMode = ui.sort;
         uiToggles = ui.toggles;

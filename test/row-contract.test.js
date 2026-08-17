@@ -381,20 +381,27 @@ const PROJECTS_NOW = 1786045920; // минута после mtime первого
  */
 function renderProjectRows(projects, query, toggles, taken, stale) {
   const source = pageFunctions(
-    'projectItem(project, nowSec)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)');
+    'projectItem(project, nowSec)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)',
+    'staleSettings()');
   const projectRows = buildProjectList({ projects });
   markHotkeysTaken(projectRows, taken || []);
+  const staleConfig = stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 };
+  // Галка dimStale — как в normalizeUiState на живой странице: если тест её
+  // не назвал явно, умолчание берётся из CONFIG.stale.enabled, а не гасит
+  // затемнение молча.
+  const toggleState = toggles || { showPaths: true };
+  if (toggleState.dimStale === undefined) toggleState.dimStale = staleConfig.enabled;
   const ctx = {
     // Ровно то, чем itemsOfSection пользуется снаружи себя. Секция собирается
     // настоящей buildSections — отбор и порядок строк идут той же дорогой, что
     // и на экране, а не переписанной в тесте.
     window: { PickerSections, StaleItems },
     CONFIG: {
-      stale: stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 },
+      stale: staleConfig,
     },
     projectRows,
     rows: [],
-    toggles: toggles || { showPaths: true },
+    toggles: toggleState,
     escapeHtml: Glyph.escapeHtml,
     shortPath: Glyph.shortPath,
     projectLine: Glyph.projectLine,
@@ -1493,7 +1500,12 @@ function renderSessionRows(state, query, toggles, stale) {
   // разошлась бы с настоящим правилом молча.
   const source = pageFunctions(
     'markToggleId(row)', 'sessionItem(session, nowSec)', 'subheadItem(row)',
-    'sectionItem(section)', 'itemsOfSection(section, nowSec)');
+    'sectionItem(section)', 'itemsOfSection(section, nowSec)', 'staleSettings()');
+  const staleConfig = stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 };
+  // Та же подстановка умолчания, что и в renderProjectRows: тест, назвавший
+  // только stale.enabled, не должен молча получить погашенную галку.
+  const toggleState = toggles || { showPaths: true };
+  if (toggleState.dimStale === undefined) toggleState.dimStale = staleConfig.enabled;
   const ctx = {
     // Ровно то, чем itemsOfSection пользуется снаружи себя.
     window: {
@@ -1502,12 +1514,12 @@ function renderSessionRows(state, query, toggles, stale) {
       StaleItems,
     },
     CONFIG: {
-      stale: stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 },
+      stale: staleConfig,
     },
     groups: buildSessionsPayload(state, 'recent').groups,
     rows: [],
     items: [],
-    toggles: toggles || { showPaths: true },
+    toggles: toggleState,
     escapeHtml: Glyph.escapeHtml,
     shortPath: Glyph.shortPath,
     projectLine: Glyph.projectLine,

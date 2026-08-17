@@ -90,6 +90,10 @@
     showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
     showCost: 'cost', showContext: 'context', showWindow: 'window',
     showWindowHost: 'window host', showTerminalIcon: 'terminal icon',
+    // Не колонка (`side: 'dim'` в sessions.html, а не показ/скрытие поля), но
+    // сюда идёт по тому же правилу, что и showTerminalIcon: TOGGLE_LABELS —
+    // всё, что не FILTER_LABELS, и парность двух окон проверяет именно это.
+    dimStale: 'dim stale',
   };
   const FILTER_LABELS = { onlyWindow: 'only sessions with a window', showAll: 'show all sessions' };
   const UI_DEFAULTS = {
@@ -108,6 +112,10 @@
       onlyWindow: { list: false, statusline: false },
       showAll: { list: false, statusline: true },
       showTerminalIcon: { list: false, statusline: false },
+      // Плейсхолдер: настоящее умолчание считает toggleDefaults() в
+      // sessions.html от CONFIG.stale.enabled, а тут читаются только ключи
+      // (тест «окно настроек знает все галки»), не значения.
+      dimStale: { list: true, statusline: true },
     },
   };
 
@@ -343,11 +351,13 @@
 
   // Recommended — всё, кроме редко нужного: agent event и cost читаются не
   // на каждый взгляд, а terminal icon — новая строка, включённая по умолчанию
-  // выключенной. Считается от TOGGLE_LABELS, а не вторым списком ключей: та
-  // же причина, по которой FILTER_KEYS в sessions.html считается от
-  // TOGGLE_CHECKS, а не пишется рядом заново.
+  // выключенной. dimStale сюда тоже не идёт: это не колонка, и щёлкнутый
+  // заголовок Recommended не должен решать за неё заодно. Считается от
+  // TOGGLE_LABELS, а не вторым списком ключей: та же причина, по которой
+  // FILTER_KEYS в sessions.html считается от TOGGLE_CHECKS, а не пишется
+  // рядом заново.
   const RECOMMENDED_KEYS = Object.keys(TOGGLE_LABELS).filter(
-    key => key !== 'showEvent' && key !== 'showCost' && key !== 'showTerminalIcon',
+    key => key !== 'showEvent' && key !== 'showCost' && key !== 'showTerminalIcon' && key !== 'dimStale',
   );
 
   /**
