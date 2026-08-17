@@ -832,6 +832,15 @@ test('показ окна забывает панель прошлого пок�
   assert.match(source, /activePanel = ''/, 'beginShow не чистит activePanel');
 });
 
+test('показ окна забывает наведение на проект прошлого показа', () => {
+  // Указатель мог стоять на строке проекта в прошлом сеансе; beginShow
+  // намеренно оставляет старый список на экране первым кадром, и без сброса
+  // paintProjectDim погасил бы его по каталогу, наведённому в прошлый раз —
+  // ни одна строка при этом яркой не остаётся.
+  const source = pageFunctions('beginShow()');
+  assert.match(source, /hoverProjectCwd = ''/, 'beginShow не чистит hoverProjectCwd');
+});
+
 test('наведение на проект гасит строки с другим каталогом', () => {
   // Гаснут строки во всех панелях сразу — ради этого всё и затевалось:
   // сессии проекта разбросаны по своим живым, чужим, истории и снимкам.
@@ -859,6 +868,25 @@ test('без наведения не гаснет ничего', () => {
     `${source}\ndimsForHover([{ kind: 'session', cwd: '/home/user/b' }], '');`,
     ctx, { filename: 'sessions.html' });
   assert.deepStrictEqual(Array.from(dims), [false]);
+});
+
+test('наведение, которого не несёт ни одна строка, ничего не гасит', () => {
+  // Осадок прошлого показа (см. «показ окна забывает наведение…» выше) или
+  // список, успевший пересобраться под наведённым каталогом, — оба случая
+  // выглядят одинаково: cwd есть, а строки под ним нет. Без защиты
+  // `row.cwd !== cwd` было бы истиной для каждой строки, и гасло бы всё сразу,
+  // без единой яркой строки под курсором, которая объяснила бы причину.
+  const source = pageFunctions('dimsForHover(rows, cwd)');
+  const ctx = { HEADER_KINDS: new Set(['section', 'snapshot-day']) };
+  vm.createContext(ctx);
+  const rows = [
+    { kind: 'session', cwd: '/home/user/b' },
+    { kind: 'session', cwd: '/home/user/c' },
+  ];
+  const dims = vm.runInContext(
+    `${source}\ndimsForHover(${JSON.stringify(rows)}, '/home/user/stale');`,
+    ctx, { filename: 'sessions.html' });
+  assert.deepStrictEqual(Array.from(dims), [false, false]);
 });
 
 test('подсветка восстанавливается после отрисовки', () => {
