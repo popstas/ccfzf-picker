@@ -36,15 +36,24 @@
    *
    * Наружу — имя как его написал трекер, а не приведённое к нижнему регистру:
    * сравнивают машины без учёта регистра, а показывают как есть.
+   *
+   * Список окон принимается готовым, а не считается заново: он уже собран
+   * строкой ниже в buildSessionList, и вторая копия того же вызова
+   * windowsOf разошлась бы с первой на первой же правке.
+   *
+   * Дедупликация идёт по normHost, а не по сырому имени: два трекера одной
+   * машины, записавшие имя в разном регистре, иначе дали бы два написания в
+   * колонке вместо одного.
    */
-  function foreignHosts(s, state, configHost) {
+  function foreignHosts(wins, configHost) {
     const mine = windowApi.normHost(configHost);
+    const seen = [];
     const out = [];
-    for (const w of windowApi.windowsOf(s, state)) {
-      const host = windowApi.normHost(w.host);
-      if (!host || host === mine) continue;
-      const named = String(w.host).trim();
-      if (!out.includes(named)) out.push(named);
+    for (const w of wins) {
+      const host = windowApi.normHost(w && w.host);
+      if (!host || host === mine || seen.includes(host)) continue;
+      seen.push(host);
+      out.push(String(w.host).trim());
     }
     return out;
   }
@@ -120,7 +129,7 @@
           // Отбор идёт здесь, а не в отрисовщике: `windowsOf` уже разбирается,
           // откуда взять `host` на старом агрегаторе, и второй разбор той же
           // развилки в глифе разошёлся бы с этим молча.
-          windowHost: foreignHosts(s, state, configHost).join(', '),
+          windowHost: foreignHosts(wins, configHost).join(', '),
           branch: (agent || {}).branch || '',
           pr_url: (agent || {}).pr_url || '',
           agentState: (agent || {}).state || '',

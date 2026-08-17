@@ -221,6 +221,14 @@ test('windowsOf отдаёт все окна строки в порядке от
   assert.deepStrictEqual(windowsOf(row, {}).map(w => w.host), ['mac-host', 'windows-box']);
 });
 
+test('пустой windows при непустом window откатывается на window', () => {
+  // Условие `Array.isArray(r.windows) && r.windows.length` несёт настоящую
+  // работу ровно здесь: одного Array.isArray хватило бы, чтобы пустой список
+  // победил непустое `window` и строка осталась вовсе без окон.
+  const row = { windows: [], window: { host: 'mac-host' } };
+  assert.deepStrictEqual(windowsOf(row, {}).map(w => w.host), ['mac-host']);
+});
+
 test('старый ответ понимается: одно окно становится списком из одного', () => {
   // Пикер новее агрегатора обязан вести себя как прежде, а не гасить пометки:
   // выкатываются они порознь, и порядок нам не подвластен.
@@ -253,4 +261,16 @@ test('unreadBases называет базу каждого окна, без по
 
 test('строка без окон баз не называет — просьба уйдёт по своей', () => {
   assert.deepStrictEqual(unreadBases({}, {}), []);
+});
+
+test('окно без адреса просит отмотку по своей базе, а не пропускается', () => {
+  // windows11-manager поля mqttBase не пишет вовсе, и агрегатор приписывает
+  // такому окну пустую строку. Выбрось её unreadBases — и просьба до этого
+  // трекера не доедет никогда: Rust трактует '' как «спроси свой конфиг»
+  // (resolve_base), а пропуск это переводит в «трекера тут нет».
+  const row = { windows: [
+    { host: 'mac-host', mqttBase: 'home/mac/windows' },
+    { host: 'windows-box' },
+  ] };
+  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', '']);
 });
