@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { filterProjects, filterSessions } = require('../frontend-src/picker-filter');
+const { filterProjects, filterSessions, matchesText } = require('../frontend-src/picker-filter');
 
 const ROWS = [
   { label: 'ccfzf', cwd: '/home/user/projects/shell/ccfzf' },
@@ -48,4 +48,37 @@ test('id совпадает только началом, а не середин�
 
 test('группа без совпавших сессий выпадает целиком', () => {
   assert.deepStrictEqual(filterSessions(GROUPS, 'нет такой'), []);
+});
+
+test('запрос в русской раскладке находит латинское имя', () => {
+  // Строка поиска сфокусирована всегда, и раскладка остаётся той, в которой
+  // человек только что писал. Набранное вслепую не находило ничего и
+  // выглядело пустым списком, а не промахом. `вуьщ` — это `demo`, набранное
+  // на тех же клавишах.
+  assert.deepStrictEqual(filterProjects(ROWS, 'вуьщ').map(r => r.label), ['demo']);
+  assert.deepStrictEqual(
+    filterSessions(GROUPS, 'вуьщ')[0].sessions.map(s => s.label), ['demo']);
+});
+
+test('верно набранное продолжает находить себя', () => {
+  // Отбор идёт по «исходный ИЛИ переложенный»: перевод добавляет совпадения,
+  // а не заменяет их.
+  assert.deepStrictEqual(filterProjects(ROWS, 'demo').map(r => r.label), ['demo']);
+});
+
+test('строка без кириллицы второго варианта не получает', () => {
+  assert.strictEqual(matchesText('demo', 'demo'), true);
+  assert.strictEqual(matchesText('demo', 'zzz'), false);
+});
+
+test('id по кириллице не находится', () => {
+  // matchesId сравнивает начало шестнадцатеричного id, и перевод туда не
+  // идёт: `афсу` — это `face` на тех же клавишах, и переводи мы id, сессия
+  // нашлась бы началом своего идентификатора по кириллическому запросу.
+  const groups = [{
+    title: 'Active sessions',
+    sessions: [{ id: 'face1234-aaaa-bbbb-cccc-000000000003', label: 'zzz', cwd: '/home/user/zzz' }],
+  }];
+  assert.deepStrictEqual(filterSessions(groups, 'face').length, 1);
+  assert.deepStrictEqual(filterSessions(groups, 'афсу'), []);
 });

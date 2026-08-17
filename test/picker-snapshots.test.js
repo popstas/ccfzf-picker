@@ -254,3 +254,13 @@ test('снимок старого агрегатора адреса не наз�
   assert.equal(snapshotBase({ id: 'a' }), '');
   assert.equal(snapshotBase(null), '');
 });
+
+test('снимки ищутся и в русской раскладке', () => {
+  // Третий отбор был написан в этом файле руками и filterProjects не звал
+  // вовсе: перевод, положенный в два места из трёх, дал бы поиск, который
+  // работает в сессиях и молчит в снимках. `зшслук` — это `picker`,
+  // набранный на тех же клавишах.
+  const found = rowsUnderDays([SNAP], undefined, 'зшслук')
+    .filter(r => r.kind === 'snapshot-session');
+  assert.deepEqual(found.map(r => r.id), ['aaa']);
+});
