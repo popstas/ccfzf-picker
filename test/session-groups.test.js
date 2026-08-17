@@ -252,6 +252,48 @@ test('labelSessions даёт имя каждой строке и не трога
   assert.strictEqual(out.id, 'a');
 });
 
+test('двойники разводятся именем машины окна', () => {
+  // Одинаковые имя и каталог, окна на разных машинах. Своя машина названа
+  // пустотой намеренно: имя пикера в каждой строке было бы шумом, а голая
+  // строка рядом с «· mac» читается как «здесь».
+  const rows = labelSessions([
+    { id: 'f381b515', title: 'settings', cwd: '/home/user/p', windowHost: '' },
+    { id: 'b4ed3029', title: 'settings', cwd: '/home/user/p', windowHost: 'mac' },
+  ]);
+  assert.deepStrictEqual(rows.map(r => r.label), ['settings', 'settings · mac']);
+});
+
+test('двойники на одной машине разводятся хвостом id', () => {
+  // Пометка, одинаковая у всей пары, не различает ничего — и хвост достаётся
+  // именно ей, а не приписывается поверх бесполезного имени машины.
+  const rows = labelSessions([
+    { id: 'f381b515', title: 'settings', cwd: '/home/user/p', windowHost: 'mac' },
+    { id: 'b4ed3029', title: 'settings', cwd: '/home/user/p', windowHost: 'mac' },
+  ]);
+  assert.deepStrictEqual(rows.map(r => r.label), ['settings · f381', 'settings · b4ed']);
+});
+
+test('тройке достаётся и машина, и хвост — но только тем, кому нужно', () => {
+  const rows = labelSessions([
+    { id: 'aaaa1111', title: 'settings', cwd: '/home/user/p', windowHost: '' },
+    { id: 'bbbb2222', title: 'settings', cwd: '/home/user/p', windowHost: 'mac' },
+    { id: 'cccc3333', title: 'settings', cwd: '/home/user/p', windowHost: 'mac' },
+  ]);
+  assert.deepStrictEqual(rows.map(r => r.label),
+    ['settings', 'settings · mac · bbbb', 'settings · mac · cccc']);
+});
+
+test('одинокая строка и тёзка из другого каталога остаются как есть', () => {
+  // Двойник — это совпадение имени И каталога. Одно имя на два проекта
+  // различается путём, который и так виден в строке.
+  const rows = labelSessions([
+    { id: 'aaaa1111', title: 'settings', cwd: '/home/user/a', windowHost: '' },
+    { id: 'bbbb2222', title: 'settings', cwd: '/home/user/b', windowHost: 'mac' },
+    { id: 'cccc3333', title: 'other', cwd: '/home/user/a', windowHost: '' },
+  ]);
+  assert.deepStrictEqual(rows.map(r => r.label), ['settings', 'settings', 'other']);
+});
+
 // Фильтр `only windowed` живёт на одном лишь наличии поля `window` и о машинах
 // не знает ничего: `rows.filter(r => r.window)` в buildSessionsPayload. Сторож
 // на то, что окно с чужой машины он считает окном — этим и чинится «чекбокс
