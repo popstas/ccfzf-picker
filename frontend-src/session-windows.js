@@ -147,5 +147,25 @@
     return able.find(e => normHost(e.host) === mine) || able[0] || null;
   }
 
-  return { windowOf, windowsOf, normHost, canFocusRow, focusWindowOf, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager };
+  /**
+   * Куда отматывать отметку «просмотрено».
+   *
+   * Отметка строки — максимум по всем окнам, поэтому отмотать надо у каждого
+   * трекера: отмотай у одного, и второй вернёт «просмотрено» на следующем же
+   * опросе, а кнопка будет выглядеть сломанной.
+   *
+   * Пустой список — не отказ: просьба уйдёт по базе из своего конфига, как
+   * было до появления нескольких трекеров. Слот в менеджере переживает
+   * закрытие окна, и такую сессию он всё ещё может знать по id.
+   */
+  function unreadBases(row, state) {
+    const out = [];
+    for (const w of windowsOf(row, state)) {
+      const base = w && typeof w.mqttBase === 'string' ? w.mqttBase.trim() : '';
+      if (base && !out.includes(base)) out.push(base);
+    }
+    return out;
+  }
+
+  return { windowOf, windowsOf, normHost, canFocusRow, focusWindowOf, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager, unreadBases };
 });

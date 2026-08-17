@@ -809,25 +809,33 @@ async fn focus_window_mqtt(id: String, base: Option<String>) -> Result<(), Strin
         .map_err(|e| format!("focus_window_mqtt task failed: {e}"))?
 }
 
-/// Вернуть сессию в непрочитанное у оконного трекера.
+/// Вернуть сессию в непрочитанное у оконных трекеров.
 ///
 /// Отметок о просмотре две: своя, в `seen.json`, и трекерная — она приезжает
 /// полем `focusedAt` внутри `window` и в списке побеждает по максимуму. Отмотать
 /// только свою бесполезно: у сессии с открытым окном трекерная почти всегда
 /// свежее и вернула бы кружок в «просмотрено» на следующем же опросе.
 ///
-/// Права на передний план здесь не выдаётся: окно никто не поднимает. Пикер по
-/// этой команде не гаснет — список перерисовывается раз в секунду, и кружок
-/// оранжевеет на глазах.
+/// Окон у сессии бывает два — её открывают на двух машинах сразу, — и отмотать
+/// надо у каждого трекера: отмотай у одного, и второй вернёт «просмотрено» тем
+/// же способом. Права на передний план здесь не выдаётся: окно никто не
+/// поднимает. Пикер по этой команде не гаснет — список перерисовывается раз в
+/// секунду, и кружок оранжевеет на глазах.
 #[tauri::command]
-async fn unread_session_mqtt(id: String, base: Option<String>) -> Result<(), String> {
+async fn unread_session_mqtt(id: String, bases: Vec<String>) -> Result<(), String> {
     let broker = configured_broker()?;
-    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
-    // запасной ход для трекера прежней версии.
-    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || mqtt::unread(&broker, &base, &id))
-        .await
-        .map_err(|e| format!("unread_session_mqtt task failed: {e}"))?
+    // Адрес называет трекер той машины, где стоит окно, и таких машин бывает
+    // две: сессию открывают на обеих. Пустой список — трекер прежней версии
+    // или строка без окон, тогда остаётся база своего конфига.
+    let bases = mqtt::unread_bases(&broker, &bases);
+    tauri::async_runtime::spawn_blocking(move || {
+        for base in &bases {
+            mqtt::unread(&broker, base, &id)?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("unread_session_mqtt task failed: {e}"))?
 }
 
 /// Попросить поднять раскладку снимка.

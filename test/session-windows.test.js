@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const SessionWindows = require('../frontend-src/session-windows');
-const { canFocusRow, trackerHere, trackerHosts, focusPid, openManager, windowsOf, windowOf, focusWindowOf, mqttBaseFor } = SessionWindows;
+const { canFocusRow, trackerHere, trackerHosts, focusPid, openManager, windowsOf, windowOf, focusWindowOf, mqttBaseFor, unreadBases } = SessionWindows;
 
 // Ответ нового агрегатора: две машины, у каждой свой трекер.
 const STATE = {
@@ -238,4 +238,19 @@ test('совсем старый ответ: машину называют вер
 test('строка без окон даёт пустой список, а windowOf — null', () => {
   assert.deepStrictEqual(windowsOf({}, {}), []);
   assert.strictEqual(windowOf({}, {}), null);
+});
+
+test('unreadBases называет базу каждого окна, без повторов', () => {
+  // Отметка складывается по максимуму всех окон, значит отмотать надо у
+  // каждого трекера: иначе второй вернёт «просмотрено» следующим же опросом.
+  const row = { windows: [
+    { host: 'mac-host', mqttBase: 'home/mac/windows' },
+    { host: 'windows-box', mqttBase: 'home/pc/windows' },
+    { host: 'other-box', mqttBase: 'home/pc/windows' },
+  ] };
+  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', 'home/pc/windows']);
+});
+
+test('строка без окон баз не называет — просьба уйдёт по своей', () => {
+  assert.deepStrictEqual(unreadBases({}, {}), []);
 });

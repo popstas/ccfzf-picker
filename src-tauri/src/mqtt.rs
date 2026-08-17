@@ -347,6 +347,30 @@ pub fn resolve_base(broker: &Broker, asked: &str) -> String {
     }
 }
 
+/// Адреса, по которым отматывается отметка «просмотрено».
+///
+/// Окон у сессии бывает несколько, отметка складывается по максимуму всех, и
+/// отмотать надо у каждого трекера: отмотай у одного — второй вернёт
+/// «просмотрено» на следующем же опросе.
+///
+/// Каждая база просеивается тем же белым списком, что и одиночная: строка
+/// приезжает из файла, написанного на чужой машине. Совпавшие после
+/// просеивания складываются — две публикации в один топик это два одинаковых
+/// сообщения, а не две отметки. Пустой список даёт базу своего конфига: так
+/// пикер вёл себя до появления нескольких трекеров.
+pub fn unread_bases(broker: &Broker, asked: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for base in asked.iter().map(|a| resolve_base(broker, a.trim())) {
+        if !out.contains(&base) {
+            out.push(base);
+        }
+    }
+    if out.is_empty() {
+        out.push(resolve_base(broker, ""));
+    }
+    out
+}
+
 /// Опубликовать готовое тело в топик установки и дождаться подтверждения.
 ///
 /// Ждём именно `PubAck`, а не просто отправки: без него «опубликовано» значит
@@ -403,8 +427,8 @@ fn publish(broker: &Broker, base: &str, tail: &str, payload: &str) -> Result<(),
 mod tests {
     use super::{
         broker_from_config, open_new_payload, open_payload, open_project_payload, resolve_base,
-        restore_payload, terminal_name, topic_of, FOCUS_TOPIC, OPEN_TOPIC, RESTORE_TOPIC,
-        UNREAD_TOPIC,
+        restore_payload, terminal_name, topic_of, unread_bases, FOCUS_TOPIC, OPEN_TOPIC,
+        RESTORE_TOPIC, UNREAD_TOPIC,
     };
 
     fn broker(base: &str) -> super::Broker {
@@ -666,5 +690,34 @@ mod tests {
     fn single_session_body_names_it() {
         let body = restore_payload("snap-1", &["aaa".to_string()]);
         assert_eq!(body, r#"{"id":"snap-1","sessionIds":["aaa"]}"#);
+    }
+
+    #[test]
+    fn unread_bases_resolves_each_and_drops_duplicates() {
+        // Две базы просеиваются порознь, а совпавшие после просеивания
+        // складываются в одну: две публикации в один топик — это два
+        // одинаковых сообщения, а не две отметки.
+        let b = broker("home/room/pc");
+        let got = unread_bases(&b, &["home/room/mac/windows".into(),
+                                     "home/room/mac/windows".into()]);
+        assert_eq!(got, vec!["home/room/mac/windows".to_string()]);
+    }
+
+    #[test]
+    fn unread_bases_falls_back_to_the_config_base() {
+        // Строка без окон баз не называет, и просьба обязана уйти по своей:
+        // слот в менеджере переживает закрытие окна.
+        let b = broker("home/room/pc");
+        assert_eq!(unread_bases(&b, &[]), vec![resolve_base(&b, "")]);
+    }
+
+    #[test]
+    fn unread_bases_sifts_out_wildcards() {
+        // Строка приезжает из файла, написанного на чужой машине, а `#` и `+`
+        // в MQTT — подстановочные знаки: публикация по такому топику ушла бы
+        // мимо всех.
+        let b = broker("home/room/pc");
+        assert_eq!(unread_bases(&b, &["home/+/windows".into()]),
+                   vec![resolve_base(&b, "")]);
     }
 }
