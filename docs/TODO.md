@@ -8,7 +8,7 @@
   Справочник F1: заголовок `ccfzf-picker vX.Y.Z`, «Keyboard shortcuts» —
   подзаголовок; в контенте лицензия MIT и ссылка на GitHub. Выше поле bundle
   ids, чтобы влезали 4 строки. `Projects become stale after` — часы, не дни
-  (поле уже есть: `stale.projectDays`).
+  (поле уже есть: `stale.projectHours`).
 
 - [ ] **Выбранный в пикере терминал обязан главенствовать и на машине с
   менеджером — wt и WezTerm на Windows равноправны.** Поймано на popstas-pc:
