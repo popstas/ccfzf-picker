@@ -161,12 +161,22 @@
    * Пустой элемент вместо пропуска — по той же причине, что у hotkeyHtml:
    * правые колонки стоят друг за другом, и дырка сдвинула бы соседние строки.
    */
-  function windowHtml(session, showWindow = true) {
+  // Терминал, а не окно вообще. Трекер сегодня не пишет ни `app`, ни
+  // `process` ни у одной записи — задача 5 завела саму галку, а поля
+  // остаются на будущее у того, кто их напишет. До тех пор регэксп просто не
+  // находит совпадения, и глиф остаётся прежним; подставлять вместо этого
+  // пресет терминала пикера было бы неправдой — у соседних строк терминалы
+  // бывают разные.
+  const TERMINAL_APP_RE = /wezterm|kitty|ghostty|WindowsTerminal|wt|iTerm/i;
+
+  function windowHtml(session, showWindow = true, showTerminalIcon = false) {
     if (!showWindow) return '';
     const win = session?.window;
     if (!win) return '<div class="win"></div>';
     const desktop = Number.isFinite(win.desktop) ? ` title="Desktop ${win.desktop}"` : '';
-    return `<div class="win open"${desktop}>▣</div>`;
+    const named = String(win.app || win.process || '');
+    const glyph = showTerminalIcon && TERMINAL_APP_RE.test(named) ? '⌨' : '▣';
+    return `<div class="win open"${desktop}>${glyph}</div>`;
   }
 
   /**
@@ -302,6 +312,68 @@
   }
 
   /**
+   * Слова текста для сравнения «это то же имя, просто по-другому набрано».
+   *
+   * Разделитель — всё, что не буква и не цифра: `ccfzf_picker` и
+   * `ccfzf-picker` для человека одно и то же имя, разбитое на слова разным
+   * знаком, а для строкового сравнения — два разных значения.
+   */
+  function wordSet(text) {
+    return new Set(
+      String(text ?? '')
+        .split(/[^a-zA-Z0-9]+/)
+        .map((word) => word.toLowerCase())
+        .filter(Boolean),
+    );
+  }
+
+  /** Последний непустой сегмент пути — basename и по `/`, и по `\`. */
+  function pathBasename(cwd) {
+    const parts = String(cwd ?? '').split(/[/\\]+/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : '';
+  }
+
+  // Параметры не названы `a`/`b`: тест «поле действительно есть в строке»
+  // (row-contract.test.js) вычитывает из этого файла все `session.`/`s.`/
+  // `a.`/`b.` обращения как имена полей сессии — однобуквенные имена здесь
+  // ловились бы той же регуляркой и приписали бы строке поле `has`, которого
+  // у неё нет и не должно быть.
+  function isSubset(small, big) {
+    for (const item of small) if (!big.has(item)) return false;
+    return true;
+  }
+
+  /**
+   * Каталог уже назван именем строки — вторая подпись с тем же смыслом
+   * только отнимает место.
+   *
+   * Сравниваются множества слов, а не строки целиком: разделители у людей
+   * разные (`_` против `-`), а порядок слов и регистр значения не имеют.
+   * Правило одностороннее — «одно множество внутри другого», а не равенство:
+   * `picker` внутри `ccfzf-picker` тоже читается как то же имя в
+   * сокращении, а точное совпадение такой случай упустило бы. Пустое имя или
+   * пустой каталог гасить нечем — сравнивать не с чем.
+   */
+  function hidesProject(name, cwd) {
+    const nameWords = wordSet(name);
+    const dirWords = wordSet(pathBasename(cwd));
+    if (!nameWords.size || !dirWords.size) return false;
+    return isSubset(nameWords, dirWords) || isSubset(dirWords, nameWords);
+  }
+
+  /**
+   * Вторая строка под именем в списке: каталог проекта — basename, а не
+   * сокращённый путь. Полный путь остаётся в подсказке (rowTitle, через
+   * shortPath); здесь короче не значит менее понятно, а вопрос один — «какой
+   * это каталог», не «где он на диске».
+   *
+   * Пустая строка, когда имя уже сказало то же самое: см. hidesProject.
+   */
+  function projectLine(name, cwd) {
+    return hidesProject(name, cwd) ? '' : pathBasename(cwd);
+  }
+
+  /**
    * Подсказка при наведении на строку.
    *
    * Здесь оседает то, чему в строке не хватает места: полный путь (в строке он
@@ -381,6 +453,6 @@
     statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
     sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml, windowHostHtml,
     shortPath, rowTitle, titleAttr, escapeHtml,
-    prNumber, prBadgeHtml,
+    prNumber, prBadgeHtml, wordSet, hidesProject, projectLine,
   };
 });

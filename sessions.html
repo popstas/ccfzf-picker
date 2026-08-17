@@ -922,7 +922,7 @@
 
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml,
-    windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml,
+    windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -1064,16 +1064,17 @@
     // закрытой сессии, чтобы место осталось пустым, а у проекта «сейчас
     // никто не работает» — обычное состояние, а не отсутствие строки.
     const dotClass = project.liveCount ? 'dot active' : 'dot';
-    // Подсказка — через тот же titleAttr, что у сессий: иначе в ней висел бы
-    // полный путь, а строкой ниже, в теле строки, — тот же путь через
-    // shortPath, и одна строка показывала бы каталог двумя разными видами.
+    // Подсказка — через тот же titleAttr, что у сессий, и по-прежнему
+    // полный путь: она про то, чего в теле строки не видно. Тело же теперь
+    // показывает не путь, а basename — и не показывает вовсе, когда его уже
+    // сказало имя проекта (projectLine, Task 11).
+    const cwdLine = toggles.showPaths ? projectLine(project.label, project.cwd) : '';
     const html = `<div class="row project${stale}" data-index="${index}"${titleAttr(project)}>` +
       `<div class="${dotClass}"></div>` +
       `<div class="text"><div class="name">` +
       (project.mark ? '<span class="mark">★</span> ' : '') +
       `${escapeHtml(project.label)}</div>` +
-      (toggles.showPaths
-        ? `<div class="cwd">${escapeHtml(shortPath(project.cwd))}</div>` : '') +
+      (cwdLine ? `<div class="cwd">${escapeHtml(cwdLine)}</div>` : '') +
       `</div>` +
       `<div class="meta">` +
       `<div class="count">${project.sessionCount}` +
@@ -1139,14 +1140,14 @@
     // Enter на ней поднимет уже существующее окно. Класс `on-screen`, а не
     // `closed`: в этом файле `closed` значит «сессии больше нет», а здесь
     // всё наоборот — окно есть, и именно поэтому строка тусклая.
+    const snapCwdLine = toggles.showPaths ? projectLine(row.label, row.cwd) : '';
     return {
       key: row.key,
       html: `<div class="row snapshot-session${row.open ? ' on-screen' : ''}" data-index="${index}"` +
         ` title="${escapeHtml(row.cwd)}">` +
         `<div class="dot${row.open ? ' active' : ''}"></div>` +
         `<div class="text"><div class="name">${escapeHtml(row.label)}</div>` +
-        (toggles.showPaths
-          ? `<div class="cwd">${escapeHtml(shortPath(row.cwd))}</div>` : '') +
+        (snapCwdLine ? `<div class="cwd">${escapeHtml(snapCwdLine)}</div>` : '') +
         `</div>` +
         `<div class="meta"><div class="count">${row.open ? '▣ open' : ''}</div>` +
         `</div></div>`,
@@ -1183,13 +1184,16 @@
     // не `session`.
     const rowKind = session.kind === 'zellij' ? 'zellij' : 'session';
     const stale = window.StaleItems.staleClass(session, nowSec, CONFIG.stale, rowKind);
+    // Basename каталога, а не сокращённый путь — и вовсе без строки, когда
+    // имя сессии уже назвало тот же проект (projectLine, Task 11). Полный
+    // путь остаётся в titleAttr ниже, через shortPath — подсказка не меняется.
+    const sessionCwdLine = toggles.showPaths ? projectLine(session.label, session.cwd) : '';
     const html = `<div class="row ${rowKind}${session.live ? '' : ' closed'}${markable ? ' markable' : ''}${stale}" data-index="${index}"${titleAttr(session)}>` +
       statusDotHtml(session) +
       `<div class="text"><div class="name">${escapeHtml(session.label)}` +
       `${prBadgeHtml(session)}` +
       `</div>` +
-      (toggles.showPaths
-        ? `<div class="cwd">${escapeHtml(shortPath(session.cwd))}</div>` : '') +
+      (sessionCwdLine ? `<div class="cwd">${escapeHtml(sessionCwdLine)}</div>` : '') +
       // Две строки под карточкой: что спросили и чем ответили. Пустой div
       // всё равно занял бы высоту, поэтому рисуем только то, что есть.
       // Склейку «сводка, а у работающей — предыдущая» считает
@@ -1203,7 +1207,7 @@
       // это делала `.state` своим margin-left: auto, и стоило снять с неё
       // чекбокс, как всё съезжало к названию сессии.
       `<div class="meta">` +
-      windowHtml(session, toggles.showWindow) +
+      windowHtml(session, toggles.showWindow, toggles.showTerminalIcon) +
       windowHostHtml(session, toggles.showWindowHost) +
       stateHtml(session, toggles.showEvent) +
       sessionIdHtml(session, toggles.showId) +

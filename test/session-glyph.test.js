@@ -3,8 +3,8 @@ const assert = require('node:assert');
 const {
   escapeHtml, statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
   sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
-  shortPath, rowTitle, titleAttr, windowHostHtml,
-  prNumber, prBadgeHtml,
+  shortPath, rowTitle, titleAttr, windowHostHtml, windowHtml,
+  prNumber, prBadgeHtml, wordSet, hidesProject, projectLine,
 } = require('../frontend-src/session-glyph');
 
 test('shortPath collapses the agent home directory, and survives a missing path', () => {
@@ -531,4 +531,74 @@ test('выключенная галка убирает колонку целик
 test('имя машины экранируется', () => {
   // Строка приезжает из файла, написанного на чужой машине.
   assert.ok(!windowHostHtml({ windowHost: '<b>x' }).includes('<b>'));
+});
+
+// ── basename проекта под именем строки ──────────────────────────────────────
+
+test('ccfzf_picker совпадает с ccfzf-picker', () => {
+  assert.strictEqual(hidesProject('ccfzf_picker', '/x/ccfzf-picker'), true);
+  assert.strictEqual(projectLine('ccfzf_picker', '/x/ccfzf-picker'), '');
+});
+
+test('mac-wezterm показывает basename', () => {
+  assert.strictEqual(hidesProject('mac-wezterm', '/x/projects/js/ccfzf-picker'), false);
+  assert.strictEqual(projectLine('mac-wezterm', '/x/ccfzf-picker'), 'ccfzf-picker');
+});
+
+test('короткое picker гасит ccfzf-picker', () => {
+  // Правило одностороннее: подмножество — тоже совпадение, не только равенство.
+  assert.strictEqual(hidesProject('picker', '/x/ccfzf-picker'), true);
+});
+
+test('пустые имя или cwd не гасят', () => {
+  assert.strictEqual(hidesProject('', '/x/ccfzf-picker'), false);
+  assert.strictEqual(hidesProject('n', ''), false);
+});
+
+test('wordSet режет по не-буквенно-цифровым символам и понижает регистр', () => {
+  assert.deepStrictEqual(wordSet('Ccfzf_Picker-2'), new Set(['ccfzf', 'picker', '2']));
+  assert.deepStrictEqual(wordSet(''), new Set());
+  assert.deepStrictEqual(wordSet(undefined), new Set());
+});
+
+test('projectLine берёт последний непустой сегмент пути — и по /, и по \\', () => {
+  assert.strictEqual(projectLine('other', '/x/y/ccfzf-picker/'), 'ccfzf-picker');
+  assert.strictEqual(projectLine('other', 'X:\\Users\\user\\ccfzf-picker'), 'ccfzf-picker');
+});
+
+// ── глиф терминала в колонке окна ───────────────────────────────────────────
+
+test('windowHtml оставляет прежний глиф без записи о терминале', () => {
+  // Трекер сегодня не пишет ни app, ни process — откат к ▣ честнее, чем
+  // подстановка пресета терминала пикера (у соседних строк терминалы разные).
+  assert.strictEqual(
+    windowHtml({ window: { hwnd: 1 } }, true, true),
+    '<div class="win open">▣</div>',
+  );
+});
+
+test('windowHtml меняет глиф, когда трекер назвал знакомый терминал', () => {
+  assert.strictEqual(
+    windowHtml({ window: { hwnd: 1, app: 'wezterm-gui.exe' } }, true, true),
+    '<div class="win open">⌨</div>',
+  );
+  assert.strictEqual(
+    windowHtml({ window: { hwnd: 1, process: 'WindowsTerminal.exe' } }, true, true),
+    '<div class="win open">⌨</div>',
+  );
+});
+
+test('windowHtml не подменяет глиф, пока галка выключена', () => {
+  assert.strictEqual(
+    windowHtml({ window: { hwnd: 1, app: 'kitty' } }, true, false),
+    '<div class="win open">▣</div>',
+  );
+});
+
+test('windowHtml не подменяет глиф у незнакомого приложения', () => {
+  // Регэксп общий на все терминалы: незнакомое приложение остаётся ▣.
+  assert.strictEqual(
+    windowHtml({ window: { hwnd: 1, app: 'notepad.exe' } }, true, true),
+    '<div class="win open">▣</div>',
+  );
 });
