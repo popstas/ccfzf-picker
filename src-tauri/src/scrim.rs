@@ -281,7 +281,10 @@ mod win {
         if !show {
             let guard = SCRIM_HWND.lock().unwrap();
             if *guard != 0 {
-                unsafe { ShowWindow(HWND(*guard as _), SW_HIDE) };
+                // `ShowWindow` возвращает `BOOL` с `#[must_use]` — не про
+                // ошибку, а про то, было ли окно видимо *до* вызова; прятать
+                // уже спрятанное не ошибка, и разбирать здесь нечего.
+                let _ = unsafe { ShowWindow(HWND(*guard as _), SW_HIDE) };
             }
             return Ok(());
         }
@@ -291,7 +294,7 @@ mod win {
         unsafe {
             SetWindowPos(hwnd, Some(HWND_TOPMOST), x, y, w, h, SWP_NOACTIVATE)
                 .map_err(|e| format!("cannot place the scrim window: {e}"))?;
-            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         }
         reassert_picker_on_top(app);
         Ok(())
