@@ -23,6 +23,9 @@
     font: inherit;
   }
   .hint { color: #999; margin-top: 3px; }
+  .range-row { display: flex; align-items: center; gap: 10px; }
+  .range-row input[type=range] { flex: 1; }
+  .range-current { white-space: nowrap; color: #bbb; }
   #bar { position: sticky; bottom: 0; padding: 12px 0 0; background: #1c1c1e; }
   #save { padding: 8px 18px; }
   #status { color: #999; margin-left: 10px; }
@@ -234,6 +237,17 @@
         + '<label class="size-choice size-px">'
         + `<input type="number" min="101" data-px="${esc(field.id)}" value="${pxValue}" `
         + `placeholder="px" title="must be at least 101 px"> px</label></div>${hint}</div>`;
+    }
+    if (field.type === 'range') {
+      // `data-field` тот же атрибут, что у текстовых и числовых полей: ползунок
+      // сохраняется через тот же единственный обработчик и `fieldsToPatch`,
+      // второго пути записи здесь нет.
+      return `<div class="field"><label>${esc(field.label)}</label>`
+        + '<div class="range-row">'
+        + `<input type="range" data-field="${field.id}" value="${esc(value)}"`
+        + ` min="${esc(field.min)}" max="${esc(field.max)}" step="${esc(field.step)}">`
+        + `<span class="range-current" data-range-current>Current: ${esc(value)}</span>`
+        + `</div>${hint}</div>`;
     }
     if (field.type === 'bool') {
       // title, а не вторая строка под полем: подсказка всплывает по наведению,
@@ -516,6 +530,15 @@
     await persist();
   }
 
+  function updateRangeCurrent(input) {
+    // Подпись правится на каждый `input` — человеку нужно видеть число, пока
+    // он двигает ползунок, — а само сохранение остаётся отдельным нажатием
+    // Save (и отложенным autosave), как у любого другого поля формы.
+    if (input.type !== 'range') return;
+    const output = input.parentElement.querySelector('[data-range-current]');
+    if (output) output.textContent = `Current: ${input.value}`;
+  }
+
   function renderPage() {
     const def = PAGES.find(p => p.id === current);
     const body = current === 'columns' ? axesTableHtml()
@@ -538,6 +561,7 @@
     for (const input of page.querySelectorAll('[data-field]')) {
       input.addEventListener('input', () => {
         fields[input.dataset.field] = input.type === 'checkbox' ? input.checked : input.value;
+        updateRangeCurrent(input);
         dirtyFields.add(input.dataset.field);
         scheduleAutosave();
       });

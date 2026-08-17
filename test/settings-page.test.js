@@ -610,8 +610,13 @@ test('пиксельный размер виден в числовом поле,
 
 test('вкладки называются по спеке и Integrations нет', () => {
   const { PAGES } = require('../frontend-src/settings-form');
+  // 'Dim stale sessions' сразу после General — восьмая вкладка, пришедшая из
+  // #13 параллельно с этой перестройкой (см. docs/superpowers/specs/
+  // 2026-08-17-stale-settings-tab-design.md); список из семи здесь был верен
+  // только до слияния с той веткой.
   assert.deepStrictEqual(PAGES.map(p => p.title), [
-    'General', 'Window size', 'Columns', 'Layout panels', 'Hotkeys', 'MQTT', 'Paths',
+    'General', 'Dim stale sessions', 'Window size', 'Columns', 'Layout panels',
+    'Hotkeys', 'MQTT', 'Paths',
   ]);
 });
 
@@ -1194,4 +1199,42 @@ test('persist(): правка ui.toggles, залетевшая во время a
   assert.ok(saveUiCalls.length >= 2, 'правка, залетевшая во время записи, обязана дойти отдельной записью');
   assert.strictEqual(diskUi.toggles.showId.list, true, 'правка обязана долететь до диска, а не потеряться');
   assert.strictEqual(ctx.ui.toggles.showId.list, true, 'in-memory ui не должен откатиться на старое значение');
+});
+
+test('opacity рисуется range с шагом 0.1 и текущим значением', () => {
+  const { PAGES } = require('../frontend-src/settings-form');
+  const field = PAGES.find(page => page.id === 'stale').fields
+    .find(item => item.id === 'stale.opacity');
+  const src = sourceOf(/\n {2}function fieldHtml\(field\) \{[\s\S]*?\n {2}\}\n/, 'fieldHtml');
+  const ctx = {
+    fields: { 'stale.opacity': 0.5 },
+    esc: value => String(value),
+    window: {},
+  };
+  vm.createContext(ctx);
+  const html = vm.runInContext(`${src}\nfieldHtml(${JSON.stringify(field)});`, ctx,
+    { filename: 'settings.html' });
+
+  assert.match(html, /type="range"/);
+  assert.match(html, /min="0\.1"/);
+  assert.match(html, /max="1"/);
+  assert.match(html, /step="0\.1"/);
+  assert.match(html, /Current: 0\.5/);
+});
+
+test('подпись opacity обновляется сразу при движении range', () => {
+  const src = sourceOf(
+    /\n {2}function updateRangeCurrent\(input\) \{[\s\S]*?\n {2}\}\n/,
+    'updateRangeCurrent',
+  );
+  const output = { textContent: 'Current: 0.5' };
+  const input = {
+    type: 'range',
+    value: '0.7',
+    parentElement: { querySelector: () => output },
+  };
+  const ctx = { input, output };
+  vm.createContext(ctx);
+  vm.runInContext(`${src}\nupdateRangeCurrent(input);`, ctx, { filename: 'settings.html' });
+  assert.strictEqual(output.textContent, 'Current: 0.7');
 });

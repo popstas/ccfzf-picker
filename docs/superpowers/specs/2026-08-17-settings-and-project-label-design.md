@@ -20,14 +20,22 @@
 Порядок слева, сверху вниз:
 
 1. General
-2. Window size (бывшая Window)
-3. Columns (бывшая UI)
-4. Layout panels (бывшая Panels)
-5. Hotkeys
-6. MQTT
-7. Paths
+2. Dim stale sessions
+3. Window size (бывшая Window)
+4. Columns (бывшая UI)
+5. Layout panels (бывшая Panels)
+6. Hotkeys
+7. MQTT
+8. Paths
 
 Вкладки Integrations больше нет: её поля разъехались в General, MQTT и Paths.
+
+Вкладок восемь, а не семь, как было задумано здесь изначально: `Dim stale
+sessions` приехала параллельно, из #13 (`docs/superpowers/specs/
+2026-08-17-stale-settings-tab-design.md`), и слияние этой ветки с тем PR
+оставило её отдельной вкладкой сразу после General, а не вернуло четыре
+stale-поля туда. Список тут правлен по факту слияния, а не по изначальному
+плану.
 
 Страницы по-прежнему задаёт таблица `PAGES` в `frontend-src/settings-form.js`.
 Columns и Layout panels полей конфига не имеют — рисуются своим кодом в
@@ -39,8 +47,9 @@ p.id)`, правится вместе с таблицей.
 Поля: Host with sessions, Terminal preset, затем `<details>` с Terminal и
 Terminal arguments (открыт, только если пресет Custom), Only running sessions,
 Hide the window when it loses focus, Keep polling while the window is closed,
-группа stale, Allow reptyr / takeover, **Name of this machine** (переезд из
-Integrations).
+Allow reptyr / takeover, **Name of this machine** (переезд из Integrations).
+Группы stale здесь больше нет — все четыре её поля переехали на свою вкладку
+`Dim stale sessions` вместе со слиянием #13 (см. правку списка вкладок выше).
 
 У каждой галки атрибут `title` с тем же текстом, что сейчас в `hint` (или с
 новым пояснением, если hint пуст). Подсказка при наведении, не вторая строка
@@ -136,11 +145,12 @@ Integrations).
 контента: `MIT License` и ссылка https://github.com/popstas/ccfzf-picker.
 Разметка клавиш не меняется.
 
-`stale.projectDays` уходит. В конфиге и форме — `stale.projectHours`,
-умолчание 168 (семь суток). Если в yaml есть `projectDays` и нет
-`projectHours`, нормализация считает `projectDays * 24`. Некорректное
-значение сбрасывает только себя, на 168. Подпись поля: `Projects become
-stale after, hours`.
+`stale.projectDays` уходит. Здесь изначально планировалось умолчание 168
+(семь суток) и разовая миграция `projectDays * 24` для тех, у кого
+`projectHours` не задан. Слияние с #13 (`docs/superpowers/specs/
+2026-08-17-stale-settings-tab-design.md`) отменило оба пункта: `projectDays`
+не читается вовсе, ни в каком виде, а умолчание `projectHours` — 24, как в
+том PR. Подпись поля осталась той же: `Projects become stale after, hours`.
 
 ## Размер окна пикера
 
@@ -241,7 +251,8 @@ layered popup на весь экран рабочего стола пикера;
 - Recommended-галка включает и выключает только ось list;
 - колонки таблицы — list затем statusline;
 - подпись `project`, ключ `showPaths`;
-- нормализация `projectDays` → `projectHours`;
+- `projectDays` полностью игнорируется (см. правку выше — миграция из #13 не
+  прижилась, слияние оставило только `projectHours`);
 - 0 / 1–100 / ≥101 в `scale_axis` и в форме;
 - 100% не зовёт fullscreen;
 - scrim не создаётся вторым webview; на Linux флаги без окна;

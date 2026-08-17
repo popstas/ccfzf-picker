@@ -78,18 +78,25 @@
         { id: 'backgroundRefresh', label: 'Keep polling while the window is closed', type: 'bool',
           default: true,
           hint: 'Keeps the aggregator dump fresh: the openHASP panel lives off it.' },
+        { id: 'caps.reptyr', label: 'Allow moving the process (reptyr)', type: 'bool' },
+        { id: 'caps.takeover', label: 'Allow taking a session over', type: 'bool' },
+        { id: 'windowHost', label: 'Name of this machine', type: 'text',
+          hint: 'Matches the host on a session window — Enter raises it.' },
+      ],
+    },
+    {
+      id: 'stale',
+      title: 'Dim stale sessions',
+      fields: [
         { id: 'stale.enabled', label: 'Dim stale sessions and projects',
           type: 'bool', default: false },
         { id: 'stale.sessionHours', label: 'Sessions become stale after, hours',
           type: 'number', default: 2 },
         { id: 'stale.projectHours', label: 'Projects become stale after, hours',
-          type: 'number', default: 168 },
-        { id: 'stale.opacity', label: 'Stale opacity', type: 'number', default: 0.5,
+          type: 'number', default: 24 },
+        { id: 'stale.opacity', label: 'Stale opacity', type: 'range', default: 0.5,
+          min: 0.1, max: 1, step: 0.1,
           hint: 'From 0.1 (very dim) to 1.0 (fully opaque).' },
-        { id: 'caps.reptyr', label: 'Allow moving the process (reptyr)', type: 'bool' },
-        { id: 'caps.takeover', label: 'Allow taking a session over', type: 'bool' },
-        { id: 'windowHost', label: 'Name of this machine', type: 'text',
-          hint: 'Matches the host on a session window — Enter raises it.' },
       ],
     },
     {
@@ -187,7 +194,9 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
    */
   function emptyFor(field) {
     if (field.type === 'bool') return Boolean(field.default);
-    if (field.type === 'number') return field.default === undefined ? '' : field.default;
+    if (field.type === 'number' || field.type === 'range') {
+      return field.default === undefined ? '' : field.default;
+    }
     // Ноль, а не пустая строка: у выбора нет состояния «не заполнено» — первый
     // пункт списка и есть умолчание, и отсутствующий ключ обязан показать
     // именно его. Отступление для высоты (65 вместо 0) не отсюда — оно
@@ -230,7 +239,7 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
         .map(s => s.trim())
         .filter(Boolean);
     }
-    if (field.type === 'number') {
+    if (field.type === 'number' || field.type === 'range') {
       // Пустая (или из пробелов) строка — это «не трогали», а не число 0:
       // `Number('')` даёт 0, и без этой проверки стёртое поле порта тихо
       // сохранилось бы как mqtt.port: 0 — недопустимый порт брокера.

@@ -47,7 +47,7 @@ test('порядок тегов таков, что каждый модуль н�
   assert.strictEqual(
     ctx.StaleItems.isStale(
       { lastActivity: 1 }, 7201,
-      { enabled: true, sessionHours: 2, projectHours: 168, opacity: 0.5 },
+      { enabled: true, sessionHours: 2, projectHours: 24, opacity: 0.5 },
       'session',
     ),
     true,

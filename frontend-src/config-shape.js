@@ -85,7 +85,7 @@
     pickerSize: { narrow: { width: 0, height: 0 }, wide: { width: 0, height: 0 } },
     // Визуальное приглушение старых строк выключено, пока человек сам его не
     // попросил. Пороги остаются в конфиге и при выключенной галке.
-    stale: { enabled: false, sessionHours: 2, projectHours: 168, opacity: 0.5 },
+    stale: { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 },
     // Подложка позади пикера — своя половинка на каждую раскладку, обе
     // выключены по умолчанию: затемнение стола позади списка меняет то, что
     // человек видит на всём экране, а не только в самом пикере, и включать
@@ -204,7 +204,7 @@
    * Пороги старых строк и их прозрачность.
    *
    * Каждое поле нормализуется отдельно: опечатка в opacity не должна стирать
-   * выбранный человеком недельный порог проектов.
+   * выбранный человеком часовой порог проектов.
    */
   function normalizeStale(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
@@ -218,20 +218,13 @@
       return Number.isFinite(number) && number > 0 ? number : fallback;
     };
     const opacity = asNumber(src.opacity);
-    // Разовая миграция, только на чтение: старый `projectDays` пересчитывается
-    // в часы, лишь если `projectHours` вовсе не задан. Заданный (даже
-    // испорченный) `projectHours` главнее — иначе опечатка в новом поле молча
-    // откатывала бы человека к старому.
-    const fromDays = Number.isFinite(asNumber(src.projectDays)) && src.projectHours == null
-      ? asNumber(src.projectDays) * 24
-      : NaN;
+    // Старый `projectDays` не читается вовсе: единственный поддерживаемый
+    // ключ — `projectHours`, и опечатка или отсутствие поля сбрасывает его на
+    // умолчание, а не откатывает к дням.
     return {
       enabled: typeof src.enabled === 'boolean' ? src.enabled : DEFAULTS.stale.enabled,
       sessionHours: positive(src.sessionHours, DEFAULTS.stale.sessionHours),
-      projectHours: positive(
-        src.projectHours != null ? src.projectHours : fromDays,
-        DEFAULTS.stale.projectHours,
-      ),
+      projectHours: positive(src.projectHours, DEFAULTS.stale.projectHours),
       opacity: Number.isFinite(opacity) && opacity >= 0.1 && opacity <= 1
         ? opacity
         : DEFAULTS.stale.opacity,

@@ -314,30 +314,36 @@ test('таблица граничных значений размера совп
 
 // ── Затемнение старых строк ────────────────────────────────────────────────
 
-test('stale по умолчанию выключен и несёт оба порога с opacity', () => {
+test('stale по умолчанию выключен и несёт часовые пороги с opacity', () => {
   assert.deepStrictEqual(normalizeConfig({}).stale, {
     enabled: false,
     sessionHours: 2,
-    projectHours: 168,
+    projectHours: 24,
     opacity: 0.5,
   });
 });
 
 test('корректные stale-настройки проходят числами', () => {
   assert.deepStrictEqual(normalizeConfig({
-    stale: { enabled: true, sessionHours: '3.5', projectHours: '14', opacity: '0.7' },
+    stale: { enabled: true, sessionHours: '3.5', projectHours: '36', opacity: '0.7' },
   }).stale, {
     enabled: true,
     sessionHours: 3.5,
-    projectHours: 14,
+    projectHours: 36,
     opacity: 0.7,
   });
+});
+
+test('старый projectDays полностью игнорируется', () => {
+  const stale = normalizeConfig({ stale: { projectDays: 30 } }).stale;
+  assert.strictEqual(stale.projectHours, 24);
+  assert.ok(!Object.hasOwn(stale, 'projectDays'));
 });
 
 test('stale-числа не принимают значения других типов через Number coercion', () => {
   for (const [id, validValue, fallback] of [
     ['sessionHours', 3.5, 2],
-    ['projectHours', 14, 168],
+    ['projectHours', 36, 24],
     ['opacity', 0.7, 0.5],
   ]) {
     for (const malformed of [true, [validValue], { valueOf: () => validValue }]) {
@@ -359,21 +365,9 @@ test('испорченное stale-поле сбрасывает только с
   assert.deepStrictEqual(normalizeConfig({ stale: null }).stale, {
     enabled: false,
     sessionHours: 2,
-    projectHours: 168,
+    projectHours: 24,
     opacity: 0.5,
   });
-});
-
-test('projectDays без projectHours переводится в часы', () => {
-  assert.strictEqual(normalizeConfig({
-    stale: { enabled: true, projectDays: 7 },
-  }).stale.projectHours, 168);
-});
-
-test('projectHours главнее устаревшего projectDays', () => {
-  assert.strictEqual(normalizeConfig({
-    stale: { projectDays: 7, projectHours: 3 },
-  }).stale.projectHours, 3);
 });
 
 // ── Подложка позади пикера ─────────────────────────────────────────────────

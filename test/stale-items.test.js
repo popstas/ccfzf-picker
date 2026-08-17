@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { isStale, staleClass } = require('../frontend-src/stale-items');
 
 const NOW = 2_000_000;
-const STALE = { enabled: true, sessionHours: 2, projectHours: 168, opacity: 0.5 };
+const STALE = { enabled: true, sessionHours: 2, projectHours: 24, opacity: 0.5 };
 
 test('сессия становится старой ровно на пороге', () => {
   assert.strictEqual(isStale({ lastActivity: NOW - 7199 }, NOW, STALE, 'session'), false);
@@ -22,17 +22,13 @@ test('live и window не дают исключений старой сесси�
   }
 });
 
-test('проект считается в часах, а не в днях', () => {
-  // Порог 2 часа, а не унаследованные 7 суток: если бы SECONDS.project
-  // остался 86400 или amount читался как дни, граница ушла бы далеко за эти
-  // 7200 секунд.
-  const stale = { ...STALE, projectHours: 2 };
+test('проект становится stale на часовом пороге включительно', () => {
   assert.strictEqual(
-    isStale({ lastActivity: NOW - 7199 }, NOW, stale, 'project'),
+    isStale({ lastActivity: NOW - 24 * 3600 + 1 }, NOW, STALE, 'project'),
     false,
   );
   assert.strictEqual(
-    isStale({ lastActivity: NOW - 7200 }, NOW, stale, 'project'),
+    isStale({ lastActivity: NOW - 24 * 3600 }, NOW, STALE, 'project'),
     true,
   );
 });
@@ -52,5 +48,29 @@ test('выключенный режим и неизвестный возраст
 test('логический и строковый lastActivity не считаются возрастом', () => {
   for (const lastActivity of [true, false, String(NOW - 7200)]) {
     assert.strictEqual(isStale({ lastActivity }, NOW, STALE, 'session'), false);
+  }
+});
+
+test('испорченный порог не роняет isStale — проверка стоит после умножения', () => {
+  // Ранней проверки по amount больше нет: она была лишней (хвостовая по
+  // threshold ловит те же случаи), а переполнение произведения (amount ->
+  // Infinity) она не замечала бы вовсе, потому что смотрела на amount, а не
+  // на итог умножения.
+  const row = { lastActivity: NOW - 999999 };
+  for (const kind of ['session', 'project']) {
+    for (const projectHours of [0, -1, NaN]) {
+      assert.strictEqual(
+        isStale(row, NOW, { ...STALE, projectHours, sessionHours: projectHours }, kind),
+        false,
+        `${kind}/${projectHours}`,
+      );
+    }
+    // amount * 3600 переполняется до Infinity — тем самым его отсекает
+    // именно проверка threshold, а не отдельная граница до умножения.
+    assert.strictEqual(
+      isStale(row, NOW, { ...STALE, projectHours: 1e308, sessionHours: 1e308 }, kind),
+      false,
+      `${kind}/overflow`,
+    );
   }
 });
