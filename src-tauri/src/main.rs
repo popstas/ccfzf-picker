@@ -18,6 +18,7 @@ mod mqtt;
 mod poller;
 mod proc;
 mod project_hotkeys;
+mod scrim;
 mod state_source;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
@@ -97,6 +98,11 @@ fn hide_window(app: &tauri::AppHandle) {
         return;
     }
     let _ = window.hide();
+    // Подложка гасится безусловно, не спрашивая флаги: пикер спрятан — ни
+    // одна раскладка не оправдывает затемнённый стол без списка над ним.
+    if let Err(e) = scrim::set_visible(app, false) {
+        eprintln!("ccfzf-picker: {e}");
+    }
     let _ = app.emit("picker-hidden", ());
     if let Some(state) = app.try_state::<LastHidden>() {
         *state.0.lock().unwrap() = Some(Instant::now());
@@ -187,6 +193,11 @@ fn toggle_window(app: &tauri::AppHandle, mode: Option<&str>) {
 fn show_picker(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("picker") else { return };
     let _ = window.show();
+    // Раскладка на момент показа — та, что запомнена с прошлого раза
+    // (`SizeRequest.fullscreen`); просьба о размере ниже может её сменить, но
+    // подложка не обязана ждать: `apply_scrim` из `set_picker_size` перекроет
+    // это значение, если страница вслед за показом попросит другой режим.
+    apply_scrim(app, current_fullscreen(app));
     // Отложенный размер применяется здесь и только после `show()`: просьба,
     // пришедшая по скрытому окну, была отложена именно потому, что экрана у
     // такого окна нет. См. `SizeRequest`. Отказ стоит строки в stderr, а не
@@ -214,6 +225,16 @@ fn hide_picker(app: tauri::AppHandle) {
     hide_window(&app);
 }
 
+/// Версия для шапки справочника клавиш (F1) на странице.
+///
+/// Номер уже читает пункт-подпись трея (`version_item_label` ниже) — здесь
+/// та же константа компиляции, а не второе поле в конфиге: разошлась бы с
+/// `Cargo.toml` при следующем релизе, и заметить это было бы нечем.
+#[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 /// Размеры окна пикера.
 ///
 /// Узкий обязан совпадать с `tauri.conf.json` — с ним пикер открывается, к
@@ -233,11 +254,11 @@ const SCREEN_FILL: f64 = 0.9;
 
 /// Размер окна настроек.
 ///
-/// Высота взята с запасом намеренно: поля во вкладках идут в столбик, и на
-/// прежних 600 точках нижняя половина вкладки уезжала под прокрутку. Зажим по
-/// экрану тот же, что у широкого пикера: 1080 — ровно высота распространённого
-/// экрана, и незажатое окно ушло бы под панель задач.
-const SETTINGS_SIZE: (f64, f64) = (820.0, 1080.0);
+/// Высота 720 подходит теперь: предыдущая задача распределила поля вкладки
+/// General по новым вкладкам и свернула Terminal / Terminal arguments в
+/// `<details>`, поэтому самая длинная вкладка теперь короче. 720 держит окно
+/// под экраном 1080p с запасом, поэтому `fit_to_screen` ничего не зажимает.
+const SETTINGS_SIZE: (f64, f64) = (820.0, 720.0);
 
 /// Зажать желаемый размер по логическому размеру экрана.
 ///
@@ -257,25 +278,39 @@ fn fit_axis(want: f64, screen: f64) -> f64 {
     want.min(screen * SCREEN_FILL)
 }
 
-/// Доли экрана, названные человеком, — по стороне на каждую раскладку.
+/// Стороны окна, названные человеком, — по стороне на каждую раскладку.
 ///
 /// Ноль значит «взять встроенный размер», и он же — умолчание: ключа в
-/// `config.yaml` может не быть вовсе. Проценты, а не пиксели, потому что
-/// вопрос у человека не «сколько точек», а «сколько сессий влезет»: на большом
-/// экране в узкий список входит куда меньше, чем могло бы, а число пикселей,
-/// верное на одной машине, на второй значит другое.
+/// `config.yaml` может не быть вовсе. Число `1..=100` — доля экрана в
+/// процентах, а не пиксели: вопрос у человека обычно не «сколько точек», а
+/// «сколько сессий влезет», и число пикселей, верное на одной машине, на
+/// второй с другим экраном значит другое. Но иногда точный размер и нужен —
+/// например, под конкретный монитор или чтобы вплотную поместить окно рядом с
+/// другим приложением, — и для этого случая `101` и выше читаются буквально,
+/// пикселями (см. `scale_axis`).
 #[derive(Default, Clone, Copy, PartialEq, Debug)]
 struct PickerScale {
     narrow: (f64, f64),
     wide: (f64, f64),
 }
 
-/// Одна доля из конфига.
+/// Одна сторона из конфига.
 ///
-/// Принимается `1..=100`; ноль, отсутствие ключа и мусор читаются как «взять
-/// встроенный размер». Число вне диапазона — тоже, но со строкой в stderr:
-/// правку руками надо либо исполнить, либо объяснить, а молчаливый откат
-/// выглядит потерянной настройкой.
+/// Принимается `0` (встроенный размер), `1..=100` (доля экрана в процентах)
+/// или `101` и выше (пиксели — тот же счётчик без верхней границы). Зазор
+/// между долей и пикселями, `(100..101)`, отрицательное, `Infinity`/`NaN` и
+/// не-число читаются как мусор и откатываются на встроенный размер — со
+/// строкой в stderr: правку руками надо либо исполнить, либо объяснить, а
+/// молчаливый откат выглядит потерянной настройкой. Дробное внутри рабочих
+/// диапазонов (`65.5`, `1400.5`) принимается как есть: округлять его не для
+/// чего — экран в конце концов зажимает `wanted_size`, а точность выбора
+/// человека дробность не портит.
+///
+/// Диапазон обязан совпадать с тем, что проверяет `normalizePickerSize` на
+/// странице (`frontend-src/config-shape.js`): иначе форма показывала бы
+/// значение, которое здесь молча отклоняется, и окно выходило бы не того
+/// размера без единого объяснения на экране. Сторож —
+/// «границы доли те же, по которым судит Rust» в `test/config-shape.test.js`.
 fn scale_axis(node: Option<&serde_json::Value>, name: &str) -> f64 {
     let Some(value) = node else { return 0.0 };
     if value.is_null() {
@@ -288,11 +323,20 @@ fn scale_axis(node: Option<&serde_json::Value>, name: &str) -> f64 {
     if pct == 0.0 {
         return 0.0;
     }
-    if !(1.0..=100.0).contains(&pct) {
-        eprintln!("ccfzf-picker: pickerSize.{name} = {pct} is outside 1..100, using the built-in size");
-        return 0.0;
+    // `is_finite()` в самом условии, а не отдельной веткой раньше: `Infinity`
+    // и `NaN` — тот же «не подошло ни под одно из трёх правил» случай, что и
+    // зазор между долей и пикселями, и вторая строка в stderr для них ничего
+    // не добавила бы. На практике сюда они и не доходят — serde_json не умеет
+    // хранить нецелое число как `Number` вовсе (`Value::from(f64::INFINITY)`
+    // становится `Null` и отсекается веткой выше), но проверка здесь — это
+    // документированная гарантия правила, а не защита от конкретного пути.
+    if pct.is_finite() && ((1.0..=100.0).contains(&pct) || pct >= 101.0) {
+        return pct;
     }
-    pct
+    eprintln!(
+        "ccfzf-picker: pickerSize.{name} = {pct} must be 0 (Default), 1-100 (percent of screen), or 101 or more (pixels); using the built-in size"
+    );
+    0.0
 }
 
 /// `pickerSize` из конфига.
@@ -313,20 +357,23 @@ fn picker_scale(config: &serde_json::Value) -> PickerScale {
 /// `fit_to_screen`: монитора в тестах нет, а арифметику проверить и нужно, и
 /// можно.
 ///
-/// **Названная доля обходит `SCREEN_FILL`, а встроенный размер — нет**, и это
-/// не оплошность. Зажим защищает абсолютное число от маленького экрана: 1400×900
-/// закрывают тринадцатидюймовый мак целиком. Доля же в экран влезает по
-/// построению, и зажми мы и её, выбранные человеком 95% молча стали бы 90% —
-/// пункт списка, обещающий не то, что делает.
+/// **Названная доля обходит `SCREEN_FILL`, а встроенный размер и пиксели —
+/// нет**, и это не оплошность. Зажим защищает абсолютное число от маленького
+/// экрана: 1400×900 закрывают тринадцатидюймовый мак целиком, и названные
+/// человеком пиксели ничем не лучше — зажимаются они той же `fit_to_screen`,
+/// что и встроенный широкий размер. Доля же в экран влезает по построению, и
+/// зажми мы и её, выбранные человеком 95% молча стали бы 90% — пункт списка,
+/// обещающий не то, что делает.
 ///
-/// Экран неизвестен (`None`) — доли не считаются вовсе: `NaN * 0.8` уронил бы
-/// окно в точку, а «сколько это в пикселях» без экрана не ответить. Откат на
-/// встроенное, то есть на прежнее поведение.
+/// Экран неизвестен (`None`) — ни доли, ни пиксели не считаются вовсе:
+/// `NaN * 0.8` уронил бы окно в точку, а зажать пиксели без экрана нечем.
+/// Откат на встроенное, то есть на прежнее поведение.
 ///
 /// Оси независимы: доля по высоте при встроенной ширине — обычный случай, за
-/// которым задача и заводилась.
+/// которым задача и заводилась, а пиксели по одной стороне и доля по другой —
+/// тот же случай для точного размера.
 fn wanted_size(fullscreen: bool, scale: PickerScale, screen: Option<(f64, f64)>) -> (f64, f64) {
-    let (base, pct) = if fullscreen {
+    let (base, val) = if fullscreen {
         (WIDE_SIZE, scale.wide)
     } else {
         (NARROW_SIZE, scale.narrow)
@@ -339,16 +386,22 @@ fn wanted_size(fullscreen: bool, scale: PickerScale, screen: Option<(f64, f64)>)
     // `narrow_size_matches_the_window_config` держится за то, что при выборе
     // `Default` окно открывается ровно размером из `tauri.conf.json`.
     let fitted = if fullscreen { fit_to_screen(base, screen) } else { base };
-    let axis = |fitted: f64, pct: f64, screen: f64| {
-        if pct > 0.0 && screen > 0.0 && !screen.is_nan() {
-            screen * pct / 100.0
-        } else {
-            fitted
+    let axis = |fitted: f64, val: f64, screen: f64| {
+        if val >= 101.0 && screen > 0.0 && !screen.is_nan() {
+            // Пиксели: абсолютное число зажимается так же, как встроенный
+            // широкий размер, — иначе оно закрыло бы маленький экран целиком.
+            return fit_axis(val, screen);
         }
+        if val > 0.0 && val <= 100.0 && screen > 0.0 && !screen.is_nan() {
+            // Доля: в экран влезает по построению, зажим тут только испортил
+            // бы выбранное человеком число.
+            return screen * val / 100.0;
+        }
+        fitted
     };
     (
-        axis(fitted.0, pct.0, screen.0),
-        axis(fitted.1, pct.1, screen.1),
+        axis(fitted.0, val.0, screen.0),
+        axis(fitted.1, val.1, screen.1),
     )
 }
 
@@ -560,6 +613,55 @@ fn picker_scale_now(app: &tauri::AppHandle) -> PickerScale {
         .unwrap_or_default()
 }
 
+/// `scrim` из конфига — по флагу на каждую раскладку, оба ложью по умолчанию:
+/// подложка — вещь, которую человек включает сам, а не то, чем пикер решил
+/// его удивить после обновления.
+fn scrim_flags(config: &serde_json::Value) -> (bool, bool) {
+    let flag = |name: &str| {
+        config
+            .get("scrim")
+            .and_then(|v| v.get(name))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    };
+    (flag("narrow"), flag("wide"))
+}
+
+/// Флаги подложки, действующие прямо сейчас — тем же приёмом и по той же
+/// причине, что и `WindowScale`: конфиг перечитывает `apply_config`, а
+/// подложку показывают в других местах и в другое время.
+#[derive(Default)]
+struct ScrimFlags(Mutex<(bool, bool)>);
+
+fn scrim_flags_now(app: &tauri::AppHandle) -> (bool, bool) {
+    app.try_state::<ScrimFlags>()
+        .map(|s| *s.0.lock().unwrap())
+        .unwrap_or_default()
+}
+
+/// Режим списка, названный последним, — тот же, по которому `apply_picker_size`
+/// считает размер (`SizeRequest.fullscreen`). Подложка обязана затемнять под
+/// той же раскладкой, какую видит человек, а второй счётчик режима завёл бы
+/// второй источник правды рядом с уже существующим.
+fn current_fullscreen(app: &tauri::AppHandle) -> bool {
+    app.try_state::<PickerSize>()
+        .map(|s| s.0.lock().unwrap().fullscreen)
+        .unwrap_or(false)
+}
+
+/// Показать или скрыть подложку под текущую раскладку.
+///
+/// Отказ не роняет вызывающего: показ и размер самого пикера дороже
+/// затемнения стола позади него, та же расстановка приоритетов, что и у
+/// `apply_picker_size` в `show_picker`.
+fn apply_scrim(app: &tauri::AppHandle, fullscreen: bool) {
+    let (narrow, wide) = scrim_flags_now(app);
+    let show = scrim::scrim_wanted(fullscreen, narrow, wide);
+    if let Err(e) = scrim::set_visible(app, show) {
+        eprintln!("ccfzf-picker: {e}");
+    }
+}
+
 #[tauri::command]
 fn set_picker_size(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String> {
     let Some(window) = app.get_webview_window("picker") else {
@@ -576,7 +678,15 @@ fn set_picker_size(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String
         None => visible.then_some(fullscreen),
     };
     match apply {
-        Some(fullscreen) => apply_picker_size(&window, fullscreen, picker_scale_now(&app)),
+        Some(fullscreen) => {
+            let result = apply_picker_size(&window, fullscreen, picker_scale_now(&app));
+            // Подложка пересчитывается тут же, а не ждёт следующего показа:
+            // `^F` меняет раскладку у уже открытого окна, и без этого вызова
+            // затемнение осталось бы от прежнего режима до следующего
+            // закрытия-открытия пикера.
+            apply_scrim(&app, fullscreen);
+            result
+        }
         None => Ok(()),
     }
 }
@@ -656,11 +766,23 @@ fn allow_any_foreground() {}
 /// Общий для всех команд, публикующих просьбы: шесть копий одной проверки
 /// разошлись бы в тексте отказа, а его читает человек в строке ошибки пикера.
 fn configured_broker() -> Result<mqtt::Broker, String> {
-    let broker = mqtt::broker_from_config(&load_config()?);
+    Ok(configured_broker_and_terminal()?.0)
+}
+
+/// То же самое плюс имя выбранного терминала — одним чтением конфига.
+///
+/// Отдельная функция, а не второй `load_config()` рядом: файл читается с диска,
+/// а зовут это на каждое нажатие Enter. Имя нужно только тем трём просьбам, что
+/// кончаются терминалом, — остальным (фокус, отметка, восстановление) хватает
+/// брокера, и грузить их лишним полем незачем.
+fn configured_broker_and_terminal() -> Result<(mqtt::Broker, String), String> {
+    let raw = load_config()?;
+    let broker = mqtt::broker_from_config(&raw);
     if !broker.is_configured() {
         return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
     }
-    Ok(broker)
+    let terminal = mqtt::terminal_name(&raw);
+    Ok((broker, terminal))
 }
 
 /// Поднять окно сессии через MQTT.
@@ -758,12 +880,12 @@ async fn open_session_mqtt(
     base: Option<String>,
 ) -> Result<(), String> {
     allow_any_foreground();
-    let broker = configured_broker()?;
+    let (broker, terminal) = configured_broker_and_terminal()?;
     let cwd = cwd.unwrap_or_default().trim().to_string();
     // Адрес называет трекер той машины, где стоит окно; свой из конфига —
     // запасной ход для трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &base, &id, &cwd))
+    tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &base, &id, &cwd, &terminal))
         .await
         .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
 }
@@ -781,14 +903,16 @@ async fn open_session_mqtt(
 #[tauri::command]
 async fn open_project_mqtt(cwd: String, base: Option<String>) -> Result<(), String> {
     allow_any_foreground();
-    let broker = configured_broker()?;
+    let (broker, terminal) = configured_broker_and_terminal()?;
     // У строки проекта окна нет вовсе: адрес называет трекер машины
     // менеджера, а не машины окна. Свой из конфига — запасной ход для
     // трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || mqtt::open_project(&broker, &base, &cwd))
-        .await
-        .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        mqtt::open_project(&broker, &base, &cwd, &terminal)
+    })
+    .await
+    .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
 }
 
 /// Попросить менеджера завести новую сессию в каталоге.
@@ -800,14 +924,16 @@ async fn open_project_mqtt(cwd: String, base: Option<String>) -> Result<(), Stri
 #[tauri::command]
 async fn new_session_mqtt(cwd: String, name: String, base: Option<String>) -> Result<(), String> {
     allow_any_foreground();
-    let broker = configured_broker()?;
+    let (broker, terminal) = configured_broker_and_terminal()?;
     // Окна ещё нет — сессия только заводится: адрес называет трекер машины
     // менеджера, а не машины окна. Свой из конфига — запасной ход для
     // трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || mqtt::open_new(&broker, &base, &cwd, &name))
-        .await
-        .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        mqtt::open_new(&broker, &base, &cwd, &name, &terminal)
+    })
+    .await
+    .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
 }
 
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
@@ -1167,6 +1293,14 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
         if let Some(size) = app.try_state::<PickerSize>() {
             size.0.lock().unwrap().pending = true;
         }
+    }
+
+    // Подложка — тем же приёмом: флаги переставляются здесь, а видимость
+    // трогает только показанное окно. Пикер в этот момент скрыт (см. выше про
+    // размер), так что пересчитывать её сейчас нечего — она и так спрятана
+    // вместе с окном.
+    if let Some(state) = app.try_state::<ScrimFlags>() {
+        *state.0.lock().unwrap() = scrim_flags(&config);
     }
 
     let _ = app.global_shortcut().unregister_all();
@@ -1637,7 +1771,7 @@ fn main() {
         // шлёт событие, и перепутать их нечем.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            hide_picker, set_picker_size, poll_now, spawn_detached, load_seen, save_seen, load_config,
+            hide_picker, app_version, set_picker_size, poll_now, spawn_detached, load_seen, save_seen, load_config,
             terminal_helper,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, open_session_mqtt, open_project_mqtt, new_session_mqtt,
@@ -1684,6 +1818,9 @@ fn main() {
             // Доли экрана — тем же приёмом и по той же причине: их
             // переставляет `apply_config`, а читает `apply_picker_size`.
             app.manage(WindowScale(Mutex::new(picker_scale(&config))));
+            // Флаги подложки — тем же приёмом: их переставляет `apply_config`,
+            // а читает `apply_scrim`.
+            app.manage(ScrimFlags(Mutex::new(scrim_flags(&config))));
             // Список хоткеев приезжает ответом агрегатора, а не из конфига:
             // единственный его источник — claudeWt.projects у
             // windows11-manager. До первого ответа висит список прошлого
@@ -2501,6 +2638,31 @@ actions:
         assert_eq!(fit_to_screen(WIDE_SIZE, (2560.0, 1440.0)), WIDE_SIZE);
     }
 
+    /// ≥101 — пиксели, а не доля: число едет как есть и зажимается только
+    /// экраном, как встроенный размер. Смешанная сторона (ширина в пикселях,
+    /// высота в процентах) — рабочий случай: оси считаются независимо.
+    #[test]
+    fn pixels_are_absolute_then_fitted() {
+        let conf = serde_json::json!({"pickerSize": {"narrow": {"width": 1400.0, "height": 65.0}}});
+        let scale = picker_scale(&conf);
+        assert_eq!(scale.narrow.0, 1400.0);
+        assert_eq!(scale.narrow.1, 65.0);
+        let (w, h) = wanted_size(false, scale, Some((2560.0, 1440.0)));
+        assert_eq!(w, 1400.0);
+        assert_eq!(h, 1440.0 * 0.65);
+    }
+
+    /// 100% — это `scale_axis` = 100, доля экрана, а не `set_fullscreen`: окно
+    /// встаёт вровень с экраном по числам, а не переходит в системный
+    /// полноэкранный режим, который отобрал бы у Windows панель задач, а у
+    /// мака — место под вырезом.
+    #[test]
+    fn hundred_percent_is_the_screen_not_fullscreen() {
+        let conf = serde_json::json!({"pickerSize": {"narrow": {"width": 100.0, "height": 100.0}}});
+        let (w, h) = wanted_size(false, picker_scale(&conf), Some((1920.0, 1080.0)));
+        assert_eq!((w, h), (1920.0, 1080.0));
+    }
+
     /// Тринадцатидюймовый мак: логические 1440×900 меньше желаемых 1400×900 по
     /// высоте и почти равны по ширине. Окно обязано выйти строго меньше экрана
     /// по обеим сторонам — иначе оно закроет экран целиком и залезет под
@@ -2542,7 +2704,10 @@ actions:
     }
 
     /// Испорченное и вышедшее из диапазона откатывается на встроенное, а не
-    /// роняет запуск и не растягивает окно на десять экранов.
+    /// роняет запуск и не растягивает окно на десять экранов. 300 из этого
+    /// списка ушёл: с приходом пикселей это больше не мусор, а валидный
+    /// размер — см. `pixels_are_absolute_then_fitted` и тест ниже. Мусором
+    /// остался только зазор между долей и пикселями, `(100..101)`.
     #[test]
     fn broken_scale_falls_back_to_the_built_in_size() {
         let scale = |v: serde_json::Value| {
@@ -2552,10 +2717,51 @@ actions:
         assert_eq!(scale(serde_json::json!(null)), 0.0);
         assert_eq!(scale(serde_json::json!(0)), 0.0);
         assert_eq!(scale(serde_json::json!(-10)), 0.0);
-        assert_eq!(scale(serde_json::json!(300)), 0.0);
+        assert_eq!(scale(serde_json::json!(100.5)), 0.0);
         // Границы диапазона — рабочие значения, а не отказ.
         assert_eq!(scale(serde_json::json!(1)), 1.0);
         assert_eq!(scale(serde_json::json!(100)), 100.0);
+    }
+
+    /// ≥101 — рабочие пиксели, не мусор: тот же счётчик без верхней границы,
+    /// см. `pixels_are_absolute_then_fitted` для сборки размера целиком.
+    #[test]
+    fn pixels_above_100_are_accepted_by_scale_axis() {
+        let scale = |v: serde_json::Value| {
+            picker_scale(&serde_json::json!({"pickerSize": {"narrow": {"width": v}}})).narrow.0
+        };
+        assert_eq!(scale(serde_json::json!(101)), 101.0);
+        assert_eq!(scale(serde_json::json!(1400)), 1400.0);
+    }
+
+    /// Список — источник истины для Rust; тот же список по смыслу живёт в
+    /// JS (`SIZE_BOUNDARY_TABLE` в `test/config-shape.test.js`) и обязан
+    /// давать те же ответы на каждое число. Прежний сторож на JS-стороне
+    /// сверял только текст исходника (упоминание `101.0`) — этот список
+    /// гоняет оба конца по одним числам и ловит расхождение в поведении, а
+    /// не в тексте: разошедшийся диапазон читался бы формой как принятое
+    /// значение, а Rust'ом — как отвергнутое, и окно вышло бы не того
+    /// размера без единого объяснения на экране.
+    #[test]
+    fn scale_axis_boundary_table_matches_js() {
+        let width = |v: serde_json::Value| {
+            picker_scale(&serde_json::json!({"pickerSize": {"narrow": {"width": v}}})).narrow.0
+        };
+        let cases: &[(serde_json::Value, f64)] = &[
+            (serde_json::json!(0), 0.0),               // встроенный размер
+            (serde_json::json!(0.5), 0.0),              // дробное меньше единицы
+            (serde_json::json!(1), 1.0),                // нижняя граница доли
+            (serde_json::json!(100), 100.0),            // верхняя граница доли
+            (serde_json::json!(100.5), 0.0),            // зазор между долей и пикселями
+            (serde_json::json!(101), 101.0),            // нижняя граница пикселей
+            (serde_json::json!(1400), 1400.0),          // рабочий размер в пикселях
+            (serde_json::json!(-10), 0.0),              // отрицательное
+            (serde_json::json!(f64::INFINITY), 0.0),    // не конечное
+            (serde_json::json!(f64::NAN), 0.0),         // не число
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(width(raw.clone()), *expected, "{raw:?}");
+        }
     }
 
     /// Половинки конфига свои у каждой раскладки и у каждой стороны: одна

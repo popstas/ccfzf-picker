@@ -494,7 +494,23 @@
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
             border-bottom: 1px solid #3a3d42;
         }
+        /* У справочника клавиш заголовок и подпись разнесены: строка выше —
+           имя и версия приложения, эта — прежний текст «Keyboard shortcuts».
+           Граница переезжает на подпись, #info-title её не теряет. */
+        #keys-title { border-bottom: none; padding-bottom: 2px; }
+        #keys-subtitle {
+            padding: 0 16px 8px; font-size: 11px; color: #7d838c;
+            border-bottom: 1px solid #3a3d42;
+        }
         #info-rows, #keys-rows { padding: 8px 0; }
+        /* Подвал: версия — не только в заголовке, лицензия и ссылка на
+           репозиторий. Та же серая палитра карточки, граница сверху отделяет
+           его от списка клавиш. */
+        #keys-footer {
+            padding: 8px 16px 12px; font-size: 11px; color: #7d838c;
+            border-top: 1px solid #3a3d42;
+        }
+        #keys-footer a { color: #6aa9ff; }
         .info-row { display: flex; gap: 12px; padding: 3px 16px; font-size: 12px; }
         .info-row .k { flex: 0 0 96px; color: #7d838c; }
         .info-row .v { min-width: 0; word-break: break-word; }
@@ -586,8 +602,16 @@
 <div id="drop-line"></div>
 <div id="keys-backdrop" aria-hidden="true">
   <div id="keys-card" role="dialog">
-    <div id="keys-title">Keyboard shortcuts</div>
+    <!-- Версию дописывает страница после загрузки (invoke('app_version')):
+         зашитая сюда строка разошлась бы с Cargo.toml на первом же релизе, и
+         разошедшееся никто бы не заметил. -->
+    <div id="keys-title">ccfzf-picker</div>
+    <div id="keys-subtitle">Keyboard shortcuts</div>
     <div id="keys-rows"></div>
+    <!-- Вне #keys-rows: openKeys() переписывает keysRows.innerHTML целиком
+         при каждом открытии, и подвал внутри него пришлось бы дорисовывать
+         заново на каждый F1. -->
+    <div id="keys-footer">MIT License &middot; <a href="https://github.com/popstas/ccfzf-picker" target="_blank" rel="noopener">github.com/popstas/ccfzf-picker</a></div>
   </div>
 </div>
 <script src="state-shape.js"></script>
@@ -755,7 +779,7 @@
   const TOGGLE_CHECKS = [
     { key: 'showPrompt', label: 'prompt', side: 'left' },
     { key: 'showAnswer', label: 'answer', side: 'left' },
-    { key: 'showPaths', label: 'paths', side: 'left' },
+    { key: 'showPaths', label: 'project', side: 'left' },
     { key: 'showHotkey', label: 'hotkeys', side: 'right' },
     { key: 'showEvent', label: 'events', side: 'right' },
     { key: 'showId', label: 'id', side: 'right' },
@@ -765,6 +789,11 @@
     { key: 'showWindowHost', label: 'window host', side: 'right' },
     { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
     { key: 'showAll', label: 'show all', side: 'filter' },
+    // `glyph` — не колонка со своим текстом и не фильтр: включённая ось list
+    // подменяет глиф окна иконкой терминала (Task 11), а статуслайну эта
+    // галка не сдаётся вовсе — подмена живёт только в колонке окна, второй
+    // строки внизу списка ей не положено.
+    { key: 'showTerminalIcon', label: 'terminal icon', side: 'glyph' },
   ];
   // Ключи фильтров — из той же таблицы, а не вторым списком: разойдясь, новый
   // фильтр молча стал бы колонкой, то есть галкой, которая не отбирает строки.
@@ -799,6 +828,10 @@
     // config.yaml: галка — это отступление от настройки, а не вторая
     // настройка. Отступление запоминается в ui.json, как и все остальные.
     showAll: { list: false, statusline: true },
+    // Выключена по обеим осям: без неё в колонке окна остаётся нынешний
+    // глиф, а не пресет пикера — у соседних строк терминалы разные, общий
+    // пресет врал бы. Ось statusline тут не читается вовсе (см. renderChecks).
+    showTerminalIcon: { list: false, statusline: false },
   };
   // Плоская карта «показывать ли колонку»: её читают рисовальщики строк и
   // чекбоксы статуслайна. Пересчитывается из uiToggles одной функцией, чтобы
@@ -875,6 +908,7 @@
   const infoRows = document.getElementById('info-rows');
   const keysButton = document.getElementById('keys-button');
   const keysBackdrop = document.getElementById('keys-backdrop');
+  const keysTitle = document.getElementById('keys-title');
   const keysRows = document.getElementById('keys-rows');
 
   function paintSort() {
@@ -888,7 +922,7 @@
 
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml,
-    windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml,
+    windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -901,7 +935,11 @@
 
   function renderChecks() {
     toggleInputs.clear();
-    const shown = TOGGLE_CHECKS.filter(({ key }) => (uiToggles[key] || {}).statusline);
+    // `glyph` — не пропускается сюда даже с включённой осью statusline: этой
+    // строке не положена своя галка внизу списка (см. комментарий у
+    // showTerminalIcon в TOGGLE_CHECKS), а не полагаться на то, что ось
+    // всегда false, надёжнее — окно настроек её всё равно предлагает.
+    const shown = TOGGLE_CHECKS.filter(({ key, side }) => side !== 'glyph' && (uiToggles[key] || {}).statusline);
     // Отбивка между группами — на первом чекбоксе каждой следующей: отдельный
     // пустой элемент-разделитель пришлось бы ещё и прятать, когда группа пуста.
     statusChecks.innerHTML = shown.map(({ key, label, side }, i) => {
@@ -1026,16 +1064,17 @@
     // закрытой сессии, чтобы место осталось пустым, а у проекта «сейчас
     // никто не работает» — обычное состояние, а не отсутствие строки.
     const dotClass = project.liveCount ? 'dot active' : 'dot';
-    // Подсказка — через тот же titleAttr, что у сессий: иначе в ней висел бы
-    // полный путь, а строкой ниже, в теле строки, — тот же путь через
-    // shortPath, и одна строка показывала бы каталог двумя разными видами.
+    // Подсказка — через тот же titleAttr, что у сессий, и по-прежнему
+    // полный путь: она про то, чего в теле строки не видно. Тело же теперь
+    // показывает не путь, а basename — и не показывает вовсе, когда его уже
+    // сказало имя проекта (projectLine, Task 11).
+    const cwdLine = toggles.showPaths ? projectLine(project.label, project.cwd) : '';
     const html = `<div class="row project${stale}" data-index="${index}"${titleAttr(project)}>` +
       `<div class="${dotClass}"></div>` +
       `<div class="text"><div class="name">` +
       (project.mark ? '<span class="mark">★</span> ' : '') +
       `${escapeHtml(project.label)}</div>` +
-      (toggles.showPaths
-        ? `<div class="cwd">${escapeHtml(shortPath(project.cwd))}</div>` : '') +
+      (cwdLine ? `<div class="cwd">${escapeHtml(cwdLine)}</div>` : '') +
       `</div>` +
       `<div class="meta">` +
       `<div class="count">${project.sessionCount}` +
@@ -1101,14 +1140,14 @@
     // Enter на ней поднимет уже существующее окно. Класс `on-screen`, а не
     // `closed`: в этом файле `closed` значит «сессии больше нет», а здесь
     // всё наоборот — окно есть, и именно поэтому строка тусклая.
+    const snapCwdLine = toggles.showPaths ? projectLine(row.label, row.cwd) : '';
     return {
       key: row.key,
       html: `<div class="row snapshot-session${row.open ? ' on-screen' : ''}" data-index="${index}"` +
         ` title="${escapeHtml(row.cwd)}">` +
         `<div class="dot${row.open ? ' active' : ''}"></div>` +
         `<div class="text"><div class="name">${escapeHtml(row.label)}</div>` +
-        (toggles.showPaths
-          ? `<div class="cwd">${escapeHtml(shortPath(row.cwd))}</div>` : '') +
+        (snapCwdLine ? `<div class="cwd">${escapeHtml(snapCwdLine)}</div>` : '') +
         `</div>` +
         `<div class="meta"><div class="count">${row.open ? '▣ open' : ''}</div>` +
         `</div></div>`,
@@ -1145,13 +1184,16 @@
     // не `session`.
     const rowKind = session.kind === 'zellij' ? 'zellij' : 'session';
     const stale = window.StaleItems.staleClass(session, nowSec, CONFIG.stale, rowKind);
+    // Basename каталога, а не сокращённый путь — и вовсе без строки, когда
+    // имя сессии уже назвало тот же проект (projectLine, Task 11). Полный
+    // путь остаётся в titleAttr ниже, через shortPath — подсказка не меняется.
+    const sessionCwdLine = toggles.showPaths ? projectLine(session.label, session.cwd) : '';
     const html = `<div class="row ${rowKind}${session.live ? '' : ' closed'}${markable ? ' markable' : ''}${stale}" data-index="${index}"${titleAttr(session)}>` +
       statusDotHtml(session) +
       `<div class="text"><div class="name">${escapeHtml(session.label)}` +
       `${prBadgeHtml(session)}` +
       `</div>` +
-      (toggles.showPaths
-        ? `<div class="cwd">${escapeHtml(shortPath(session.cwd))}</div>` : '') +
+      (sessionCwdLine ? `<div class="cwd">${escapeHtml(sessionCwdLine)}</div>` : '') +
       // Две строки под карточкой: что спросили и чем ответили. Пустой div
       // всё равно занял бы высоту, поэтому рисуем только то, что есть.
       // Склейку «сводка, а у работающей — предыдущая» считает
@@ -1165,7 +1207,7 @@
       // это делала `.state` своим margin-left: auto, и стоило снять с неё
       // чекбокс, как всё съезжало к названию сессии.
       `<div class="meta">` +
-      windowHtml(session, toggles.showWindow) +
+      windowHtml(session, toggles.showWindow, toggles.showTerminalIcon) +
       windowHostHtml(session, toggles.showWindowHost) +
       stateHtml(session, toggles.showEvent) +
       sessionIdHtml(session, toggles.showId) +
@@ -3102,7 +3144,30 @@
     }
   }
 
+  /**
+   * Версия в шапке справочника клавиш (F1).
+   *
+   * Зовём через invoke() — тот сам возвращает Promise.resolve() без моста,
+   * и без него заголовок остаётся тем, что уже в разметке («ccfzf-picker»
+   * без номера): в тестах, где __TAURI__ нет вовсе, это рабочее состояние, а
+   * не ошибка. Строка в исходник не зашивается намеренно — она разошлась бы
+   * с Cargo.toml на первом же релизе, и заметить это было бы нечем.
+   */
+  async function loadAppVersion() {
+    try {
+      const version = await invoke('app_version');
+      if (version) keysTitle.textContent = `ccfzf-picker v${version}`;
+    } catch (e) {
+      // Тихо: карточка клавиш не критична для работы пикера, а без версии
+      // заголовок и так читаем — просто без номера.
+    }
+  }
+
   async function start() {
+    // До проверки моста: без __TAURI__ start() тут же выходит, а
+    // loadAppVersion() безопасна и без него — invoke() внутри неё сама
+    // возвращает Promise.resolve(), просто ничего не меняя в заголовке.
+    loadAppVersion();
     if (!window.__TAURI__) { message.textContent = 'No backend detected.'; return; }
     const { listen } = window.__TAURI__.event;
     const { getCurrentWindow } = window.__TAURI__.window;

@@ -161,12 +161,63 @@
    * Пустой элемент вместо пропуска — по той же причине, что у hotkeyHtml:
    * правые колонки стоят друг за другом, и дырка сдвинула бы соседние строки.
    */
-  function windowHtml(session, showWindow = true) {
+  /**
+   * Терминалы, которые пометка различает поимённо.
+   *
+   * Один общий знак ⌨ на все терминалы сразу не годится: на Windows рядом
+   * живут Windows Terminal и WezTerm, и вопрос к пометке — не «терминал ли
+   * это» (это и так видно по ▣), а «какой именно». Отсюда буква на терминал,
+   * а не картинка: колонка `.win` шириной в один знак, и иконке приложения
+   * там места нет — а брать её было бы неоткуда вдвойне, окно стоит на
+   * соседней машине, и её exe у нас не спросить.
+   *
+   * Порядок значим: `windowsterminal` обязан проверяться раньше `terminal`,
+   * иначе Windows Terminal читался бы маковским Terminal.app. Имя приезжает
+   * от трекера: на Windows это basename exe (`WindowsTerminal.exe`,
+   * `wezterm-gui.exe`), на маке — отображаемое имя приложения (`kitty`,
+   * `iTerm2`). Регэкспы поэтому свободные, но не настолько, как прежний общий
+   * `wt` — тот совпадал в любом слове с этими двумя буквами подряд.
+   */
+  const TERMINAL_GLYPHS = [
+    // `z` у WezTerm, а `w` у Windows Terminal — выбор владельца, и он не
+    // произвольный: первая буква достаётся тому, у кого имя с неё начинается,
+    // а WezTerm узнаётся по своей второй, характерной.
+    { re: /wezterm/i, glyph: 'z', name: 'WezTerm' },
+    { re: /kitty/i, glyph: 'k', name: 'kitty' },
+    { re: /ghostty/i, glyph: 'g', name: 'Ghostty' },
+    { re: /iterm/i, glyph: 'i', name: 'iTerm2' },
+    { re: /windowsterminal|(^|[\\/])wt(\.exe)?$/i, glyph: 'w', name: 'Windows Terminal' },
+    { re: /alacritty/i, glyph: 'a', name: 'Alacritty' },
+    { re: /^terminal(\.app)?$/i, glyph: 'T', name: 'Terminal' },
+  ];
+
+  /**
+   * Терминал записи окна, если трекер его назвал и он знаком.
+   *
+   * `null` значит «оставить ▣»: и когда поля нет вовсе (старый трекер), и
+   * когда названо незнакомое приложение. Подставлять вместо этого пресет
+   * терминала самого пикера было бы неправдой — у соседних строк терминалы
+   * бывают разные, а окно вообще может стоять на чужой машине.
+   */
+  function terminalOf(win) {
+    const named = String(win?.app || win?.process || '');
+    if (!named) return null;
+    return TERMINAL_GLYPHS.find(t => t.re.test(named)) || null;
+  }
+
+  function windowHtml(session, showWindow = true, showTerminalIcon = false) {
     if (!showWindow) return '';
     const win = session?.window;
     if (!win) return '<div class="win"></div>';
-    const desktop = Number.isFinite(win.desktop) ? ` title="Desktop ${win.desktop}"` : '';
-    return `<div class="win open"${desktop}>▣</div>`;
+    const terminal = showTerminalIcon ? terminalOf(win) : null;
+    // Подсказка складывается из того, что известно: стол называет трекер
+    // Windows, имя терминала — оба, но только с новой правкой. Пустых
+    // разделителей не бывает — склеиваются только непустые части.
+    const parts = [];
+    if (Number.isFinite(win.desktop)) parts.push(`Desktop ${win.desktop}`);
+    if (terminal) parts.push(terminal.name);
+    const title = parts.length ? ` title="${escapeHtml(parts.join(' · '))}"` : '';
+    return `<div class="win open"${title}>${terminal ? terminal.glyph : '▣'}</div>`;
   }
 
   /**
@@ -302,6 +353,68 @@
   }
 
   /**
+   * Слова текста для сравнения «это то же имя, просто по-другому набрано».
+   *
+   * Разделитель — всё, что не буква и не цифра: `ccfzf_picker` и
+   * `ccfzf-picker` для человека одно и то же имя, разбитое на слова разным
+   * знаком, а для строкового сравнения — два разных значения.
+   */
+  function wordSet(text) {
+    return new Set(
+      String(text ?? '')
+        .split(/[^a-zA-Z0-9]+/)
+        .map((word) => word.toLowerCase())
+        .filter(Boolean),
+    );
+  }
+
+  /** Последний непустой сегмент пути — basename и по `/`, и по `\`. */
+  function pathBasename(cwd) {
+    const parts = String(cwd ?? '').split(/[/\\]+/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : '';
+  }
+
+  // Параметры не названы `a`/`b`: тест «поле действительно есть в строке»
+  // (row-contract.test.js) вычитывает из этого файла все `session.`/`s.`/
+  // `a.`/`b.` обращения как имена полей сессии — однобуквенные имена здесь
+  // ловились бы той же регуляркой и приписали бы строке поле `has`, которого
+  // у неё нет и не должно быть.
+  function isSubset(small, big) {
+    for (const item of small) if (!big.has(item)) return false;
+    return true;
+  }
+
+  /**
+   * Каталог уже назван именем строки — вторая подпись с тем же смыслом
+   * только отнимает место.
+   *
+   * Сравниваются множества слов, а не строки целиком: разделители у людей
+   * разные (`_` против `-`), а порядок слов и регистр значения не имеют.
+   * Правило одностороннее — «одно множество внутри другого», а не равенство:
+   * `picker` внутри `ccfzf-picker` тоже читается как то же имя в
+   * сокращении, а точное совпадение такой случай упустило бы. Пустое имя или
+   * пустой каталог гасить нечем — сравнивать не с чем.
+   */
+  function hidesProject(name, cwd) {
+    const nameWords = wordSet(name);
+    const dirWords = wordSet(pathBasename(cwd));
+    if (!nameWords.size || !dirWords.size) return false;
+    return isSubset(nameWords, dirWords) || isSubset(dirWords, nameWords);
+  }
+
+  /**
+   * Вторая строка под именем в списке: каталог проекта — basename, а не
+   * сокращённый путь. Полный путь остаётся в подсказке (rowTitle, через
+   * shortPath); здесь короче не значит менее понятно, а вопрос один — «какой
+   * это каталог», не «где он на диске».
+   *
+   * Пустая строка, когда имя уже сказало то же самое: см. hidesProject.
+   */
+  function projectLine(name, cwd) {
+    return hidesProject(name, cwd) ? '' : pathBasename(cwd);
+  }
+
+  /**
    * Подсказка при наведении на строку.
    *
    * Здесь оседает то, чему в строке не хватает места: полный путь (в строке он
@@ -380,7 +493,8 @@
   return {
     statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
     sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml, windowHostHtml,
+    TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
-    prNumber, prBadgeHtml,
+    prNumber, prBadgeHtml, wordSet, hidesProject, projectLine,
   };
 });

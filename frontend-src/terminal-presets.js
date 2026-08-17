@@ -77,39 +77,56 @@
    * собственном конфиге (`~/.wezterm.lua`), то есть настройка человека, а не
    * пресета. Решено оставить как есть: цена — непрочитанная ошибка ssh, та же,
    * что была у kitty до `--hold`.
+   *
+   * `terminal` — **семейное имя**, и оно не то же самое, что `id`. `id`
+   * называет запись этой таблицы (`wezterm` и `wezterm-windows` — две разные,
+   * потому что путь разный), а семейное имя называет сам терминал: WezTerm на
+   * маке и на Windows зовётся одинаково, а что за именем стоит, знает только
+   * принимающая сторона. Уезжает оно в теле просьбы к менеджеру окон
+   * (`claude-session-open`), чтобы выбранное в пикере главенствовало и там, где
+   * терминал открывает не пикер. Словарь общий с реестром менеджера:
+   * `wt`, `wezterm`, `kitty`, `ghostty`, `iterm2`.
+   *
+   * У «Custom» имени нет и быть не может: набранное руками нам неизвестно, и
+   * назови мы его чужим именем — менеджер открыл бы не то, что стоит в поле.
+   * Тогда поле в просьбе не едет вовсе, и менеджер берёт свой дефолт.
+   *
+   * Имя это читает не страница, а Rust (`terminal_name` в `mqtt.rs`): ту же
+   * просьбу шлёт проектный хоткей, а у него webview спит. Здесь имя — источник
+   * правды, там его копия; сверяет их `test/terminal-name.test.js`.
    */
   const PRESETS = [
     {
-      id: 'kitty', label: 'kitty', os: 'macos',
+      id: 'kitty', label: 'kitty', os: 'macos', terminal: 'kitty',
       file: '/opt/homebrew/bin/kitty', args: ['--single-instance', '--hold'],
     },
     {
-      id: 'ghostty', label: 'Ghostty', os: 'macos',
+      id: 'ghostty', label: 'Ghostty', os: 'macos', terminal: 'ghostty',
       file: '/Applications/Ghostty.app/Contents/MacOS/ghostty', args: ['-e'],
     },
     {
-      id: 'iterm2', label: 'iTerm2', os: 'macos',
+      id: 'iterm2', label: 'iTerm2', os: 'macos', terminal: 'iterm2',
       file: '/usr/bin/osascript',
       args: ['-e', 'tell application "iTerm" to create window with default profile command "{helper} {commandBase64}"'],
     },
     {
-      id: 'wezterm', label: 'WezTerm', os: 'macos',
+      id: 'wezterm', label: 'WezTerm', os: 'macos', terminal: 'wezterm',
       file: '/Applications/WezTerm.app/Contents/MacOS/wezterm', args: ['start', '--'],
     },
     {
-      id: 'kitty-linux', label: 'kitty', os: 'linux',
+      id: 'kitty-linux', label: 'kitty', os: 'linux', terminal: 'kitty',
       file: '/usr/bin/kitty', args: ['--single-instance', '--hold'],
     },
     {
-      id: 'ghostty-linux', label: 'Ghostty', os: 'linux',
+      id: 'ghostty-linux', label: 'Ghostty', os: 'linux', terminal: 'ghostty',
       file: '/usr/bin/ghostty', args: ['-e'],
     },
     {
-      id: 'wt', label: 'Windows Terminal', os: 'windows',
+      id: 'wt', label: 'Windows Terminal', os: 'windows', terminal: 'wt',
       file: 'wt.exe', args: [],
     },
     {
-      id: 'wezterm-windows', label: 'WezTerm', os: 'windows',
+      id: 'wezterm-windows', label: 'WezTerm', os: 'windows', terminal: 'wezterm',
       file: 'wezterm-gui.exe', args: ['start', '--'],
     },
   ];

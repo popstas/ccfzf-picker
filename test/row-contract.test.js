@@ -397,6 +397,7 @@ function renderProjectRows(projects, query, toggles, taken, stale) {
     toggles: toggles || { showPaths: true },
     escapeHtml: Glyph.escapeHtml,
     shortPath: Glyph.shortPath,
+    projectLine: Glyph.projectLine,
     ageHtml: Glyph.ageHtml,
     hotkeyHtml: Glyph.hotkeyHtml,
     titleAttr: Glyph.titleAttr,
@@ -432,9 +433,12 @@ test('строка проекта доезжает с настоящего пу�
   assert.ok(items[1].html.includes('<div class="dot"></div>'), items[1].html);
   assert.ok(!items[1].html.includes('closed'), items[1].html);
 
-  // Путь в подсказке и в теле строки — одного вида, через shortPath.
+  // Подсказка остаётся полным путём через shortPath — это не поменялось.
   assert.ok(items[0].html.includes('title="~/projects/ccfzf"'), items[0].html);
-  assert.ok(items[0].html.includes('<div class="cwd">~/projects/ccfzf</div>'), items[0].html);
+  // А тело строки basename больше не показывает вовсе: имя проекта — тоже
+  // «ccfzf», и вторая подпись с тем же смыслом только отняла бы место
+  // (projectLine/hidesProject, Task 11).
+  assert.ok(!items[0].html.includes('class="cwd"'), items[0].html);
 
   // Возраст: минута у свежего, пусто у проекта с mtime 0. «1970» здесь взяться
   // неоткуда — но взялось бы, если возраст начнут считать без проверки нуля.
@@ -457,6 +461,16 @@ test('строка проекта доезжает с настоящего пу�
   assert.strictEqual(rows.length, items.length);
 });
 
+// Обратный случай: имя проекта ничего не говорит про каталог, и строка
+// показывает basename — короче полного пути, но не пусто.
+test('несовпадающее имя проекта не гасит каталог', () => {
+  const { items } = renderProjectRows([{
+    path: '/x/projects/js/ccfzf-picker', name: 'mac-wezterm',
+    mark: false, sessions: 1, live: 0, mtime: 1786045860,
+  }]);
+  assert.ok(items[0].html.includes('<div class="cwd">ccfzf-picker</div>'), items[0].html);
+});
+
 test('имя проекта в разметку экранируется', () => {
   const { items } = renderProjectRows([{
     path: '/home/user/projects/<b>"x"', name: '<b>"amp & co"</b>',
@@ -464,7 +478,8 @@ test('имя проекта в разметку экранируется', () =>
   }]);
   assert.ok(items[0].html.includes('&lt;b&gt;&quot;amp &amp; co&quot;&lt;/b&gt;'), items[0].html);
   assert.ok(!items[0].html.includes('<b>'), items[0].html);
-  // И путь — в подсказке и в теле строки.
+  // И basename каталога — тоже, и в подсказке (полным путём), и в теле
+  // строки (см. projectLine, Task 11).
   assert.ok(!items[0].html.includes('"x"'), items[0].html);
 });
 
@@ -576,6 +591,7 @@ function renderSnapshotRows(snapshots, query, options) {
     toggles: opts.toggles || { showPaths: true },
     escapeHtml: Glyph.escapeHtml,
     shortPath: Glyph.shortPath,
+    projectLine: Glyph.projectLine,
     query: query || '',
     nowSec: PROJECTS_NOW,
   };
@@ -628,10 +644,16 @@ test('строка снимка доезжает с настоящего пут�
   assert.ok(items[3].html.includes('<div class="dot"></div>'), items[3].html);
   assert.ok(items[3].html.includes('<div class="count"></div>'), items[3].html);
 
-  // Имя строки — каталог проекта, путь — тот же shortPath, что у сессий.
+  // Имя строки — каталог проекта; в подсказке остаётся полный путь.
   assert.ok(items[3].html.includes('<div class="name">empty</div>'), items[3].html);
-  assert.ok(items[3].html.includes('<div class="cwd">~/projects/empty</div>'), items[3].html);
   assert.ok(items[3].html.includes('title="/home/user/projects/empty"'), items[3].html);
+  // Тело же basename не повторяет, и не только у этой строки: у
+  // snapshot-session имя строки — сам projectBasename(session)
+  // (picker-snapshots.js), то есть уже basename каталога; hidesProject видит
+  // их равными у любой сессии снимка с непустым cwd, и .cwd под именем не
+  // рисуется никогда — не потому, что имя и каталог совпали именно здесь,
+  // а по устройству самой строки (Task 11).
+  assert.ok(!items[3].html.includes('class="cwd"'), items[3].html);
 });
 
 test('снимок отделён от соседа сильнее, чем его сессии друг от друга', () => {
@@ -686,9 +708,12 @@ test('отбор снимков и порядок строк — тот же, ч
 });
 
 test('имя и путь снимка в разметку экранируются', () => {
+  // Имя сессии нарочно не похоже на каталог — иначе строка спрятала бы
+  // basename целиком (hidesProject, Task 11), и здесь стало бы нечего
+  // экранировать.
   const { items } = renderSnapshotRows([{
     id: 'snap-2', created: 1786045860,
-    sessions: [{ id: 'ccc', cwd: '/home/user/projects/<b>"x"', title: 'x' }],
+    sessions: [{ id: 'ccc', cwd: '/home/user/projects/<b>"x"', title: 'unrelated' }],
   }]);
   // Путь идёт и в подсказку, и в тело строки — обе через escapeHtml.
   assert.ok(!items[2].html.includes('<b>'), items[2].html);
@@ -1094,13 +1119,20 @@ function keysFromSettings() {
   vm.runInContext(
     `${labels[0]}\n${filters[0]}\n${defaults[0]}\nvar toggles = Object.keys(TOGGLE_LABELS);`
     + `\nvar filterKeys = Object.keys(FILTER_LABELS);`
-    + `\nvar defaultKeys = Object.keys(UI_DEFAULTS.toggles);`,
+    + `\nvar defaultKeys = Object.keys(UI_DEFAULTS.toggles);`
+    + `\nvar toggleLabelsOut = TOGGLE_LABELS;`,
     ctx, { filename: 'settings.html' },
   );
   return {
     toggles: Array.from(ctx.toggles),
     filters: Array.from(ctx.filterKeys),
     defaults: Array.from(ctx.defaultKeys),
+    // Только TOGGLE_LABELS (колонки), не FILTER_LABELS: подписи фильтров в
+    // двух окнах уже расходятся сегодня (`onlyWindow` — «only windowed» в
+    // пикере и «only sessions with a window» в настройках) — это отдельная,
+    // не заявленная в этой задаче поломка, и сторожить её здесь значило бы
+    // чинить чужой баг мимо брифа.
+    toggleLabels: { ...ctx.toggleLabelsOut },
   };
 }
 
@@ -1109,9 +1141,10 @@ function checksFromPicker() {
   assert.ok(source, 'TOGGLE_CHECKS не найден в sessions.html — тест сторожит не то');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(`${source[0]}\nvar out = TOGGLE_CHECKS.map(c => ({ key: c.key, side: c.side }));`,
+  vm.runInContext(
+    `${source[0]}\nvar out = TOGGLE_CHECKS.map(c => ({ key: c.key, side: c.side, label: c.label }));`,
     ctx, { filename: 'sessions.html' });
-  return Array.from(ctx.out).map(c => ({ key: c.key, side: c.side }));
+  return Array.from(ctx.out).map(c => ({ key: c.key, side: c.side, label: c.label }));
 }
 
 test('окно настроек знает все галки пикера и ни одной лишней', () => {
@@ -1139,6 +1172,21 @@ test('фильтры и колонки разделены в обоих окна
     settings.filters.sort(),
     checks.filter(c => c.side === 'filter').map(c => c.key).sort(),
   );
+});
+
+test('подписи колонок совпадают в пикере и в настройках', () => {
+  // Расхождение здесь молчаливое: строка статуслайна берёт подпись из
+  // TOGGLE_CHECKS, таблица настроек — из TOGGLE_LABELS, и разница видна
+  // только тому, кто открыл оба окна разом. showPaths — прямой повод: ключ
+  // остаётся прежним, а подпись меняется на project и обязана смениться в
+  // обоих окнах вместе. Фильтры (FILTER_LABELS) сюда не входят — см.
+  // комментарий у keysFromSettings.
+  const checks = checksFromPicker().filter(c => c.side !== 'filter');
+  const settings = keysFromSettings();
+  for (const c of checks) {
+    assert.strictEqual(settings.toggleLabels[c.key], c.label, `подпись ${c.key} разошлась`);
+  }
+  assert.strictEqual(settings.toggleLabels.showPaths, 'project');
 });
 
 // ── showAll перекрывает onlyLive из конфига ────────────────────────────────
@@ -1448,6 +1496,7 @@ function renderSessionRows(state, query, toggles, stale) {
     toggles: toggles || { showPaths: true },
     escapeHtml: Glyph.escapeHtml,
     shortPath: Glyph.shortPath,
+    projectLine: Glyph.projectLine,
     titleAttr: Glyph.titleAttr,
     statusDotHtml: Glyph.statusDotHtml,
     prBadgeHtml: Glyph.prBadgeHtml,
@@ -1503,6 +1552,20 @@ test('строка зелийной сессии доезжает до отри�
   // Ключ строки — с префиксом: он же уходит в picker-list-sync, и столкнись
   // он с uuid сессии, список перерисовывался бы целиком.
   assert.ok(items.some(i => i.key === 's:zellij:home'), items.map(i => i.key));
+});
+
+// Пример из спеки: имя сессии не называет каталог, и строка показывает
+// basename — короче полного пути из подсказки, но не пусто.
+test('сессия mac-wezterm показывает каталог ccfzf-picker, а подсказка остаётся полным путём', () => {
+  const { items } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({ title: 'mac-wezterm', cwd: '/home/user/ccfzf-picker' })],
+  });
+  const session = items.find(i => i.key.startsWith('s:'));
+  assert.ok(session.html.includes('<div class="cwd">ccfzf-picker</div>'), session.html);
+  // Подсказка не поменялась: тот же titleAttr, что и раньше, полный путь
+  // через shortPath.
+  assert.ok(session.html.includes('~/ccfzf-picker'), session.html);
 });
 
 // Маркер вида строки — самый хрупкий инвариант широкого режима: карточка в

@@ -111,3 +111,14 @@ test('статуслайн больше не пересказывает спис
   }
   assert.ok(hint[1].includes('^K'), 'вход в меню строки из статуслайна пропал');
 });
+
+test('заголовок справочника — имя и версия, не Keyboard shortcuts', () => {
+  assert.match(SESSIONS_HTML, /id="keys-title"/);
+  assert.match(SESSIONS_HTML, /id="keys-subtitle"/);
+  assert.match(SESSIONS_HTML, /MIT License/);
+  assert.match(SESSIONS_HTML, /github.com\/popstas\/ccfzf-picker/);
+  assert.doesNotMatch(
+    SESSIONS_HTML.match(/id="keys-title"[^<]*</)[0],
+    /Keyboard shortcuts/,
+  );
+});

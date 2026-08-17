@@ -44,6 +44,9 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # всю функцию за этой feature. `Win32_System_Com` — ради пары
 # `CoInitializeEx`/`CoUninitialize` вокруг `SHGetFileInfoW`: шелл идёт за
 # иконкой в свои расширения, а те без апартамента у потока не отвечают.
+# `Win32_System_LibraryLoader` — ради `GetModuleHandleW` в `scrim.rs`: окну
+# подложки нужен `hInstance` текущего процесса, и передавать туда пустой
+# честнее не пытаться — он не всегда работает так же, как настоящий.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
@@ -54,6 +57,32 @@ windows = { version = "0.61", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Environment",
     "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+] }
+
+# Подложка позади пикера (`scrim.rs`) на маке — тем же приёмом, каким Windows
+# выше уже пользуется `windows`: своя реализация ниже уровня Tauri, крейты
+# биндинга к AppKit. Версии те же, что уже стоят в Cargo.lock транзитивно
+# через tao/wry (macOS-сборка их и так тянет ради собственных окон), а
+# `default-features = false` — потому что дефолт у `objc2-app-kit` тянет весь
+# фреймворк разом (Core Video, QuartzCore, CloudKit — десяток крейтов, ни один
+# из них подложке не нужен). Четырёх features хватает: NSWindow — само окно,
+# уровень и стиль; NSScreen — куда его положить; NSColor и NSGraphics —
+# заливка и тип бэкинга.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "NSWindow",
+    "NSScreen",
+    "NSColor",
+    "NSGraphics",
+    # Клик по подложке гасит пикер, и разбирает его своя вьюха
+    # (`ScrimView` в `scrim.rs`): NSView — её предок, NSResponder — под этой
+    # feature лежат его методы у самого NSView, NSEvent — аргумент
+    # `mouseDown:`.
+    "NSView",
+    "NSResponder",
+    "NSEvent",
 ] }
 
 # Профиль собран под выкатку, а не под витрину: `deploy-*.sh` зовёт

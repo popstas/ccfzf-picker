@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const UiState = require('../frontend-src/ui-state');
 
-// ── save() из settings.html не затирает то, что писал пикер ─────────────────
+// ── persist() из settings.html не затирает то, что писал пикер ──────────────
 //
 // Ревью нашло: окно настроек читает ui.json один раз при загрузке, а
 // `open_settings` переиспользует уже созданное окно и страницу не
@@ -15,10 +15,11 @@ const UiState = require('../frontend-src/ui-state');
 // сторону. Сохранение снимком откатывало бы чужую правку, да ещё и рассылало
 // пикеру приказ перечитать этот откат.
 //
-// save() живёт прямо в странице, требовать его через require неоткуда —
+// persist() живёт прямо в странице, требовать его через require неоткуда —
 // поэтому он вычитывается из settings.html и выполняется в vm, тем же приёмом,
 // что renderProjects и saveUi в row-contract.test.js. Копия сохранения в тесте
-// разошлась бы с настоящим молча.
+// разошлась бы с настоящим молча. Save зовёт его же — кнопка и автосохранение
+// делят один обработчик (task 6).
 const SETTINGS_HTML = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
 
 function sourceOf(re, what) {
@@ -28,7 +29,23 @@ function sourceOf(re, what) {
 }
 
 /**
- * Прогнать настоящий save() на вкладке UI.
+ * Общий кусок settings.html, нужный любому вызову persist(): guard-обвязка
+ * (persisting/persistPending), оба оверлея dirty-состояния и сама persistOnce.
+ *
+ * Одна функция на все три вкладки — иначе набор извлекаемых кусков
+ * разошёлся бы между хелперами теста молча, как только persistOnce попросит
+ * что-то ещё.
+ */
+function persistCoreSrc() {
+  return sourceOf(/\n {2}let persisting = false;\n {2}let persistPending = false;\n/, 'persisting/persistPending')
+    + sourceOf(/\n {2}function overlayDirtyPanels\(fresh\) \{[\s\S]*?\n {2}\}\n/, 'overlayDirtyPanels')
+    + sourceOf(/\n {2}function overlayDirtyToggles\(fresh\) \{[\s\S]*?\n {2}\}\n/, 'overlayDirtyToggles')
+    + sourceOf(/\n {2}async function persist\(\) \{[\s\S]*?\n {2}\}\n/, 'persist')
+    + sourceOf(/\n {2}async function persistOnce\(\) \{[\s\S]*?\n {2}\}\n/, 'persistOnce');
+}
+
+/**
+ * Прогнать настоящий persist() на вкладке UI.
  *
  * `onDisk` — то, что лежит в ui.json к моменту нажатия «Сохранить» (обычно уже
  * с правками пикера). `snapshot` — что окно прочитало при загрузке. `dirty` —
@@ -36,7 +53,7 @@ function sourceOf(re, what) {
  */
 async function saveUiTab({ onDisk, snapshot, dirty }) {
   const defaultsSrc = sourceOf(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/, 'UI_DEFAULTS');
-  const saveSrc = sourceOf(/\n {2}async function save\(\) \{[\s\S]*?\n {2}\}\n/, 'save');
+  const saveSrc = persistCoreSrc();
 
   const calls = [];
   const dirtyAxes = new Map();
@@ -49,13 +66,13 @@ async function saveUiTab({ onDisk, snapshot, dirty }) {
       calls.push({ cmd, args });
       return Promise.resolve(cmd === 'load_ui' ? onDisk : undefined);
     },
-    current: 'ui',
+    current: 'columns',
     ui: snapshot,
     dirtyAxes,
     renderPage: () => {},
   };
   vm.createContext(ctx);
-  vm.runInContext(`${defaultsSrc}\n${saveSrc}\nvar done = save();`, ctx, { filename: 'settings.html' });
+  vm.runInContext(`${defaultsSrc}\n${saveSrc}\nvar done = persist();`, ctx, { filename: 'settings.html' });
   await ctx.done;
   const saved = calls.find(c => c.cmd === 'save_ui');
   assert.ok(saved, 'save_ui не позван');
@@ -81,9 +98,17 @@ function defaultsFromPage() {
 // Тем же приёмом, что и save(): настоящий axesTableHtml вычитывается из
 // страницы и выполняется в vm — копия разметки в тесте разошлась бы молча.
 function axesHtml() {
-  const src = ['TOGGLE_LABELS', 'FILTER_LABELS', 'AXIS_HINTS']
+  const src = ['TOGGLE_LABELS', 'FILTER_LABELS', 'AXIS_HINTS', 'COLUMN_ICONS', 'COLUMN_HINTS']
     .map(name => sourceOf(new RegExp(`\\n {2}const ${name} = \\{[\\s\\S]*?\\n?(?: {2})?\\};\\n`), name))
     .join('\n')
+    // RECOMMENDED_KEYS — не объектный литерал, а выражение над TOGGLE_LABELS,
+    // поэтому вычитывается своим шаблоном, до первого `;\n` на отступе в два
+    // пробела, а не фигурными скобками, как остальные константы выше.
+    + sourceOf(/\n {2}const RECOMMENDED_KEYS = [\s\S]*?;\n/, 'RECOMMENDED_KEYS')
+    // axesTableHtml зовёт recommendedListState для checked заголовка
+    // Recommended — без неё вызов упал бы ReferenceError, а не молча дал
+    // неверную разметку.
+    + sourceOf(/\n {2}function recommendedListState\(toggles\) \{[\s\S]*?\n {2}\}\n/, 'recommendedListState')
     + sourceOf(/\n {2}function axesTableHtml\(\) \{[\s\S]*?\n {2}\}\n/, 'axesTableHtml');
   const ctx = {
     esc: s => String(s).replace(/[&<>"]/g, c => (
@@ -95,12 +120,159 @@ function axesHtml() {
   return ctx.out;
 }
 
+// ── чекбокс recommended-all: тройное состояние и эффект клика ───────────────
+//
+// axesHtml() выше проверяет только разметку — что чекбокс на месте и что он
+// красится каким-то title'ом. Контракт задачи («включён, когда все Recommended
+// list=true; выключен, когда ни один; неопределён на смеси; клик решает по
+// текущему состоянию, а не по input.checked; трогает только list; метит
+// dirtyAxes») живёт в двух чистых функциях, recommendedListState и
+// applyRecommendedToggle, и вычитывается тем же приёмом, что и markToggleId в
+// row-contract.test.js — извлечённая ссылка на функцию зовётся прямо из
+// теста, минуя DOM и renderPage целиком.
+function recommendedLogic() {
+  const src = sourceOf(/\n {2}const TOGGLE_LABELS = \{[\s\S]*?\n {2}\};\n/, 'TOGGLE_LABELS')
+    + sourceOf(/\n {2}const RECOMMENDED_KEYS = [\s\S]*?;\n/, 'RECOMMENDED_KEYS')
+    + sourceOf(/\n {2}function recommendedListState\(toggles\) \{[\s\S]*?\n {2}\}\n/, 'recommendedListState')
+    + sourceOf(
+      /\n {2}function applyRecommendedToggle\(toggles, dirtyAxes\) \{[\s\S]*?\n {2}\}\n/,
+      'applyRecommendedToggle',
+    );
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(
+    `${src}\nvar state = recommendedListState;\nvar apply = applyRecommendedToggle;`
+    + `\nvar keys = RECOMMENDED_KEYS;`,
+    ctx, { filename: 'settings.html' },
+  );
+  return {
+    recommendedListState: ctx.state,
+    applyRecommendedToggle: ctx.apply,
+    RECOMMENDED_KEYS: Array.from(ctx.keys),
+  };
+}
+
+// Полный набор осей на все ключи TOGGLE_LABELS — умолчания страницы, чтобы не
+// заводить третью копию таблицы галок прямо в тесте.
+function allToggles() {
+  return { ...defaults().toggles };
+}
+
+test('recommended-all отмечен, когда у всех Recommended list=true', () => {
+  const { recommendedListState, RECOMMENDED_KEYS } = recommendedLogic();
+  const toggles = allToggles();
+  for (const key of RECOMMENDED_KEYS) toggles[key] = { ...toggles[key], list: true };
+  const state = recommendedListState(toggles);
+  assert.strictEqual(state.checked, true);
+  assert.strictEqual(state.indeterminate, false);
+});
+
+test('recommended-all снят, когда ни у одного Recommended list не включён', () => {
+  const { recommendedListState, RECOMMENDED_KEYS } = recommendedLogic();
+  const toggles = allToggles();
+  for (const key of RECOMMENDED_KEYS) toggles[key] = { ...toggles[key], list: false };
+  const state = recommendedListState(toggles);
+  assert.strictEqual(state.checked, false);
+  assert.strictEqual(state.indeterminate, false);
+});
+
+test('recommended-all в неопределённом состоянии на смеси', () => {
+  const { recommendedListState, RECOMMENDED_KEYS } = recommendedLogic();
+  const toggles = allToggles();
+  RECOMMENDED_KEYS.forEach((key, i) => { toggles[key] = { ...toggles[key], list: i === 0 }; });
+  const state = recommendedListState(toggles);
+  assert.strictEqual(state.checked, false);
+  assert.strictEqual(state.indeterminate, true);
+});
+
+test('клик на смеси включает list у всех Recommended и метит их dirty', () => {
+  const { applyRecommendedToggle, RECOMMENDED_KEYS } = recommendedLogic();
+  const toggles = allToggles();
+  // Смешанное состояние по list, вперемешку с включённой statusline — она
+  // не должна дрогнуть.
+  RECOMMENDED_KEYS.forEach((key, i) => {
+    toggles[key] = { ...toggles[key], list: i === 0, statusline: true };
+  });
+  const before = JSON.parse(JSON.stringify(toggles));
+  const dirtyAxes = new Map();
+  const next = applyRecommendedToggle(toggles, dirtyAxes);
+  for (const key of RECOMMENDED_KEYS) {
+    assert.strictEqual(next[key].list, true, `${key}.list`);
+    assert.strictEqual(next[key].statusline, before[key].statusline, `${key}.statusline`);
+    assert.ok(dirtyAxes.has(key), `${key} не помечен dirty`);
+    assert.deepStrictEqual([...dirtyAxes.get(key)], ['list'], `${key} помечен не только по list`);
+  }
+  // Other-строки (showEvent, showCost, showTerminalIcon) клик не касается
+  // вовсе — ни по значению, ни по dirty-отметке.
+  for (const key of Object.keys(toggles)) {
+    if (RECOMMENDED_KEYS.includes(key)) continue;
+    assert.deepStrictEqual(next[key], before[key], key);
+    assert.ok(!dirtyAxes.has(key), `${key} помечен dirty, а это не Recommended`);
+  }
+});
+
+test('клик, когда все Recommended включены, выключает их все и тоже метит dirty', () => {
+  const { applyRecommendedToggle, RECOMMENDED_KEYS } = recommendedLogic();
+  const toggles = allToggles();
+  RECOMMENDED_KEYS.forEach((key) => {
+    toggles[key] = { ...toggles[key], list: true, statusline: true };
+  });
+  const before = JSON.parse(JSON.stringify(toggles));
+  const dirtyAxes = new Map();
+  const next = applyRecommendedToggle(toggles, dirtyAxes);
+  for (const key of RECOMMENDED_KEYS) {
+    assert.strictEqual(next[key].list, false, `${key}.list`);
+    assert.strictEqual(next[key].statusline, before[key].statusline, `${key}.statusline`);
+    assert.ok(dirtyAxes.get(key).has('list'), `${key} не помечен dirty`);
+  }
+  for (const key of Object.keys(toggles)) {
+    if (RECOMMENDED_KEYS.includes(key)) continue;
+    assert.deepStrictEqual(next[key], before[key], key);
+    assert.ok(!dirtyAxes.has(key), `${key} помечен dirty, а это не Recommended`);
+  }
+});
+
 test('у каждой галки осей есть подсказка', () => {
   const html = axesHtml();
   const boxes = html.match(/<input type="checkbox"[^>]*>/g) || [];
   assert.ok(boxes.length > 0, 'галок не нашлось — тест сторожит не то');
   for (const box of boxes) {
     assert.match(box, /title="[^"]+"/, `галка без подсказки: ${box}`);
+  }
+});
+
+// Ревью финальной волны: `showTerminalIcon` — ось про глиф в колонке окна
+// (`side: 'glyph'` в sessions.html), и `renderChecks` там безусловно выкидывает
+// такие ключи из статуслайна (`side !== 'glyph'`). Чекбокс statusline у этой
+// строки писал бы в ui.json и не рисовал бы ничего внизу списка никогда —
+// мёртвый чекбокс, ровно то правило CLAUDE.md.
+test('у terminal icon нет чекбокса statusline — это мёртвая ось', () => {
+  const html = axesHtml();
+  const rowStart = html.split('<tr>').find(chunk => chunk.includes('data-key="showTerminalIcon"'));
+  assert.ok(rowStart, 'строка terminal icon не найдена');
+  const row = `<tr>${rowStart.split('</tr>')[0]}</tr>`;
+  assert.doesNotMatch(row, /data-axis="statusline" data-key="showTerminalIcon"/,
+    `чекбокс statusline не должен существовать — renderChecks выкидывает glyph-ключи безусловно: ${row}`);
+  assert.match(row, /<\/td><td><\/td><\/tr>$/,
+    `ячейка statusline обязана остаться пустой, но присутствовать: ${row}`);
+});
+
+// Подсказка перечисляет буквы терминалов, а таблица этих букв живёт в
+// session-glyph.js — то есть список здесь второй по счёту. Второму источнику
+// правды в этом проекте полагается сторож: разойдись они, настройки обещали бы
+// человеку букву, которой список не рисует, и заметить это можно было бы
+// только глазами на живом окне с открытым терминалом.
+test('подсказка terminal icon называет каждый терминал из таблицы глифов', () => {
+  const { TERMINAL_GLYPHS } = require('../frontend-src/session-glyph');
+  const src = sourceOf(/\n {2}const COLUMN_HINTS = \{[\s\S]*?\n {2}\};\n/, 'COLUMN_HINTS');
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(`${src}\nvar out = COLUMN_HINTS;`, ctx, { filename: 'settings.html' });
+  const hint = ctx.out.showTerminalIcon;
+  assert.ok(hint, 'у terminal icon нет подсказки');
+  for (const terminal of TERMINAL_GLYPHS) {
+    assert.ok(hint.includes(`${terminal.glyph} ${terminal.name}`),
+      `подсказка не называет ${terminal.glyph} ${terminal.name}: ${hint}`);
   }
 });
 
@@ -119,6 +291,24 @@ test('блок фильтров отбит от таблицы колонок', 
   // Без отступа шапка второй таблицы читалась последней строкой первой — то
   // есть колонкой `window`.
   assert.match(axesHtml(), /class="field axes-group"/);
+});
+
+test('оси колонок идут list затем statusline', () => {
+  const html = axesHtml();
+  const head = html.split('Filters')[0];
+  assert.ok(head.indexOf('>list<') < head.indexOf('>statusline<'));
+});
+
+test('Recommended и Other — отдельные таблицы', () => {
+  const html = axesHtml();
+  assert.match(html, /Recommended/);
+  assert.match(html, /Other/);
+  assert.match(html, /data-axis="list" data-key="recommended-all"/);
+});
+
+test('подпись paths стала project', () => {
+  assert.match(axesHtml(), />project</);
+  assert.doesNotMatch(axesHtml().split('Filters')[0], />paths</);
 });
 
 test('правка пикера переживает сохранение настроек', async () => {
@@ -214,10 +404,10 @@ test('пикер тоже зовёт uiStateToSave всеми аргумента
 
 const PickerPanels = require('../frontend-src/picker-panels');
 
-/** Прогнать настоящий save() на вкладке Panels. */
+/** Прогнать настоящий persist() на вкладке Panels. */
 async function savePanelsTab({ onDisk, snapshot, dirty }) {
   const defaultsSrc = sourceOf(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/, 'UI_DEFAULTS');
-  const saveSrc = sourceOf(/\n {2}async function save\(\) \{[\s\S]*?\n {2}\}\n/, 'save');
+  const saveSrc = persistCoreSrc();
   const calls = [];
   const status = { className: '', textContent: '' };
   const ctx = {
@@ -234,7 +424,7 @@ async function savePanelsTab({ onDisk, snapshot, dirty }) {
     renderPage: () => {},
   };
   vm.createContext(ctx);
-  vm.runInContext(`${defaultsSrc}\n${saveSrc}\nvar done = save();`, ctx, { filename: 'settings.html' });
+  vm.runInContext(`${defaultsSrc}\n${saveSrc}\nvar done = persist();`, ctx, { filename: 'settings.html' });
   await ctx.done;
   const saved = calls.find(c => c.cmd === 'save_ui');
   assert.ok(saved, 'save_ui не позван');
@@ -397,15 +587,16 @@ test('у каждого типа поля есть своя ветка отри�
   }
 });
 
-// Значение, которого в списке нет, дописывается пунктом, а не теряется:
-// config.yaml правят и руками, а `<select>` без совпадения показал бы первый
-// пункт — то есть соврал бы, что размер встроенный. Та же цена и та же
-// причина, что у «Custom» в выпадашке терминалов.
-test('размер, вписанный руками, виден в выпадашке', () => {
+// Пять долей — фиксированный список радиокнопок ("Четыре доли, а не десять" —
+// список, по которому надо водить глазами, хуже короткого; сам список теперь
+// из пяти, но принцип тот же). Значение вне этого списка — пиксели, вписанные
+// руками или подобранные раньше, — не теряется молча, а видно в соседнем
+// числовом поле, а не как «совпавшая» радиокнопка, которой для него нет.
+test('пиксельный размер виден в числовом поле, а не как радиокнопка', () => {
   const { PAGES } = require('../frontend-src/settings-form');
   const src = sourceOf(/\n {2}function fieldHtml\(field\) \{[\s\S]*?\n {2}\}\n/, 'fieldHtml');
-  const field = PAGES.flatMap(p => p.fields).find(f => f.type === 'choice');
-  assert.ok(field, 'поля-выпадашки в PAGES нет — тест сторожит не то');
+  const field = PAGES.flatMap(p => p.fields).find(f => f.type === 'size');
+  assert.ok(field, 'поля-радио в PAGES нет — тест сторожит не то');
 
   const html = (value) => {
     const ctx = {
@@ -419,13 +610,614 @@ test('размер, вписанный руками, виден в выпада�
   };
 
   const known = html(80);
-  assert.match(known, /<option value="80" selected>/);
-  assert.strictEqual((known.match(/<option/g) || []).length, field.options.length,
-    'известное значение лишнего пункта не заводит');
+  assert.match(known, /<input type="radio"[^>]*value="80"[^>]* checked>/);
+  assert.strictEqual((known.match(/type="radio"/g) || []).length, field.options.length,
+    'радиокнопок должно быть ровно по числу вариантов SIZE_CHOICES');
+  // Известное значение в поле пикселей не утекает.
+  assert.doesNotMatch(known, /data-px="[^"]*"[^>]*value="80"/);
 
-  const handmade = html(70);
-  assert.match(handmade, /<option value="70" selected>70% of screen<\/option>/);
-  assert.strictEqual((handmade.match(/<option/g) || []).length, field.options.length + 1);
+  const handmade = html(1400);
+  assert.doesNotMatch(handmade, /checked/, 'пиксели не должны совпасть ни с одной радиокнопкой');
+  assert.match(handmade, /data-px="[^"]+"[^>]*value="1400"/);
+});
+
+// ── маршрутизация вкладок после переименования 'ui'/'integrations' ──────────
+//
+// Task 2 переименовал id страниц в PAGES (ui → columns, integrations исчезла,
+// её поля ушли в mqtt и paths), а settings.html намеренно оставили нетронутым
+// — эти тесты сторожат, что маршрутизация в renderPage/save её догнала.
+
+test('вкладки называются по спеке и Integrations нет', () => {
+  const { PAGES } = require('../frontend-src/settings-form');
+  // 'Dim stale sessions' сразу после General — восьмая вкладка, пришедшая из
+  // #13 параллельно с этой перестройкой (см. docs/superpowers/specs/
+  // 2026-08-17-stale-settings-tab-design.md); список из семи здесь был верен
+  // только до слияния с той веткой.
+  assert.deepStrictEqual(PAGES.map(p => p.title), [
+    'General', 'Dim stale sessions', 'Window size', 'Columns', 'Layout panels',
+    'Hotkeys', 'MQTT', 'Paths',
+  ]);
+});
+
+test('renderPage знает columns и paths, а не ui и integrations', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  assert.match(src, /current === 'columns'/);
+  assert.match(src, /current === 'paths'/);
+  assert.doesNotMatch(src, /current === 'ui'/);
+  assert.doesNotMatch(src, /current === 'integrations'/);
+  assert.match(src, /Focus, snapshots, and opening a session through a window manager need MQTT/);
+  assert.match(src, /<details/);
+});
+
+// ── <details> терминала открыт ровно когда пресет свой ──────────────────────
+//
+// Текстовый тест выше сторожит только наличие `<details` в файле — он остался
+// бы зелёным, даже переверни кто-нибудь условие `open` или сломай пару
+// terminal.file/terminal.args в generalBodyHtml. Здесь настоящие
+// currentPreset/fieldHtml/generalBodyHtml вычитаны из страницы и прогнаны
+// через настоящий TerminalPresets — как axesHtml/panelsHtml выше, но ещё и
+// с реальным матчером, а не подставным: два вызова matchPreset, разошедшиеся
+// местами, дали бы ложное совпадение здесь и остались бы незамеченными при
+// подмене.
+const TerminalPresets = require('../frontend-src/terminal-presets');
+const { PAGES: FORM_PAGES, configToFields, validate, fieldsToPatch } = require('../frontend-src/settings-form');
+
+function generalHtml(overrides) {
+  const src = ['function platform', 'function linesToArgs', 'function currentPreset']
+    .map(name => sourceOf(new RegExp(`\\n {2}${name}\\([^)]*\\) \\{[\\s\\S]*?\\n {2}\\}\\n`), name))
+    .join('\n')
+    + sourceOf(/\n {2}function fieldHtml\(field\) \{[\s\S]*?\n {2}\}\n/, 'fieldHtml')
+    + sourceOf(/\n {2}function generalBodyHtml\(fieldsList\) \{[\s\S]*?\n {2}\}\n/, 'generalBodyHtml');
+  const fields = { ...configToFields({}), ...overrides };
+  const ctx = {
+    esc: s => String(s).replace(/[&<>"]/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+    window: { TerminalPresets },
+    fields,
+  };
+  vm.createContext(ctx);
+  const generalFields = FORM_PAGES.find(p => p.id === 'general').fields;
+  return vm.runInContext(
+    `${src}\ngeneralBodyHtml(${JSON.stringify(generalFields)});`, ctx, { filename: 'settings.html' });
+}
+
+test('свой путь без совпадения с пресетом открывает <details>', () => {
+  // navigator в vm-контексте не задан — platform() отдаёт '', и osOf('') это
+  // linux; ни один пресет linux не совпадает с выдуманным путём.
+  const html = generalHtml({ 'terminal.file': '/opt/not-a-real-terminal', 'terminal.args': '' });
+  assert.match(html, /<details open>/);
+});
+
+test('путь и аргументы, совпавшие с пресетом, оставляют <details> свёрнутым', () => {
+  const preset = TerminalPresets.presetById('kitty-linux');
+  const html = generalHtml({
+    'terminal.file': preset.file,
+    'terminal.args': preset.args.join('\n'),
+  });
+  assert.match(html, /<details>/);
+  assert.doesNotMatch(html, /<details open>/);
+});
+
+// ── Task 6: автосохранение и Save зовут одну persist ─────────────────────────
+//
+// Save-кнопка больше не единственный путь к записи: каждая правка планирует
+// тот же persist() через общий таймер. Текстовый тест ниже сторожит форму —
+// что persist существует, что таймер зовут именно его, что дебаунс 400 мс и
+// что у кнопки появился отступ; поведенческие тесты после него проверяют, что
+// дебаунс и правда общий на всё окно, а не по полю, и что ошибка validate
+// глушит запись даже под таймером — тем же кодом, каким она глушит её и под
+// ручным Save.
+
+test('autosave и Save зовут одну persist', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  assert.match(src, /async function persist\(/);
+  assert.match(src, /setTimeout\(\(\) => \{ saveTimer = null; persist\(\); \}, 400\)/);
+  assert.match(src, /400/);
+  assert.match(src, /#save \{[^}]*padding/);
+});
+
+/**
+ * Настоящий scheduleAutosave, прогнанный на поддельных таймерах.
+ *
+ * Ни DOM, ни настоящий setTimeout не нужны: у дебаунса есть ровно один
+ * контракт — второй вызов подряд отменяет первый таймер, а не заводит второй,
+ * — и его целиком видно по паре clearTimeout/setTimeout. Настоящие таймеры
+ * заставили бы тест либо спать 400 мс, либо гадать с фиктивным временем;
+ * подставные fn-таймеры дают то же самое без ожидания.
+ */
+function runScheduleAutosaveTwice() {
+  const src = sourceOf(/\n {2}let saveTimer = null;\n/, 'saveTimer')
+    + sourceOf(/\n {2}function scheduleAutosave\(\) \{[\s\S]*?\n {2}\}\n/, 'scheduleAutosave');
+  let persistCalls = 0;
+  let nextId = 0;
+  const pending = new Map();
+  const ctx = {
+    persist: () => { persistCalls += 1; },
+    setTimeout: (fn, ms) => {
+      assert.strictEqual(ms, 400, 'дебаунс обязан быть ровно 400 мс — как в брифе');
+      nextId += 1;
+      pending.set(nextId, fn);
+      return nextId;
+    },
+    clearTimeout: (id) => { pending.delete(id); },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${src}\nscheduleAutosave();\nscheduleAutosave();`, ctx, { filename: 'settings.html' });
+  return { pending, fire: () => { for (const fn of pending.values()) fn(); }, persistCalls: () => persistCalls };
+}
+
+test('два быстрых события планируют один persist, а не два', () => {
+  const run = runScheduleAutosaveTwice();
+  assert.strictEqual(run.pending.size, 1,
+    'второй вызов обязан отменить первый таймер — общий таймер на всё окно, не по полю');
+  run.fire();
+  assert.strictEqual(run.persistCalls(), 1, 'persist обязан сработать ровно один раз');
+});
+
+// ── Финальное ревью: смена вкладки не роняет ожидающий autosave ─────────────
+//
+// Раньше клик по вкладке менял `current` и перерисовывал страницу, не трогая
+// `saveTimer`. Таймер доживал до клика сам, срабатывал уже на новой вкладке
+// и уходил в persistOnce по её ветке — правка General писалась бы как
+// `ui.json` вкладки Columns (или наоборот), печатая «saved» про то, чего не
+// сохраняла. `flushPendingSave` (и вызов перед сменой `current`) чинят это;
+// тем же приёмом, что и у остального файла, настоящий код вычитывается из
+// страницы и прогоняется в vm — вторая копия в тесте разошлась бы молча.
+function flushSrc() {
+  return sourceOf(/\n {2}let saveTimer = null;\n/, 'saveTimer')
+    + sourceOf(/\n {2}function scheduleAutosave\(\) \{[\s\S]*?\n {2}\}\n/, 'scheduleAutosave')
+    + sourceOf(/\n {2}async function flushPendingSave\(\) \{[\s\S]*?\n {2}\}\n/, 'flushPendingSave');
+}
+
+test('flushPendingSave сохраняет правку старой вкладки, пока current ещё не сменился', async () => {
+  const src = persistCoreSrc() + flushSrc();
+  const calls = [];
+  const status = { className: '', textContent: '' };
+  const config = { sshHost: 'host' };
+  const timers = new Map();
+  let nextId = 0;
+  const ctx = {
+    document: { getElementById: () => status },
+    window: {},
+    invoke: (cmd, args) => {
+      calls.push({ cmd, args });
+      return Promise.resolve(cmd === 'load_config' ? config : undefined);
+    },
+    current: 'general',
+    validate,
+    fieldsToPatch,
+    configToFields,
+    config,
+    fields: { ...configToFields(config), sshHost: 'edited-host' },
+    dirtyFields: new Set(['sshHost']),
+    setTimeout: (fn, ms) => { nextId += 1; timers.set(nextId, fn); return nextId; },
+    clearTimeout: (id) => { timers.delete(id); },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(src, ctx, { filename: 'settings.html' });
+  // Правка в поле General планирует autosave — тем же вызовом, каким это
+  // делает обработчик `input`.
+  vm.runInContext('scheduleAutosave();', ctx, { filename: 'settings.html' });
+  assert.strictEqual(timers.size, 1, 'дебаунс обязан был запланировать таймер');
+
+  // Клик по другой вкладке случается внутри окна дебаунса — до того, как
+  // таймер сам успел бы сработать.
+  vm.runInContext('var flushed = flushPendingSave();', ctx, { filename: 'settings.html' });
+  await ctx.flushed;
+
+  assert.strictEqual(timers.size, 0,
+    'ожидающий таймер обязан быть снят немедленно, а не просто дожить до своего часа');
+  const saved = calls.find(c => c.cmd === 'save_config');
+  assert.ok(saved, 'правка обязана была дойти до save_config, пока current ещё был general');
+  assert.strictEqual(saved.args.patch.sshHost, 'edited-host');
+  assert.strictEqual(status.textContent, 'saved');
+});
+
+test('flushPendingSave ничего не шлёт, если autosave не был запланирован', async () => {
+  const src = persistCoreSrc() + flushSrc();
+  const calls = [];
+  const ctx = {
+    document: { getElementById: () => ({ className: '', textContent: '' }) },
+    window: {},
+    invoke: (cmd, args) => { calls.push({ cmd, args }); return Promise.resolve(undefined); },
+    current: 'general',
+    validate,
+    fieldsToPatch,
+    configToFields,
+    config: {},
+    fields: {},
+    dirtyFields: new Set(),
+    setTimeout: () => { throw new Error('таймер не должен был понадобиться — нечего сбрасывать'); },
+    clearTimeout: () => {},
+  };
+  vm.createContext(ctx);
+  vm.runInContext(src, ctx, { filename: 'settings.html' });
+  vm.runInContext('var flushed = flushPendingSave();', ctx, { filename: 'settings.html' });
+  await ctx.flushed;
+  assert.deepStrictEqual(calls, [],
+    'клик по вкладке без ожидающей правки не обязан ничего сохранять — иначе каждый клик тихо переписывал бы config.yaml');
+});
+
+/** Прогнать настоящий persist() на обычной (yaml) вкладке. */
+async function persistGeneralTab({ fields, config }) {
+  const src = persistCoreSrc();
+  const calls = [];
+  const status = { className: '', textContent: '' };
+  const ctx = {
+    document: { getElementById: () => status },
+    window: {},
+    invoke: (cmd, args) => {
+      calls.push({ cmd, args });
+      return Promise.resolve(cmd === 'load_config' ? config : undefined);
+    },
+    current: 'general',
+    validate,
+    fieldsToPatch,
+    configToFields,
+    config,
+    fields,
+    dirtyFields: new Set(),
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${src}\nvar done = persist();`, ctx, { filename: 'settings.html' });
+  await ctx.done;
+  return { calls, status };
+}
+
+test('validate, провалившийся под автосохранением, ничего не пишет', async () => {
+  // Спека говорит прямо: «autosave не пишет при ошибке validate». Проверяется
+  // это на persist() напрямую — том же коде, что зовёт и таймер, и кнопка, —
+  // поэтому одного теста хватает на оба пути.
+  const { calls, status } = await persistGeneralTab({ fields: { sshHost: '' }, config: {} });
+  assert.ok(!calls.some(c => c.cmd === 'save_config'), 'save_config не должен был позваться');
+  assert.strictEqual(status.className, 'bad');
+  assert.match(status.textContent, /sshHost is not set/);
+});
+
+// ── нет стартового persist() при загрузке (ревью финальной волны) ───────────
+//
+// Раньше хвост IIFE после renderTabs()/renderPage() сам решал, нужен ли
+// разовый persist() при отсутствующей высоте, — и писал config.yaml (с `.bak`
+// и предупреждающей шапкой) без единого действия человека, только за то, что
+// он открыл окно посмотреть. Обоснование («пикер и так уже занимает 65%
+// экрана») к тому же было фактической ошибкой: `wanted_size` в main.rs при
+// отсутствующем ключе берёт встроенный размер, а не долю. Запись 65
+// по-прежнему происходит — но только вместе с первым настоящим autosave или
+// Save, что и проверяют два теста ниже.
+test('загрузка окна не пишет config.yaml сама по себе', () => {
+  assert.doesNotMatch(SETTINGS_HTML, /if \(fieldsToPatch\(fields, config\)\.pickerSize\) persist\(\);/,
+    'хвост загрузки не должен звать persist() без действия человека');
+});
+
+test('первый настоящий persist() всё равно пишет 65 для отсутствующей высоты', async () => {
+  // Отсутствующая высота уже показана формой как 65 (configToFields) — так
+  // выглядели бы fields сразу после загрузки окна, без единой правки
+  // человека. Дальше persist() должен позвать что угодно ещё, лишь бы не при
+  // загрузке, — здесь это обычное сохранение вкладки General.
+  const config = { sshHost: 'host' };
+  const fields = configToFields(config);
+  const { calls } = await persistGeneralTab({ fields, config });
+  const saved = calls.find(c => c.cmd === 'save_config');
+  assert.ok(saved, 'save_config не был позван');
+  assert.strictEqual(saved.args.patch.pickerSize.narrow.height, 65);
+  assert.strictEqual(saved.args.patch.pickerSize.wide.height, 65);
+});
+
+test('повторное сохранение после записи 65 не патчит pickerSize снова', async () => {
+  // Ключ в config.yaml уже есть (65, записанные предыдущим сохранением), и
+  // подмена в configToFields не срабатывает: baseline и показанное
+  // совпадают, patch.pickerSize не появляется — свойство то же, что раньше
+  // сторожил тест на стартовом хвосте, только на настоящем сохранении, а не
+  // на загрузке.
+  const config = {
+    sshHost: 'host',
+    pickerSize: { narrow: { width: 0, height: 65 }, wide: { width: 0, height: 65 } },
+  };
+  const fields = configToFields(config);
+  const { calls } = await persistGeneralTab({ fields, config });
+  const saved = calls.find(c => c.cmd === 'save_config');
+  assert.ok(saved, 'save_config всё равно вызывается — сохранение идёт, просто пустым патчем');
+  assert.ok(!('pickerSize' in saved.args.patch),
+    'pickerSize не должен был снова попасть в патч — высота уже записана');
+});
+
+// ── Ревью Task 8: отказ поля пикселей виден, стёртое не воскресает ──────────
+//
+// `setCustomValidity` сама по себе ничего не показывает без `reportValidity`
+// или отправки формы — а тут нет ни того, ни другого. Отказ поэтому обязан
+// быть виден через `#status`, ту же строку, которой отвечает `validate()`
+// при сохранении. Проверяется настоящая проводка `[data-size]`/`[data-px]`
+// из renderPage() — вычитана и прогнана в vm, как и остальные куски этого
+// файла: вторая копия в тесте разошлась бы с настоящей молча.
+function sizeWiringSrc() {
+  const found = SETTINGS_HTML.match(
+    /(\n {4}\/\/ Радиокнопки размера и поле пикселей рядом[\s\S]*?\n {4}\})\n {4}document\.getElementById\('save'\)/,
+  );
+  assert.ok(found, 'проводка [data-size]/[data-px] не найдена в settings.html — тест сторожит не то');
+  return found[1];
+}
+
+/** Фиктивная строка размера: радиокнопки и поле пикселей внутри общего .field. */
+function fakeSizeRow(id, radioValues, pxValue) {
+  const radios = radioValues.map(v => ({
+    dataset: { size: id },
+    value: String(v),
+    checked: false,
+    listeners: {},
+    addEventListener(type, fn) { this.listeners[type] = fn; },
+  }));
+  const px = {
+    dataset: { px: id },
+    value: pxValue || '',
+    validity: '',
+    listeners: {},
+    setCustomValidity(msg) { this.validity = msg; },
+    addEventListener(type, fn) { this.listeners[type] = fn; },
+  };
+  const container = {
+    querySelectorAll: (sel) => (sel === 'input[type=radio]' ? radios : []),
+    querySelector: (sel) => (sel === '[data-px]' ? px : null),
+  };
+  for (const r of radios) r.closest = () => container;
+  px.closest = () => container;
+  return { radios, px };
+}
+
+/** Прогнать настоящую проводку [data-size]/[data-px] на одной фиктивной строке. */
+function runSizeWiring({ id, radioValues, pxValue, fields, dirtyFields }) {
+  const row = fakeSizeRow(id, radioValues, pxValue);
+  const status = { className: '', textContent: '' };
+  const calls = { scheduleAutosave: 0 };
+  const ctx = {
+    page: {
+      querySelectorAll: (sel) => (sel === '[data-size]' ? row.radios : sel === '[data-px]' ? [row.px] : []),
+    },
+    document: { getElementById: (elId) => (elId === 'status' ? status : null) },
+    fields,
+    dirtyFields,
+    scheduleAutosave: () => { calls.scheduleAutosave += 1; },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(sizeWiringSrc(), ctx, { filename: 'settings.html' });
+  return { row, status, calls };
+}
+
+test('пиксели 1–100 не пишутся и подсвечиваются статусной строкой', () => {
+  const fields = { 'pickerSize.narrow.width': 0 };
+  const dirtyFields = new Set();
+  const { row, status, calls } = runSizeWiring({
+    id: 'pickerSize.narrow.width', radioValues: [0, 50, 65, 80, 95, 100], fields, dirtyFields,
+  });
+  row.px.value = '50';
+  row.px.listeners.input();
+  assert.strictEqual(fields['pickerSize.narrow.width'], 0, 'значение не должно было записаться');
+  assert.strictEqual(dirtyFields.has('pickerSize.narrow.width'), false);
+  assert.strictEqual(status.className, 'bad');
+  assert.strictEqual(status.textContent, 'must be at least 101 px');
+  assert.strictEqual(calls.scheduleAutosave, 0, 'автосохранение не должно было планироваться на отказ');
+});
+
+test('пиксели ≥ 101 пишутся и снимают отказ', () => {
+  const fields = { 'pickerSize.narrow.width': 0 };
+  const dirtyFields = new Set();
+  const { row, status, calls } = runSizeWiring({
+    id: 'pickerSize.narrow.width', radioValues: [0, 50, 65, 80, 95, 100], fields, dirtyFields,
+  });
+  row.px.value = '50';
+  row.px.listeners.input();
+  row.px.value = '1400';
+  row.px.listeners.input();
+  assert.strictEqual(fields['pickerSize.narrow.width'], 1400);
+  assert.ok(dirtyFields.has('pickerSize.narrow.width'));
+  assert.strictEqual(status.className, '');
+  assert.strictEqual(status.textContent, '');
+  assert.strictEqual(calls.scheduleAutosave, 1, 'автосохранение обязано было запланироваться ровно на удачную правку');
+  assert.ok(row.radios.every(r => r.checked === false), 'радиокнопки обязаны остаться пустыми у пикселей');
+});
+
+test('стёртое поле пикселей падает на Default, а не воскресает при сохранении', () => {
+  // До фикса стёртое поле оставляло fields[id] прежним пиксельным числом —
+  // человек стирал значение и видел его вернувшимся на следующем сохранении.
+  const fields = { 'pickerSize.narrow.width': 1400 };
+  const dirtyFields = new Set();
+  const { row } = runSizeWiring({
+    id: 'pickerSize.narrow.width', radioValues: [0, 50, 65, 80, 95, 100], pxValue: '1400', fields, dirtyFields,
+  });
+  row.px.value = '';
+  row.px.listeners.input();
+  assert.strictEqual(fields['pickerSize.narrow.width'], 0,
+    'стёртое поле обязано стать Default, а не остаться прежним числом');
+  assert.ok(dirtyFields.has('pickerSize.narrow.width'));
+  const zero = row.radios.find(r => r.value === '0');
+  assert.strictEqual(zero.checked, true, 'радиокнопка Default обязана закраситься при очистке поля');
+});
+
+test('радиокнопка снимает отказ поля пикселей рядом', () => {
+  const fields = { 'pickerSize.narrow.width': 0 };
+  const dirtyFields = new Set();
+  const { row, status } = runSizeWiring({
+    id: 'pickerSize.narrow.width', radioValues: [0, 50, 65, 80, 95, 100], fields, dirtyFields,
+  });
+  row.px.value = '50';
+  row.px.listeners.input();
+  assert.strictEqual(status.className, 'bad');
+  row.radios.find(r => r.value === '80').listeners.change();
+  assert.strictEqual(fields['pickerSize.narrow.width'], 80);
+  assert.strictEqual(status.className, '', 'выбор радиокнопки обязан снять отказ поля пикселей рядом');
+  assert.strictEqual(row.px.value, '');
+});
+
+// ── Ревью: реентерабельность persist() под автосохранением ──────────────────
+//
+// 400 мс дебаунса — это окно, в которое ручной клик почти никогда не попадал,
+// а автосохранение попадает систематически: человек может продолжать
+// печатать, пока предыдущий persist() ещё не долетел до диска (invoke —
+// это IPC, не мгновенная операция). Без защиты это бьёт по двум свойствам
+// сразу — второй persist() шлёт свой invoke параллельно с первым, и
+// `fields = configToFields(config)` / `ui = fresh` в конце первого стирают
+// то, что успело залететь на живой fields/ui, пока шёл обмен с диском.
+//
+// Ниже — не текстовые сторожа, а прогон настоящих persist()/persistOnce() с
+// управляемым (deferred) invoke: тест сам решает, когда «диск» ответит, и
+// успевает вмешаться в live fields/ui между вызовом и ответом — ровно та
+// гонка, которую иначе пришлось бы ловить настоящими 400 мс ожидания или не
+// поймать вовсе.
+
+/** Обещание, которое разрешает вызывающий, а не таймер или другой промис. */
+function deferred() {
+  let resolve;
+  const promise = new Promise((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
+/** Слияние патча в фиктивный диск — тем же приёмом, каким merge_patch делает это в Rust, но проще: полей с точкой в этих тестах нет. */
+function mergePatch(target, patch) {
+  for (const [key, value] of Object.entries(patch)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      target[key] = mergePatch({ ...(target[key] || {}) }, value);
+    } else {
+      target[key] = value;
+    }
+  }
+  return target;
+}
+
+test('persist(): правка, залетевшая во время записи конфига, не пропадает и не шлётся вторым save_config параллельно', async () => {
+  const src = persistCoreSrc();
+  const calls = [];
+  const status = { className: '', textContent: '' };
+  let diskConfig = {};
+  const gate = deferred();
+  let inFlight = 0;
+  let maxInFlight = 0;
+
+  const ctx = {
+    document: { getElementById: () => status },
+    window: {},
+    invoke: (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'save_config') {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        return gate.promise.then(() => {
+          inFlight -= 1;
+          diskConfig = mergePatch({ ...diskConfig }, args.patch);
+          return {};
+        });
+      }
+      if (cmd === 'load_config') return Promise.resolve({ ...diskConfig });
+      return Promise.resolve(undefined);
+    },
+    current: 'general',
+    validate,
+    fieldsToPatch,
+    configToFields,
+    config: diskConfig,
+    fields: { sshHost: 'first-host' },
+    dirtyFields: new Set(),
+  };
+  vm.createContext(ctx);
+  // Первый persist() доходит ровно до await invoke('save_config', …) и там
+  // виснет на gate — синхронный хвост до первого await уже отработал к
+  // моменту, когда runInContext вернёт управление.
+  vm.runInContext(`${src}\nvar first = persist();`, ctx, { filename: 'settings.html' });
+  assert.strictEqual(ctx.dirtyFields.size, 0, 'снимок «что шлём» обязан очистить dirtyFields до await');
+
+  // Человек продолжает печатать, пока первая запись всё ещё в пути.
+  ctx.fields.sshHost = 'second-host';
+  ctx.dirtyFields.add('sshHost');
+
+  // Дебаунс тем временем тоже стучится — второй persist(), пока первый ещё
+  // не долетел.
+  vm.runInContext('var second = persist();', ctx, { filename: 'settings.html' });
+
+  gate.resolve();
+  await ctx.first;
+  await ctx.second;
+
+  assert.strictEqual(maxInFlight, 1, 'save_config не должен был идти параллельно с самим собой');
+  const saveConfigCalls = calls.filter(c => c.cmd === 'save_config');
+  assert.ok(saveConfigCalls.length >= 2, 'правка, залетевшая во время записи, обязана дойти отдельной записью');
+  assert.strictEqual(diskConfig.sshHost, 'second-host', 'правка обязана долететь до диска, а не потеряться');
+  assert.strictEqual(ctx.fields.sshHost, 'second-host', 'in-memory fields не должны откатиться на старое значение');
+});
+
+/**
+ * Дать очереди микрозадач полностью опустеть.
+ *
+ * `await invoke('load_ui')` в persistOnce виснет на своём собственном gate,
+ * а её продолжение (overlayDirtyToggles + dirtyAxes.clear(), тоже
+ * синхронные) должно успеть отработать ДО того, как тест вмешается в live
+ * ui/dirtyAxes — иначе правка ниже случайно уедет в тот же, первый, а не во
+ * второй прогон, и тест перестанет отличать «поймали» от «повезло». Тиков
+ * await у одного `await` может быть больше одного, а setImmediate в Node
+ * гарантированно откладывается до полного опустошения микроочереди.
+ */
+function flushMicrotasks() {
+  return new Promise((resolve) => { setImmediate(resolve); });
+}
+
+test('persist(): правка ui.toggles, залетевшая во время await save_ui, всё равно доходит до диска', async () => {
+  const defaultsSrc = sourceOf(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/, 'UI_DEFAULTS');
+  const src = `${defaultsSrc}\n${persistCoreSrc()}`;
+  const calls = [];
+  const status = { className: '', textContent: '' };
+  let diskUi = defaults();
+  const loadGate = deferred();
+  const saveGate = deferred();
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const snapshot = defaults();
+
+  const ctx = {
+    document: { getElementById: () => status },
+    window: { UiState },
+    invoke: (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'load_ui') return loadGate.promise.then(() => diskUi);
+      if (cmd === 'save_ui') {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        return saveGate.promise.then(() => {
+          inFlight -= 1;
+          diskUi = args.ui;
+          return undefined;
+        });
+      }
+      return Promise.resolve(undefined);
+    },
+    current: 'columns',
+    ui: snapshot,
+    dirtyAxes: new Map(),
+    renderPage: () => {},
+  };
+  vm.createContext(ctx);
+  // Первый persist() виснет на await invoke('load_ui', …) — своём gate.
+  vm.runInContext(`${src}\nvar first = persist();`, ctx, { filename: 'settings.html' });
+
+  // Пускаем load_ui и ждём, пока persistOnce дойдёт до своего собственного
+  // await invoke('save_ui', …) — overlayDirtyToggles и dirtyAxes.clear() для
+  // этого прогона к этому моменту уже отработали, оба синхронные.
+  loadGate.resolve();
+  await flushMicrotasks();
+  assert.strictEqual(ctx.dirtyAxes.size, 0, 'снимок «что шлём» обязан очистить dirtyAxes до await save_ui');
+
+  // Человек щёлкает галку showId, пока первая запись ещё в пути к диску.
+  ctx.ui.toggles.showId = { ...ctx.ui.toggles.showId, list: true };
+  ctx.dirtyAxes.set('showId', new Set(['list']));
+
+  // И следом дебаунс подгоняет второй persist().
+  vm.runInContext('var second = persist();', ctx, { filename: 'settings.html' });
+
+  saveGate.resolve();
+  await ctx.first;
+  await ctx.second;
+
+  assert.strictEqual(maxInFlight, 1, 'save_ui не должен был идти параллельно с самим собой');
+  const saveUiCalls = calls.filter(c => c.cmd === 'save_ui');
+  assert.ok(saveUiCalls.length >= 2, 'правка, залетевшая во время записи, обязана дойти отдельной записью');
+  assert.strictEqual(diskUi.toggles.showId.list, true, 'правка обязана долететь до диска, а не потеряться');
+  assert.strictEqual(ctx.ui.toggles.showId.list, true, 'in-memory ui не должен откатиться на старое значение');
 });
 
 test('opacity рисуется range с шагом 0.1 и текущим значением', () => {

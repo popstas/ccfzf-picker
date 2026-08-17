@@ -86,6 +86,12 @@
     // Визуальное приглушение старых строк выключено, пока человек сам его не
     // попросил. Пороги остаются в конфиге и при выключенной галке.
     stale: { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 },
+    // Подложка позади пикера — своя половинка на каждую раскладку, обе
+    // выключены по умолчанию: затемнение стола позади списка меняет то, что
+    // человек видит на всём экране, а не только в самом пикере, и включать
+    // такое без спроса нельзя. Ставит саму подложку нативное окно (`scrim.rs`
+    // в Rust), а не страница — здесь только два флага, решающих, звать ли её.
+    scrim: { narrow: false, wide: false },
   };
 
   /**
@@ -155,20 +161,38 @@
   }
 
   /**
-   * Размер окна долями экрана.
+   * Размер окна долями экрана — или пикселями, для того, что ни одна доля не
+   * называет.
    *
    * Правило то же, что и у соседей: испорченное выбрасывается, а не роняет
-   * файл. Годятся числа `1..100`; ноль, мусор и число вне диапазона читаются
-   * как «взять встроенный размер» — те же границы, по которым судит
-   * `scale_axis` в Rust. Две проверки тут неизбежны (размер ставит Rust,
-   * показывает выбор страница), поэтому они и записаны одинаково; сторож
-   * сверяет их на общих значениях.
+   * файл. Ноль — «взять встроенный размер»; `1..=100` — доля экрана;
+   * `≥101` — пиксели без верхней границы (её, как и раньше долевую, ставит
+   * только экран — `wanted_size`/`fit_to_screen` в Rust). Три случая мимо
+   * этих трёх правил читаются тем же нулём: дробное меньше единицы (не доля
+   * и не пиксели), `(100..101)` — зазор между долей и пикселями, ни то ни
+   * другое, — и `Infinity`/`NaN`/не-число, которые `Number.isFinite` отсеивает
+   * раньше остальных проверок. Дробное **внутри** рабочих диапазонов (`65.5`,
+   * `1400.5`) принимается как есть — округлять его незачем, экран всё равно
+   * зажимает `wanted_size` в Rust.
+   *
+   * Две проверки тут неизбежны (размер ставит Rust, показывает выбор
+   * страница), и они обязаны сходиться на каждом числе, а не только на
+   * тексте диапазона: разошедшийся диапазон читался бы формой как принятое
+   * значение, а Rust'ом — как отвергнутое, и окно вышло бы не того размера
+   * без единого объяснения на экране. Сторож —
+   * «таблица граничных значений размера совпадает с Rust» в
+   * `test/config-shape.test.js`, гоняющая один и тот же список чисел через
+   * `normalizePickerSize` здесь и через `scale_axis` в `main.rs`.
    */
   function normalizePickerSize(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
     const axis = (half, side) => {
       const value = Number(((src[half] || {}) || {})[side]);
-      return Number.isFinite(value) && value >= 1 && value <= 100 ? value : 0;
+      if (!Number.isFinite(value) || value < 0) return 0;
+      if (value === 0) return 0;
+      if (value >= 1 && value <= 100) return value; // доля экрана, в процентах
+      if (value >= 101) return value; // пиксели, без верхней границы
+      return 0; // дробное меньше единицы или зазор между долей и пикселями
     };
     return {
       narrow: { width: axis('narrow', 'width'), height: axis('narrow', 'height') },
@@ -194,6 +218,9 @@
       return Number.isFinite(number) && number > 0 ? number : fallback;
     };
     const opacity = asNumber(src.opacity);
+    // Старый `projectDays` не читается вовсе: единственный поддерживаемый
+    // ключ — `projectHours`, и опечатка или отсутствие поля сбрасывает его на
+    // умолчание, а не откатывает к дням.
     return {
       enabled: typeof src.enabled === 'boolean' ? src.enabled : DEFAULTS.stale.enabled,
       sessionHours: positive(src.sessionHours, DEFAULTS.stale.sessionHours),
@@ -201,6 +228,18 @@
       opacity: Number.isFinite(opacity) && opacity >= 0.1 && opacity <= 1
         ? opacity
         : DEFAULTS.stale.opacity,
+    };
+  }
+
+  /**
+   * Флаги подложки — по одному на раскладку, независимо друг от друга: порча
+   * одного не должна гасить другой, тем же правилом, что и у `normalizeStale`.
+   */
+  function normalizeScrim(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    return {
+      narrow: typeof src.narrow === 'boolean' ? src.narrow : DEFAULTS.scrim.narrow,
+      wide: typeof src.wide === 'boolean' ? src.wide : DEFAULTS.scrim.wide,
     };
   }
 
@@ -238,6 +277,7 @@
       actions: normalizeActions(src.actions),
       pickerSize: normalizePickerSize(src.pickerSize),
       stale: normalizeStale(src.stale),
+      scrim: normalizeScrim(src.scrim),
     };
   }
 

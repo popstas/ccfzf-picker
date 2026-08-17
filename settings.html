@@ -23,10 +23,16 @@
     font: inherit;
   }
   .hint { color: #999; margin-top: 3px; }
+  /* Свёрнутая подробность терминала — такое же поле формы, как соседние, и
+     отбивка снизу у неё обязана быть та же: без неё следующая строка (выбор
+     пресета или галка) прилипает к `<summary>` вплотную и читается его
+     продолжением. */
+  #page details { margin-bottom: 14px; }
   .range-row { display: flex; align-items: center; gap: 10px; }
   .range-row input[type=range] { flex: 1; }
   .range-current { white-space: nowrap; color: #bbb; }
   #bar { position: sticky; bottom: 0; padding: 12px 0 0; background: #1c1c1e; }
+  #save { padding: 8px 18px; }
   #status { color: #999; margin-left: 10px; }
   #status.bad { color: #ff7b72; }
   table.axes { border-collapse: collapse; }
@@ -35,6 +41,22 @@
      строкой первой — то есть колонкой `window`. */
   .field.axes-group { margin-top: 18px; }
   table.axes th[title] { cursor: help; }
+  .col-icon { display: inline-block; width: 1.4em; color: #999; }
+  table.axes label.axis-head { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  table.axes span[title] { border-bottom: 1px dotted #666; cursor: help; }
+  /* Пять радиокнопок и поле пикселей в один ряд, а не столбиком, как
+     остальные поля формы, — их и так пять, вертикально они заняли бы
+     четверть страницы. */
+  .size-row { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .size-choice { display: inline-flex; align-items: center; gap: 4px; margin: 0; width: auto; }
+  /* Общее правило `.field input[type=number] { width: 100% }` тут неверно:
+     поле пикселей — часть строки радиокнопок, а не поле само по себе. */
+  .size-px input[type=number] { width: 6em; }
+  /* `:invalid` красится браузером сам, без единого вызова JS: и по нативному
+     min="101", и по setCustomValidity в renderPage. Слово с причиной несёт
+     статусная строка внизу — тут только пятно, чтобы взгляд сразу нашёл
+     поле. */
+  .size-px input[type=number]:invalid { border-color: #ff7b72; }
 </style>
 </head>
 <body>
@@ -64,10 +86,10 @@
   // но расходиться ему не дают нормализация в ui-state.js (незнакомый ключ
   // выбрасывается) и подписи, взятые отсюда же.
   const TOGGLE_LABELS = {
-    showPrompt: 'prompt', showAnswer: 'answer', showPaths: 'paths',
+    showPrompt: 'prompt', showAnswer: 'answer', showPaths: 'project',
     showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
     showCost: 'cost', showContext: 'context', showWindow: 'window',
-    showWindowHost: 'window host',
+    showWindowHost: 'window host', showTerminalIcon: 'terminal icon',
   };
   const FILTER_LABELS = { onlyWindow: 'only sessions with a window', showAll: 'show all sessions' };
   const UI_DEFAULTS = {
@@ -85,6 +107,7 @@
       showWindowHost: { list: true, statusline: false },
       onlyWindow: { list: false, statusline: false },
       showAll: { list: false, statusline: true },
+      showTerminalIcon: { list: false, statusline: false },
     },
   };
 
@@ -110,7 +133,26 @@
   // широкой, и один ключ на обе переносил бы правку туда, где человек её не
   // делал.
   const dirtyPanels = new Set();
+  // Ключи fields, которых человек коснулся с последнего успешного слияния со
+  // свежепрочитанным config.yaml. Нужны затем же, зачем dirtyAxes и
+  // dirtyPanels: между отправкой patch и обратным чтением config стоят два
+  // await, и правка, залетевшая в это окно, лежит на живом fields — а
+  // `fields = configToFields(config)` в конце обычной записи стирает fields
+  // целиком, вместе с ней.
+  const dirtyFields = new Set();
   let current = 'general';
+  // Автосохранение: таймер один на всё окно, а не по полю. Дебаунс — 400 мс,
+  // и общий он затем, что правка в одном поле и следом клик по галке рядом
+  // обязаны собраться в одну запись на диск, а не в две подряд.
+  let saveTimer = null;
+  // Автосохранение может дозвониться до persist(), пока предыдущий вызов ещё
+  // не долетел до диска (медленный invoke плюс 400 мс дебаунс — то, чего
+  // ручной клик почти никогда не успевал). persisting держит замок на весь
+  // прогон persistOnce; persistPending — «пока я был занят, меня попросили
+  // ещё раз» — и по нему завершающийся прогон перезапускает себя сам, а не
+  // роняет вторую просьбу молча.
+  let persisting = false;
+  let persistPending = false;
   const tabs = document.getElementById('tabs');
   const page = document.getElementById('page');
 
@@ -122,7 +164,12 @@
       `<div class="tab${p.id === current ? ' active' : ''}" data-page="${p.id}">${esc(p.title)}</div>`
     ).join('');
     for (const tab of tabs.querySelectorAll('.tab')) {
-      tab.addEventListener('click', () => { current = tab.dataset.page; renderTabs(); renderPage(); });
+      tab.addEventListener('click', async () => {
+        await flushPendingSave();
+        current = tab.dataset.page;
+        renderTabs();
+        renderPage();
+      });
     }
   }
 
@@ -137,35 +184,64 @@
     return String(value == null ? '' : value).split('\n').map(s => s.trim()).filter(Boolean);
   }
 
+  /** Вводный абзац вкладки MQTT — объясняет, зачем брокер вообще нужен. */
+  function mqttIntroHtml() {
+    return '<div class="hint">Focus, snapshots, and opening a session through a window manager need MQTT. '
+      + 'Without a broker those actions do not run. On Windows the manager both focuses windows and '
+      + 'opens terminals. On a Mac the tracker focuses windows and the picker opens terminals itself '
+      + '— the broker is still required for focus.</div>';
+  }
+
+  /**
+   * Какой пресет терминала совпадает с текущими полями формы — `'custom'`,
+   * если ни один.
+   *
+   * Единственный вызов `matchPreset` на весь файл: у выпадашки пресетов
+   * (`fieldHtml`) и у обёртки `<details>` (`generalBodyHtml`) свой резон
+   * спрашивать про то же самое, но вопрос один и ответ обязан быть одним —
+   * разойдись эти два вызова, выпадашка обещала бы пресет, с которым
+   * `<details>` не согласен: одна сторона показывала бы «kitty», а другая
+   * держала бы блок свёрнутым, как будто набрано что-то своё.
+   */
+  function currentPreset() {
+    return window.TerminalPresets.matchPreset(
+      { file: fields['terminal.file'], args: linesToArgs(fields['terminal.args']) },
+      platform());
+  }
+
   function fieldHtml(field) {
     const value = fields[field.id];
     const hint = field.hint ? `<div class="hint">${esc(field.hint)}</div>` : '';
     if (field.type === 'preset') {
       // Что выбрано — считается по содержимому полей, а не хранится рядом:
       // второй источник правды разошёлся бы с тем, что человек правит руками.
-      const current = window.TerminalPresets.matchPreset(
-        { file: fields['terminal.file'], args: linesToArgs(fields['terminal.args']) },
-        platform());
+      const current = currentPreset();
       const options = window.TerminalPresets.presetsFor(platform())
         .map(p => `<option value="${esc(p.id)}"${p.id === current ? ' selected' : ''}>`
           + `${esc(p.label)}</option>`).join('');
       return `<div class="field"><label>${esc(field.label)}</label>`
         + `<select data-preset>${options}</select>${hint}</div>`;
     }
-    if (field.type === 'choice') {
-      // Значение, которого в списке нет, дописывается пунктом, а не молча
-      // теряется: `config.yaml` правят и руками, а `<select>` без совпадения
-      // показал бы первый пункт — то есть соврал бы, что размер встроенный.
-      // Тот же приём и та же причина, что у «Custom» в выпадашке терминалов.
-      const options = field.options.slice();
-      if (!options.some(o => o.value === value)) {
-        options.push({ value, label: `${value}% of screen` });
-      }
-      const html = options
-        .map(o => `<option value="${esc(o.value)}"${o.value === value ? ' selected' : ''}>`
-          + `${esc(o.label)}</option>`).join('');
+    if (field.type === 'size') {
+      // Пять долей — радиокнопками, а не выпадашкой: список фиксирован
+      // намеренно ("Четыре доли, а не десять" — теперь их пять — из
+      // settings-form.js), лишнего пункта под значение, которого в нём нет,
+      // сюда не дописывают. Значение вне списка — пиксели, вписанные вручную
+      // или подобранные раньше: как совпавшую радиокнопку его не показать
+      // (ни одна не совпадёт), и оно уходит в соседнее числовое поле — тот же
+      // мотив, что был у лишнего пункта выпадашки, только форма другая.
+      const known = field.options.some(o => o.value === value);
+      const radios = field.options.map(o => '<label class="size-choice">'
+        + `<input type="radio" name="${esc(field.id)}" data-size="${esc(field.id)}" `
+        + `value="${esc(o.value)}"${o.value === value ? ' checked' : ''}> ${esc(o.label)}</label>`).join('');
+      // Пустое поле у известного значения — не только сохранённое пусто:
+      // радиокнопка и так его показывает, а число рядом дублировало бы её.
+      const pxValue = known ? '' : esc(value);
       return `<div class="field"><label>${esc(field.label)}</label>`
-        + `<select data-field="${field.id}">${html}</select>${hint}</div>`;
+        + `<div class="size-row">${radios}`
+        + '<label class="size-choice size-px">'
+        + `<input type="number" min="101" data-px="${esc(field.id)}" value="${pxValue}" `
+        + `placeholder="px" title="must be at least 101 px"> px</label></div>${hint}</div>`;
     }
     if (field.type === 'range') {
       // `data-field` тот же атрибут, что у текстовых и числовых полей: ползунок
@@ -179,8 +255,10 @@
         + `</div>${hint}</div>`;
     }
     if (field.type === 'bool') {
+      // title, а не вторая строка под полем: подсказка всплывает по наведению,
+      // а `.hint` рядом остаётся как есть — их две разных формы объяснения.
       return `<div class="field"><label><input type="checkbox" data-field="${field.id}"${
-        value ? ' checked' : ''}> ${esc(field.label)}</label>${hint}</div>`;
+        value ? ' checked' : ''} title="${esc(field.hint || field.label)}"> ${esc(field.label)}</label>${hint}</div>`;
     }
     if (field.type === 'lines') {
       return `<div class="field"><label>${esc(field.label)}</label>`
@@ -189,6 +267,34 @@
     const type = field.type === 'password' ? 'password' : (field.type === 'number' ? 'number' : 'text');
     return `<div class="field"><label>${esc(field.label)}</label>`
       + `<input type="${type}" data-field="${field.id}" value="${esc(value)}">${hint}</div>`;
+  }
+
+  /**
+   * Тело страницы General: поля страницы, но `terminal.file` и `terminal.args`
+   * сложены в один `<details>`, а не идут двумя отдельными полями.
+   *
+   * `fieldHtml` про это не знает — её контракт «одно поле внутрь, одна строка
+   * наружу» остаётся как был, обёртку строит вызывающий код. Открыт `<details>`
+   * ровно тогда, когда `currentPreset()` вернул `'custom'` — тем же вопросом,
+   * каким уже задаётся выпадашка пресетов в `fieldHtml`, а не вторым разбором
+   * полей: два разбора разошлись бы на первой же правке `matchPreset`.
+   */
+  function generalBodyHtml(fieldsList) {
+    const custom = currentPreset() === 'custom';
+    let html = '';
+    for (let i = 0; i < fieldsList.length; i++) {
+      const field = fieldsList[i];
+      const next = fieldsList[i + 1];
+      if (field.id === 'terminal.file' && next && next.id === 'terminal.args') {
+        html += `<details${custom ? ' open' : ''}>`
+          + '<summary>Terminal command (path and arguments)</summary>'
+          + fieldHtml(field) + fieldHtml(next) + '</details>';
+        i += 1;
+        continue;
+      }
+      html += fieldHtml(field);
+    }
+    return html;
   }
 
   // Обе оси называются одинаково у колонок и у фильтров, а значат разное:
@@ -200,21 +306,142 @@
     enabled: 'Apply this filter to the list',
   };
 
+  // Иконка на строку — шрифтовый знак, тем же приёмом, что и у пунктов меню
+  // Ctrl+K (`action-icons.js`): символ, а не картинка, свой файл не нужен.
+  const COLUMN_ICONS = {
+    showPrompt: '»',
+    showAnswer: '«',
+    showPaths: '▤',
+    showHotkey: '⌘',
+    showEvent: '↯',
+    showId: '#',
+    showCost: '$',
+    showContext: '≡',
+    // Тот же глиф, каким сам список помечает открытое окно (session-glyph.js,
+    // класс `.win.open`) — совпадение чисто визуальное, окно строки не
+    // спрашивает.
+    showWindow: '▣',
+    showWindowHost: '⌂',
+    showTerminalIcon: '⌨',
+  };
+
+  // Подсказка на подписи — только там, где название колонки само не говорит,
+  // что рисуется: остальные подписи однозначны без неё.
+  const COLUMN_HINTS = {
+    showEvent: "The agent's last event, such as stop, fail, or waiting for input",
+    showWindow: 'The glyph marking whether a window is open for this session',
+    showWindowHost: 'The name of the machine that owns the open window',
+    // Буквы те же, что в таблице TERMINAL_GLYPHS (session-glyph.js), и список
+    // здесь второй — но не молчаливый: сторож в test/settings-page.test.js
+    // сверяет подсказку с самой таблицей, имя за именем.
+    showTerminalIcon: 'Replaces the window glyph with a letter naming the terminal: '
+      + 'z WezTerm, k kitty, g Ghostty, i iTerm2, w Windows Terminal, a Alacritty, T Terminal. '
+      + 'Windows trackers report wt, WezTerm, kitty, Ghostty and Alacritty; macOS ones report '
+      + 'kitty, WezTerm, Ghostty, iTerm2, Terminal and Alacritty. A window whose tracker does '
+      + 'not name the app keeps the plain glyph.',
+  };
+
+  // Recommended — всё, кроме редко нужного: agent event и cost читаются не
+  // на каждый взгляд, а terminal icon — новая строка, включённая по умолчанию
+  // выключенной. Считается от TOGGLE_LABELS, а не вторым списком ключей: та
+  // же причина, по которой FILTER_KEYS в sessions.html считается от
+  // TOGGLE_CHECKS, а не пишется рядом заново.
+  const RECOMMENDED_KEYS = Object.keys(TOGGLE_LABELS).filter(
+    key => key !== 'showEvent' && key !== 'showCost' && key !== 'showTerminalIcon',
+  );
+
+  /**
+   * Тройное состояние заголовка Recommended, по оси list.
+   *
+   * Общая для разметки и для перерисовки функция, а не вычисление по месту в
+   * каждой из них: `axesTableHtml` красит `checked` в исходной строке,
+   * `renderPage` следом ставит `indeterminate` DOM-свойством (строкой его не
+   * выразить) — разошедшиеся вычисления одного и того же дали бы галку,
+   * которая красится по одному правилу, а щёлкается по другому.
+   */
+  function recommendedListState(toggles) {
+    const on = RECOMMENDED_KEYS.filter(key => Boolean((toggles[key] || {}).list));
+    return {
+      checked: on.length === RECOMMENDED_KEYS.length,
+      indeterminate: on.length > 0 && on.length < RECOMMENDED_KEYS.length,
+    };
+  }
+
+  /**
+   * Эффект клика по заголовку Recommended.
+   *
+   * Чистая по отношению к DOM функция — мутирует только переданные `toggles`
+   * (копией, не на месте) и `dirtyAxes` — специально, чтобы её можно было
+   * прогнать в тесте без имитации браузера. Ось statusline не трогает вовсе:
+   * заголовок отвечает только за list. Если не все Recommended включены,
+   * включает все; если все включены — выключает все.
+   */
+  function applyRecommendedToggle(toggles, dirtyAxes) {
+    const allOn = recommendedListState(toggles).checked;
+    const turnOn = !allOn;
+    const next = { ...toggles };
+    for (const key of RECOMMENDED_KEYS) {
+      next[key] = { ...next[key], list: turnOn };
+      if (!dirtyAxes.has(key)) dirtyAxes.set(key, new Set());
+      dirtyAxes.get(key).add('list');
+    }
+    return next;
+  }
+
+  /**
+   * Таблицы вкладки Columns: Recommended, Other и Filters.
+   *
+   * Оси в шапке — list, затем statusline: list главная, ей отвечает большая
+   * часть решений человека, а statusline — редкое исключение (место там
+   * кончилось). У Filters порядок остаётся прежним, statusline и потом
+   * enabled: это отдельная таблица про состав списка, а не про колонки, и
+   * трогать её форму эта правка не должна.
+   */
   function axesTableHtml() {
-    const row = (key, label, secondAxisHint) => `<tr><td>${esc(label)}</td>`
-      + `<td><input type="checkbox" data-axis="statusline" data-key="${key}"${
-        ui.toggles[key].statusline ? ' checked' : ''} title="${esc(AXIS_HINTS.statusline)}"></td>`
-      + `<td><input type="checkbox" data-axis="list" data-key="${key}"${
-        ui.toggles[key].list ? ' checked' : ''} title="${esc(secondAxisHint)}"></td></tr>`;
+    const row = (key) => {
+      const label = TOGGLE_LABELS[key];
+      const hint = COLUMN_HINTS[key];
+      const labelHtml = hint ? `<span title="${esc(hint)}">${esc(label)}</span>` : esc(label);
+      // `showTerminalIcon` рисует пустую ячейку статуслайна вместо чекбокса:
+      // это ось про глиф в колонке окна (`side: 'glyph'` в sessions.html), и
+      // `renderChecks` там безусловно выкидывает такие ключи из статуслайна
+      // (`side !== 'glyph'`). Настоящий чекбокс тут был бы мёртвым — писал бы
+      // в ui.json и не рисовал бы ничего внизу списка никогда: то самое
+      // правило CLAUDE.md про мёртвый чекбокс.
+      const statuslineCell = key === 'showTerminalIcon'
+        ? '<td></td>'
+        : `<td><input type="checkbox" data-axis="statusline" data-key="${key}"${
+          ui.toggles[key].statusline ? ' checked' : ''} title="${esc(AXIS_HINTS.statusline)}"></td>`;
+      return `<tr><td><span class="col-icon">${esc(COLUMN_ICONS[key] || '')}</span>${labelHtml}</td>`
+        + `<td><input type="checkbox" data-axis="list" data-key="${key}"${
+          ui.toggles[key].list ? ' checked' : ''} title="${esc(AXIS_HINTS.list)}"></td>`
+        + statuslineCell + '</tr>';
+    };
     const th = (label, hint) => `<th title="${esc(hint)}">${esc(label)}</th>`;
-    return '<table class="axes"><tr><th>Column</th>'
-      + th('statusline', AXIS_HINTS.statusline) + th('list', AXIS_HINTS.list) + '</tr>'
-      + Object.entries(TOGGLE_LABELS).map(([k, l]) => row(k, l, AXIS_HINTS.list)).join('')
-      + '</table>'
+    const otherKeys = Object.keys(TOGGLE_LABELS).filter(key => !RECOMMENDED_KEYS.includes(key));
+    // Заголовок Recommended несёт свой чекбокс, а не общий `th('list', ...)`:
+    // клик по нему решает ось list у всех строк группы разом. Обработчик и
+    // расчёт indeterminate — в renderPage, отдельной веткой мимо
+    // [data-axis]: тот пишет правку в ui.toggles[key] по данному ключу, а у
+    // recommended-all настоящего ключа в ui.toggles нет и быть не должно.
+    const recommendedHead = `<th title="${esc(AXIS_HINTS.list)}"><label class="axis-head">`
+      + `<input type="checkbox" data-axis="list" data-key="recommended-all"${
+        recommendedListState(ui.toggles).checked ? ' checked' : ''} title="${
+        esc('Turn every recommended column on or off in the list')}"> <span>list</span></label></th>`;
+    const groupTable = (title, keys, listHeadCell) => '<div class="field axes-group">'
+      + `<label>${esc(title)}</label><table class="axes"><tr><th>Column</th>`
+      + (listHeadCell || th('list', AXIS_HINTS.list)) + th('statusline', AXIS_HINTS.statusline)
+      + '</tr>' + keys.map(row).join('') + '</table></div>';
+    return groupTable('Recommended', RECOMMENDED_KEYS, recommendedHead)
+      + groupTable('Other', otherKeys)
       + '<div class="field axes-group"><label>Filters</label><table class="axes">'
       + '<tr><th></th>' + th('statusline', AXIS_HINTS.statusline)
       + th('enabled', AXIS_HINTS.enabled) + '</tr>'
-      + Object.entries(FILTER_LABELS).map(([k, l]) => row(k, l, AXIS_HINTS.enabled)).join('')
+      + Object.entries(FILTER_LABELS).map(([k, l]) => `<tr><td>${esc(l)}</td>`
+        + `<td><input type="checkbox" data-axis="statusline" data-key="${k}"${
+          ui.toggles[k].statusline ? ' checked' : ''} title="${esc(AXIS_HINTS.statusline)}"></td>`
+        + `<td><input type="checkbox" data-axis="list" data-key="${k}"${
+          ui.toggles[k].list ? ' checked' : ''} title="${esc(AXIS_HINTS.enabled)}"></td></tr>`).join('')
       + '</table><div class="hint">A filter decides which rows make it into the list, '
       + 'not which columns are visible.</div></div>';
   }
@@ -283,10 +510,43 @@
         + 'once you have folded or moved them at least once.');
   }
 
+  /**
+   * Отложенная запись: событие правки перезапускает один и тот же таймер.
+   *
+   * Не по месту в каждом обработчике, а общей функцией — иначе список полей,
+   * трогающих `fields`/`ui.*`, разошёлся бы с тем, что реально шлёт запись.
+   */
+  function scheduleAutosave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { saveTimer = null; persist(); }, 400);
+  }
+
+  /**
+   * Сбрасывает отложенный autosave немедленно и ждёт его — зовётся перед
+   * каждой сменой `current`.
+   *
+   * Без этого клик по вкладке в первые 400 мс после правки не терял саму
+   * правку (`dirtyFields`/`dirtyAxes` её и так помнят), а терял запись:
+   * таймер доживал до клика, срабатывал уже на новой вкладке и уходил в
+   * persistOnce по чужой ветке — правка на General писалась бы как `ui.json`
+   * вкладки Columns (или наоборот), и статус говорил «saved» про то, чего не
+   * сохранял. Обнулять `saveTimer` обязан сам таймер (см. scheduleAutosave), а
+   * не только `clearTimeout` здесь — тот variable не трогает: не обнуляй его
+   * там, и уже сработавший, ушедший в persist() таймер выглядел бы тут
+   * непогашенным, и каждый клик по вкладке слал бы лишний persist(), даже
+   * если человек ничего не правил.
+   */
+  async function flushPendingSave() {
+    if (saveTimer === null) return;
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    await persist();
+  }
+
   function updateRangeCurrent(input) {
     // Подпись правится на каждый `input` — человеку нужно видеть число, пока
     // он двигает ползунок, — а само сохранение остаётся отдельным нажатием
-    // Save, как у любого другого поля формы.
+    // Save (и отложенным autosave), как у любого другого поля формы.
     if (input.type !== 'range') return;
     const output = input.parentElement.querySelector('[data-range-current]');
     if (output) output.textContent = `Current: ${input.value}`;
@@ -294,21 +554,36 @@
 
   function renderPage() {
     const def = PAGES.find(p => p.id === current);
-    const body = current === 'ui'
-      ? axesTableHtml()
-      : current === 'panels'
-        ? panelsTableHtml()
-        : def.fields.map(fieldHtml).join('') + (current === 'integrations' ? actionsListHtml() : '');
+    const body = current === 'columns' ? axesTableHtml()
+      : current === 'panels' ? panelsTableHtml()
+      : current === 'general' ? generalBodyHtml(def.fields)
+      : (current === 'mqtt' ? mqttIntroHtml() : '')
+        + def.fields.map(fieldHtml).join('')
+        + (current === 'paths' ? actionsListHtml() : '');
     page.innerHTML = body
       + '<div id="bar"><button id="save">Save</button><span id="status"></span></div>';
+
+    // `indeterminate` — свойство DOM, а не HTML-атрибут: строкой его не
+    // выразить, и ставится оно уже по вставленной разметке. `checked` уже
+    // верен из разметки — та же `recommendedListState`, что и здесь.
+    const recommendedAll = page.querySelector('[data-key="recommended-all"]');
+    if (recommendedAll) {
+      recommendedAll.indeterminate = recommendedListState(ui.toggles).indeterminate;
+    }
 
     for (const input of page.querySelectorAll('[data-field]')) {
       input.addEventListener('input', () => {
         fields[input.dataset.field] = input.type === 'checkbox' ? input.checked : input.value;
         updateRangeCurrent(input);
+        dirtyFields.add(input.dataset.field);
+        scheduleAutosave();
       });
       if (input.type === 'checkbox') {
-        input.addEventListener('change', () => { fields[input.dataset.field] = input.checked; });
+        input.addEventListener('change', () => {
+          fields[input.dataset.field] = input.checked;
+          dirtyFields.add(input.dataset.field);
+          scheduleAutosave();
+        });
       }
     }
     for (const input of page.querySelectorAll('[data-panel]')) {
@@ -333,15 +608,33 @@
           ui.order = window.PickerPanels.withColumn(ui.order, key, Number(input.value));
         }
         dirtyPanels.add(`${half}:${key}`);
+        scheduleAutosave();
       });
     }
     for (const input of page.querySelectorAll('[data-axis]')) {
+      // recommended-all — псевдоключ заголовка, не строка ui.toggles: эта
+      // генерическая ветка вписала бы в файл мусорную галку под его именем,
+      // а настоящие строки Recommended не сдвинулись бы вовсе. У него своя
+      // ветка, ниже.
+      if (input.dataset.key === 'recommended-all') continue;
       input.addEventListener('change', () => {
         const key = input.dataset.key;
         const axis = input.dataset.axis;
         ui.toggles[key] = { ...ui.toggles[key], [axis]: input.checked };
         if (!dirtyAxes.has(key)) dirtyAxes.set(key, new Set());
         dirtyAxes.get(key).add(axis);
+        scheduleAutosave();
+      });
+    }
+    if (recommendedAll) {
+      recommendedAll.addEventListener('change', () => {
+        // Не читается сам input.checked: у смешанного состояния клик обязан
+        // включить всё, а не подстроиться под то, где случайно остановился
+        // курсор индикатора — applyRecommendedToggle решает это сама, по
+        // текущим ui.toggles, а не по DOM-состоянию щёлкнутого чекбокса.
+        ui.toggles = applyRecommendedToggle(ui.toggles, dirtyAxes);
+        scheduleAutosave();
+        renderPage();
       });
     }
     for (const select of page.querySelectorAll('[data-preset]')) {
@@ -354,15 +647,162 @@
         fields['terminal.file'] = preset.file;
         // Аргументы форма держит построчной строкой — тип `lines`.
         fields['terminal.args'] = preset.args.join('\n');
+        dirtyFields.add('terminal.file');
+        dirtyFields.add('terminal.args');
+        scheduleAutosave();
         // Перерисовка, а не правка двух input'ов по месту: поля рисует
         // fieldHtml, и вторая дорога к их значению разошлась бы с первой.
         renderPage();
       });
     }
-    document.getElementById('save').addEventListener('click', save);
+    // Радиокнопки размера и поле пикселей рядом — не через общий `[data-field]`
+    // выше: та ветка пишет `input.value` как есть на каждый ввод, а поле
+    // пикселей обязано молчать, пока в нём не набрано 101 и больше (см.
+    // комментарий у цикла по `[data-px]` ниже). Разводить два разных правила
+    // внутри одной общей ветки было бы менее понятно, чем две своих, — как у
+    // `data-panel` и `data-axis` рядом.
+    // Отказ поля пикселей обязан быть виден человеку, а не только браузеру:
+    // `setCustomValidity` сама по себе ничего не рисует — она лишь готовит
+    // сообщение для `reportValidity()`/отправки формы, а тут нет ни того, ни
+    // другого (`<form>` в файле нет вовсе). Показывает отказ статусная
+    // строка внизу — тот же `#status`, которым уже отвечает `validate()` при
+    // сохранении; второго места для ошибок в этом окне нет, и заводить его
+    // ради одного поля незачем. `setCustomValidity` при этом не убрана: она
+    // бесплатно включает нативную рамку `:invalid` у поля, пока сообщение не
+    // снято, — планка тут просто не единственная.
+    const sizeStatus = (bad, text) => {
+      const status = document.getElementById('status');
+      if (!status) return;
+      status.className = bad ? 'bad' : '';
+      status.textContent = text || '';
+    };
+    for (const radio of page.querySelectorAll('[data-size]')) {
+      radio.addEventListener('change', () => {
+        const id = radio.dataset.size;
+        fields[id] = Number(radio.value);
+        dirtyFields.add(id);
+        // Доля и пиксели — одно значение поля, а не два независимых: выбор
+        // радиокнопки отменяет то, что было набрано в поле пикселей рядом,
+        // вместе с отказом, который оно, возможно, показывало.
+        const px = radio.closest('.field').querySelector('[data-px]');
+        if (px) { px.value = ''; px.setCustomValidity(''); }
+        sizeStatus(false);
+        scheduleAutosave();
+      });
+    }
+    for (const px of page.querySelectorAll('[data-px]')) {
+      px.addEventListener('input', () => {
+        const id = px.dataset.px;
+        const raw = px.value.trim();
+        const container = px.closest('.field');
+        if (!raw) {
+          // Стёртое руками поле пикселей — это отказ от прежнего числа, а не
+          // «не трогали»: не запиши сюда 0, следующее сохранение вернуло бы
+          // человеку удалённое им значение как ни в чём не бывало — то самое
+          // молчаливое воскрешение стёртого, которого правило избегает и у
+          // числовых полей (`fromField` про пустую строку порта), только тут
+          // источник другой. Default — тот же смысл, что у возврата
+          // радиокнопкой, и радиокнопка красится в него же, а не остаётся
+          // пустой: иначе на экране не было бы видно вовсе, что теперь выбрано.
+          fields[id] = 0;
+          dirtyFields.add(id);
+          for (const radio of container.querySelectorAll('input[type=radio]')) {
+            radio.checked = radio.value === '0';
+          }
+          px.setCustomValidity('');
+          sizeStatus(false);
+          scheduleAutosave();
+          return;
+        }
+        const n = Number(raw);
+        // 1–100 сюда не записываются вовсе — для них есть радиокнопки, и
+        // поле пикселей не второй, конкурирующий способ задать то же самое.
+        // `fields[id]` остаётся тем, чем было (прежний выбор или Default), а
+        // не «не трогали» ничего не значащим числом — но отказ обязан быть
+        // виден, а не тих, иначе поле выглядело бы сломанным.
+        if (!Number.isFinite(n) || n < 101) {
+          px.setCustomValidity('must be at least 101 px');
+          sizeStatus(true, 'must be at least 101 px');
+          return;
+        }
+        px.setCustomValidity('');
+        sizeStatus(false);
+        fields[id] = n;
+        dirtyFields.add(id);
+        for (const radio of container.querySelectorAll('input[type=radio]')) {
+          radio.checked = false;
+        }
+        scheduleAutosave();
+      });
+    }
+    document.getElementById('save').addEventListener('click', persist);
   }
 
-  async function save() {
+  /**
+   * Правки dirtyPanels поверх свежепрочитанного ui.json.
+   *
+   * Своя функция, а не код по месту, зовётся persistOnce дважды подряд: один
+   * раз перед отправкой (чтобы записать то, что известно на этот момент), и
+   * ещё раз перед финальным `ui = fresh` (чтобы не потерять то, что успели
+   * поправить, пока мы ждали `save_ui`/`ui-changed`). Разошедшийся дублем код
+   * посчитал бы это по-разному в двух местах.
+   */
+  function overlayDirtyPanels(fresh) {
+    for (const mark of dirtyPanels) {
+      // Помечено «раскладка:ключ», а в ключе своё двоеточие бывает
+      // (`past:2`) — поэтому режется по длине известного
+      // имени раскладки, а не по первому попавшемуся разделителю.
+      const half = mark.startsWith('narrow:') ? 'narrow' : 'wide';
+      const key = mark.slice(half.length + 1);
+      fresh.hidden[half][key] = ((ui.hidden || {})[half] || {})[key] === true;
+      fresh.collapsed[half][key] = ((ui.collapsed || {})[half] || {})[key] === true;
+      // Колонка живёт не картой, а порядком: ключ лежит внутри своей
+      // колонки, и переставить его надо тем же помощником, что и в форме.
+      // У узкой раскладки колонок нет, и порядок её здесь не трогается
+      // вовсе — им распоряжается перетаскивание в пикере.
+      if (half === 'wide') {
+        fresh.order = window.PickerPanels.withColumn(
+          fresh.order, key, window.PickerPanels.columnOf(ui, key));
+      }
+    }
+  }
+
+  /** Правки dirtyAxes поверх свежепрочитанного ui.json — та же роль, что у overlayDirtyPanels. */
+  function overlayDirtyToggles(fresh) {
+    for (const [key, axes] of dirtyAxes) {
+      for (const axis of axes) {
+        fresh.toggles[key] = { ...fresh.toggles[key], [axis]: ui.toggles[key][axis] };
+      }
+    }
+  }
+
+  /**
+   * Единственная точка входа: и кнопка, и автосохранение зовут только её.
+   *
+   * Дебаунс уже развёл частые события в один таймер, но не развёл сами
+   * запуски: пока persistOnce ждёт диск (`invoke`), человек мог успеть
+   * отредактировать что-то ещё — 400 мс автосохранения это раскрывает так,
+   * как ручной клик почти никогда не успевал. Второй параллельный прогон не
+   * заводится вовсе: он лишь отмечает persistPending и возвращается, а
+   * завершившийся прогон перечитывает этот флаг и перезапускается сам —
+   * ровно один раз на каждую такую просьбу, без риска зациклиться, потому
+   * что новый флаг может выставить только новый вызов persist().
+   */
+  async function persist() {
+    if (persisting) { persistPending = true; return; }
+    persisting = true;
+    try {
+      await persistOnce();
+    } finally {
+      persisting = false;
+      if (persistPending) {
+        persistPending = false;
+        await persist();
+      }
+    }
+  }
+
+  async function persistOnce() {
     const status = document.getElementById('status');
     status.className = '';
     status.textContent = 'saving…';
@@ -373,45 +813,40 @@
         // здесь. Пикер пишет тот же файл, пока окно открыто, — сохранив
         // снимок целиком, мы откатили бы его перетаскивания.
         const fresh = window.UiState.normalizeUiState(await invoke('load_ui'), UI_DEFAULTS);
-        for (const mark of dirtyPanels) {
-          // Помечено «раскладка:ключ», а в ключе своё двоеточие бывает
-          // (`past:2`) — поэтому режется по длине известного
-          // имени раскладки, а не по первому попавшемуся разделителю.
-          const half = mark.startsWith('narrow:') ? 'narrow' : 'wide';
-          const key = mark.slice(half.length + 1);
-          fresh.hidden[half][key] = ((ui.hidden || {})[half] || {})[key] === true;
-          fresh.collapsed[half][key] = ((ui.collapsed || {})[half] || {})[key] === true;
-          // Колонка живёт не картой, а порядком: ключ лежит внутри своей
-          // колонки, и переставить его надо тем же помощником, что и в форме.
-          // У узкой раскладки колонок нет, и порядок её здесь не трогается
-          // вовсе — им распоряжается перетаскивание в пикере.
-          if (half === 'wide') {
-            fresh.order = window.PickerPanels.withColumn(
-              fresh.order, key, window.PickerPanels.columnOf(ui, key));
-          }
-        }
+        overlayDirtyPanels(fresh);
+        // Снимок «что шлём» зафиксирован — дальше правки копятся в
+        // dirtyPanels заново, а не путаются с уже отправленными. Без этой
+        // ранней очистки правка, залетевшая на await ниже, была бы неотличима
+        // от уже уехавшей на диск, и её некому было бы досдать следующим
+        // прогоном persist().
+        dirtyPanels.clear();
         await invoke('save_ui', {
           ui: window.UiState.uiStateToSave(
             fresh.sort, fresh.toggles, fresh.fullscreen, fresh.collapsed, fresh.order,
             fresh.hidden),
         });
         if (window.__TAURI__) await window.__TAURI__.event.emit('ui-changed');
+        // Правка, случившаяся, пока мы ждали запись, — уже не в fresh:
+        // накладываем её тем же оверлеем на то, что реально дошло. Её
+        // собственная пометка в dirtyPanels намеренно не тронута этим
+        // прогоном — по ней досдаст следующий persist(), либо запущенный
+        // guard'ом выше, либо собственным таймером самой этой правки.
+        overlayDirtyPanels(fresh);
         ui = fresh;
-        dirtyPanels.clear();
         renderPage();
         document.getElementById('status').textContent = 'saved';
-      } else if (current === 'ui') {
+      } else if (current === 'columns') {
         // Файл перечитывается прямо сейчас, а не берётся из снимка загрузки:
         // пикер мог написать в него своё, пока окно было открыто (см.
         // `dirtyAxes`). Поверх свежего кладутся только те оси, что правили
         // здесь; `sort` не кладётся вовсе — сортировкой окно настроек не
         // распоряжается, ею крутит пикер.
         const fresh = window.UiState.normalizeUiState(await invoke('load_ui'), UI_DEFAULTS);
-        for (const [key, axes] of dirtyAxes) {
-          for (const axis of axes) {
-            fresh.toggles[key] = { ...fresh.toggles[key], [axis]: ui.toggles[key][axis] };
-          }
-        }
+        overlayDirtyToggles(fresh);
+        // Тот же ранний clear, что и у панелей, и по той же причине: без
+        // него правка, залетевшая на await ниже, была бы неотличима от уже
+        // отправленной.
+        dirtyAxes.clear();
         // Режим окна, свёрнутость и порядок секций возвращаются в файл
         // нетронутыми — по той же причине, что и `sort`: ими распоряжается
         // пикер (`^F`, Enter на заголовке и перетаскивание заголовка), а окно
@@ -428,12 +863,15 @@
         // Пикер — другое окно, своего ui.json он не перечитает. Событие
         // рассылается всем окнам, и подписан на него только он.
         if (window.__TAURI__) await window.__TAURI__.event.emit('ui-changed');
+        // Правка, случившаяся во время двух await выше, накладывается тем же
+        // оверлеем поверх fresh; dirtyAxes за неё намеренно не тронут — см.
+        // комментарий у панелей.
+        overlayDirtyToggles(fresh);
         // Записанное и есть новый снимок: правки учтены, чужие пережили, и
         // следующее сохранение начинает счёт заново. Таблица перерисовывается
         // из него же — иначе на экране остались бы отметки, которых в файле
         // уже нет.
         ui = fresh;
-        dirtyAxes.clear();
         renderPage();
         document.getElementById('status').textContent = 'saved';
       } else {
@@ -446,9 +884,19 @@
           return;
         }
         const patch = fieldsToPatch(fields, config);
+        // Снимок «что шлём» зафиксирован синхронно, до первого await — та же
+        // причина и тот же приём, что у dirtyPanels/dirtyAxes выше.
+        dirtyFields.clear();
         const result = await invoke('save_config', { patch });
         config = await invoke('load_config') || {};
-        fields = configToFields(config);
+        const reloaded = configToFields(config);
+        // Правка, залетевшая на awaits выше, свежепрочитанный config не
+        // видел вовсе — reloaded для неё лежала бы прежним, дореформенным
+        // значением. Накладываем её поверх reloaded тем, что сейчас лежит в
+        // живом fields по каждому ключу, отметившемуся dirty за это время.
+        for (const key of dirtyFields) reloaded[key] = fields[key];
+        dirtyFields.clear();
+        fields = reloaded;
         // Регистрация глобального хоткея могла не удаться (Windows держит
         // часть комбинаций за собой). Отказ не фатален, но молчать о нём
         // нельзя: человек будет думать, что хоткей сменился, а тот мёртв.
@@ -478,6 +926,31 @@
   }
   renderTabs();
   renderPage();
+  // Раньше отсюда уходил разовый persist() — писал показанные 65% в
+  // config.yaml сразу при открытии окна, даже если человек ничего не тронул.
+  // Ревью нашло это неверным трижды: комментарий-обоснование был фактической
+  // ошибкой (см. ниже), сама запись — это once-only переписывание
+  // config.yaml (с `.bak` и предупреждающей шапкой) без единого действия
+  // человека, а на пустом `sshHost` тот же вызов гонял validate() и
+  // встречал человека красной ошибкой раньше, чем он успевал хоть что-то
+  // ввести.
+  //
+  // Обоснование звучало так: «пикер и без правки уже занимает 65% экрана,
+  // wanted_size берёт эту долю встроенным умолчанием» — и это неправда.
+  // `wanted_size` (main.rs) при отсутствующем ключе возвращает NARROW_SIZE
+  // (900×640) или зажатый по экрану WIDE_SIZE (1400×900), а не долю. Запись
+  // 65 — это настоящая смена поведения (на 1080p широкий режим стал бы уже,
+  // 900 → 702, узкий — шире, 640 → 702), а не просто фиксация того, что и
+  // так уже происходило.
+  //
+  // 65 по-прежнему показывается формой (`configToFields`) как рекомендация,
+  // а не как текущий факт, и по-прежнему уедет в config.yaml — но только
+  // вместе с первым настоящим autosave или Save, когда человек и так что-то
+  // менял: `fieldsToPatch` сравнивает `fields` с `baselineFields(config)`,
+  // которая подмену 65 не несёт, так что патч на pickerSize выходит
+  // непустым, даже если правили совсем другое поле. Именно так это и
+  // задумано спекой («первый autosave/Save запишет 65»), просто без
+  // отдельного вызова здесь.
 })();
 </script>
 </body>

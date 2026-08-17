@@ -288,6 +288,8 @@ version = "0.4.6"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "objc2",
+ "objc2-app-kit",
  "png 0.17.16",
  "rumqttc",
  "serde",

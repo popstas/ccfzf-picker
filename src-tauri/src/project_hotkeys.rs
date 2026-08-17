@@ -461,8 +461,13 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
     // Ответа агрегатора здесь нет — только конфиг, поэтому просимый адрес
     // всегда пуст, и `resolve_base` откатывается на базу из конфига.
     let base = crate::mqtt::resolve_base(&broker, "");
+    // Имя терминала считается здесь же, из того же прочитанного конфига:
+    // спросить страницу нельзя — у скрытого пикера webview усыплён целиком, а
+    // хоткей нажимают ровно тогда, когда пикер скрыт. Ради этого имя и живёт в
+    // Rust, а не в `settings-form.js`.
+    let terminal = crate::mqtt::terminal_name(&raw);
     tauri::async_runtime::spawn_blocking(move || {
-        if let Err(e) = crate::mqtt::open_project(&broker, &base, &cwd) {
+        if let Err(e) = crate::mqtt::open_project(&broker, &base, &cwd, &terminal) {
             eprintln!("ccfzf-picker: cannot ask to open {cwd}: {e}");
         }
     });

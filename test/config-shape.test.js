@@ -232,9 +232,14 @@ test('доли экрана читаются по стороне и по рас�
 test('испорченная доля выбрасывается, а не роняет конфиг', () => {
   const height = raw => normalizeConfig({ pickerSize: { narrow: { height: raw } } })
     .pickerSize.narrow.height;
-  for (const bad of ['восемьдесят', null, undefined, {}, [], NaN, 0, -10, 300, Infinity]) {
+  // 300 из этого списка ушёл: с приходом пикселей это больше не мусор, а
+  // валидный размер, — см. отдельные проверки ниже.
+  for (const bad of ['восемьдесят', null, undefined, {}, [], NaN, -10, Infinity]) {
     assert.strictEqual(height(bad), 0, `${JSON.stringify(bad)} должно читаться как встроенный размер`);
   }
+  // Дробное меньше единицы — не доля и не пиксели, отсекается тем же нулём.
+  assert.strictEqual(height(0.5), 0);
+  assert.strictEqual(height(0), 0);
   // Границы диапазона — рабочие значения, а не отказ. Число строкой тоже
   // годится: yaml отдаёт `height: "80"` строкой, а значит это то же самое.
   assert.strictEqual(height(1), 1);
@@ -242,15 +247,69 @@ test('испорченная доля выбрасывается, а не рон
   assert.strictEqual(height('80'), 80);
 });
 
+// ≥101 — пиксели, а не доля экрана: тот же счётчик без верхней границы.
+// Здесь только JS-сторона (Task 8); Rust читает то же число своим
+// scale_axis/wanted_size в Task 9.
+test('пиксели ≥ 101 проходят нормализацию', () => {
+  assert.strictEqual(
+    normalizeConfig({ pickerSize: { narrow: { width: 1400, height: 65 } } }).pickerSize.narrow.width,
+    1400,
+  );
+  assert.strictEqual(
+    normalizeConfig({ pickerSize: { wide: { width: 101 } } }).pickerSize.wide.width,
+    101,
+  );
+  assert.strictEqual(
+    normalizeConfig({ pickerSize: { wide: { width: 80 } } }).pickerSize.wide.width,
+    80,
+  );
+  assert.strictEqual(
+    normalizeConfig({ pickerSize: { wide: { width: 0 } } }).pickerSize.wide.width,
+    0,
+  );
+});
+
 // Проверок две — размер ставит Rust (`scale_axis` в main.rs), а показывает
 // выбор страница, — и разойтись им нельзя: показанное «80%» при отвергнутом
-// Rust'ом значении читалось бы как сломанное окно. Сторож сверяет границы по
-// тексту второго разбора: выполнить Rust отсюда нечем.
+// Rust'ом значении читалось бы как сломанное окно. Этот сторож — только
+// первая линия: он сверяет, что нужные ветки вообще есть в тексте Rust,
+// потому что выполнить сам Rust отсюда нечем. Поведение на конкретных числах
+// сверяет следующий тест, боевой список.
 test('границы доли те же, по которым судит Rust', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src-tauri', 'src', 'main.rs'), 'utf8');
   const fn = src.match(/fn scale_axis\([\s\S]*?\n\}\n/);
   assert.ok(fn, 'scale_axis не найдена в main.rs — тест сторожит не то');
-  assert.ok(fn[0].includes('(1.0..=100.0)'), 'диапазон в Rust разошёлся с диапазоном здесь');
+  assert.ok(fn[0].includes('(1.0..=100.0)'), 'диапазон долей в Rust разошёлся с диапазоном здесь');
+  assert.ok(
+    fn[0].includes('101.0') || fn[0].includes('>= 101'),
+    'ветка пикселей (≥101) в Rust разошлась с диапазоном здесь',
+  );
+});
+
+// Список — источник истины для JS; тот же список по смыслу живёт в Rust
+// (`scale_axis_boundary_table_matches_js` в main.rs) и обязан давать те же
+// ответы на каждое число. Текстовый сторож выше ловит пропавшую ветку в
+// исходнике, а не разошедшееся поведение — 300 когда-то читался Rust'ом как
+// мусор, а этот список поймал бы именно такое расхождение, прогнав оба конца
+// по одним числам, а не по упоминанию диапазона в тексте.
+const SIZE_BOUNDARY_TABLE = [
+  [0, 0], // встроенный размер
+  [0.5, 0], // дробное меньше единицы — не доля и не пиксели
+  [1, 1], // нижняя граница доли
+  [100, 100], // верхняя граница доли
+  [100.5, 0], // зазор между долей и пикселями — свой мусор
+  [101, 101], // нижняя граница пикселей
+  [1400, 1400], // рабочий размер в пикселях
+  [-10, 0], // отрицательное
+  [Infinity, 0], // не конечное — `Number.isFinite`/`f64::is_finite` отсекают
+  [NaN, 0], // не число
+];
+
+test('таблица граничных значений размера совпадает с Rust', () => {
+  for (const [raw, expected] of SIZE_BOUNDARY_TABLE) {
+    const got = normalizeConfig({ pickerSize: { narrow: { width: raw } } }).pickerSize.narrow.width;
+    assert.strictEqual(got, expected, `width=${raw}: ожидали ${expected}, получили ${got}`);
+  }
 });
 
 // ── Затемнение старых строк ────────────────────────────────────────────────
@@ -309,4 +368,18 @@ test('испорченное stale-поле сбрасывает только с
     projectHours: 24,
     opacity: 0.5,
   });
+});
+
+// ── Подложка позади пикера ─────────────────────────────────────────────────
+
+test('scrim по умолчанию выключен в обеих раскладках', () => {
+  assert.deepStrictEqual(normalizeConfig({}).scrim, { narrow: false, wide: false });
+  assert.deepStrictEqual(normalizeConfig({ scrim: null }).scrim, { narrow: false, wide: false });
+});
+
+test('scrim принимает один флаг, не трогая соседний', () => {
+  assert.deepStrictEqual(normalizeConfig({ scrim: { wide: true } }).scrim,
+    { narrow: false, wide: true });
+  assert.deepStrictEqual(normalizeConfig({ scrim: { narrow: true } }).scrim,
+    { narrow: true, wide: false });
 });
