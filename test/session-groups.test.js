@@ -283,6 +283,31 @@ test('тройке достаётся и машина, и хвост — но т
     ['settings', 'settings · mac · bbbb', 'settings · mac · cccc']);
 });
 
+test('закрытая тёзка живую не помечает', () => {
+  // Поймано на живых данных (2026-08-18, `picker-list-polish`): живая сессия с
+  // окном на маке и закрытая тёзка того же каталога. Пикер на маке рисовал
+  // обеим хвост id, потому что имя машины у обеих вышло пустым — у живой
+  // «своя машина», у закрытой окна нет вовсе. Пометки здесь не нужно ни одной:
+  // строки лежат в разных секциях (`live` и `past`), рядом их не видно, а под
+  // умолчанием `onlyLive` закрытой в списке нет вообще.
+  const rows = labelSessions([
+    { id: 'fdd74d58', title: 'picker-list-polish', cwd: '/home/user/p', windowHost: '', live: true },
+    { id: '4b93d3bd', title: 'picker-list-polish', cwd: '/home/user/p', windowHost: '', live: false },
+  ]);
+  assert.deepStrictEqual(rows.map(r => r.label), ['picker-list-polish', 'picker-list-polish']);
+});
+
+test('две закрытые тёзки в истории по-прежнему разводятся хвостом id', () => {
+  // Сторож на противоположную починку: «неживым пометок не давать вовсе»
+  // оставила бы историю с двумя дословно одинаковыми строками, а там они как
+  // раз стоят рядом.
+  const rows = labelSessions([
+    { id: 'aaaa1111', title: 'settings', cwd: '/home/user/p', windowHost: '', live: false },
+    { id: 'bbbb2222', title: 'settings', cwd: '/home/user/p', windowHost: '', live: false },
+  ]);
+  assert.deepStrictEqual(rows.map(r => r.label), ['settings · aaaa', 'settings · bbbb']);
+});
+
 test('одинокая строка и тёзка из другого каталога остаются как есть', () => {
   // Двойник — это совпадение имени И каталога. Одно имя на два проекта
   // различается путём, который и так виден в строке.
