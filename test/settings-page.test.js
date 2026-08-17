@@ -241,6 +241,22 @@ test('у каждой галки осей есть подсказка', () => {
   }
 });
 
+// Ревью финальной волны: `showTerminalIcon` — ось про глиф в колонке окна
+// (`side: 'glyph'` в sessions.html), и `renderChecks` там безусловно выкидывает
+// такие ключи из статуслайна (`side !== 'glyph'`). Чекбокс statusline у этой
+// строки писал бы в ui.json и не рисовал бы ничего внизу списка никогда —
+// мёртвый чекбокс, ровно то правило CLAUDE.md.
+test('у terminal icon нет чекбокса statusline — это мёртвая ось', () => {
+  const html = axesHtml();
+  const rowStart = html.split('<tr>').find(chunk => chunk.includes('data-key="showTerminalIcon"'));
+  assert.ok(rowStart, 'строка terminal icon не найдена');
+  const row = `<tr>${rowStart.split('</tr>')[0]}</tr>`;
+  assert.doesNotMatch(row, /data-axis="statusline" data-key="showTerminalIcon"/,
+    `чекбокс statusline не должен существовать — renderChecks выкидывает glyph-ключи безусловно: ${row}`);
+  assert.match(row, /<\/td><td><\/td><\/tr>$/,
+    `ячейка statusline обязана остаться пустой, но присутствовать: ${row}`);
+});
+
 test('второй столбец фильтров объяснён иначе, чем у колонок', () => {
   // Поле под ним то же самое (`list`), а значит разное: у колонки — «показывать
   // колонку», у фильтра — «фильтр включён». Одинаковая подсказка врала бы.
@@ -671,7 +687,7 @@ test('путь и аргументы, совпавшие с пресетом, о
 test('autosave и Save зовут одну persist', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
   assert.match(src, /async function persist\(/);
-  assert.match(src, /setTimeout\(persist,/);
+  assert.match(src, /setTimeout\(\(\) => \{ saveTimer = null; persist\(\); \}, 400\)/);
   assert.match(src, /400/);
   assert.match(src, /#save \{[^}]*padding/);
 });
@@ -714,6 +730,90 @@ test('два быстрых события планируют один persist, 
   assert.strictEqual(run.persistCalls(), 1, 'persist обязан сработать ровно один раз');
 });
 
+// ── Финальное ревью: смена вкладки не роняет ожидающий autosave ─────────────
+//
+// Раньше клик по вкладке менял `current` и перерисовывал страницу, не трогая
+// `saveTimer`. Таймер доживал до клика сам, срабатывал уже на новой вкладке
+// и уходил в persistOnce по её ветке — правка General писалась бы как
+// `ui.json` вкладки Columns (или наоборот), печатая «saved» про то, чего не
+// сохраняла. `flushPendingSave` (и вызов перед сменой `current`) чинят это;
+// тем же приёмом, что и у остального файла, настоящий код вычитывается из
+// страницы и прогоняется в vm — вторая копия в тесте разошлась бы молча.
+function flushSrc() {
+  return sourceOf(/\n {2}let saveTimer = null;\n/, 'saveTimer')
+    + sourceOf(/\n {2}function scheduleAutosave\(\) \{[\s\S]*?\n {2}\}\n/, 'scheduleAutosave')
+    + sourceOf(/\n {2}async function flushPendingSave\(\) \{[\s\S]*?\n {2}\}\n/, 'flushPendingSave');
+}
+
+test('flushPendingSave сохраняет правку старой вкладки, пока current ещё не сменился', async () => {
+  const src = persistCoreSrc() + flushSrc();
+  const calls = [];
+  const status = { className: '', textContent: '' };
+  const config = { sshHost: 'host' };
+  const timers = new Map();
+  let nextId = 0;
+  const ctx = {
+    document: { getElementById: () => status },
+    window: {},
+    invoke: (cmd, args) => {
+      calls.push({ cmd, args });
+      return Promise.resolve(cmd === 'load_config' ? config : undefined);
+    },
+    current: 'general',
+    validate,
+    fieldsToPatch,
+    configToFields,
+    config,
+    fields: { ...configToFields(config), sshHost: 'edited-host' },
+    dirtyFields: new Set(['sshHost']),
+    setTimeout: (fn, ms) => { nextId += 1; timers.set(nextId, fn); return nextId; },
+    clearTimeout: (id) => { timers.delete(id); },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(src, ctx, { filename: 'settings.html' });
+  // Правка в поле General планирует autosave — тем же вызовом, каким это
+  // делает обработчик `input`.
+  vm.runInContext('scheduleAutosave();', ctx, { filename: 'settings.html' });
+  assert.strictEqual(timers.size, 1, 'дебаунс обязан был запланировать таймер');
+
+  // Клик по другой вкладке случается внутри окна дебаунса — до того, как
+  // таймер сам успел бы сработать.
+  vm.runInContext('var flushed = flushPendingSave();', ctx, { filename: 'settings.html' });
+  await ctx.flushed;
+
+  assert.strictEqual(timers.size, 0,
+    'ожидающий таймер обязан быть снят немедленно, а не просто дожить до своего часа');
+  const saved = calls.find(c => c.cmd === 'save_config');
+  assert.ok(saved, 'правка обязана была дойти до save_config, пока current ещё был general');
+  assert.strictEqual(saved.args.patch.sshHost, 'edited-host');
+  assert.strictEqual(status.textContent, 'saved');
+});
+
+test('flushPendingSave ничего не шлёт, если autosave не был запланирован', async () => {
+  const src = persistCoreSrc() + flushSrc();
+  const calls = [];
+  const ctx = {
+    document: { getElementById: () => ({ className: '', textContent: '' }) },
+    window: {},
+    invoke: (cmd, args) => { calls.push({ cmd, args }); return Promise.resolve(undefined); },
+    current: 'general',
+    validate,
+    fieldsToPatch,
+    configToFields,
+    config: {},
+    fields: {},
+    dirtyFields: new Set(),
+    setTimeout: () => { throw new Error('таймер не должен был понадобиться — нечего сбрасывать'); },
+    clearTimeout: () => {},
+  };
+  vm.createContext(ctx);
+  vm.runInContext(src, ctx, { filename: 'settings.html' });
+  vm.runInContext('var flushed = flushPendingSave();', ctx, { filename: 'settings.html' });
+  await ctx.flushed;
+  assert.deepStrictEqual(calls, [],
+    'клик по вкладке без ожидающей правки не обязан ничего сохранять — иначе каждый клик тихо переписывал бы config.yaml');
+});
+
 /** Прогнать настоящий persist() на обычной (yaml) вкладке. */
 async function persistGeneralTab({ fields, config }) {
   const src = persistCoreSrc();
@@ -750,76 +850,51 @@ test('validate, провалившийся под автосохранением
   assert.match(status.textContent, /sshHost is not set/);
 });
 
-// ── стартовый persist() отсутствующей высоты (65%) ──────────────────────────
+// ── нет стартового persist() при загрузке (ревью финальной волны) ───────────
 //
-// Хвост IIFE в settings.html: после renderTabs()/renderPage() форма сама
-// решает, нужен ли разовый persist() — без правки человека и мимо 400 мс
-// дебаунса Task 6. Тем же приёмом, что и у остального в этом файле,
-// настоящий хвост вычитывается из страницы и выполняется в vm — вторая копия
-// этой логики в тесте разошлась бы с настоящей молча.
-function startupTailSrc() {
-  return sourceOf(
-    /\n {2}renderTabs\(\);\n {2}renderPage\(\);\n[\s\S]*?if \(fieldsToPatch\(fields, config\)\.pickerSize\) persist\(\);\n/,
-    'хвост загрузки (renderTabs/renderPage/стартовый persist)',
-  );
-}
+// Раньше хвост IIFE после renderTabs()/renderPage() сам решал, нужен ли
+// разовый persist() при отсутствующей высоте, — и писал config.yaml (с `.bak`
+// и предупреждающей шапкой) без единого действия человека, только за то, что
+// он открыл окно посмотреть. Обоснование («пикер и так уже занимает 65%
+// экрана») к тому же было фактической ошибкой: `wanted_size` в main.rs при
+// отсутствующем ключе берёт встроенный размер, а не долю. Запись 65
+// по-прежнему происходит — но только вместе с первым настоящим autosave или
+// Save, что и проверяют два теста ниже.
+test('загрузка окна не пишет config.yaml сама по себе', () => {
+  assert.doesNotMatch(SETTINGS_HTML, /if \(fieldsToPatch\(fields, config\)\.pickerSize\) persist\(\);/,
+    'хвост загрузки не должен звать persist() без действия человека');
+});
 
-/**
- * Прогнать настоящий хвост загрузки с данным `config`.
- *
- * `persist()` внутри хвоста не ждут (`if (...) persist();`, без await) — то
- * же самое верно и в настоящем файле: это последняя строка загрузочного
- * IIFE, дожидаться там некому. Тест поэтому вычерпывает микрозадачи вручную,
- * пока не перестанут прилетать новые вызовы `invoke` — все промисы в моках
- * уже разрешены (`Promise.resolve`), реального таймера или сети тут нет, и
- * несколько проходов очереди микрозадач гарантированно всё раскрутят.
- */
-async function runStartupTail({ config }) {
-  const src = persistCoreSrc() + startupTailSrc();
-  const calls = [];
-  const status = { className: '', textContent: '' };
-  const ctx = {
-    document: { getElementById: () => status },
-    window: {},
-    invoke: (cmd, args) => {
-      calls.push({ cmd, args });
-      return Promise.resolve(cmd === 'load_config' ? config : undefined);
-    },
-    current: 'general',
-    validate,
-    fieldsToPatch,
-    configToFields,
-    config,
-    fields: configToFields(config),
-    dirtyFields: new Set(),
-    renderTabs: () => {},
-    renderPage: () => {},
-  };
-  vm.createContext(ctx);
-  vm.runInContext(src, ctx, { filename: 'settings.html' });
-  for (let i = 0; i < 20; i++) await Promise.resolve();
-  return { calls };
-}
-
-test('отсутствующая высота патчится один раз при загрузке', async () => {
-  const { calls } = await runStartupTail({ config: { sshHost: 'host' } });
+test('первый настоящий persist() всё равно пишет 65 для отсутствующей высоты', async () => {
+  // Отсутствующая высота уже показана формой как 65 (configToFields) — так
+  // выглядели бы fields сразу после загрузки окна, без единой правки
+  // человека. Дальше persist() должен позвать что угодно ещё, лишь бы не при
+  // загрузке, — здесь это обычное сохранение вкладки General.
+  const config = { sshHost: 'host' };
+  const fields = configToFields(config);
+  const { calls } = await persistGeneralTab({ fields, config });
   const saved = calls.find(c => c.cmd === 'save_config');
-  assert.ok(saved, 'save_config не был позван при отсутствующей высоте');
+  assert.ok(saved, 'save_config не был позван');
   assert.strictEqual(saved.args.patch.pickerSize.narrow.height, 65);
   assert.strictEqual(saved.args.patch.pickerSize.wide.height, 65);
 });
 
-test('повторное открытие после записи 65 не патчит снова', async () => {
-  // Второй раз ключ в config.yaml уже есть (65, записанные первым persist()),
-  // и подмена в configToFields не срабатывает: baseline и показанное
-  // совпадают, патч пуст, второй save_config не уходит.
+test('повторное сохранение после записи 65 не патчит pickerSize снова', async () => {
+  // Ключ в config.yaml уже есть (65, записанные предыдущим сохранением), и
+  // подмена в configToFields не срабатывает: baseline и показанное
+  // совпадают, patch.pickerSize не появляется — свойство то же, что раньше
+  // сторожил тест на стартовом хвосте, только на настоящем сохранении, а не
+  // на загрузке.
   const config = {
     sshHost: 'host',
     pickerSize: { narrow: { width: 0, height: 65 }, wide: { width: 0, height: 65 } },
   };
-  const { calls } = await runStartupTail({ config });
-  assert.ok(!calls.some(c => c.cmd === 'save_config'),
-    'save_config не должен был позваться — высота уже записана');
+  const fields = configToFields(config);
+  const { calls } = await persistGeneralTab({ fields, config });
+  const saved = calls.find(c => c.cmd === 'save_config');
+  assert.ok(saved, 'save_config всё равно вызывается — сохранение идёт, просто пустым патчем');
+  assert.ok(!('pickerSize' in saved.args.patch),
+    'pickerSize не должен был снова попасть в патч — высота уже записана');
 });
 
 // ── Ревью Task 8: отказ поля пикселей виден, стёртое не воскресает ──────────
