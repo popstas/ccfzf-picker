@@ -450,3 +450,52 @@ test('renderPage знает columns и paths, а не ui и integrations', () =>
   assert.match(src, /Focus, snapshots, and opening a session through a window manager need MQTT/);
   assert.match(src, /<details/);
 });
+
+// ── <details> терминала открыт ровно когда пресет свой ──────────────────────
+//
+// Текстовый тест выше сторожит только наличие `<details` в файле — он остался
+// бы зелёным, даже переверни кто-нибудь условие `open` или сломай пару
+// terminal.file/terminal.args в generalBodyHtml. Здесь настоящие
+// currentPreset/fieldHtml/generalBodyHtml вычитаны из страницы и прогнаны
+// через настоящий TerminalPresets — как axesHtml/panelsHtml выше, но ещё и
+// с реальным матчером, а не подставным: два вызова matchPreset, разошедшиеся
+// местами, дали бы ложное совпадение здесь и остались бы незамеченными при
+// подмене.
+const TerminalPresets = require('../frontend-src/terminal-presets');
+const { PAGES: FORM_PAGES, configToFields } = require('../frontend-src/settings-form');
+
+function generalHtml(overrides) {
+  const src = ['function platform', 'function linesToArgs', 'function currentPreset']
+    .map(name => sourceOf(new RegExp(`\\n {2}${name}\\([^)]*\\) \\{[\\s\\S]*?\\n {2}\\}\\n`), name))
+    .join('\n')
+    + sourceOf(/\n {2}function fieldHtml\(field\) \{[\s\S]*?\n {2}\}\n/, 'fieldHtml')
+    + sourceOf(/\n {2}function generalBodyHtml\(fieldsList\) \{[\s\S]*?\n {2}\}\n/, 'generalBodyHtml');
+  const fields = { ...configToFields({}), ...overrides };
+  const ctx = {
+    esc: s => String(s).replace(/[&<>"]/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+    window: { TerminalPresets },
+    fields,
+  };
+  vm.createContext(ctx);
+  const generalFields = FORM_PAGES.find(p => p.id === 'general').fields;
+  return vm.runInContext(
+    `${src}\ngeneralBodyHtml(${JSON.stringify(generalFields)});`, ctx, { filename: 'settings.html' });
+}
+
+test('свой путь без совпадения с пресетом открывает <details>', () => {
+  // navigator в vm-контексте не задан — platform() отдаёт '', и osOf('') это
+  // linux; ни один пресет linux не совпадает с выдуманным путём.
+  const html = generalHtml({ 'terminal.file': '/opt/not-a-real-terminal', 'terminal.args': '' });
+  assert.match(html, /<details open>/);
+});
+
+test('путь и аргументы, совпавшие с пресетом, оставляют <details> свёрнутым', () => {
+  const preset = TerminalPresets.presetById('kitty-linux');
+  const html = generalHtml({
+    'terminal.file': preset.file,
+    'terminal.args': preset.args.join('\n'),
+  });
+  assert.match(html, /<details>/);
+  assert.doesNotMatch(html, /<details open>/);
+});

@@ -142,15 +142,30 @@
       + '— the broker is still required for focus.</div>';
   }
 
+  /**
+   * Какой пресет терминала совпадает с текущими полями формы — `'custom'`,
+   * если ни один.
+   *
+   * Единственный вызов `matchPreset` на весь файл: у выпадашки пресетов
+   * (`fieldHtml`) и у обёртки `<details>` (`generalBodyHtml`) свой резон
+   * спрашивать про то же самое, но вопрос один и ответ обязан быть одним —
+   * разойдись эти два вызова, выпадашка обещала бы пресет, с которым
+   * `<details>` не согласен: одна сторона показывала бы «kitty», а другая
+   * держала бы блок свёрнутым, как будто набрано что-то своё.
+   */
+  function currentPreset() {
+    return window.TerminalPresets.matchPreset(
+      { file: fields['terminal.file'], args: linesToArgs(fields['terminal.args']) },
+      platform());
+  }
+
   function fieldHtml(field) {
     const value = fields[field.id];
     const hint = field.hint ? `<div class="hint">${esc(field.hint)}</div>` : '';
     if (field.type === 'preset') {
       // Что выбрано — считается по содержимому полей, а не хранится рядом:
       // второй источник правды разошёлся бы с тем, что человек правит руками.
-      const current = window.TerminalPresets.matchPreset(
-        { file: fields['terminal.file'], args: linesToArgs(fields['terminal.args']) },
-        platform());
+      const current = currentPreset();
       const options = window.TerminalPresets.presetsFor(platform())
         .map(p => `<option value="${esc(p.id)}"${p.id === current ? ' selected' : ''}>`
           + `${esc(p.label)}</option>`).join('');
@@ -193,14 +208,12 @@
    *
    * `fieldHtml` про это не знает — её контракт «одно поле внутрь, одна строка
    * наружу» остаётся как был, обёртку строит вызывающий код. Открыт `<details>`
-   * ровно тогда, когда набранное не совпадает ни с одним пресетом
-   * (`matchPreset` вернул `'custom'`) — тем же вызовом, каким это уже решает
-   * `fieldHtml` для поля-выпадашки пресетов, а не вторым разбором.
+   * ровно тогда, когда `currentPreset()` вернул `'custom'` — тем же вопросом,
+   * каким уже задаётся выпадашка пресетов в `fieldHtml`, а не вторым разбором
+   * полей: два разбора разошлись бы на первой же правке `matchPreset`.
    */
   function generalBodyHtml(fieldsList) {
-    const custom = window.TerminalPresets.matchPreset(
-      { file: fields['terminal.file'], args: linesToArgs(fields['terminal.args']) },
-      platform()) === 'custom';
+    const custom = currentPreset() === 'custom';
     let html = '';
     for (let i = 0; i < fieldsList.length; i++) {
       const field = fieldsList[i];
