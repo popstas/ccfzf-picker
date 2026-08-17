@@ -427,11 +427,10 @@ test('строка проекта доезжает с настоящего пу�
   assert.ok(items[0].html.includes('<div class="count">12 · 2●</div>'), items[0].html);
   assert.ok(items[1].html.includes('<div class="count">0</div>'), items[1].html);
 
-  // Точка: зелёная там, где кто-то работает, обычная серая — где никого.
-  // `closed` (прозрачная) у проекта не появляется: она про закрытую сессию.
+  // Точка: зелёная там, где кто-то работает; у проекта без единой сессии —
+  // прозрачная. Второй проект фикстуры именно такой (`sessions: 0`).
   assert.ok(items[0].html.includes('<div class="dot active"></div>'), items[0].html);
-  assert.ok(items[1].html.includes('<div class="dot"></div>'), items[1].html);
-  assert.ok(!items[1].html.includes('closed'), items[1].html);
+  assert.ok(items[1].html.includes('<div class="dot closed"></div>'), items[1].html);
 
   // Подсказка остаётся полным путём через shortPath — это не поменялось.
   assert.ok(items[0].html.includes('title="~/projects/ccfzf"'), items[0].html);
@@ -459,6 +458,21 @@ test('строка проекта доезжает с настоящего пу�
     assert.strictEqual(rows[i].kind, 'project');
   }
   assert.strictEqual(rows.length, items.length);
+});
+
+test('кружок проекта различает живое, прошлое и пустое', () => {
+  // Три состояния, а не два: серый кружок у закладки, в которой не работали
+  // никогда, обещал историю, которой нет. Прозрачный оставляет место пустым —
+  // ровно как у закрытой сессии.
+  const { items } = renderProjectRows([
+    { path: '/home/user/projects/a', name: 'a', mark: false, sessions: 12, live: 2, mtime: 1786045860 },
+    { path: '/home/user/projects/b', name: 'b', mark: false, sessions: 5, live: 0, mtime: 1786045800 },
+    { path: '/home/user/projects/c', name: 'c', mark: false, sessions: 0, live: 0, mtime: 0 },
+  ]);
+  assert.strictEqual(items.length, 3);
+  assert.ok(items[0].html.includes('<div class="dot active"></div>'), items[0].html);
+  assert.ok(items[1].html.includes('<div class="dot"></div>'), items[1].html);
+  assert.ok(items[2].html.includes('<div class="dot closed"></div>'), items[2].html);
 });
 
 // Обратный случай: имя проекта ничего не говорит про каталог, и строка
