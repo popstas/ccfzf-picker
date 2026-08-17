@@ -49,7 +49,7 @@
 - Consumes: raw `stale.projectDays` and/or `stale.projectHours`
 - Produces: `config.stale.projectHours: number` (default 168). No `projectDays` on the normalized object.
 
-- [ ] **Step 1: Rewrite the stale normalization tests**
+- [x] **Step 1: Rewrite the stale normalization tests**
 
 In `test/config-shape.test.js` replace `projectDays: 7` defaults with `projectHours: 168`. Add:
 
@@ -69,7 +69,7 @@ test('projectHours главнее устаревшего projectDays', () => {
 
 Replace `stale.projectDays` in `test/settings-form.test.js` (field id, patch, validate) with `stale.projectHours`. Default shown is 168. In `stale-items.test.js` use `projectHours: 168` and a threshold of 2 hours for a project fixture that used 7 days.
 
-- [ ] **Step 2: Run focused tests — they fail**
+- [x] **Step 2: Run focused tests — they fail**
 
 ```bash
 npm test -- test/config-shape.test.js test/stale-items.test.js test/settings-form.test.js
@@ -77,7 +77,7 @@ npm test -- test/config-shape.test.js test/stale-items.test.js test/settings-for
 
 Expected: FAIL because `projectHours` is undefined and `projectDays` is still the field id.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `DEFAULTS.stale.projectHours = 168`. Delete `projectDays` from defaults. In `normalizeStale`:
 
@@ -93,7 +93,7 @@ projectHours: positive(
 
 `stale-items.js`: `SECONDS.project = 3600`, read `stale.projectHours`. Settings field label: `Projects become stale after, hours`.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 npm test
@@ -101,7 +101,7 @@ npm test
 
 Expected: PASS. Fix remaining `projectDays` fixtures (`test/frontend-load.test.js`, `test/row-contract.test.js`).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend-src/config-shape.js frontend-src/stale-items.js frontend-src/settings-form.js test
@@ -121,7 +121,7 @@ git commit -m "feat(settings): store project stale age in hours"
 - Titles: `General`, `Window size`, `Columns`, `Layout panels`, `Hotkeys`, `MQTT`, `Paths`
 - `windowHost` moves to General. MQTT fields to `mqtt`. `pathMap.*` to `paths`. No `integrations` page.
 
-- [ ] **Step 1: Fail the id list test**
+- [x] **Step 1: Fail the id list test**
 
 Change the expected array in `test/settings-form.test.js` to the seven ids above. Add:
 
@@ -136,15 +136,15 @@ test('windowHost живёт на General, mqtt и pathMap — на своих в
 });
 ```
 
-- [ ] **Step 2: Run `npm test -- test/settings-form.test.js`** — FAIL on id list.
+- [x] **Step 2: Run `npm test -- test/settings-form.test.js`** — FAIL on id list.
 
-- [ ] **Step 3: Split `PAGES`**
+- [x] **Step 3: Split `PAGES`**
 
 Keep field objects, change page membership and titles. Window page id stays `window` (title `Window size`). Panels id stays `panels` (title `Layout panels`). New pages `mqtt` and `paths` with `fields: []` only for yaml keys (no custom HTML yet).
 
-- [ ] **Step 4: `npm test`** — PASS. `settings.html` still keys off `ui` / `integrations` and will mis-render until Task 3; do not open Settings yet.
+- [x] **Step 4: `npm test`** — PASS. `settings.html` still keys off `ui` / `integrations` and will mis-render until Task 3; do not open Settings yet.
 
-- [ ] **Step 5: Commit** `refactor(settings): split Integrations into MQTT and Paths`
+- [x] **Step 5: Commit** `refactor(settings): split Integrations into MQTT and Paths`
 
 ---
 
@@ -160,7 +160,7 @@ Keep field objects, change page membership and titles. Window page id stays `win
 - Consumes: `PAGES` from Task 2
 - Produces: `renderPage()` branches `current === 'columns'` and `current === 'panels'`; MQTT intro paragraph; actions list on `paths`.
 
-- [ ] **Step 1: Tests in `test/settings-page.test.js`**
+- [x] **Step 1: Tests in `test/settings-page.test.js`**
 
 Keep extracting functions from the page via `sourceOf`. Add:
 
@@ -189,9 +189,9 @@ test('renderPage знает columns и paths, а не ui и integrations', () =>
 
 The existing `axesHtml()` helper still looks up `axesTableHtml` — leave the function name, only the `renderPage` branch changes (`'ui'` → `'columns'`).
 
-- [ ] **Step 2: Run `npm test -- test/settings-page.test.js test/settings-form.test.js`** — FAIL.
+- [x] **Step 2: Run `npm test -- test/settings-page.test.js test/settings-form.test.js`** — FAIL.
 
-- [ ] **Step 3: Implement routing**
+- [x] **Step 3: Implement routing**
 
 In `renderPage`:
 
@@ -208,9 +208,9 @@ const body = current === 'columns' ? axesTableHtml()
 
 `let current = 'general'` stays.
 
-- [ ] **Step 4: `npm test`** — PASS.
+- [x] **Step 4: `npm test`** — PASS.
 
-- [ ] **Step 5: Commit** `feat(settings): route new tabs and collapse terminal details`
+- [x] **Step 5: Commit** `feat(settings): route new tabs and collapse terminal details`
 
 ---
 
@@ -220,13 +220,13 @@ const body = current === 'columns' ? axesTableHtml()
 - Modify: `src-tauri/src/main.rs` (`SETTINGS_SIZE`)
 - Test: existing `settings_window_fits_a_1080p_screen`
 
-- [ ] **Step 1: Change the constant to `(820.0, 720.0)`.** If a later Columns table still scrolls on 1080p, raise height until the longest tab fits, but keep it under 1080 so the existing fit test does not clamp.
+- [x] **Step 1: Change the constant to `(820.0, 720.0)`.** If a later Columns table still scrolls on 1080p, raise height until the longest tab fits, but keep it under 1080 so the existing fit test does not clamp.
 
-- [ ] **Step 2: `cd src-tauri && cargo test settings_window_fits_a_1080p_screen -- --nocapture`**
+- [x] **Step 2: `cd src-tauri && cargo test settings_window_fits_a_1080p_screen -- --nocapture`**
 
 Expected: PASS with width unclamped. If the test asserts exact 1080 height, update the assertion to the new constant.
 
-- [ ] **Step 3: Commit** `fix(settings): shrink settings window to fit 1080p`
+- [x] **Step 3: Commit** `fix(settings): shrink settings window to fit 1080p`
 
 ---
 
@@ -242,7 +242,7 @@ Expected: PASS with width unclamped. If the test asserts exact 1080 height, upda
 
 Recommended keys: every `TOGGLE_LABELS` key except `showEvent`, `showCost`, `showTerminalIcon`. Other: those three.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```js
 test('оси колонок идут list затем statusline', () => {
@@ -268,9 +268,9 @@ Update `test/row-contract.test.js` sync test: `TOGGLE_LABELS.showPaths` must equ
 
 Extend `axesHtml()` extractor to include any new constants (`COLUMN_ICONS`, `COLUMN_HINTS`, `RECOMMENDED_KEYS`).
 
-- [ ] **Step 2: Run tests — FAIL.**
+- [x] **Step 2: Run tests — FAIL.**
 
-- [ ] **Step 3: Rebuild `axesTableHtml`**
+- [x] **Step 3: Rebuild `axesTableHtml`**
 
 Swap the two checkbox `<td>` so `data-axis="list"` is first. Split rows into two tables. Recommended header row: checkbox `data-key="recommended-all"` `data-axis="list"` with `indeterminate` set in `renderPage` after insert (property, not HTML attribute). Click handler: if every recommended key has `list`, set all to false; else set all to true; mark every key dirty on the list axis.
 
@@ -280,9 +280,9 @@ Swap the two checkbox `<td>` so `data-axis="list"` is first. Split rows into two
 
 `paintToggles` / statusline: skip `showTerminalIcon` when building statusline checks (`side !== 'filter'` is not enough — either give it `side: 'list-only'` or filter the key out of `TOGGLE_CHECKS` statusline rendering). Spec: no extra statusline checkbox. Add `side: 'glyph'` and exclude it from `FILTER_KEYS` and from `shown` in `paintToggles`.
 
-- [ ] **Step 4: `npm test`** — PASS. Update any test that assumed header order `statusline` then `list`.
+- [x] **Step 4: `npm test`** — PASS. Update any test that assumed header order `statusline` then `list`.
 
-- [ ] **Step 5: Commit** `feat(settings): regroup Columns with list first`
+- [x] **Step 5: Commit** `feat(settings): regroup Columns with list first`
 
 ---
 
@@ -292,7 +292,7 @@ Swap the two checkbox `<td>` so `data-axis="list"` is first. Split rows into two
 - Modify: `settings.html` (save bar CSS, `persist` function, input listeners)
 - Test: `test/settings-page.test.js` (text-watch `persist` / debounce)
 
-- [ ] **Step 1: Fail a text test**
+- [x] **Step 1: Fail a text test**
 
 ```js
 test('autosave и Save зовут одну persist', () => {
@@ -304,15 +304,15 @@ test('autosave и Save зовут одну persist', () => {
 });
 ```
 
-- [ ] **Step 2: Run — FAIL.**
+- [x] **Step 2: Run — FAIL.**
 
-- [ ] **Step 3: Extract `async function persist()`** from the current Save click handler (validate, `fieldsToPatch` + `save_config`, dirty ui.json). Save click calls `persist()`. Each `input`/`change` that already writes `fields[...]` also `clearTimeout(saveTimer); saveTimer = setTimeout(persist, 400)`. Do not start the timer from `renderPage` itself.
+- [x] **Step 3: Extract `async function persist()`** from the current Save click handler (validate, `fieldsToPatch` + `save_config`, dirty ui.json). Save click calls `persist()`. Each `input`/`change` that already writes `fields[...]` also `clearTimeout(saveTimer); saveTimer = setTimeout(persist, 400)`. Do not start the timer from `renderPage` itself.
 
 `#save { padding: 8px 18px; }` (or equivalent larger padding).
 
-- [ ] **Step 4: `npm test`** — PASS.
+- [x] **Step 4: `npm test`** — PASS.
 
-- [ ] **Step 5: Commit** `feat(settings): autosave after 400ms and keep Save`
+- [x] **Step 5: Commit** `feat(settings): autosave after 400ms and keep Save`
 
 ---
 
@@ -330,7 +330,7 @@ fn app_version() -> String {
 
 and register it next to other commands. Fill the title after load: `ccfzf-picker v${version}`. Subtitle: keep a `#keys-subtitle` with `Keyboard shortcuts`. Footer inside `#keys-rows` or after it: `MIT License` + `<a href="https://github.com/popstas/ccfzf-picker">github.com/popstas/ccfzf-picker</a>` (`spawn_detached` / `open` is not required; the webview may show the link as text if clicks are not wired — make it a clickable `https` link; if the webview cannot open it, still show the URL).
 
-- [ ] **Step 1: Tests in `test/keys-modal.test.js`**
+- [x] **Step 1: Tests in `test/keys-modal.test.js`**
 
 ```js
 test('заголовок справочника — имя и версия, не Keyboard shortcuts', () => {
@@ -345,9 +345,9 @@ test('заголовок справочника — имя и версия, не
 });
 ```
 
-- [ ] **Step 2: FAIL, implement, `npm test`, `cd src-tauri && cargo test` if a command was added.**
+- [x] **Step 2: FAIL, implement, `npm test`, `cd src-tauri && cargo test` if a command was added.**
 
-- [ ] **Step 3: Commit** `feat(picker): show version and license in the keys card`
+- [x] **Step 3: Commit** `feat(picker): show version and license in the keys card`
 
 ---
 
@@ -366,7 +366,7 @@ test('заголовок справочника — имя и версия, не
 - Pixel input ≥ 101 sets the field value to that number and leaves radios unchecked. Radio click sets the value and clears the px box. Values 1–100 in the px box are not written (`fromField` returns undefined / validate error `must be at least 101 px`).
 - `configToFields`: if `at(raw, 'pickerSize.narrow.height')` is `undefined` (key missing), show `65`. Same for `wide.height`. Widths stay 0. Because `fieldsToPatch` compares against `configToFields(original)`, a missing key vs displayed 65 **will** patch on persist. After load in `settings.html`, if `fieldsToPatch(fields, config)` contains pickerSize heights, call `persist()` once (the Task 6 timer is user-only).
 
-- [ ] **Step 1: Tests**
+- [x] **Step 1: Tests**
 
 ```js
 test('SIZE_CHOICES содержит 100', () => {
@@ -396,7 +396,7 @@ test('пиксели ≥ 101 проходят нормализацию', () => {
 
 Change `test/settings-page.test.js` «у каждого типа поля» — type `size` needs `field.type === 'size'` in `fieldHtml`. Replace the select-based «размер, вписанный руками» test: a value `1400` renders in the px input, not as a selected radio.
 
-- [ ] **Step 2: FAIL, implement `normalizePickerSize`:**
+- [x] **Step 2: FAIL, implement `normalizePickerSize`:**
 
 ```js
 return Number.isFinite(value) && (value === 0 || (value >= 1 && value <= 100) || value >= 101)
@@ -416,9 +416,9 @@ Reject 0.5 as 0.
 
 `validate`: `validNumber` for each size id allowing 0, 1–100, or ≥101.
 
-- [ ] **Step 3: `npm test`** — also update `границы доли те же, по которым судит Rust` in Task 9 together, or temporarily allow the JS side to accept ≥101 while Rust still rejects until Task 9. **Do Task 9 immediately after this task in the same sitting if tests would disagree.** Prefer finishing Task 9 before claiming Task 8 green if that watcher would fail.
+- [x] **Step 3: `npm test`** — also update `границы доли те же, по которым судит Rust` in Task 9 together, or temporarily allow the JS side to accept ≥101 while Rust still rejects until Task 9. **Do Task 9 immediately after this task in the same sitting if tests would disagree.** Prefer finishing Task 9 before claiming Task 8 green if that watcher would fail.
 
-- [ ] **Step 4: Commit** `feat(settings): size radios, 100 percent, custom pixels`
+- [x] **Step 4: Commit** `feat(settings): size radios, 100 percent, custom pixels`
 
 ---
 
@@ -428,7 +428,7 @@ Reject 0.5 as 0.
 - Modify: `src-tauri/src/main.rs` (`scale_axis`, `wanted_size`, comments)
 - Test: existing picker size tests in `main.rs`; `test/config-shape.test.js` watcher for `scale_axis` body
 
-- [ ] **Step 1: Update the JS watcher** in `test/config-shape.test.js`:
+- [x] **Step 1: Update the JS watcher** in `test/config-shape.test.js`:
 
 ```js
 assert.ok(fn[0].includes('(1.0..=100.0)') || fn[0].includes('1.0..=100.0'), 'percent branch missing');
@@ -459,9 +459,9 @@ fn hundred_percent_is_the_screen_not_fullscreen() {
 
 Grep that `wanted_size` / `set_picker_size` never call `set_fullscreen`.
 
-- [ ] **Step 2: `cd src-tauri && cargo test` — FAIL** on new tests.
+- [x] **Step 2: `cd src-tauri && cargo test` — FAIL** on new tests.
 
-- [ ] **Step 3: `scale_axis`**
+- [x] **Step 3: `scale_axis`**
 
 ```rust
 if pct == 0.0 { return 0.0; }
@@ -486,9 +486,9 @@ let axis = |fitted: f64, val: f64, screen: f64| {
 };
 ```
 
-- [ ] **Step 4: `cargo test` and `npm test`.**
+- [x] **Step 4: `cargo test` and `npm test`.**
 
-- [ ] **Step 5: Commit** `feat(picker): accept pixel pickerSize values`
+- [x] **Step 5: Commit** `feat(picker): accept pixel pickerSize values`
 
 ---
 
@@ -505,7 +505,7 @@ let axis = |fitted: f64, val: f64, screen: f64| {
 - `scrim::set_visible(app, show: bool)` 
 - `show = scrim_for(fullscreen, cfg)` where `fullscreen` is the picker layout flag
 
-- [ ] **Step 1: JS tests** for default scrim false and a patch of one flag. Rust:
+- [x] **Step 1: JS tests** for default scrim false and a patch of one flag. Rust:
 
 ```rust
 fn scrim_wanted(fullscreen: bool, narrow: bool, wide: bool) -> bool {
@@ -526,9 +526,9 @@ test('scrim не второй webview', () => {
 
 (Place `scrim.rs` so the test file exists by Step 3.)
 
-- [ ] **Step 2: FAIL, then implement `normalizeScrim`.** Window size page gets two bool fields after the size radios: `scrim.narrow`, `scrim.wide`.
+- [x] **Step 2: FAIL, then implement `normalizeScrim`.** Window size page gets two bool fields after the size radios: `scrim.narrow`, `scrim.wide`.
 
-- [ ] **Step 3: Native windows**
+- [x] **Step 3: Native windows**
 
 `scrim.rs`:
 
@@ -538,9 +538,9 @@ test('scrim не второй webview', () => {
 
 Call `scrim::set_visible` from `show_picker` (after `show()`), `hide_picker` (before or after hide), and the size/fullscreen apply path so `^F` restyles visibility.
 
-- [ ] **Step 4: `npm test` and `cargo test`.** Manual note in Post-Completion.
+- [x] **Step 4: `npm test` and `cargo test`.** Manual note in Post-Completion.
 
-- [ ] **Step 5: Commit** `feat(picker): dim the desktop behind the picker`
+- [x] **Step 5: Commit** `feat(picker): dim the desktop behind the picker`
 
 ---
 
@@ -556,7 +556,7 @@ Call `scrim::set_visible` from `show_picker` (after `show()`), `hide_picker` (be
 - `function hidesProject(name, cwd) -> boolean` — basename of `cwd` (last non-empty path segment, accept `/` and `\`), both sets non-empty, one is a subset of the other
 - `function projectLine(name, cwd) -> string` — `''` if hidden, else basename (not `shortPath`)
 
-- [ ] **Step 1: Tests in `test/session-glyph.test.js`**
+- [x] **Step 1: Tests in `test/session-glyph.test.js`**
 
 ```js
 test('ccfzf_picker совпадает с ccfzf-picker', () => {
@@ -581,15 +581,15 @@ test('пустые имя или cwd не гасят', () => {
 
 Row contract: with `showPaths: true`, a project row whose `label` equals the directory name has no `<div class="cwd">`. A session `mac-wezterm` in `ccfzf-picker` has `<div class="cwd">ccfzf-picker</div>` and `title` still contains `shortPath`.
 
-- [ ] **Step 2: FAIL.**
+- [x] **Step 2: FAIL.**
 
-- [ ] **Step 3: Implement and switch the three `.cwd` interpolations** from `shortPath(...)` to `projectLine(name, cwd)` where `name` is the same string already used as the row title (`sessionName` / `project.label` / snapshot session name). Tooltip unchanged (`rowTitle` still uses `shortPath`).
+- [x] **Step 3: Implement and switch the three `.cwd` interpolations** from `shortPath(...)` to `projectLine(name, cwd)` where `name` is the same string already used as the row title (`sessionName` / `project.label` / snapshot session name). Tooltip unchanged (`rowTitle` still uses `shortPath`).
 
 Terminal icon: in `windowHtml` (or wherever the window glyph is built), if `toggles.showTerminalIcon.list` and `windowOf(row).app` or `.process` matches `/wezterm|kitty|ghostty|WindowsTerminal|wt|iTerm/i`, swap the glyph character. If no field, keep the current glyph. No tracker change in this task.
 
-- [ ] **Step 4: `npm test`.**
+- [x] **Step 4: `npm test`.**
 
-- [ ] **Step 5: Commit** `feat(picker): show project basename unless named in the row`
+- [x] **Step 5: Commit** `feat(picker): show project basename unless named in the row`
 
 ---
 
@@ -600,9 +600,9 @@ Terminal icon: in `windowHtml` (or wherever the window glyph is built), if `togg
 
 Remove or check off: Settings tabs, Columns table, form chrome, Window size radios, overlay, «вместо пути показывать проект». Leave terminal registry, wide-mode selection jump, grey circle, and `## Нужен дизайн` untouched.
 
-- [ ] **Step 1: Edit `docs/TODO.md`.** No tests.
+- [x] **Step 1: Edit `docs/TODO.md`.** No tests.
 
-- [ ] **Step 2: Commit** `task: check off settings overhaul items`
+- [x] **Step 2: Commit** `task: check off settings overhaul items`
 
 ---
 
