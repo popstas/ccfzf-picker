@@ -766,11 +766,23 @@ fn allow_any_foreground() {}
 /// Общий для всех команд, публикующих просьбы: шесть копий одной проверки
 /// разошлись бы в тексте отказа, а его читает человек в строке ошибки пикера.
 fn configured_broker() -> Result<mqtt::Broker, String> {
-    let broker = mqtt::broker_from_config(&load_config()?);
+    Ok(configured_broker_and_terminal()?.0)
+}
+
+/// То же самое плюс имя выбранного терминала — одним чтением конфига.
+///
+/// Отдельная функция, а не второй `load_config()` рядом: файл читается с диска,
+/// а зовут это на каждое нажатие Enter. Имя нужно только тем трём просьбам, что
+/// кончаются терминалом, — остальным (фокус, отметка, восстановление) хватает
+/// брокера, и грузить их лишним полем незачем.
+fn configured_broker_and_terminal() -> Result<(mqtt::Broker, String), String> {
+    let raw = load_config()?;
+    let broker = mqtt::broker_from_config(&raw);
     if !broker.is_configured() {
         return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
     }
-    Ok(broker)
+    let terminal = mqtt::terminal_name(&raw);
+    Ok((broker, terminal))
 }
 
 /// Поднять окно сессии через MQTT.
@@ -868,12 +880,12 @@ async fn open_session_mqtt(
     base: Option<String>,
 ) -> Result<(), String> {
     allow_any_foreground();
-    let broker = configured_broker()?;
+    let (broker, terminal) = configured_broker_and_terminal()?;
     let cwd = cwd.unwrap_or_default().trim().to_string();
     // Адрес называет трекер той машины, где стоит окно; свой из конфига —
     // запасной ход для трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &base, &id, &cwd))
+    tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &base, &id, &cwd, &terminal))
         .await
         .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
 }
@@ -891,14 +903,16 @@ async fn open_session_mqtt(
 #[tauri::command]
 async fn open_project_mqtt(cwd: String, base: Option<String>) -> Result<(), String> {
     allow_any_foreground();
-    let broker = configured_broker()?;
+    let (broker, terminal) = configured_broker_and_terminal()?;
     // У строки проекта окна нет вовсе: адрес называет трекер машины
     // менеджера, а не машины окна. Свой из конфига — запасной ход для
     // трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || mqtt::open_project(&broker, &base, &cwd))
-        .await
-        .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        mqtt::open_project(&broker, &base, &cwd, &terminal)
+    })
+    .await
+    .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
 }
 
 /// Попросить менеджера завести новую сессию в каталоге.
@@ -910,14 +924,16 @@ async fn open_project_mqtt(cwd: String, base: Option<String>) -> Result<(), Stri
 #[tauri::command]
 async fn new_session_mqtt(cwd: String, name: String, base: Option<String>) -> Result<(), String> {
     allow_any_foreground();
-    let broker = configured_broker()?;
+    let (broker, terminal) = configured_broker_and_terminal()?;
     // Окна ещё нет — сессия только заводится: адрес называет трекер машины
     // менеджера, а не машины окна. Свой из конфига — запасной ход для
     // трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || mqtt::open_new(&broker, &base, &cwd, &name))
-        .await
-        .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        mqtt::open_new(&broker, &base, &cwd, &name, &terminal)
+    })
+    .await
+    .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
 }
 
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и

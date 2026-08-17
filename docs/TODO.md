@@ -265,26 +265,36 @@ Recommended, свёрнутая подробность терминала, ра�
 
 # future
 
-- [ ] **Выбранный в пикере терминал обязан главенствовать и на машине с
+- [x] **Выбранный в пикере терминал обязан главенствовать и на машине с
   менеджером — wt и WezTerm на Windows равноправны.** Поймано на popstas-pc:
   выбран пресет `wezterm-windows`, `config.yaml` записан верно
   (`file: wezterm-gui.exe`, `args: [start, --]`), а открывается Windows
   Terminal. Пресет не при чём — на этой машине пикер терминал не открывает
   вовсе: хост совпал с `windowHost`, брокер настроен, и `chooseEnterAction`
   (`frontend-src/open-transport.js`) отдаёт `manager`. Терминал поднимает
-  windows11-manager своим конфигом (`launch`/`launchNew` — `wt.exe -w -1 …`),
-  а поле `terminal` в `config.yaml` читается только на запасной местной
-  дороге, то есть на этой машине почти никогда.
+  windows11-manager своим конфигом, а поле `terminal` в `config.yaml` читается
+  только на запасной местной дороге, то есть на этой машине почти никогда.
 
-  Переносится не одна команда: `-w -1` («в текущее окно») у `wezterm start`
-  прямого аналога не имеет, а `applyWtProfile` вставляет `-p <профиль>` — весь
-  маппинг `claudeWt.projects → profile` это понятие Windows Terminal, у
-  WezTerm профилей нет вовсе. Дизайн решён и записан:
-  [docs/superpowers/specs/2026-08-16-terminal-registry-design.md](superpowers/specs/2026-08-16-terminal-registry-design.md)
-  — имя терминала едет в просьбе, определения живут реестром у менеджера,
-  профили становятся картой по имени терминала. Работа на три репозитория:
-  windows11-manager, ccfzf-picker, macos-windows-manager (последний учится
-  открывать сессии и объявляет `openSession: true`).
+  Диагноз подтверждён на живой машине 2026-08-17 и оказался неполным в одном:
+  **сторона менеджера уже сделана и выкачена.** На popstas-pc стоит
+  windows11-manager `87161df` с `src/claude-wt/terminal-helpers.js` — реестр
+  (`wt` → `wt.exe -w -1` + `-p {profile}`, `wezterm` → `wezterm-gui.exe start
+  --`), `resolveTerminal` берёт названный просьбой, `claude-commands.js`
+  разбирает поле `terminal` из тела, дефолт машины в конфиге — `wt`. Не
+  хватало ровно пикерной половины: просьба уходила без имени, и менеджер
+  честно брал свой дефолт.
+
+  Сделано по
+  [дизайну](superpowers/specs/2026-08-16-terminal-registry-design.md):
+  семейное имя у пресетов (`terminal-presets.js`), таблица «имя файла → имя
+  терминала» в Rust (`terminal_name` в `mqtt.rs` — считает Rust, а не
+  страница: ту же просьбу шлёт проектный хоткей при спящем webview), поле в
+  трёх телах просьбы, текстовый сторож `test/terminal-name.test.js` на сверку
+  двух таблиц.
+
+  Остаётся третий репозиторий — macos-windows-manager: он учится принимать
+  `claude-session-open` и объявлять `openSession: true`. Строка на это —
+  в его собственном TODO.
 
 - [ ] **Живая сессия исчезает из списка, а на её месте стоит тёзка.** Поймано
   2026-08-17: сессия `60a2` (`ExpertizeMe`) пропала из списка, а строка с тем же
