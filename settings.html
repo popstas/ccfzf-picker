@@ -134,6 +134,14 @@
     return String(value == null ? '' : value).split('\n').map(s => s.trim()).filter(Boolean);
   }
 
+  /** Вводный абзац вкладки MQTT — объясняет, зачем брокер вообще нужен. */
+  function mqttIntroHtml() {
+    return '<div class="hint">Focus, snapshots, and opening a session through a window manager need MQTT. '
+      + 'Without a broker those actions do not run. On Windows the manager both focuses windows and '
+      + 'opens terminals. On a Mac the tracker focuses windows and the picker opens terminals itself '
+      + '— the broker is still required for focus.</div>';
+  }
+
   function fieldHtml(field) {
     const value = fields[field.id];
     const hint = field.hint ? `<div class="hint">${esc(field.hint)}</div>` : '';
@@ -165,8 +173,10 @@
         + `<select data-field="${field.id}">${html}</select>${hint}</div>`;
     }
     if (field.type === 'bool') {
+      // title, а не вторая строка под полем: подсказка всплывает по наведению,
+      // а `.hint` рядом остаётся как есть — их две разных формы объяснения.
       return `<div class="field"><label><input type="checkbox" data-field="${field.id}"${
-        value ? ' checked' : ''}> ${esc(field.label)}</label>${hint}</div>`;
+        value ? ' checked' : ''} title="${esc(field.hint || field.label)}"> ${esc(field.label)}</label>${hint}</div>`;
     }
     if (field.type === 'lines') {
       return `<div class="field"><label>${esc(field.label)}</label>`
@@ -175,6 +185,36 @@
     const type = field.type === 'password' ? 'password' : (field.type === 'number' ? 'number' : 'text');
     return `<div class="field"><label>${esc(field.label)}</label>`
       + `<input type="${type}" data-field="${field.id}" value="${esc(value)}">${hint}</div>`;
+  }
+
+  /**
+   * Тело страницы General: поля страницы, но `terminal.file` и `terminal.args`
+   * сложены в один `<details>`, а не идут двумя отдельными полями.
+   *
+   * `fieldHtml` про это не знает — её контракт «одно поле внутрь, одна строка
+   * наружу» остаётся как был, обёртку строит вызывающий код. Открыт `<details>`
+   * ровно тогда, когда набранное не совпадает ни с одним пресетом
+   * (`matchPreset` вернул `'custom'`) — тем же вызовом, каким это уже решает
+   * `fieldHtml` для поля-выпадашки пресетов, а не вторым разбором.
+   */
+  function generalBodyHtml(fieldsList) {
+    const custom = window.TerminalPresets.matchPreset(
+      { file: fields['terminal.file'], args: linesToArgs(fields['terminal.args']) },
+      platform()) === 'custom';
+    let html = '';
+    for (let i = 0; i < fieldsList.length; i++) {
+      const field = fieldsList[i];
+      const next = fieldsList[i + 1];
+      if (field.id === 'terminal.file' && next && next.id === 'terminal.args') {
+        html += `<details${custom ? ' open' : ''}>`
+          + '<summary>Terminal command (path and arguments)</summary>'
+          + fieldHtml(field) + fieldHtml(next) + '</details>';
+        i += 1;
+        continue;
+      }
+      html += fieldHtml(field);
+    }
+    return html;
   }
 
   // Обе оси называются одинаково у колонок и у фильтров, а значат разное:
@@ -271,11 +311,12 @@
 
   function renderPage() {
     const def = PAGES.find(p => p.id === current);
-    const body = current === 'ui'
-      ? axesTableHtml()
-      : current === 'panels'
-        ? panelsTableHtml()
-        : def.fields.map(fieldHtml).join('') + (current === 'integrations' ? actionsListHtml() : '');
+    const body = current === 'columns' ? axesTableHtml()
+      : current === 'panels' ? panelsTableHtml()
+      : current === 'general' ? generalBodyHtml(def.fields)
+      : (current === 'mqtt' ? mqttIntroHtml() : '')
+        + def.fields.map(fieldHtml).join('')
+        + (current === 'paths' ? actionsListHtml() : '');
     page.innerHTML = body
       + '<div id="bar"><button id="save">Save</button><span id="status"></span></div>';
 
@@ -376,7 +417,7 @@
         dirtyPanels.clear();
         renderPage();
         document.getElementById('status').textContent = 'saved';
-      } else if (current === 'ui') {
+      } else if (current === 'columns') {
         // Файл перечитывается прямо сейчас, а не берётся из снимка загрузки:
         // пикер мог написать в него своё, пока окно было открыто (см.
         // `dirtyAxes`). Поверх свежего кладутся только те оси, что правили

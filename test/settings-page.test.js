@@ -49,7 +49,7 @@ async function saveUiTab({ onDisk, snapshot, dirty }) {
       calls.push({ cmd, args });
       return Promise.resolve(cmd === 'load_ui' ? onDisk : undefined);
     },
-    current: 'ui',
+    current: 'columns',
     ui: snapshot,
     dirtyAxes,
     renderPage: () => {},
@@ -426,4 +426,27 @@ test('размер, вписанный руками, виден в выпада�
   const handmade = html(70);
   assert.match(handmade, /<option value="70" selected>70% of screen<\/option>/);
   assert.strictEqual((handmade.match(/<option/g) || []).length, field.options.length + 1);
+});
+
+// ── маршрутизация вкладок после переименования 'ui'/'integrations' ──────────
+//
+// Task 2 переименовал id страниц в PAGES (ui → columns, integrations исчезла,
+// её поля ушли в mqtt и paths), а settings.html намеренно оставили нетронутым
+// — эти тесты сторожат, что маршрутизация в renderPage/save её догнала.
+
+test('вкладки называются по спеке и Integrations нет', () => {
+  const { PAGES } = require('../frontend-src/settings-form');
+  assert.deepStrictEqual(PAGES.map(p => p.title), [
+    'General', 'Window size', 'Columns', 'Layout panels', 'Hotkeys', 'MQTT', 'Paths',
+  ]);
+});
+
+test('renderPage знает columns и paths, а не ui и integrations', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  assert.match(src, /current === 'columns'/);
+  assert.match(src, /current === 'paths'/);
+  assert.doesNotMatch(src, /current === 'ui'/);
+  assert.doesNotMatch(src, /current === 'integrations'/);
+  assert.match(src, /Focus, snapshots, and opening a session through a window manager need MQTT/);
+  assert.match(src, /<details/);
 });
