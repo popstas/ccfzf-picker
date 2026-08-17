@@ -9,7 +9,16 @@ test('страницы перечисляют поля без повторов',
   const ids = PAGES.flatMap(p => p.fields.map(f => f.id));
   assert.deepStrictEqual([...new Set(ids)], ids);
   assert.deepStrictEqual(PAGES.map(p => p.id),
-    ['general', 'window', 'ui', 'panels', 'hotkeys', 'integrations']);
+    ['general', 'window', 'columns', 'panels', 'hotkeys', 'mqtt', 'paths']);
+});
+
+test('windowHost живёт на General, mqtt и pathMap — на своих вкладках', () => {
+  const ids = (page) => PAGES.find(p => p.id === page).fields.map(f => f.id);
+  assert.ok(ids('general').includes('windowHost'));
+  assert.ok(ids('mqtt').some(id => id.startsWith('mqtt.')));
+  assert.ok(ids('paths').some(id => id.startsWith('pathMap.')));
+  assert.ok(!PAGES.some(p => p.id === 'integrations'));
+  assert.ok(!PAGES.some(p => p.id === 'ui'));
 });
 
 test('конфиг раскладывается по полям формы', () => {

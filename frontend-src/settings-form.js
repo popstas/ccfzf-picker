@@ -20,7 +20,7 @@
    * `id` поля — это путь в конфиге через точку. Разбор пути тут же, ниже:
    * заводить ради двух уровней вложенности схему было бы дороже.
    *
-   * Страница `ui` полей не имеет: она правит ui.json, а не config.yaml, и
+   * Страница `columns` полей не имеет: она правит ui.json, а не config.yaml, и
    * рисуется своим кодом в settings.html — таблицей галок по двум осям.
    */
   /**
@@ -80,11 +80,13 @@
           hint: 'From 0.1 (very dim) to 1.0 (fully opaque).' },
         { id: 'caps.reptyr', label: 'Allow moving the process (reptyr)', type: 'bool' },
         { id: 'caps.takeover', label: 'Allow taking a session over', type: 'bool' },
+        { id: 'windowHost', label: 'Name of this machine', type: 'text',
+          hint: 'Matches the host on a session window — Enter raises it.' },
       ],
     },
     {
       id: 'window',
-      title: 'Window',
+      title: 'Window size',
       fields: [
         { id: 'pickerSize.narrow.width', label: 'List width', type: 'choice',
           options: SIZE_CHOICES },
@@ -99,11 +101,11 @@
           hint: 'Wide mode is the one Ctrl+F switches to.' },
       ],
     },
-    { id: 'ui', title: 'UI', fields: [] },
-    // Полей у неё нет по той же причине, что и у `ui`: правит она ui.json, а
-    // не config.yaml, и рисуется своим кодом в settings.html — таблицей
-    // панелей широкого режима.
-    { id: 'panels', title: 'Panels', fields: [] },
+    { id: 'columns', title: 'Columns', fields: [] },
+    // Полей у неё нет по той же причине, что и у `columns`: правит она
+    // ui.json, а не config.yaml, и рисуется своим кодом в settings.html —
+    // таблицей панелей широкого режима.
+    { id: 'panels', title: 'Layout panels', fields: [] },
     {
       id: 'hotkeys',
       title: 'Hotkeys',
@@ -116,17 +118,21 @@
       ],
     },
     {
-      id: 'integrations',
-      title: 'Integrations',
+      id: 'mqtt',
+      title: 'MQTT',
       fields: [
-        { id: 'windowHost', label: 'Name of this machine', type: 'text',
-          hint: 'Matches the host on a session window — Enter raises it.' },
         { id: 'mqtt.host', label: 'MQTT broker', type: 'text' },
         { id: 'mqtt.port', label: 'Broker port', type: 'number' },
         { id: 'mqtt.user', label: 'User', type: 'text' },
         { id: 'mqtt.password', label: 'Password', type: 'password',
           hint: 'Empty means keep the current one.' },
         { id: 'mqtt.base', label: 'Topic prefix', type: 'text' },
+      ],
+    },
+    {
+      id: 'paths',
+      title: 'Paths',
+      fields: [
         { id: 'pathMap.remote', label: 'Directory on the remote host', type: 'text' },
         { id: 'pathMap.local', label: 'The same one here', type: 'text' },
       ],
