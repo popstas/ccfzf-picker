@@ -261,6 +261,11 @@
            показе окна и при каждой правке запроса, то есть без участия человека.
            Наведение — наоборот, прямой жест и по одной строке. */
         .row.stale:hover { opacity: 1; }
+        /* Гашение по наведённому проекту. Стоит после `.row.stale` намеренно: обе
+           правки меняют opacity, и на строке с обоими классами они не складываются, а
+           перекрывают друг друга по порядку в файле. Главнее здесь наведение — оно
+           временное и отвечает на прямой жест человека. */
+        .row.dim-other { opacity: 0.3; }
         .row.active .cwd { color: #9aa0a8; }
         /* Заголовок секции — строка списка, но читается заголовком: те же
            мелкие прописные, что и у подписи группы, которой он пришёл на
@@ -672,6 +677,8 @@
   // переживает пересборку списка: по нему сброс выбора возвращается туда,
   // где человек стоял, а не в первую колонку.
   let activePanel = '';
+  // Каталог проекта, на который наведена мышь. Пусто — не гасим ничего.
+  let hoverProjectCwd = '';
   // Строки-переключатели: Enter на них ничего не открывает, а сворачивает. Их
   // сброс выбора и пропускает. Список, а не одна проверка на `section`:
   // заголовок дня у снимков — такая же строка и с той же ценой, и в режиме
@@ -1554,6 +1561,9 @@
     }
     if (active >= rows.length) active = Math.max(0, rows.length - 1);
     paint();
+    // Подсветка держится отдельно от разметки строки и потому переживает
+    // planListSync только так — восстановлением после каждой отрисовки.
+    paintProjectDim();
   }
 
   /**
@@ -1768,6 +1778,26 @@
     // себя, разошлись бы, а забытый шестой дал бы прыжок через экран — ровно
     // тот, ради которого всё затевалось.
     activePanel = (rows[active] || {}).panel || '';
+  }
+
+  /**
+   * Какие строки гасить при наведении на проект: чистая часть, поэтому
+   * отдельно от записи в DOM.
+   *
+   * Заголовки секций и дней не гаснут: погашенный заголовок читался бы как
+   * свёрнутая панель. Подзаголовки машин в `rows` не попадают вовсе.
+   */
+  function dimsForHover(rows, cwd) {
+    return rows.map(row => Boolean(cwd)
+      && !HEADER_KINDS.has(row.kind)
+      && row.cwd !== cwd);
+  }
+
+  /** Разложить решение dimsForHover по узлам списка. */
+  function paintProjectDim() {
+    const dims = dimsForHover(rows, hoverProjectCwd);
+    const nodes = list.querySelectorAll('.row');
+    nodes.forEach((node, i) => node.classList.toggle('dim-other', Boolean(dims[i])));
   }
 
   /** Каретка на краю запроса и ничего не выделено. */
@@ -3092,6 +3122,26 @@
     }
     else if (e.key === 'Enter') { e.preventDefault(); choose(); }
     else if (e.key === 'Escape') { e.preventDefault(); onEscape(); }
+  });
+
+  // Наведение на строку проекта гасит строки с другим каталогом во всех
+  // панелях. mouseover, а не mouseenter: первый всплывает, и один обработчик
+  // на списке видит переход между строками. Уход мыши со строки проекта на
+  // соседнюю строку списка гасит подсветку тем же событием — closest не
+  // находит `.row.project`, и каталог становится пустым.
+  list.addEventListener('mouseover', (e) => {
+    const node = e.target.closest('.row.project');
+    const cwd = node ? (rows[Number(node.dataset.index)] || {}).cwd || '' : '';
+    if (cwd === hoverProjectCwd) return;
+    hoverProjectCwd = cwd;
+    paintProjectDim();
+  });
+
+  // Уход мыши из списка целиком: mouseover там уже не придёт.
+  list.addEventListener('mouseleave', () => {
+    if (!hoverProjectCwd) return;
+    hoverProjectCwd = '';
+    paintProjectDim();
   });
 
   list.addEventListener('click', (e) => {

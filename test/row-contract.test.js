@@ -832,6 +832,43 @@ test('показ окна забывает панель прошлого пок�
   assert.match(source, /activePanel = ''/, 'beginShow не чистит activePanel');
 });
 
+test('наведение на проект гасит строки с другим каталогом', () => {
+  // Гаснут строки во всех панелях сразу — ради этого всё и затевалось:
+  // сессии проекта разбросаны по своим живым, чужим, истории и снимкам.
+  const source = pageFunctions('dimsForHover(rows, cwd)');
+  const ctx = { HEADER_KINDS: new Set(['section', 'snapshot-day']) };
+  vm.createContext(ctx);
+  const rows = [
+    { kind: 'section' },
+    { kind: 'project', cwd: '/home/user/a' },
+    { kind: 'session', cwd: '/home/user/a' },
+    { kind: 'session', cwd: '/home/user/b' },
+    { kind: 'snapshot-session', cwd: '/home/user/b' },
+  ];
+  const dims = vm.runInContext(`${source}\ndimsForHover(${JSON.stringify(rows)}, '/home/user/a');`,
+    ctx, { filename: 'sessions.html' });
+  // Заголовок не гаснет: погашенный, он читался бы как свёрнутая панель.
+  assert.deepStrictEqual(Array.from(dims), [false, false, false, true, true]);
+});
+
+test('без наведения не гаснет ничего', () => {
+  const source = pageFunctions('dimsForHover(rows, cwd)');
+  const ctx = { HEADER_KINDS: new Set(['section', 'snapshot-day']) };
+  vm.createContext(ctx);
+  const dims = vm.runInContext(
+    `${source}\ndimsForHover([{ kind: 'session', cwd: '/home/user/b' }], '');`,
+    ctx, { filename: 'sessions.html' });
+  assert.deepStrictEqual(Array.from(dims), [false]);
+});
+
+test('подсветка восстанавливается после отрисовки', () => {
+  // Подача тикает раз в секунду, и planListSync правит изменившиеся
+  // элементы: без вызова из render класс исчезал бы на первом же такте — то
+  // есть почти сразу и без всякой видимой причины.
+  const source = pageFunctions('render()');
+  assert.match(source, /paintProjectDim\(\)/, 'render не восстанавливает подсветку проекта');
+});
+
 // ── Куда Enter уводит строку снимка ──────────────────────────────────────────
 //
 // Единственное место, которое различает три исхода — поднять всю раскладку,
