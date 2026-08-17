@@ -24,6 +24,7 @@
   }
   .hint { color: #999; margin-top: 3px; }
   #bar { position: sticky; bottom: 0; padding: 12px 0 0; background: #1c1c1e; }
+  #save { padding: 8px 18px; }
   #status { color: #999; margin-left: 10px; }
   #status.bad { color: #ff7b72; }
   table.axes { border-collapse: collapse; }
@@ -112,6 +113,10 @@
   // делал.
   const dirtyPanels = new Set();
   let current = 'general';
+  // Автосохранение: таймер один на всё окно, а не по полю. Дебаунс — 400 мс,
+  // и общий он затем, что правка в одном поле и следом клик по галке рядом
+  // обязаны собраться в одну запись на диск, а не в две подряд.
+  let saveTimer = null;
   const tabs = document.getElementById('tabs');
   const page = document.getElementById('page');
 
@@ -430,6 +435,17 @@
         + 'once you have folded or moved them at least once.');
   }
 
+  /**
+   * Отложенная запись: событие правки перезапускает один и тот же таймер.
+   *
+   * Не по месту в каждом обработчике, а общей функцией — иначе список полей,
+   * трогающих `fields`/`ui.*`, разошёлся бы с тем, что реально шлёт запись.
+   */
+  function scheduleAutosave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(persist, 400);
+  }
+
   function renderPage() {
     const def = PAGES.find(p => p.id === current);
     const body = current === 'columns' ? axesTableHtml()
@@ -452,9 +468,13 @@
     for (const input of page.querySelectorAll('[data-field]')) {
       input.addEventListener('input', () => {
         fields[input.dataset.field] = input.type === 'checkbox' ? input.checked : input.value;
+        scheduleAutosave();
       });
       if (input.type === 'checkbox') {
-        input.addEventListener('change', () => { fields[input.dataset.field] = input.checked; });
+        input.addEventListener('change', () => {
+          fields[input.dataset.field] = input.checked;
+          scheduleAutosave();
+        });
       }
     }
     for (const input of page.querySelectorAll('[data-panel]')) {
@@ -479,6 +499,7 @@
           ui.order = window.PickerPanels.withColumn(ui.order, key, Number(input.value));
         }
         dirtyPanels.add(`${half}:${key}`);
+        scheduleAutosave();
       });
     }
     for (const input of page.querySelectorAll('[data-axis]')) {
@@ -493,6 +514,7 @@
         ui.toggles[key] = { ...ui.toggles[key], [axis]: input.checked };
         if (!dirtyAxes.has(key)) dirtyAxes.set(key, new Set());
         dirtyAxes.get(key).add(axis);
+        scheduleAutosave();
       });
     }
     if (recommendedAll) {
@@ -502,6 +524,7 @@
         // курсор индикатора — applyRecommendedToggle решает это сама, по
         // текущим ui.toggles, а не по DOM-состоянию щёлкнутого чекбокса.
         ui.toggles = applyRecommendedToggle(ui.toggles, dirtyAxes);
+        scheduleAutosave();
         renderPage();
       });
     }
@@ -515,15 +538,16 @@
         fields['terminal.file'] = preset.file;
         // Аргументы форма держит построчной строкой — тип `lines`.
         fields['terminal.args'] = preset.args.join('\n');
+        scheduleAutosave();
         // Перерисовка, а не правка двух input'ов по месту: поля рисует
         // fieldHtml, и вторая дорога к их значению разошлась бы с первой.
         renderPage();
       });
     }
-    document.getElementById('save').addEventListener('click', save);
+    document.getElementById('save').addEventListener('click', persist);
   }
 
-  async function save() {
+  async function persist() {
     const status = document.getElementById('status');
     status.className = '';
     status.textContent = 'saving…';

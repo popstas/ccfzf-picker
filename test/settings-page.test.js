@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const UiState = require('../frontend-src/ui-state');
 
-// ── save() из settings.html не затирает то, что писал пикер ─────────────────
+// ── persist() из settings.html не затирает то, что писал пикер ──────────────
 //
 // Ревью нашло: окно настроек читает ui.json один раз при загрузке, а
 // `open_settings` переиспользует уже созданное окно и страницу не
@@ -15,10 +15,11 @@ const UiState = require('../frontend-src/ui-state');
 // сторону. Сохранение снимком откатывало бы чужую правку, да ещё и рассылало
 // пикеру приказ перечитать этот откат.
 //
-// save() живёт прямо в странице, требовать его через require неоткуда —
+// persist() живёт прямо в странице, требовать его через require неоткуда —
 // поэтому он вычитывается из settings.html и выполняется в vm, тем же приёмом,
 // что renderProjects и saveUi в row-contract.test.js. Копия сохранения в тесте
-// разошлась бы с настоящим молча.
+// разошлась бы с настоящим молча. Save зовёт его же — кнопка и автосохранение
+// делят один обработчик (task 6).
 const SETTINGS_HTML = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
 
 function sourceOf(re, what) {
@@ -36,7 +37,7 @@ function sourceOf(re, what) {
  */
 async function saveUiTab({ onDisk, snapshot, dirty }) {
   const defaultsSrc = sourceOf(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/, 'UI_DEFAULTS');
-  const saveSrc = sourceOf(/\n {2}async function save\(\) \{[\s\S]*?\n {2}\}\n/, 'save');
+  const saveSrc = sourceOf(/\n {2}async function persist\(\) \{[\s\S]*?\n {2}\}\n/, 'persist');
 
   const calls = [];
   const dirtyAxes = new Map();
@@ -55,7 +56,7 @@ async function saveUiTab({ onDisk, snapshot, dirty }) {
     renderPage: () => {},
   };
   vm.createContext(ctx);
-  vm.runInContext(`${defaultsSrc}\n${saveSrc}\nvar done = save();`, ctx, { filename: 'settings.html' });
+  vm.runInContext(`${defaultsSrc}\n${saveSrc}\nvar done = persist();`, ctx, { filename: 'settings.html' });
   await ctx.done;
   const saved = calls.find(c => c.cmd === 'save_ui');
   assert.ok(saved, 'save_ui не позван');
@@ -352,10 +353,10 @@ test('пикер тоже зовёт uiStateToSave всеми аргумента
 
 const PickerPanels = require('../frontend-src/picker-panels');
 
-/** Прогнать настоящий save() на вкладке Panels. */
+/** Прогнать настоящий persist() на вкладке Panels. */
 async function savePanelsTab({ onDisk, snapshot, dirty }) {
   const defaultsSrc = sourceOf(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/, 'UI_DEFAULTS');
-  const saveSrc = sourceOf(/\n {2}async function save\(\) \{[\s\S]*?\n {2}\}\n/, 'save');
+  const saveSrc = sourceOf(/\n {2}async function persist\(\) \{[\s\S]*?\n {2}\}\n/, 'persist');
   const calls = [];
   const status = { className: '', textContent: '' };
   const ctx = {
@@ -372,7 +373,7 @@ async function savePanelsTab({ onDisk, snapshot, dirty }) {
     renderPage: () => {},
   };
   vm.createContext(ctx);
-  vm.runInContext(`${defaultsSrc}\n${saveSrc}\nvar done = save();`, ctx, { filename: 'settings.html' });
+  vm.runInContext(`${defaultsSrc}\n${saveSrc}\nvar done = persist();`, ctx, { filename: 'settings.html' });
   await ctx.done;
   const saved = calls.find(c => c.cmd === 'save_ui');
   assert.ok(saved, 'save_ui не позван');
@@ -600,7 +601,7 @@ test('renderPage знает columns и paths, а не ui и integrations', () =>
 // местами, дали бы ложное совпадение здесь и остались бы незамеченными при
 // подмене.
 const TerminalPresets = require('../frontend-src/terminal-presets');
-const { PAGES: FORM_PAGES, configToFields } = require('../frontend-src/settings-form');
+const { PAGES: FORM_PAGES, configToFields, validate, fieldsToPatch } = require('../frontend-src/settings-form');
 
 function generalHtml(overrides) {
   const src = ['function platform', 'function linesToArgs', 'function currentPreset']
@@ -636,4 +637,95 @@ test('путь и аргументы, совпавшие с пресетом, о
   });
   assert.match(html, /<details>/);
   assert.doesNotMatch(html, /<details open>/);
+});
+
+// ── Task 6: автосохранение и Save зовут одну persist ─────────────────────────
+//
+// Save-кнопка больше не единственный путь к записи: каждая правка планирует
+// тот же persist() через общий таймер. Текстовый тест ниже сторожит форму —
+// что persist существует, что таймер зовут именно его, что дебаунс 400 мс и
+// что у кнопки появился отступ; поведенческие тесты после него проверяют, что
+// дебаунс и правда общий на всё окно, а не по полю, и что ошибка validate
+// глушит запись даже под таймером — тем же кодом, каким она глушит её и под
+// ручным Save.
+
+test('autosave и Save зовут одну persist', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  assert.match(src, /async function persist\(/);
+  assert.match(src, /setTimeout\(persist,/);
+  assert.match(src, /400/);
+  assert.match(src, /#save \{[^}]*padding/);
+});
+
+/**
+ * Настоящий scheduleAutosave, прогнанный на поддельных таймерах.
+ *
+ * Ни DOM, ни настоящий setTimeout не нужны: у дебаунса есть ровно один
+ * контракт — второй вызов подряд отменяет первый таймер, а не заводит второй,
+ * — и его целиком видно по паре clearTimeout/setTimeout. Настоящие таймеры
+ * заставили бы тест либо спать 400 мс, либо гадать с фиктивным временем;
+ * подставные fn-таймеры дают то же самое без ожидания.
+ */
+function runScheduleAutosaveTwice() {
+  const src = sourceOf(/\n {2}let saveTimer = null;\n/, 'saveTimer')
+    + sourceOf(/\n {2}function scheduleAutosave\(\) \{[\s\S]*?\n {2}\}\n/, 'scheduleAutosave');
+  let persistCalls = 0;
+  let nextId = 0;
+  const pending = new Map();
+  const ctx = {
+    persist: () => { persistCalls += 1; },
+    setTimeout: (fn, ms) => {
+      assert.strictEqual(ms, 400, 'дебаунс обязан быть ровно 400 мс — как в брифе');
+      nextId += 1;
+      pending.set(nextId, fn);
+      return nextId;
+    },
+    clearTimeout: (id) => { pending.delete(id); },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${src}\nscheduleAutosave();\nscheduleAutosave();`, ctx, { filename: 'settings.html' });
+  return { pending, fire: () => { for (const fn of pending.values()) fn(); }, persistCalls: () => persistCalls };
+}
+
+test('два быстрых события планируют один persist, а не два', () => {
+  const run = runScheduleAutosaveTwice();
+  assert.strictEqual(run.pending.size, 1,
+    'второй вызов обязан отменить первый таймер — общий таймер на всё окно, не по полю');
+  run.fire();
+  assert.strictEqual(run.persistCalls(), 1, 'persist обязан сработать ровно один раз');
+});
+
+/** Прогнать настоящий persist() на обычной (yaml) вкладке. */
+async function persistGeneralTab({ fields, config }) {
+  const src = sourceOf(/\n {2}async function persist\(\) \{[\s\S]*?\n {2}\}\n/, 'persist');
+  const calls = [];
+  const status = { className: '', textContent: '' };
+  const ctx = {
+    document: { getElementById: () => status },
+    window: {},
+    invoke: (cmd, args) => {
+      calls.push({ cmd, args });
+      return Promise.resolve(cmd === 'load_config' ? config : undefined);
+    },
+    current: 'general',
+    validate,
+    fieldsToPatch,
+    configToFields,
+    config,
+    fields,
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${src}\nvar done = persist();`, ctx, { filename: 'settings.html' });
+  await ctx.done;
+  return { calls, status };
+}
+
+test('validate, провалившийся под автосохранением, ничего не пишет', async () => {
+  // Спека говорит прямо: «autosave не пишет при ошибке validate». Проверяется
+  // это на persist() напрямую — том же коде, что зовёт и таймер, и кнопка, —
+  // поэтому одного теста хватает на оба пути.
+  const { calls, status } = await persistGeneralTab({ fields: { sshHost: '' }, config: {} });
+  assert.ok(!calls.some(c => c.cmd === 'save_config'), 'save_config не должен был позваться');
+  assert.strictEqual(status.className, 'bad');
+  assert.match(status.textContent, /sshHost is not set/);
 });
