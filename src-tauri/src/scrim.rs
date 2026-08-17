@@ -85,12 +85,19 @@ fn on_main_thread(
     f: impl FnOnce(&tauri::AppHandle) -> Result<(), String> + Send + 'static,
 ) -> Result<(), String> {
     let app = app.clone();
-    app.run_on_main_thread(move || {
-        if let Err(e) = f(&app) {
-            eprintln!("ccfzf-picker: {e}");
-        }
-    })
-    .map_err(|e| format!("cannot schedule the scrim: {e}"))
+    // `run_on_main_thread` берёт `&self`, а замыкание ниже забирает `app` в
+    // себя целиком (`move`) — один и тот же биндинг не может быть и тем, что
+    // заимствуется для вызова, и тем, что перемещается в аргумент. Лишний
+    // `clone()` перед вызовом решает это дешевле, чем заводить вторую
+    // переменную под то же значение: `AppHandle` внутри — счётчик ссылок,
+    // клонирование стоит одного инкремента.
+    app.clone()
+        .run_on_main_thread(move || {
+            if let Err(e) = f(&app) {
+                eprintln!("ccfzf-picker: {e}");
+            }
+        })
+        .map_err(|e| format!("cannot schedule the scrim: {e}"))
 }
 
 #[cfg(windows)]
@@ -103,6 +110,12 @@ mod win {
     //! так что z-order пикера можно поднять тем же типом `HWND` без
     //! конвертации.
     use std::sync::Mutex;
+    // `get_webview_window` — метод трейта `Manager`, а не инструментального
+    // AppHandle: `main.rs` его импортирует у себя, а этот модуль — свой,
+    // отдельная область видимости, свой импорт. Модуль целиком под
+    // `#[cfg(windows)]`, поэтому на Linux этой строки не существует вовсе —
+    // и предупреждения о неиспользованном импорте здесь взяться неоткуда.
+    use tauri::Manager;
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::Graphics::Gdi::CreateSolidBrush;
@@ -295,6 +308,10 @@ mod mac {
     //! Borderless `NSWindow`, а не Tauri: тем же приёмом, что и на Windows,
     //! Tauri умеет создавать только webview-окна.
     use std::sync::Mutex;
+    // Та же причина, что у Windows-стороны этого файла: `get_webview_window`
+    // из трейта `Manager`, модуль под своим `#[cfg(target_os = "macos")]`,
+    // импорт свой — на Linux этот код не компилируется вовсе.
+    use tauri::Manager;
     use objc2::rc::Retained;
     use objc2::MainThreadMarker;
     use objc2_app_kit::{
