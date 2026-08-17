@@ -23,6 +23,9 @@
     font: inherit;
   }
   .hint { color: #999; margin-top: 3px; }
+  .range-row { display: flex; align-items: center; gap: 10px; }
+  .range-row input[type=range] { flex: 1; }
+  .range-current { white-space: nowrap; color: #bbb; }
   #bar { position: sticky; bottom: 0; padding: 12px 0 0; background: #1c1c1e; }
   #status { color: #999; margin-left: 10px; }
   #status.bad { color: #ff7b72; }
@@ -164,6 +167,14 @@
       return `<div class="field"><label>${esc(field.label)}</label>`
         + `<select data-field="${field.id}">${html}</select>${hint}</div>`;
     }
+    if (field.type === 'range') {
+      return `<div class="field"><label>${esc(field.label)}</label>`
+        + '<div class="range-row">'
+        + `<input type="range" data-field="${field.id}" value="${esc(value)}"`
+        + ` min="${esc(field.min)}" max="${esc(field.max)}" step="${esc(field.step)}">`
+        + `<span class="range-current" data-range-current>Current: ${esc(value)}</span>`
+        + `</div>${hint}</div>`;
+    }
     if (field.type === 'bool') {
       return `<div class="field"><label><input type="checkbox" data-field="${field.id}"${
         value ? ' checked' : ''}> ${esc(field.label)}</label>${hint}</div>`;
@@ -269,6 +280,12 @@
         + 'once you have folded or moved them at least once.');
   }
 
+  function updateRangeCurrent(input) {
+    if (input.type !== 'range') return;
+    const output = input.parentElement.querySelector('[data-range-current]');
+    if (output) output.textContent = `Current: ${input.value}`;
+  }
+
   function renderPage() {
     const def = PAGES.find(p => p.id === current);
     const body = current === 'ui'
@@ -282,6 +299,7 @@
     for (const input of page.querySelectorAll('[data-field]')) {
       input.addEventListener('input', () => {
         fields[input.dataset.field] = input.type === 'checkbox' ? input.checked : input.value;
+        updateRangeCurrent(input);
       });
       if (input.type === 'checkbox') {
         input.addEventListener('change', () => { fields[input.dataset.field] = input.checked; });
