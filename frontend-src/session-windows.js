@@ -22,23 +22,32 @@
   }
 
   /**
-   * Запись окна строки, дополненная сведениями о машине.
+   * Окна строки, дополненные сведениями о машине.
    *
-   * Трекеров теперь может быть несколько, и «чья это машина» перестало быть
-   * свойством всего ответа: агрегатор приписывает `host`, `pid` и `canFocus`
-   * каждой записи окна отдельно.
+   * Окон у сессии бывает больше одного: её открывают на двух машинах сразу —
+   * работали на одной, продолжили на другой. Агрегатор отдаёт их списком, в
+   * порядке «свежайший взгляд первым».
    *
-   * Старый агрегатор этих полей не кладёт, и тогда берутся верхние поля
-   * ответа — там ровно один трекер, и все окна его. Пикер и агрегатор
-   * обновляются порознь, порядок нам не подвластен, а пикер новее агрегатора
-   * обязан вести себя как прежде, а не гасить пометки.
+   * Две ветви совместимости, и обе обязательны: пикер и агрегатор
+   * выкатываются порознь, а пикер новее агрегатора обязан вести себя как
+   * прежде, а не гасить пометки. Старый ответ несёт одно `window` — из него
+   * выходит список на одного; совсем старый не кладёт машину и в него, и
+   * тогда её называют верхние поля ответа: там ровно один трекер, и все окна
+   * его.
    */
-  function windowOf(row, state) {
-    const w = (row || {}).window;
-    if (!w) return null;
-    if (normHost(w.host)) return w;
+  function windowsOf(row, state) {
+    const r = row || {};
+    if (Array.isArray(r.windows) && r.windows.length) return r.windows;
+    const w = r.window;
+    if (!w) return [];
+    if (normHost(w.host)) return [w];
     const s = state || {};
-    return { ...w, host: s.windowHost, pid: s.windowPid, canFocus: true };
+    return [{ ...w, host: s.windowHost, pid: s.windowPid, canFocus: true }];
+  }
+
+  /** Первое окно строки — то, которое агрегатор назвал главным. */
+  function windowOf(row, state) {
+    return windowsOf(row, state)[0] || null;
   }
 
   /**
@@ -129,5 +138,5 @@
     return able.find(e => normHost(e.host) === mine) || able[0] || null;
   }
 
-  return { windowOf, normHost, canFocusRow, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager };
+  return { windowOf, windowsOf, normHost, canFocusRow, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager };
 });

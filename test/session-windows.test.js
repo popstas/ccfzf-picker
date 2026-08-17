@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const SessionWindows = require('../frontend-src/session-windows');
-const { canFocusRow, trackerHere, trackerHosts, focusPid, openManager } = SessionWindows;
+const { canFocusRow, trackerHere, trackerHosts, focusPid, openManager, windowsOf, windowOf } = SessionWindows;
 
 // Ответ нового агрегатора: две машины, у каждой свой трекер.
 const STATE = {
@@ -195,4 +195,28 @@ test('старый агрегатор называет одну машину, и
   // как прежде, а не терять ветку менеджера.
   const state = { windowHost: 'windows-box', windowPid: 42 };
   assert.equal(SessionWindows.openManager(state, 'windows-box').host, 'windows-box');
+});
+
+test('windowsOf отдаёт все окна строки в порядке ответа', () => {
+  const row = { windows: [{ host: 'mac-host', app: 'kitty' }, { host: 'windows-box' }] };
+  assert.deepStrictEqual(windowsOf(row, {}).map(w => w.host), ['mac-host', 'windows-box']);
+});
+
+test('старый ответ понимается: одно окно становится списком из одного', () => {
+  // Пикер новее агрегатора обязан вести себя как прежде, а не гасить пометки:
+  // выкатываются они порознь, и порядок нам не подвластен.
+  const row = { window: { host: 'mac-host' } };
+  assert.deepStrictEqual(windowsOf(row, {}).map(w => w.host), ['mac-host']);
+});
+
+test('совсем старый ответ: машину называют верхние поля', () => {
+  const row = { window: { title: 'ccfzf' } };
+  const state = { windowHost: 'windows-box', windowPid: 7 };
+  assert.deepStrictEqual(windowsOf(row, state).map(w => w.host), ['windows-box']);
+  assert.strictEqual(windowsOf(row, state)[0].pid, 7);
+});
+
+test('строка без окон даёт пустой список, а windowOf — null', () => {
+  assert.deepStrictEqual(windowsOf({}, {}), []);
+  assert.strictEqual(windowOf({}, {}), null);
 });
