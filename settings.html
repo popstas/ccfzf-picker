@@ -340,6 +340,11 @@
     showWindow: '▣',
     showWindowHost: '⌂',
     showTerminalIcon: '⌨',
+    // Обе галки затемнения — не колонки, но в таблице стоят строками наравне
+    // с ними, и без глифа выглядели бы голее соседей. Знак один на обе, он
+    // про приглушение как таковое; что именно приглушается, говорит подсказка.
+    dimStale: '◐',
+    dimProject: '◐',
   };
 
   // Подсказка на подписи — только там, где название колонки само не говорит,
@@ -356,6 +361,13 @@
       + 'Windows trackers report wt, WezTerm, kitty, Ghostty and Alacritty; macOS ones report '
       + 'kitty, WezTerm, Ghostty, iTerm2, Terminal and Alacritty. A window whose tracker does '
       + 'not name the app keeps the plain glyph.',
+    // Обе галки не рисуют колонку, а приглушают строки, и по названию это не
+    // очевидно — соседи в этой таблице отвечают на вопрос «что показать», а
+    // эти две на «что притушить».
+    dimStale: 'Dims sessions and projects nobody has touched for a while. '
+      + 'The threshold comes from stale in config.yaml; this checkbox only turns the dimming on and off.',
+    dimProject: 'Dims rows belonging to other projects while the pointer or the selection '
+      + 'rests on a project row. In a list of projects alone there is nothing to separate, so it stays off there.',
   };
 
   // Recommended — всё, кроме редко нужного: agent event и cost читаются не
