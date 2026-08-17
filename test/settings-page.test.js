@@ -81,9 +81,13 @@ function defaultsFromPage() {
 // Тем же приёмом, что и save(): настоящий axesTableHtml вычитывается из
 // страницы и выполняется в vm — копия разметки в тесте разошлась бы молча.
 function axesHtml() {
-  const src = ['TOGGLE_LABELS', 'FILTER_LABELS', 'AXIS_HINTS']
+  const src = ['TOGGLE_LABELS', 'FILTER_LABELS', 'AXIS_HINTS', 'COLUMN_ICONS', 'COLUMN_HINTS']
     .map(name => sourceOf(new RegExp(`\\n {2}const ${name} = \\{[\\s\\S]*?\\n?(?: {2})?\\};\\n`), name))
     .join('\n')
+    // RECOMMENDED_KEYS — не объектный литерал, а выражение над TOGGLE_LABELS,
+    // поэтому вычитывается своим шаблоном, до первого `;\n` на отступе в два
+    // пробела, а не фигурными скобками, как остальные константы выше.
+    + sourceOf(/\n {2}const RECOMMENDED_KEYS = [\s\S]*?;\n/, 'RECOMMENDED_KEYS')
     + sourceOf(/\n {2}function axesTableHtml\(\) \{[\s\S]*?\n {2}\}\n/, 'axesTableHtml');
   const ctx = {
     esc: s => String(s).replace(/[&<>"]/g, c => (
@@ -119,6 +123,24 @@ test('блок фильтров отбит от таблицы колонок', 
   // Без отступа шапка второй таблицы читалась последней строкой первой — то
   // есть колонкой `window`.
   assert.match(axesHtml(), /class="field axes-group"/);
+});
+
+test('оси колонок идут list затем statusline', () => {
+  const html = axesHtml();
+  const head = html.split('Filters')[0];
+  assert.ok(head.indexOf('>list<') < head.indexOf('>statusline<'));
+});
+
+test('Recommended и Other — отдельные таблицы', () => {
+  const html = axesHtml();
+  assert.match(html, /Recommended/);
+  assert.match(html, /Other/);
+  assert.match(html, /data-axis="list" data-key="recommended-all"/);
+});
+
+test('подпись paths стала project', () => {
+  assert.match(axesHtml(), />project</);
+  assert.doesNotMatch(axesHtml().split('Filters')[0], />paths</);
 });
 
 test('правка пикера переживает сохранение настроек', async () => {

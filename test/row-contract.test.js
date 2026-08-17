@@ -1094,13 +1094,20 @@ function keysFromSettings() {
   vm.runInContext(
     `${labels[0]}\n${filters[0]}\n${defaults[0]}\nvar toggles = Object.keys(TOGGLE_LABELS);`
     + `\nvar filterKeys = Object.keys(FILTER_LABELS);`
-    + `\nvar defaultKeys = Object.keys(UI_DEFAULTS.toggles);`,
+    + `\nvar defaultKeys = Object.keys(UI_DEFAULTS.toggles);`
+    + `\nvar toggleLabelsOut = TOGGLE_LABELS;`,
     ctx, { filename: 'settings.html' },
   );
   return {
     toggles: Array.from(ctx.toggles),
     filters: Array.from(ctx.filterKeys),
     defaults: Array.from(ctx.defaultKeys),
+    // Только TOGGLE_LABELS (колонки), не FILTER_LABELS: подписи фильтров в
+    // двух окнах уже расходятся сегодня (`onlyWindow` — «only windowed» в
+    // пикере и «only sessions with a window» в настройках) — это отдельная,
+    // не заявленная в этой задаче поломка, и сторожить её здесь значило бы
+    // чинить чужой баг мимо брифа.
+    toggleLabels: { ...ctx.toggleLabelsOut },
   };
 }
 
@@ -1109,9 +1116,10 @@ function checksFromPicker() {
   assert.ok(source, 'TOGGLE_CHECKS не найден в sessions.html — тест сторожит не то');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(`${source[0]}\nvar out = TOGGLE_CHECKS.map(c => ({ key: c.key, side: c.side }));`,
+  vm.runInContext(
+    `${source[0]}\nvar out = TOGGLE_CHECKS.map(c => ({ key: c.key, side: c.side, label: c.label }));`,
     ctx, { filename: 'sessions.html' });
-  return Array.from(ctx.out).map(c => ({ key: c.key, side: c.side }));
+  return Array.from(ctx.out).map(c => ({ key: c.key, side: c.side, label: c.label }));
 }
 
 test('окно настроек знает все галки пикера и ни одной лишней', () => {
@@ -1139,6 +1147,21 @@ test('фильтры и колонки разделены в обоих окна
     settings.filters.sort(),
     checks.filter(c => c.side === 'filter').map(c => c.key).sort(),
   );
+});
+
+test('подписи колонок совпадают в пикере и в настройках', () => {
+  // Расхождение здесь молчаливое: строка статуслайна берёт подпись из
+  // TOGGLE_CHECKS, таблица настроек — из TOGGLE_LABELS, и разница видна
+  // только тому, кто открыл оба окна разом. showPaths — прямой повод: ключ
+  // остаётся прежним, а подпись меняется на project и обязана смениться в
+  // обоих окнах вместе. Фильтры (FILTER_LABELS) сюда не входят — см.
+  // комментарий у keysFromSettings.
+  const checks = checksFromPicker().filter(c => c.side !== 'filter');
+  const settings = keysFromSettings();
+  for (const c of checks) {
+    assert.strictEqual(settings.toggleLabels[c.key], c.label, `подпись ${c.key} разошлась`);
+  }
+  assert.strictEqual(settings.toggleLabels.showPaths, 'project');
 });
 
 // ── showAll перекрывает onlyLive из конфига ────────────────────────────────

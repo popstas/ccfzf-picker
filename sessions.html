@@ -755,7 +755,7 @@
   const TOGGLE_CHECKS = [
     { key: 'showPrompt', label: 'prompt', side: 'left' },
     { key: 'showAnswer', label: 'answer', side: 'left' },
-    { key: 'showPaths', label: 'paths', side: 'left' },
+    { key: 'showPaths', label: 'project', side: 'left' },
     { key: 'showHotkey', label: 'hotkeys', side: 'right' },
     { key: 'showEvent', label: 'events', side: 'right' },
     { key: 'showId', label: 'id', side: 'right' },
@@ -765,6 +765,11 @@
     { key: 'showWindowHost', label: 'window host', side: 'right' },
     { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
     { key: 'showAll', label: 'show all', side: 'filter' },
+    // `glyph` — не колонка со своим текстом и не фильтр: включённая ось list
+    // подменяет глиф окна иконкой терминала (Task 11), а статуслайну эта
+    // галка не сдаётся вовсе — подмена живёт только в колонке окна, второй
+    // строки внизу списка ей не положено.
+    { key: 'showTerminalIcon', label: 'terminal icon', side: 'glyph' },
   ];
   // Ключи фильтров — из той же таблицы, а не вторым списком: разойдясь, новый
   // фильтр молча стал бы колонкой, то есть галкой, которая не отбирает строки.
@@ -799,6 +804,10 @@
     // config.yaml: галка — это отступление от настройки, а не вторая
     // настройка. Отступление запоминается в ui.json, как и все остальные.
     showAll: { list: false, statusline: true },
+    // Выключена по обеим осям: без неё в колонке окна остаётся нынешний
+    // глиф, а не пресет пикера — у соседних строк терминалы разные, общий
+    // пресет врал бы. Ось statusline тут не читается вовсе (см. renderChecks).
+    showTerminalIcon: { list: false, statusline: false },
   };
   // Плоская карта «показывать ли колонку»: её читают рисовальщики строк и
   // чекбоксы статуслайна. Пересчитывается из uiToggles одной функцией, чтобы
@@ -901,7 +910,11 @@
 
   function renderChecks() {
     toggleInputs.clear();
-    const shown = TOGGLE_CHECKS.filter(({ key }) => (uiToggles[key] || {}).statusline);
+    // `glyph` — не пропускается сюда даже с включённой осью statusline: этой
+    // строке не положена своя галка внизу списка (см. комментарий у
+    // showTerminalIcon в TOGGLE_CHECKS), а не полагаться на то, что ось
+    // всегда false, надёжнее — окно настроек её всё равно предлагает.
+    const shown = TOGGLE_CHECKS.filter(({ key, side }) => side !== 'glyph' && (uiToggles[key] || {}).statusline);
     // Отбивка между группами — на первом чекбоксе каждой следующей: отдельный
     // пустой элемент-разделитель пришлось бы ещё и прятать, когда группа пуста.
     statusChecks.innerHTML = shown.map(({ key, label, side }, i) => {

@@ -32,6 +32,9 @@
      строкой первой — то есть колонкой `window`. */
   .field.axes-group { margin-top: 18px; }
   table.axes th[title] { cursor: help; }
+  .col-icon { display: inline-block; width: 1.4em; color: #999; }
+  table.axes label.axis-head { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  table.axes span[title] { border-bottom: 1px dotted #666; cursor: help; }
 </style>
 </head>
 <body>
@@ -61,10 +64,10 @@
   // но расходиться ему не дают нормализация в ui-state.js (незнакомый ключ
   // выбрасывается) и подписи, взятые отсюда же.
   const TOGGLE_LABELS = {
-    showPrompt: 'prompt', showAnswer: 'answer', showPaths: 'paths',
+    showPrompt: 'prompt', showAnswer: 'answer', showPaths: 'project',
     showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
     showCost: 'cost', showContext: 'context', showWindow: 'window',
-    showWindowHost: 'window host',
+    showWindowHost: 'window host', showTerminalIcon: 'terminal icon',
   };
   const FILTER_LABELS = { onlyWindow: 'only sessions with a window', showAll: 'show all sessions' };
   const UI_DEFAULTS = {
@@ -82,6 +85,7 @@
       showWindowHost: { list: true, statusline: false },
       onlyWindow: { list: false, statusline: false },
       showAll: { list: false, statusline: true },
+      showTerminalIcon: { list: false, statusline: false },
     },
   };
 
@@ -239,21 +243,88 @@
     enabled: 'Apply this filter to the list',
   };
 
+  // Иконка на строку — шрифтовый знак, тем же приёмом, что и у пунктов меню
+  // Ctrl+K (`action-icons.js`): символ, а не картинка, свой файл не нужен.
+  const COLUMN_ICONS = {
+    showPrompt: '»',
+    showAnswer: '«',
+    showPaths: '▤',
+    showHotkey: '⌘',
+    showEvent: '↯',
+    showId: '#',
+    showCost: '$',
+    showContext: '≡',
+    // Тот же глиф, каким сам список помечает открытое окно (session-glyph.js,
+    // класс `.win.open`) — совпадение чисто визуальное, окно строки не
+    // спрашивает.
+    showWindow: '▣',
+    showWindowHost: '⌂',
+    showTerminalIcon: '⌨',
+  };
+
+  // Подсказка на подписи — только там, где название колонки само не говорит,
+  // что рисуется: остальные подписи однозначны без неё.
+  const COLUMN_HINTS = {
+    showEvent: "The agent's last event, such as stop, fail, or waiting for input",
+    showWindow: 'The glyph marking whether a window is open for this session',
+    showWindowHost: 'The name of the machine that owns the open window',
+  };
+
+  // Recommended — всё, кроме редко нужного: agent event и cost читаются не
+  // на каждый взгляд, а terminal icon — новая строка, включённая по умолчанию
+  // выключенной. Считается от TOGGLE_LABELS, а не вторым списком ключей: та
+  // же причина, по которой FILTER_KEYS в sessions.html считается от
+  // TOGGLE_CHECKS, а не пишется рядом заново.
+  const RECOMMENDED_KEYS = Object.keys(TOGGLE_LABELS).filter(
+    key => key !== 'showEvent' && key !== 'showCost' && key !== 'showTerminalIcon',
+  );
+
+  /**
+   * Таблицы вкладки Columns: Recommended, Other и Filters.
+   *
+   * Оси в шапке — list, затем statusline: list главная, ей отвечает большая
+   * часть решений человека, а statusline — редкое исключение (место там
+   * кончилось). У Filters порядок остаётся прежним, statusline и потом
+   * enabled: это отдельная таблица про состав списка, а не про колонки, и
+   * трогать её форму эта правка не должна.
+   */
   function axesTableHtml() {
-    const row = (key, label, secondAxisHint) => `<tr><td>${esc(label)}</td>`
-      + `<td><input type="checkbox" data-axis="statusline" data-key="${key}"${
-        ui.toggles[key].statusline ? ' checked' : ''} title="${esc(AXIS_HINTS.statusline)}"></td>`
-      + `<td><input type="checkbox" data-axis="list" data-key="${key}"${
-        ui.toggles[key].list ? ' checked' : ''} title="${esc(secondAxisHint)}"></td></tr>`;
+    const row = (key) => {
+      const label = TOGGLE_LABELS[key];
+      const hint = COLUMN_HINTS[key];
+      const labelHtml = hint ? `<span title="${esc(hint)}">${esc(label)}</span>` : esc(label);
+      return `<tr><td><span class="col-icon">${esc(COLUMN_ICONS[key] || '')}</span>${labelHtml}</td>`
+        + `<td><input type="checkbox" data-axis="list" data-key="${key}"${
+          ui.toggles[key].list ? ' checked' : ''} title="${esc(AXIS_HINTS.list)}"></td>`
+        + `<td><input type="checkbox" data-axis="statusline" data-key="${key}"${
+          ui.toggles[key].statusline ? ' checked' : ''} title="${esc(AXIS_HINTS.statusline)}"></td></tr>`;
+    };
     const th = (label, hint) => `<th title="${esc(hint)}">${esc(label)}</th>`;
-    return '<table class="axes"><tr><th>Column</th>'
-      + th('statusline', AXIS_HINTS.statusline) + th('list', AXIS_HINTS.list) + '</tr>'
-      + Object.entries(TOGGLE_LABELS).map(([k, l]) => row(k, l, AXIS_HINTS.list)).join('')
-      + '</table>'
+    const otherKeys = Object.keys(TOGGLE_LABELS).filter(key => !RECOMMENDED_KEYS.includes(key));
+    // Заголовок Recommended несёт свой чекбокс, а не общий `th('list', ...)`:
+    // клик по нему решает ось list у всех строк группы разом. Обработчик и
+    // расчёт indeterminate — в renderPage, отдельной веткой мимо
+    // [data-axis]: тот пишет правку в ui.toggles[key] по данному ключу, а у
+    // recommended-all настоящего ключа в ui.toggles нет и быть не должно.
+    const recommendedAllOn = RECOMMENDED_KEYS.every(key => ui.toggles[key].list);
+    const recommendedHead = `<th title="${esc(AXIS_HINTS.list)}"><label class="axis-head">`
+      + `<input type="checkbox" data-axis="list" data-key="recommended-all"${
+        recommendedAllOn ? ' checked' : ''} title="${
+        esc('Turn every recommended column on or off in the list')}"> <span>list</span></label></th>`;
+    const groupTable = (title, keys, listHeadCell) => '<div class="field axes-group">'
+      + `<label>${esc(title)}</label><table class="axes"><tr><th>Column</th>`
+      + (listHeadCell || th('list', AXIS_HINTS.list)) + th('statusline', AXIS_HINTS.statusline)
+      + '</tr>' + keys.map(row).join('') + '</table></div>';
+    return groupTable('Recommended', RECOMMENDED_KEYS, recommendedHead)
+      + groupTable('Other', otherKeys)
       + '<div class="field axes-group"><label>Filters</label><table class="axes">'
       + '<tr><th></th>' + th('statusline', AXIS_HINTS.statusline)
       + th('enabled', AXIS_HINTS.enabled) + '</tr>'
-      + Object.entries(FILTER_LABELS).map(([k, l]) => row(k, l, AXIS_HINTS.enabled)).join('')
+      + Object.entries(FILTER_LABELS).map(([k, l]) => `<tr><td>${esc(l)}</td>`
+        + `<td><input type="checkbox" data-axis="statusline" data-key="${k}"${
+          ui.toggles[k].statusline ? ' checked' : ''} title="${esc(AXIS_HINTS.statusline)}"></td>`
+        + `<td><input type="checkbox" data-axis="list" data-key="${k}"${
+          ui.toggles[k].list ? ' checked' : ''} title="${esc(AXIS_HINTS.enabled)}"></td></tr>`).join('')
       + '</table><div class="hint">A filter decides which rows make it into the list, '
       + 'not which columns are visible.</div></div>';
   }
@@ -333,6 +404,14 @@
     page.innerHTML = body
       + '<div id="bar"><button id="save">Save</button><span id="status"></span></div>';
 
+    // `indeterminate` — свойство DOM, а не HTML-атрибут: строкой его не
+    // выразить, и ставится оно уже по вставленной разметке.
+    const recommendedAll = page.querySelector('[data-key="recommended-all"]');
+    if (recommendedAll) {
+      const states = RECOMMENDED_KEYS.map(key => Boolean(ui.toggles[key].list));
+      recommendedAll.indeterminate = states.some(Boolean) && !states.every(Boolean);
+    }
+
     for (const input of page.querySelectorAll('[data-field]')) {
       input.addEventListener('input', () => {
         fields[input.dataset.field] = input.type === 'checkbox' ? input.checked : input.value;
@@ -366,12 +445,32 @@
       });
     }
     for (const input of page.querySelectorAll('[data-axis]')) {
+      // recommended-all — псевдоключ заголовка, не строка ui.toggles: эта
+      // генерическая ветка вписала бы в файл мусорную галку под его именем,
+      // а настоящие строки Recommended не сдвинулись бы вовсе. У него своя
+      // ветка, ниже.
+      if (input.dataset.key === 'recommended-all') continue;
       input.addEventListener('change', () => {
         const key = input.dataset.key;
         const axis = input.dataset.axis;
         ui.toggles[key] = { ...ui.toggles[key], [axis]: input.checked };
         if (!dirtyAxes.has(key)) dirtyAxes.set(key, new Set());
         dirtyAxes.get(key).add(axis);
+      });
+    }
+    if (recommendedAll) {
+      recommendedAll.addEventListener('change', () => {
+        // Не читается сам input.checked: у смешанного состояния клик обязан
+        // включить всё, а не подстроиться под то, где случайно остановился
+        // курсор индикатора. Ось statusline эта галка не трогает вовсе.
+        const allOn = RECOMMENDED_KEYS.every(key => ui.toggles[key].list);
+        const turnOn = !allOn;
+        for (const key of RECOMMENDED_KEYS) {
+          ui.toggles[key] = { ...ui.toggles[key], list: turnOn };
+          if (!dirtyAxes.has(key)) dirtyAxes.set(key, new Set());
+          dirtyAxes.get(key).add('list');
+        }
+        renderPage();
       });
     }
     for (const select of page.querySelectorAll('[data-preset]')) {
