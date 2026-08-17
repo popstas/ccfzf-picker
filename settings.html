@@ -112,11 +112,26 @@
   // широкой, и один ключ на обе переносил бы правку туда, где человек её не
   // делал.
   const dirtyPanels = new Set();
+  // Ключи fields, которых человек коснулся с последнего успешного слияния со
+  // свежепрочитанным config.yaml. Нужны затем же, зачем dirtyAxes и
+  // dirtyPanels: между отправкой patch и обратным чтением config стоят два
+  // await, и правка, залетевшая в это окно, лежит на живом fields — а
+  // `fields = configToFields(config)` в конце обычной записи стирает fields
+  // целиком, вместе с ней.
+  const dirtyFields = new Set();
   let current = 'general';
   // Автосохранение: таймер один на всё окно, а не по полю. Дебаунс — 400 мс,
   // и общий он затем, что правка в одном поле и следом клик по галке рядом
   // обязаны собраться в одну запись на диск, а не в две подряд.
   let saveTimer = null;
+  // Автосохранение может дозвониться до persist(), пока предыдущий вызов ещё
+  // не долетел до диска (медленный invoke плюс 400 мс дебаунс — то, чего
+  // ручной клик почти никогда не успевал). persisting держит замок на весь
+  // прогон persistOnce; persistPending — «пока я был занят, меня попросили
+  // ещё раз» — и по нему завершающийся прогон перезапускает себя сам, а не
+  // роняет вторую просьбу молча.
+  let persisting = false;
+  let persistPending = false;
   const tabs = document.getElementById('tabs');
   const page = document.getElementById('page');
 
@@ -468,11 +483,13 @@
     for (const input of page.querySelectorAll('[data-field]')) {
       input.addEventListener('input', () => {
         fields[input.dataset.field] = input.type === 'checkbox' ? input.checked : input.value;
+        dirtyFields.add(input.dataset.field);
         scheduleAutosave();
       });
       if (input.type === 'checkbox') {
         input.addEventListener('change', () => {
           fields[input.dataset.field] = input.checked;
+          dirtyFields.add(input.dataset.field);
           scheduleAutosave();
         });
       }
@@ -538,6 +555,8 @@
         fields['terminal.file'] = preset.file;
         // Аргументы форма держит построчной строкой — тип `lines`.
         fields['terminal.args'] = preset.args.join('\n');
+        dirtyFields.add('terminal.file');
+        dirtyFields.add('terminal.args');
         scheduleAutosave();
         // Перерисовка, а не правка двух input'ов по месту: поля рисует
         // fieldHtml, и вторая дорога к их значению разошлась бы с первой.
@@ -547,7 +566,71 @@
     document.getElementById('save').addEventListener('click', persist);
   }
 
+  /**
+   * Правки dirtyPanels поверх свежепрочитанного ui.json.
+   *
+   * Своя функция, а не код по месту, зовётся persistOnce дважды подряд: один
+   * раз перед отправкой (чтобы записать то, что известно на этот момент), и
+   * ещё раз перед финальным `ui = fresh` (чтобы не потерять то, что успели
+   * поправить, пока мы ждали `save_ui`/`ui-changed`). Разошедшийся дублем код
+   * посчитал бы это по-разному в двух местах.
+   */
+  function overlayDirtyPanels(fresh) {
+    for (const mark of dirtyPanels) {
+      // Помечено «раскладка:ключ», а в ключе своё двоеточие бывает
+      // (`past:2`) — поэтому режется по длине известного
+      // имени раскладки, а не по первому попавшемуся разделителю.
+      const half = mark.startsWith('narrow:') ? 'narrow' : 'wide';
+      const key = mark.slice(half.length + 1);
+      fresh.hidden[half][key] = ((ui.hidden || {})[half] || {})[key] === true;
+      fresh.collapsed[half][key] = ((ui.collapsed || {})[half] || {})[key] === true;
+      // Колонка живёт не картой, а порядком: ключ лежит внутри своей
+      // колонки, и переставить его надо тем же помощником, что и в форме.
+      // У узкой раскладки колонок нет, и порядок её здесь не трогается
+      // вовсе — им распоряжается перетаскивание в пикере.
+      if (half === 'wide') {
+        fresh.order = window.PickerPanels.withColumn(
+          fresh.order, key, window.PickerPanels.columnOf(ui, key));
+      }
+    }
+  }
+
+  /** Правки dirtyAxes поверх свежепрочитанного ui.json — та же роль, что у overlayDirtyPanels. */
+  function overlayDirtyToggles(fresh) {
+    for (const [key, axes] of dirtyAxes) {
+      for (const axis of axes) {
+        fresh.toggles[key] = { ...fresh.toggles[key], [axis]: ui.toggles[key][axis] };
+      }
+    }
+  }
+
+  /**
+   * Единственная точка входа: и кнопка, и автосохранение зовут только её.
+   *
+   * Дебаунс уже развёл частые события в один таймер, но не развёл сами
+   * запуски: пока persistOnce ждёт диск (`invoke`), человек мог успеть
+   * отредактировать что-то ещё — 400 мс автосохранения это раскрывает так,
+   * как ручной клик почти никогда не успевал. Второй параллельный прогон не
+   * заводится вовсе: он лишь отмечает persistPending и возвращается, а
+   * завершившийся прогон перечитывает этот флаг и перезапускается сам —
+   * ровно один раз на каждую такую просьбу, без риска зациклиться, потому
+   * что новый флаг может выставить только новый вызов persist().
+   */
   async function persist() {
+    if (persisting) { persistPending = true; return; }
+    persisting = true;
+    try {
+      await persistOnce();
+    } finally {
+      persisting = false;
+      if (persistPending) {
+        persistPending = false;
+        await persist();
+      }
+    }
+  }
+
+  async function persistOnce() {
     const status = document.getElementById('status');
     status.className = '';
     status.textContent = 'saving…';
@@ -558,31 +641,26 @@
         // здесь. Пикер пишет тот же файл, пока окно открыто, — сохранив
         // снимок целиком, мы откатили бы его перетаскивания.
         const fresh = window.UiState.normalizeUiState(await invoke('load_ui'), UI_DEFAULTS);
-        for (const mark of dirtyPanels) {
-          // Помечено «раскладка:ключ», а в ключе своё двоеточие бывает
-          // (`past:2`) — поэтому режется по длине известного
-          // имени раскладки, а не по первому попавшемуся разделителю.
-          const half = mark.startsWith('narrow:') ? 'narrow' : 'wide';
-          const key = mark.slice(half.length + 1);
-          fresh.hidden[half][key] = ((ui.hidden || {})[half] || {})[key] === true;
-          fresh.collapsed[half][key] = ((ui.collapsed || {})[half] || {})[key] === true;
-          // Колонка живёт не картой, а порядком: ключ лежит внутри своей
-          // колонки, и переставить его надо тем же помощником, что и в форме.
-          // У узкой раскладки колонок нет, и порядок её здесь не трогается
-          // вовсе — им распоряжается перетаскивание в пикере.
-          if (half === 'wide') {
-            fresh.order = window.PickerPanels.withColumn(
-              fresh.order, key, window.PickerPanels.columnOf(ui, key));
-          }
-        }
+        overlayDirtyPanels(fresh);
+        // Снимок «что шлём» зафиксирован — дальше правки копятся в
+        // dirtyPanels заново, а не путаются с уже отправленными. Без этой
+        // ранней очистки правка, залетевшая на await ниже, была бы неотличима
+        // от уже уехавшей на диск, и её некому было бы досдать следующим
+        // прогоном persist().
+        dirtyPanels.clear();
         await invoke('save_ui', {
           ui: window.UiState.uiStateToSave(
             fresh.sort, fresh.toggles, fresh.fullscreen, fresh.collapsed, fresh.order,
             fresh.hidden),
         });
         if (window.__TAURI__) await window.__TAURI__.event.emit('ui-changed');
+        // Правка, случившаяся, пока мы ждали запись, — уже не в fresh:
+        // накладываем её тем же оверлеем на то, что реально дошло. Её
+        // собственная пометка в dirtyPanels намеренно не тронута этим
+        // прогоном — по ней досдаст следующий persist(), либо запущенный
+        // guard'ом выше, либо собственным таймером самой этой правки.
+        overlayDirtyPanels(fresh);
         ui = fresh;
-        dirtyPanels.clear();
         renderPage();
         document.getElementById('status').textContent = 'saved';
       } else if (current === 'columns') {
@@ -592,11 +670,11 @@
         // здесь; `sort` не кладётся вовсе — сортировкой окно настроек не
         // распоряжается, ею крутит пикер.
         const fresh = window.UiState.normalizeUiState(await invoke('load_ui'), UI_DEFAULTS);
-        for (const [key, axes] of dirtyAxes) {
-          for (const axis of axes) {
-            fresh.toggles[key] = { ...fresh.toggles[key], [axis]: ui.toggles[key][axis] };
-          }
-        }
+        overlayDirtyToggles(fresh);
+        // Тот же ранний clear, что и у панелей, и по той же причине: без
+        // него правка, залетевшая на await ниже, была бы неотличима от уже
+        // отправленной.
+        dirtyAxes.clear();
         // Режим окна, свёрнутость и порядок секций возвращаются в файл
         // нетронутыми — по той же причине, что и `sort`: ими распоряжается
         // пикер (`^F`, Enter на заголовке и перетаскивание заголовка), а окно
@@ -613,12 +691,15 @@
         // Пикер — другое окно, своего ui.json он не перечитает. Событие
         // рассылается всем окнам, и подписан на него только он.
         if (window.__TAURI__) await window.__TAURI__.event.emit('ui-changed');
+        // Правка, случившаяся во время двух await выше, накладывается тем же
+        // оверлеем поверх fresh; dirtyAxes за неё намеренно не тронут — см.
+        // комментарий у панелей.
+        overlayDirtyToggles(fresh);
         // Записанное и есть новый снимок: правки учтены, чужие пережили, и
         // следующее сохранение начинает счёт заново. Таблица перерисовывается
         // из него же — иначе на экране остались бы отметки, которых в файле
         // уже нет.
         ui = fresh;
-        dirtyAxes.clear();
         renderPage();
         document.getElementById('status').textContent = 'saved';
       } else {
@@ -631,9 +712,19 @@
           return;
         }
         const patch = fieldsToPatch(fields, config);
+        // Снимок «что шлём» зафиксирован синхронно, до первого await — та же
+        // причина и тот же приём, что у dirtyPanels/dirtyAxes выше.
+        dirtyFields.clear();
         const result = await invoke('save_config', { patch });
         config = await invoke('load_config') || {};
-        fields = configToFields(config);
+        const reloaded = configToFields(config);
+        // Правка, залетевшая на awaits выше, свежепрочитанный config не
+        // видел вовсе — reloaded для неё лежала бы прежним, дореформенным
+        // значением. Накладываем её поверх reloaded тем, что сейчас лежит в
+        // живом fields по каждому ключу, отметившемуся dirty за это время.
+        for (const key of dirtyFields) reloaded[key] = fields[key];
+        dirtyFields.clear();
+        fields = reloaded;
         // Регистрация глобального хоткея могла не удаться (Windows держит
         // часть комбинаций за собой). Отказ не фатален, но молчать о нём
         // нельзя: человек будет думать, что хоткей сменился, а тот мёртв.

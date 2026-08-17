@@ -29,7 +29,23 @@ function sourceOf(re, what) {
 }
 
 /**
- * Прогнать настоящий save() на вкладке UI.
+ * Общий кусок settings.html, нужный любому вызову persist(): guard-обвязка
+ * (persisting/persistPending), оба оверлея dirty-состояния и сама persistOnce.
+ *
+ * Одна функция на все три вкладки — иначе набор извлекаемых кусков
+ * разошёлся бы между хелперами теста молча, как только persistOnce попросит
+ * что-то ещё.
+ */
+function persistCoreSrc() {
+  return sourceOf(/\n {2}let persisting = false;\n {2}let persistPending = false;\n/, 'persisting/persistPending')
+    + sourceOf(/\n {2}function overlayDirtyPanels\(fresh\) \{[\s\S]*?\n {2}\}\n/, 'overlayDirtyPanels')
+    + sourceOf(/\n {2}function overlayDirtyToggles\(fresh\) \{[\s\S]*?\n {2}\}\n/, 'overlayDirtyToggles')
+    + sourceOf(/\n {2}async function persist\(\) \{[\s\S]*?\n {2}\}\n/, 'persist')
+    + sourceOf(/\n {2}async function persistOnce\(\) \{[\s\S]*?\n {2}\}\n/, 'persistOnce');
+}
+
+/**
+ * Прогнать настоящий persist() на вкладке UI.
  *
  * `onDisk` — то, что лежит в ui.json к моменту нажатия «Сохранить» (обычно уже
  * с правками пикера). `snapshot` — что окно прочитало при загрузке. `dirty` —
@@ -37,7 +53,7 @@ function sourceOf(re, what) {
  */
 async function saveUiTab({ onDisk, snapshot, dirty }) {
   const defaultsSrc = sourceOf(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/, 'UI_DEFAULTS');
-  const saveSrc = sourceOf(/\n {2}async function persist\(\) \{[\s\S]*?\n {2}\}\n/, 'persist');
+  const saveSrc = persistCoreSrc();
 
   const calls = [];
   const dirtyAxes = new Map();
@@ -356,7 +372,7 @@ const PickerPanels = require('../frontend-src/picker-panels');
 /** Прогнать настоящий persist() на вкладке Panels. */
 async function savePanelsTab({ onDisk, snapshot, dirty }) {
   const defaultsSrc = sourceOf(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/, 'UI_DEFAULTS');
-  const saveSrc = sourceOf(/\n {2}async function persist\(\) \{[\s\S]*?\n {2}\}\n/, 'persist');
+  const saveSrc = persistCoreSrc();
   const calls = [];
   const status = { className: '', textContent: '' };
   const ctx = {
@@ -697,7 +713,7 @@ test('два быстрых события планируют один persist, 
 
 /** Прогнать настоящий persist() на обычной (yaml) вкладке. */
 async function persistGeneralTab({ fields, config }) {
-  const src = sourceOf(/\n {2}async function persist\(\) \{[\s\S]*?\n {2}\}\n/, 'persist');
+  const src = persistCoreSrc();
   const calls = [];
   const status = { className: '', textContent: '' };
   const ctx = {
@@ -713,6 +729,7 @@ async function persistGeneralTab({ fields, config }) {
     configToFields,
     config,
     fields,
+    dirtyFields: new Set(),
   };
   vm.createContext(ctx);
   vm.runInContext(`${src}\nvar done = persist();`, ctx, { filename: 'settings.html' });
@@ -728,4 +745,177 @@ test('validate, провалившийся под автосохранением
   assert.ok(!calls.some(c => c.cmd === 'save_config'), 'save_config не должен был позваться');
   assert.strictEqual(status.className, 'bad');
   assert.match(status.textContent, /sshHost is not set/);
+});
+
+// ── Ревью: реентерабельность persist() под автосохранением ──────────────────
+//
+// 400 мс дебаунса — это окно, в которое ручной клик почти никогда не попадал,
+// а автосохранение попадает систематически: человек может продолжать
+// печатать, пока предыдущий persist() ещё не долетел до диска (invoke —
+// это IPC, не мгновенная операция). Без защиты это бьёт по двум свойствам
+// сразу — второй persist() шлёт свой invoke параллельно с первым, и
+// `fields = configToFields(config)` / `ui = fresh` в конце первого стирают
+// то, что успело залететь на живой fields/ui, пока шёл обмен с диском.
+//
+// Ниже — не текстовые сторожа, а прогон настоящих persist()/persistOnce() с
+// управляемым (deferred) invoke: тест сам решает, когда «диск» ответит, и
+// успевает вмешаться в live fields/ui между вызовом и ответом — ровно та
+// гонка, которую иначе пришлось бы ловить настоящими 400 мс ожидания или не
+// поймать вовсе.
+
+/** Обещание, которое разрешает вызывающий, а не таймер или другой промис. */
+function deferred() {
+  let resolve;
+  const promise = new Promise((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
+/** Слияние патча в фиктивный диск — тем же приёмом, каким merge_patch делает это в Rust, но проще: полей с точкой в этих тестах нет. */
+function mergePatch(target, patch) {
+  for (const [key, value] of Object.entries(patch)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      target[key] = mergePatch({ ...(target[key] || {}) }, value);
+    } else {
+      target[key] = value;
+    }
+  }
+  return target;
+}
+
+test('persist(): правка, залетевшая во время записи конфига, не пропадает и не шлётся вторым save_config параллельно', async () => {
+  const src = persistCoreSrc();
+  const calls = [];
+  const status = { className: '', textContent: '' };
+  let diskConfig = {};
+  const gate = deferred();
+  let inFlight = 0;
+  let maxInFlight = 0;
+
+  const ctx = {
+    document: { getElementById: () => status },
+    window: {},
+    invoke: (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'save_config') {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        return gate.promise.then(() => {
+          inFlight -= 1;
+          diskConfig = mergePatch({ ...diskConfig }, args.patch);
+          return {};
+        });
+      }
+      if (cmd === 'load_config') return Promise.resolve({ ...diskConfig });
+      return Promise.resolve(undefined);
+    },
+    current: 'general',
+    validate,
+    fieldsToPatch,
+    configToFields,
+    config: diskConfig,
+    fields: { sshHost: 'first-host' },
+    dirtyFields: new Set(),
+  };
+  vm.createContext(ctx);
+  // Первый persist() доходит ровно до await invoke('save_config', …) и там
+  // виснет на gate — синхронный хвост до первого await уже отработал к
+  // моменту, когда runInContext вернёт управление.
+  vm.runInContext(`${src}\nvar first = persist();`, ctx, { filename: 'settings.html' });
+  assert.strictEqual(ctx.dirtyFields.size, 0, 'снимок «что шлём» обязан очистить dirtyFields до await');
+
+  // Человек продолжает печатать, пока первая запись всё ещё в пути.
+  ctx.fields.sshHost = 'second-host';
+  ctx.dirtyFields.add('sshHost');
+
+  // Дебаунс тем временем тоже стучится — второй persist(), пока первый ещё
+  // не долетел.
+  vm.runInContext('var second = persist();', ctx, { filename: 'settings.html' });
+
+  gate.resolve();
+  await ctx.first;
+  await ctx.second;
+
+  assert.strictEqual(maxInFlight, 1, 'save_config не должен был идти параллельно с самим собой');
+  const saveConfigCalls = calls.filter(c => c.cmd === 'save_config');
+  assert.ok(saveConfigCalls.length >= 2, 'правка, залетевшая во время записи, обязана дойти отдельной записью');
+  assert.strictEqual(diskConfig.sshHost, 'second-host', 'правка обязана долететь до диска, а не потеряться');
+  assert.strictEqual(ctx.fields.sshHost, 'second-host', 'in-memory fields не должны откатиться на старое значение');
+});
+
+/**
+ * Дать очереди микрозадач полностью опустеть.
+ *
+ * `await invoke('load_ui')` в persistOnce виснет на своём собственном gate,
+ * а её продолжение (overlayDirtyToggles + dirtyAxes.clear(), тоже
+ * синхронные) должно успеть отработать ДО того, как тест вмешается в live
+ * ui/dirtyAxes — иначе правка ниже случайно уедет в тот же, первый, а не во
+ * второй прогон, и тест перестанет отличать «поймали» от «повезло». Тиков
+ * await у одного `await` может быть больше одного, а setImmediate в Node
+ * гарантированно откладывается до полного опустошения микроочереди.
+ */
+function flushMicrotasks() {
+  return new Promise((resolve) => { setImmediate(resolve); });
+}
+
+test('persist(): правка ui.toggles, залетевшая во время await save_ui, всё равно доходит до диска', async () => {
+  const defaultsSrc = sourceOf(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/, 'UI_DEFAULTS');
+  const src = `${defaultsSrc}\n${persistCoreSrc()}`;
+  const calls = [];
+  const status = { className: '', textContent: '' };
+  let diskUi = defaults();
+  const loadGate = deferred();
+  const saveGate = deferred();
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const snapshot = defaults();
+
+  const ctx = {
+    document: { getElementById: () => status },
+    window: { UiState },
+    invoke: (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'load_ui') return loadGate.promise.then(() => diskUi);
+      if (cmd === 'save_ui') {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        return saveGate.promise.then(() => {
+          inFlight -= 1;
+          diskUi = args.ui;
+          return undefined;
+        });
+      }
+      return Promise.resolve(undefined);
+    },
+    current: 'columns',
+    ui: snapshot,
+    dirtyAxes: new Map(),
+    renderPage: () => {},
+  };
+  vm.createContext(ctx);
+  // Первый persist() виснет на await invoke('load_ui', …) — своём gate.
+  vm.runInContext(`${src}\nvar first = persist();`, ctx, { filename: 'settings.html' });
+
+  // Пускаем load_ui и ждём, пока persistOnce дойдёт до своего собственного
+  // await invoke('save_ui', …) — overlayDirtyToggles и dirtyAxes.clear() для
+  // этого прогона к этому моменту уже отработали, оба синхронные.
+  loadGate.resolve();
+  await flushMicrotasks();
+  assert.strictEqual(ctx.dirtyAxes.size, 0, 'снимок «что шлём» обязан очистить dirtyAxes до await save_ui');
+
+  // Человек щёлкает галку showId, пока первая запись ещё в пути к диску.
+  ctx.ui.toggles.showId = { ...ctx.ui.toggles.showId, list: true };
+  ctx.dirtyAxes.set('showId', new Set(['list']));
+
+  // И следом дебаунс подгоняет второй persist().
+  vm.runInContext('var second = persist();', ctx, { filename: 'settings.html' });
+
+  saveGate.resolve();
+  await ctx.first;
+  await ctx.second;
+
+  assert.strictEqual(maxInFlight, 1, 'save_ui не должен был идти параллельно с самим собой');
+  const saveUiCalls = calls.filter(c => c.cmd === 'save_ui');
+  assert.ok(saveUiCalls.length >= 2, 'правка, залетевшая во время записи, обязана дойти отдельной записью');
+  assert.strictEqual(diskUi.toggles.showId.list, true, 'правка обязана долететь до диска, а не потеряться');
+  assert.strictEqual(ctx.ui.toggles.showId.list, true, 'in-memory ui не должен откатиться на старое значение');
 });
