@@ -188,6 +188,19 @@ test('мусорный icon обнуляется, а действие остаё
   assert.strictEqual(c.actions[0].icon, '');
 });
 
+test('menuKey у действия приводится к одной букве, мусор выбрасывается', () => {
+  // Приводится здесь, а не при показе меню: разбирать одно и то же дважды —
+  // тот самый второй список, за который в этом проекте уже платили.
+  const cfg = normalizeConfig({
+    actions: [
+      { id: 'cursor', label: 'Cursor', argv: ['cursor', '{localPath}'], menuKey: ' O ' },
+      { id: 'plain', label: 'Plain', argv: ['echo'] },
+    ],
+  });
+  assert.strictEqual(cfg.actions[0].menuKey, 'o');
+  assert.strictEqual(cfg.actions[1].menuKey, '');
+});
+
 // ── второй глобальный хоткей ────────────────────────────────────────────────
 test('умолчание второго хоткея пустое, а не комбинация', () => {
   // Умолчаний у него два, по одному на систему, и живут они в Rust, где видно

@@ -174,7 +174,9 @@ backgroundRefresh: true
 #     icon: '%SystemRoot%\explorer.exe'
 #   - id: cursor
 #     label: Open in Cursor
-#     hotkey: Ctrl+O
+#     # Ctrl+O is the picker's own sort switch, so this action gets no global
+#     # hotkey. In the Ctrl+K menu it answers to a bare `o`.
+#     menuKey: o
 #     argv: ['cursor', '{localPath}']
 #   # macOS: Finder и VS Code.
 #   - id: finder

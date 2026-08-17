@@ -1874,3 +1874,19 @@ test('настроенная stale opacity записывается в CSS prope
   vm.runInContext(`${source}\napplyStaleOpacity();`, ctx, { filename: 'sessions.html' });
   assert.deepStrictEqual(calls, [['--stale-opacity', '0.4']]);
 });
+
+test('меню подписывает пункты и слушает клавиши одним списком букв', () => {
+  // Две копии счёта букв разошлись бы на первом же столкновении: подпись
+  // обещала бы клавишу, которую обработчик отдал соседу.
+  assert.match(SESSIONS_HTML, /menuKeysShown = window\.ActionHotkey\.menuKeys\(menuActions\)/,
+    'renderMenu не считает буквы через ActionHotkey.menuKeys');
+  assert.match(SESSIONS_HTML, /menuKeysShown\.indexOf\(letter\)/,
+    'обработчик меню ищет букву не в том же списке');
+});
+
+test('буква в меню сверяется по e.code', () => {
+  // e.key в русской раскладке приходит кириллицей, и меню перестало бы
+  // слушаться ровно у того, кто набирает вслепую.
+  assert.match(SESSIONS_HTML, /e\.code\.match\(\/\^Key\(\[A-Z\]\)\$\/\)/,
+    'буква пункта меню разбирается не из e.code');
+});
