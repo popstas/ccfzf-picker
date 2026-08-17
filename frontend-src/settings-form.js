@@ -107,6 +107,12 @@
         { id: 'pickerSize.wide.height', label: 'Wide mode height', type: 'size',
           options: SIZE_CHOICES,
           hint: 'Wide mode is the one Ctrl+F switches to.' },
+        // После полей размера, не на отдельной странице: подложка отвечает
+        // на тот же вопрос «каким видеть окно», что и сам размер. Ставит её
+        // нативное окно (`scrim.rs`), а не страница — эти два поля решают
+        // только, звать ли его, порознь для каждой раскладки.
+        { id: 'scrim.narrow', label: 'Dim the desktop behind the list', type: 'bool' },
+        { id: 'scrim.wide', label: 'Dim the desktop behind the wide view', type: 'bool' },
       ],
     },
     { id: 'columns', title: 'Columns', fields: [] },

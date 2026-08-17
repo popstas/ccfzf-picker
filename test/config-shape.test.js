@@ -375,3 +375,17 @@ test('projectHours главнее устаревшего projectDays', () => {
     stale: { projectDays: 7, projectHours: 3 },
   }).stale.projectHours, 3);
 });
+
+// ── Подложка позади пикера ─────────────────────────────────────────────────
+
+test('scrim по умолчанию выключен в обеих раскладках', () => {
+  assert.deepStrictEqual(normalizeConfig({}).scrim, { narrow: false, wide: false });
+  assert.deepStrictEqual(normalizeConfig({ scrim: null }).scrim, { narrow: false, wide: false });
+});
+
+test('scrim принимает один флаг, не трогая соседний', () => {
+  assert.deepStrictEqual(normalizeConfig({ scrim: { wide: true } }).scrim,
+    { narrow: false, wide: true });
+  assert.deepStrictEqual(normalizeConfig({ scrim: { narrow: true } }).scrim,
+    { narrow: true, wide: false });
+});

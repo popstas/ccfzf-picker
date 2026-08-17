@@ -86,6 +86,12 @@
     // Визуальное приглушение старых строк выключено, пока человек сам его не
     // попросил. Пороги остаются в конфиге и при выключенной галке.
     stale: { enabled: false, sessionHours: 2, projectHours: 168, opacity: 0.5 },
+    // Подложка позади пикера — своя половинка на каждую раскладку, обе
+    // выключены по умолчанию: затемнение стола позади списка меняет то, что
+    // человек видит на всём экране, а не только в самом пикере, и включать
+    // такое без спроса нельзя. Ставит саму подложку нативное окно (`scrim.rs`
+    // в Rust), а не страница — здесь только два флага, решающих, звать ли её.
+    scrim: { narrow: false, wide: false },
   };
 
   /**
@@ -232,6 +238,18 @@
     };
   }
 
+  /**
+   * Флаги подложки — по одному на раскладку, независимо друг от друга: порча
+   * одного не должна гасить другой, тем же правилом, что и у `normalizeStale`.
+   */
+  function normalizeScrim(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    return {
+      narrow: typeof src.narrow === 'boolean' ? src.narrow : DEFAULTS.scrim.narrow,
+      wide: typeof src.wide === 'boolean' ? src.wide : DEFAULTS.scrim.wide,
+    };
+  }
+
   function normalizeConfig(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
 
@@ -266,6 +284,7 @@
       actions: normalizeActions(src.actions),
       pickerSize: normalizePickerSize(src.pickerSize),
       stale: normalizeStale(src.stale),
+      scrim: normalizeScrim(src.scrim),
     };
   }
 

@@ -216,6 +216,30 @@ test('SIZE_CHOICES содержит 100', () => {
   assert.ok(field.options.some(o => o.value === 100));
 });
 
+// Подложка позади пикера — две галки на странице Window size, после полей
+// размера: решение «затемнять ли» относится к тому же выбору «каким видеть
+// окно», что и сам размер, и на отдельную страницу его заводить незачем.
+test('scrim.narrow и scrim.wide — булевы поля на странице Window size, после размеров', () => {
+  const ids = PAGES.find(p => p.id === 'window').fields.map(f => f.id);
+  assert.ok(ids.includes('scrim.narrow'));
+  assert.ok(ids.includes('scrim.wide'));
+  assert.ok(ids.indexOf('pickerSize.wide.height') < ids.indexOf('scrim.narrow'));
+  const byId = id => PAGES.find(p => p.id === 'window').fields.find(f => f.id === id);
+  assert.strictEqual(byId('scrim.narrow').type, 'bool');
+  assert.strictEqual(byId('scrim.wide').type, 'bool');
+  assert.strictEqual(byId('scrim.narrow').label, 'Dim the desktop behind the list');
+  assert.strictEqual(byId('scrim.wide').label, 'Dim the desktop behind the wide view');
+});
+
+test('scrim без ключа в конфиге показывает выключенным, а патч несёт включённый флаг', () => {
+  const original = { sshHost: 'host', ...NO_PICKER_SIZE };
+  const fields = configToFields(original);
+  assert.strictEqual(fields['scrim.narrow'], false);
+  assert.strictEqual(fields['scrim.wide'], false);
+  const patch = fieldsToPatch({ ...fields, 'scrim.wide': true }, original);
+  assert.deepStrictEqual(patch, { scrim: { wide: true } });
+});
+
 // Отсутствующая высота — это то немногое число, за которое отвечает сам
 // пикер (`wanted_size` берёт долю по умолчанию), и форма обязана показать не
 // «Default», а ту же долю, 65%, — иначе человек читал бы включённую по

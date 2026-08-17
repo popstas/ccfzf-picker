@@ -18,6 +18,7 @@ mod mqtt;
 mod poller;
 mod proc;
 mod project_hotkeys;
+mod scrim;
 mod state_source;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
@@ -97,6 +98,11 @@ fn hide_window(app: &tauri::AppHandle) {
         return;
     }
     let _ = window.hide();
+    // Подложка гасится безусловно, не спрашивая флаги: пикер спрятан — ни
+    // одна раскладка не оправдывает затемнённый стол без списка над ним.
+    if let Err(e) = scrim::set_visible(app, false) {
+        eprintln!("ccfzf-picker: {e}");
+    }
     let _ = app.emit("picker-hidden", ());
     if let Some(state) = app.try_state::<LastHidden>() {
         *state.0.lock().unwrap() = Some(Instant::now());
@@ -187,6 +193,11 @@ fn toggle_window(app: &tauri::AppHandle, mode: Option<&str>) {
 fn show_picker(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("picker") else { return };
     let _ = window.show();
+    // Раскладка на момент показа — та, что запомнена с прошлого раза
+    // (`SizeRequest.fullscreen`); просьба о размере ниже может её сменить, но
+    // подложка не обязана ждать: `apply_scrim` из `set_picker_size` перекроет
+    // это значение, если страница вслед за показом попросит другой режим.
+    apply_scrim(app, current_fullscreen(app));
     // Отложенный размер применяется здесь и только после `show()`: просьба,
     // пришедшая по скрытому окну, была отложена именно потому, что экрана у
     // такого окна нет. См. `SizeRequest`. Отказ стоит строки в stderr, а не
@@ -602,6 +613,55 @@ fn picker_scale_now(app: &tauri::AppHandle) -> PickerScale {
         .unwrap_or_default()
 }
 
+/// `scrim` из конфига — по флагу на каждую раскладку, оба ложью по умолчанию:
+/// подложка — вещь, которую человек включает сам, а не то, чем пикер решил
+/// его удивить после обновления.
+fn scrim_flags(config: &serde_json::Value) -> (bool, bool) {
+    let flag = |name: &str| {
+        config
+            .get("scrim")
+            .and_then(|v| v.get(name))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    };
+    (flag("narrow"), flag("wide"))
+}
+
+/// Флаги подложки, действующие прямо сейчас — тем же приёмом и по той же
+/// причине, что и `WindowScale`: конфиг перечитывает `apply_config`, а
+/// подложку показывают в других местах и в другое время.
+#[derive(Default)]
+struct ScrimFlags(Mutex<(bool, bool)>);
+
+fn scrim_flags_now(app: &tauri::AppHandle) -> (bool, bool) {
+    app.try_state::<ScrimFlags>()
+        .map(|s| *s.0.lock().unwrap())
+        .unwrap_or_default()
+}
+
+/// Режим списка, названный последним, — тот же, по которому `apply_picker_size`
+/// считает размер (`SizeRequest.fullscreen`). Подложка обязана затемнять под
+/// той же раскладкой, какую видит человек, а второй счётчик режима завёл бы
+/// второй источник правды рядом с уже существующим.
+fn current_fullscreen(app: &tauri::AppHandle) -> bool {
+    app.try_state::<PickerSize>()
+        .map(|s| s.0.lock().unwrap().fullscreen)
+        .unwrap_or(false)
+}
+
+/// Показать или скрыть подложку под текущую раскладку.
+///
+/// Отказ не роняет вызывающего: показ и размер самого пикера дороже
+/// затемнения стола позади него, та же расстановка приоритетов, что и у
+/// `apply_picker_size` в `show_picker`.
+fn apply_scrim(app: &tauri::AppHandle, fullscreen: bool) {
+    let (narrow, wide) = scrim_flags_now(app);
+    let show = scrim::scrim_wanted(fullscreen, narrow, wide);
+    if let Err(e) = scrim::set_visible(app, show) {
+        eprintln!("ccfzf-picker: {e}");
+    }
+}
+
 #[tauri::command]
 fn set_picker_size(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String> {
     let Some(window) = app.get_webview_window("picker") else {
@@ -618,7 +678,15 @@ fn set_picker_size(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String
         None => visible.then_some(fullscreen),
     };
     match apply {
-        Some(fullscreen) => apply_picker_size(&window, fullscreen, picker_scale_now(&app)),
+        Some(fullscreen) => {
+            let result = apply_picker_size(&window, fullscreen, picker_scale_now(&app));
+            // Подложка пересчитывается тут же, а не ждёт следующего показа:
+            // `^F` меняет раскладку у уже открытого окна, и без этого вызова
+            // затемнение осталось бы от прежнего режима до следующего
+            // закрытия-открытия пикера.
+            apply_scrim(&app, fullscreen);
+            result
+        }
         None => Ok(()),
     }
 }
@@ -1211,6 +1279,14 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
         }
     }
 
+    // Подложка — тем же приёмом: флаги переставляются здесь, а видимость
+    // трогает только показанное окно. Пикер в этот момент скрыт (см. выше про
+    // размер), так что пересчитывать её сейчас нечего — она и так спрятана
+    // вместе с окном.
+    if let Some(state) = app.try_state::<ScrimFlags>() {
+        *state.0.lock().unwrap() = scrim_flags(&config);
+    }
+
     let _ = app.global_shortcut().unregister_all();
     let (registered, accelerator) = register_picker_hotkey(app, &config);
     let (projects_registered, projects_accelerator) = register_projects_hotkey(app, &config);
@@ -1726,6 +1802,9 @@ fn main() {
             // Доли экрана — тем же приёмом и по той же причине: их
             // переставляет `apply_config`, а читает `apply_picker_size`.
             app.manage(WindowScale(Mutex::new(picker_scale(&config))));
+            // Флаги подложки — тем же приёмом: их переставляет `apply_config`,
+            // а читает `apply_scrim`.
+            app.manage(ScrimFlags(Mutex::new(scrim_flags(&config))));
             // Список хоткеев приезжает ответом агрегатора, а не из конфига:
             // единственный его источник — claudeWt.projects у
             // windows11-manager. До первого ответа висит список прошлого
