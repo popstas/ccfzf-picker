@@ -1816,10 +1816,11 @@ test('старые обычные сессии и проекты получаю�
   assert.ok(!zellij.find(item => item.key.startsWith('s:')).html.includes(' stale'));
 });
 
-test('stale CSS затемняет, но hover и active возвращают opacity 1', () => {
+test('stale CSS затемняет, но hover возвращает opacity 1, active не трогает', () => {
   assert.match(SESSIONS_HTML, /\.row\.stale\s*\{[^}]*var\(--stale-opacity,\s*0\.5\)/);
   assert.match(SESSIONS_HTML, /\.row\.stale:hover[\s\S]*?opacity:\s*1/);
-  assert.match(SESSIONS_HTML, /\.row\.stale\.active[\s\S]*?opacity:\s*1/);
+  assert.ok(!/\.row\.stale\.active/.test(SESSIONS_HTML),
+    'выбор больше не снимает затемнение stale — первая строка не станет самой яркой');
 });
 
 test('настроенная stale opacity записывается в CSS property', () => {
