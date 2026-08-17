@@ -653,3 +653,29 @@ test('windowHtml не подменяет глиф у незнакомого пр
     '<div class="win open">▣</div>',
   );
 });
+
+// ── глиф на каждое окно сессии ──────────────────────────────────────────────
+
+test('у сессии с двумя окнами глиф на каждое', () => {
+  const html = windowHtml({ windows: [
+    { app: 'kitty', host: 'mac-host' },
+    { app: 'WindowsTerminal.exe', host: 'windows-box', desktop: 1 },
+  ] }, true, true);
+  assert.strictEqual((html.match(/class="win open"/g) || []).length, 2);
+  assert.ok(html.includes('Windows Terminal'), html);
+});
+
+test('подсказка называет машину каждого окна', () => {
+  const html = windowHtml({ windows: [
+    { app: 'kitty', host: 'mac-host' },
+    { app: 'WindowsTerminal.exe', host: 'windows-box', desktop: 1 },
+  ] }, true, true);
+  assert.ok(html.includes('title="kitty · mac-host"'), html);
+  assert.ok(html.includes('title="Desktop 1 · Windows Terminal · windows-box"'), html);
+});
+
+test('две машины в колонке названы обе', () => {
+  const html = windowHostHtml({ windowHost: 'mac-host, other-box' }, true);
+  assert.ok(html.includes('>mac-host, other-box<'), html);
+  assert.ok(html.includes('Windows are on'), html);
+});

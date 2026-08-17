@@ -205,19 +205,37 @@
     return TERMINAL_GLYPHS.find(t => t.re.test(named)) || null;
   }
 
+  /**
+   * Пометка об открытом окне — по глифу на каждое окно.
+   *
+   * Окон у сессии бывает несколько: её открывают на двух машинах сразу.
+   * Глиф на окно отвечает сразу на два вопроса — сколько их и в каком
+   * терминале каждое, — а имена машин стоят соседней колонкой
+   * (windowHostHtml).
+   *
+   * Запасная ветвь — `session.window` без `session.windows` — держит старый
+   * агрегатор живым: он про несколько окон одной сессии не знает вовсе и
+   * присылает одно.
+   *
+   * Подсказка складывается из того, что известно: стол называет трекер
+   * Windows, имя терминала — оба, машину — новый агрегатор. Пустых
+   * разделителей не бывает — склеиваются только непустые части.
+   */
   function windowHtml(session, showWindow = true, showTerminalIcon = false) {
     if (!showWindow) return '';
-    const win = session?.window;
-    if (!win) return '<div class="win"></div>';
-    const terminal = showTerminalIcon ? terminalOf(win) : null;
-    // Подсказка складывается из того, что известно: стол называет трекер
-    // Windows, имя терминала — оба, но только с новой правкой. Пустых
-    // разделителей не бывает — склеиваются только непустые части.
-    const parts = [];
-    if (Number.isFinite(win.desktop)) parts.push(`Desktop ${win.desktop}`);
-    if (terminal) parts.push(terminal.name);
-    const title = parts.length ? ` title="${escapeHtml(parts.join(' · '))}"` : '';
-    return `<div class="win open"${title}>${terminal ? terminal.glyph : '▣'}</div>`;
+    const wins = Array.isArray(session?.windows) && session.windows.length
+      ? session.windows
+      : (session?.window ? [session.window] : []);
+    if (!wins.length) return '<div class="win"></div>';
+    return wins.map((win) => {
+      const terminal = showTerminalIcon ? terminalOf(win) : null;
+      const parts = [];
+      if (Number.isFinite(win.desktop)) parts.push(`Desktop ${win.desktop}`);
+      if (terminal) parts.push(terminal.name);
+      if (win.host) parts.push(String(win.host));
+      const title = parts.length ? ` title="${escapeHtml(parts.join(' · '))}"` : '';
+      return `<div class="win open"${title}>${terminal ? terminal.glyph : '▣'}</div>`;
+    }).join('');
   }
 
   /**
@@ -228,15 +246,21 @@
    * поднимается, чужое — нет.
    *
    * Решение «чужая ли машина» принято раньше, при сборке строки: сюда приезжает
-   * либо имя, которое стоит назвать, либо пустая строка. Пустой элемент вместо
-   * пропуска — по той же причине, что у `win` и `hk`: правые колонки стоят друг
-   * за другом, и дырка сдвинула бы соседние строки.
+   * либо имя (или несколько через ', '), которое стоит назвать, либо пустая
+   * строка. Пустой элемент вместо пропуска — по той же причине, что у `win` и
+   * `hk`: правые колонки стоят друг за другом, и дырка сдвинула бы соседние
+   * строки.
+   *
+   * Имя уже склеено строкой в session-list.js — здесь меняется только подпись
+   * подсказки: одна машина или несколько.
    */
   function windowHostHtml(session, showWindowHost = true) {
     if (!showWindowHost) return '';
     const host = session?.windowHost;
     if (!host) return '<div class="winhost"></div>';
-    return `<div class="winhost" title="Window is on ${escapeHtml(host)}">${escapeHtml(host)}</div>`;
+    // Машин бывает две: сессию открывают и на соседней машине тоже.
+    const label = host.includes(',') ? 'Windows are on' : 'Window is on';
+    return `<div class="winhost" title="${label} ${escapeHtml(host)}">${escapeHtml(host)}</div>`;
   }
 
   /**
