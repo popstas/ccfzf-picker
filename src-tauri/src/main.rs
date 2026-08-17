@@ -821,6 +821,11 @@ async fn focus_window_mqtt(id: String, base: Option<String>) -> Result<(), Strin
 /// же способом. Права на передний план здесь не выдаётся: окно никто не
 /// поднимает. Пикер по этой команде не гаснет — список перерисовывается раз в
 /// секунду, и кружок оранжевеет на глазах.
+///
+/// Каждая база получает свою попытку независимо от исхода предыдущих: ранний
+/// выход на первой же ошибке оставлял бы вторую машину неотмотанной — ровно
+/// половинчатую отмотку, ради ухода от которой список баз и завели. Наружу
+/// уходит первая случившаяся ошибка, но только после того, как испробованы все.
 #[tauri::command]
 async fn unread_session_mqtt(id: String, bases: Vec<String>) -> Result<(), String> {
     let broker = configured_broker()?;
@@ -829,10 +834,18 @@ async fn unread_session_mqtt(id: String, bases: Vec<String>) -> Result<(), Strin
     // или строка без окон, тогда остаётся база своего конфига.
     let bases = mqtt::unread_bases(&broker, &bases);
     tauri::async_runtime::spawn_blocking(move || {
+        let mut first_err: Option<String> = None;
         for base in &bases {
-            mqtt::unread(&broker, base, &id)?;
+            if let Err(e) = mqtt::unread(&broker, base, &id) {
+                if first_err.is_none() {
+                    first_err = Some(e);
+                }
+            }
         }
-        Ok(())
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     })
     .await
     .map_err(|e| format!("unread_session_mqtt task failed: {e}"))?
