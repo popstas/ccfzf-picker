@@ -668,6 +668,10 @@
   // только сброс — наведённый стрелками или кликом остаётся где стоит, иначе
   // свернуть первую секцию с клавиатуры было бы нечем.
   let selectionReset = true;
+  // Панель, в которой стояла выбранная строка. Помнится ключом секции и
+  // переживает пересборку списка: по нему сброс выбора возвращается туда,
+  // где человек стоял, а не в первую колонку.
+  let activePanel = '';
   // Строки-переключатели: Enter на них ничего не открывает, а сворачивает. Их
   // сброс выбора и пропускает. Список, а не одна проверка на `section`:
   // заголовок дня у снимков — такая же строка и с той же ценой, и в режиме
@@ -1350,6 +1354,7 @@
    * `section.rows` нетронутыми, потому что по ним считается счёт в подписи.
    */
   function itemsOfSection(section, nowSec) {
+    const from = rows.length;
     const items = [sectionItem(section)];
     if (section.collapsed) return items;
     if (section.kind === 'projects') {
@@ -1361,6 +1366,12 @@
         items.push(row.kind === 'block-subhead' ? subheadItem(row) : sessionItem(row, nowSec));
       }
     }
+    // Панель — на каждой строке, которую добавила эта секция, и в обеих
+    // раскладках. Поле рядом с `block`, который проставляет renderWide, и не
+    // вместо него: `block` — номер для стрелок, съезжающий вместе с
+    // соседями, `panel` — постоянный ключ, по которому память переживает
+    // смену списка. Свёрнутая секция сюда не доходит — у неё строк нет.
+    for (let i = from; i < rows.length; i++) rows[i].panel = section.key;
     return items;
   }
 
@@ -1526,8 +1537,7 @@
     }
     if (selectionReset) {
       selectionReset = false;
-      const first = rows.findIndex(r => !HEADER_KINDS.has(r.kind));
-      active = first === -1 ? 0 : first;
+      active = window.PickerSections.firstRowInPanel(rows, activePanel, HEADER_KINDS);
     }
     if (active >= rows.length) active = Math.max(0, rows.length - 1);
     paint();
@@ -1740,6 +1750,11 @@
   function paint() {
     const nodes = list.querySelectorAll('.row');
     nodes.forEach((node, i) => node.classList.toggle('active', i === active));
+    // Одно место на все смены выбора: сюда приходят и стрелки, и ←/→, и оба
+    // клика, и сам render. Пять обработчиков, помнящих панель каждый за
+    // себя, разошлись бы, а забытый шестой дал бы прыжок через экран — ровно
+    // тот, ради которого всё затевалось.
+    activePanel = (rows[active] || {}).panel || '';
   }
 
   /** Каретка на краю запроса и ничего не выделено. */
@@ -3146,6 +3161,9 @@
     search.value = '';
     active = 0;
     selectionReset = true;
+    // Панель прошлого показа забывается: её может уже не быть на экране, а
+    // умолчание «первая не-заголовок» для свежего окна и есть верное.
+    activePanel = '';
     // Показ начинается с чистого состояния: Shift, зажатый перед вызовом
     // пикера (или отпущенный, пока окно было скрыто и события до него не
     // доходили), не должен продолжать рисовать подсказку в новом сеансе.

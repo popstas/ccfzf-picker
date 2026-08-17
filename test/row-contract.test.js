@@ -806,6 +806,32 @@ test('обе раскладки берут режим из одного мест
   assert.ok(source.includes('sectionsFor(mode, query)'), source);
 });
 
+test('панель строки проставляется одним местом на обе раскладки', () => {
+  // itemsOfSection — единственный, кто знает и секцию, и добавленные ею
+  // строки. Проставь панель renderWide, и в узком списке память была бы
+  // пустой, а сброс — прежним.
+  const source = pageFunctions('itemsOfSection(section, nowSec)');
+  assert.match(source, /rows\[i\]\.panel = section\.key/,
+    'itemsOfSection не проставляет row.panel');
+});
+
+test('память об активной панели пишется в paint, а не в render', () => {
+  // Через paint проходят все смены выбора — стрелки, ←/→, клик, правая
+  // кнопка и сам render. Записывай мы память в конце render, выбор,
+  // наведённый стрелками за секунду до набора запроса, помнился бы прежним.
+  const paint = pageFunctions('paint()');
+  assert.match(paint, /activePanel = \(rows\[active\] \|\| \{\}\)\.panel \|\| ''/,
+    'paint не запоминает панель активной строки');
+  assert.match(SESSIONS_HTML, /firstRowInPanel\(rows, activePanel, HEADER_KINDS\)/,
+    'сброс выбора не спрашивает запомненную панель');
+});
+
+test('показ окна забывает панель прошлого показа', () => {
+  // Иначе выбор вставал бы на панель, которой на экране может уже не быть.
+  const source = pageFunctions('beginShow()');
+  assert.match(source, /activePanel = ''/, 'beginShow не чистит activePanel');
+});
+
 // ── Куда Enter уводит строку снимка ──────────────────────────────────────────
 //
 // Единственное место, которое различает три исхода — поднять всю раскладку,
@@ -1746,8 +1772,10 @@ test('сброс выбора уводит его с заголовка, а на
   const source = pageFunctions('render()');
   assert.ok(source.includes('selectionReset'),
     'render() обязан спрашивать про сброс выбора');
-  assert.ok(source.includes('HEADER_KINDS.has(r.kind)'),
-    'сброс обязан искать первую строку, которая не заголовок');
+  // Поиск первой не-заголовка переехал в firstRowInPanel — она же несёт и
+  // память о панели, см. отдельный тест ниже.
+  assert.ok(source.includes('window.PickerSections.firstRowInPanel(rows, activePanel, HEADER_KINDS)'),
+    'сброс обязан искать первую строку, которая не заголовок, через firstRowInPanel');
   assert.match(SESSIONS_HTML, /const HEADER_KINDS = new Set\(\['section', 'snapshot-day'\]\)/,
     'оба вида заголовков обязаны стоять в HEADER_KINDS');
   // Просят сброс ровно два места, и оба — начало нового отбора: новая строка

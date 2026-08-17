@@ -414,5 +414,25 @@
     return indexes[Math.min(offset, indexes.length - 1)];
   }
 
-  return { buildSections, sectionHeaderText, moveInBlocks, moveBetweenBlocks };
+  /**
+   * Куда встаёт выбор при сбросе: первая не-заголовок в названной панели.
+   *
+   * Панель называется ключом секции (`row.panel`), а не номером блока
+   * (`row.block`): номер съезжает от появления и исчезновения соседей, а
+   * помнить надо именно ту панель, в которой человек стоял. Не нашлось в ней
+   * ничего — работает прежнее умолчание, первая не-заголовок во всём списке:
+   * так же ведёт себя и свежепоказанное окно, где помнить нечего.
+   */
+  function firstRowInPanel(rows, panel, headerKinds) {
+    const list = Array.isArray(rows) ? rows : [];
+    const header = (row) => Boolean(headerKinds && headerKinds.has(row.kind));
+    if (panel) {
+      const inPanel = list.findIndex(row => row.panel === panel && !header(row));
+      if (inPanel !== -1) return inPanel;
+    }
+    const first = list.findIndex(row => !header(row));
+    return first === -1 ? 0 : first;
+  }
+
+  return { buildSections, sectionHeaderText, moveInBlocks, moveBetweenBlocks, firstRowInPanel };
 });
