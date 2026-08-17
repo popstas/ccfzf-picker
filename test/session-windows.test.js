@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const SessionWindows = require('../frontend-src/session-windows');
-const { canFocusRow, trackerHere, trackerHosts, focusPid, openManager, windowsOf, windowOf } = SessionWindows;
+const { canFocusRow, trackerHere, trackerHosts, focusPid, openManager, windowsOf, windowOf, focusWindowOf, mqttBaseFor } = SessionWindows;
 
 // Ответ нового агрегатора: две машины, у каждой свой трекер.
 const STATE = {
@@ -68,6 +68,25 @@ test('старый агрегатор без полей у окна читает
   const row = { window: { title: 'ccfzf', lastSeen: 1, focusedAt: 0 } };
   assert.strictEqual(canFocusRow(row, old, 'desktop-box'), true);
   assert.strictEqual(canFocusRow(row, old, 'macbook'), false);
+});
+
+test('своё окно находится, даже когда главным названо чужое', () => {
+  // Агрегатор ставит первым окно со свежайшим взглядом — оно может быть на
+  // соседней машине. Поднимать при этом надо здешнее: подъём на чужом экране
+  // человеку ничего не даёт.
+  const row = { windows: [
+    { host: 'mac-host', pid: 5, canFocus: true, mqttBase: 'home/mac/windows' },
+    { host: 'windows-box', pid: 7, canFocus: true, mqttBase: 'home/pc/windows' },
+  ] };
+  assert.strictEqual(canFocusRow(row, {}, 'windows-box'), true);
+  assert.strictEqual(focusWindowOf(row, {}, 'windows-box').host, 'windows-box');
+  assert.strictEqual(mqttBaseFor(row, {}, 'windows-box'), 'home/pc/windows');
+});
+
+test('своего окна нет — фокуса нет, а база остаётся у главного окна', () => {
+  const row = { windows: [{ host: 'mac-host', pid: 5, canFocus: true, mqttBase: 'home/mac/windows' }] };
+  assert.strictEqual(canFocusRow(row, {}, 'windows-box'), false);
+  assert.strictEqual(mqttBaseFor(row, {}, 'windows-box'), 'home/mac/windows');
 });
 
 test('trackerHere находит свою машину среди трекеров', () => {

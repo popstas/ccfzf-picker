@@ -1711,7 +1711,7 @@
 
   /** Куда просить о подъёме окна этой строки. Пусто — спросим свой конфиг. */
   function focusBase(row) {
-    return window.SessionWindows.mqttBaseFor(row, lastState);
+    return window.SessionWindows.mqttBaseFor(row, lastState, CONFIG.windowHost);
   }
 
   /** Куда просить об открытии сессии. Пусто — спросим свой конфиг. */

@@ -51,21 +51,28 @@
   }
 
   /**
-   * Поднимать ли окно этой строки вместо открытия терминала.
+   * Своё окно этой строки — то, которое Enter поднимет.
    *
-   * Три условия, и каждое стоит починенной поломки. Машина окна совпала с
-   * нашей — иначе подъём на чужом экране ничего не даёт человеку, а Enter
-   * теряет привычное открытие терминала. Трекер этой машины умеет поднимать —
-   * иначе просьбу разберёт менеджер на другой машине, и окно поднимется не
-   * то. Pid ненулевой — это признак живого трекера: свой pid в файл окон
-   * кладёт он сам, и ноль значит «файла нет, он чужой или протух».
+   * Ищется среди **всех** окон, а не берётся главное: главным агрегатор
+   * называет окно со свежайшим взглядом, и на машине, где сессию открывали
+   * раньше, это будет окно соседней машины. Подъём на чужом экране человеку
+   * ничего не даёт, а Enter при этом теряет привычное открытие терминала.
+   *
+   * Три условия у окна те же, что были: машина совпала с нашей, трекер этой
+   * машины умеет поднимать, pid ненулевой — признак живого трекера.
+   */
+  function focusWindowOf(row, state, configHost) {
+    const mine = normHost(configHost);
+    if (!mine) return null;
+    return windowsOf(row, state).find(w => w && w.canFocus !== false
+      && normHost(w.host) === mine && focusPid(w) > 0) || null;
+  }
+
+  /**
+   * Поднимать ли окно этой строки вместо открытия терминала.
    */
   function canFocusRow(row, state, configHost) {
-    const w = windowOf(row, state);
-    if (!w || w.canFocus === false) return false;
-    const host = normHost(w.host);
-    const mine = normHost(configHost);
-    return Boolean(host) && host === mine && focusPid(w) > 0;
+    return Boolean(focusWindowOf(row, state, configHost));
   }
 
   /**
@@ -105,13 +112,15 @@
   /**
    * Куда просить о подъёме окна этой строки.
    *
-   * Адрес — свойство машины окна, а не всего ответа: трекеров несколько, и у
-   * каждого свой топик. Пустая строка значит «спроси свой конфиг» — так пикер
-   * вёл себя до появления поля, и так он обязан вести себя со старым
-   * агрегатором и со старым трекером.
+   * Адрес — свойство машины окна, которое поднимаем, а не всего ответа:
+   * трекеров несколько, и у каждого свой топик. Своего окна нет — берётся
+   * главное: просьба всё равно уйдёт мимо, но топик остаётся хоть каким-то.
+   * Пустая строка значит «спроси свой конфиг» — так пикер вёл себя до
+   * появления поля, и так он обязан вести себя со старым агрегатором и со
+   * старым трекером.
    */
-  function mqttBaseFor(row, state) {
-    const w = windowOf(row, state);
+  function mqttBaseFor(row, state, configHost) {
+    const w = focusWindowOf(row, state, configHost) || windowOf(row, state);
     const base = w && typeof w.mqttBase === 'string' ? w.mqttBase.trim() : '';
     return base;
   }
@@ -138,5 +147,5 @@
     return able.find(e => normHost(e.host) === mine) || able[0] || null;
   }
 
-  return { windowOf, windowsOf, normHost, canFocusRow, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager };
+  return { windowOf, windowsOf, normHost, canFocusRow, focusWindowOf, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager };
 });
