@@ -44,6 +44,11 @@
   /* Общее правило `.field input[type=number] { width: 100% }` тут неверно:
      поле пикселей — часть строки радиокнопок, а не поле само по себе. */
   .size-px input[type=number] { width: 6em; }
+  /* `:invalid` красится браузером сам, без единого вызова JS: и по нативному
+     min="101", и по setCustomValidity в renderPage. Слово с причиной несёт
+     статусная строка внизу — тут только пятно, чтобы взгляд сразу нашёл
+     поле. */
+  .size-px input[type=number]:invalid { border-color: #ff7b72; }
 </style>
 </head>
 <body>
@@ -583,15 +588,32 @@
     // комментарий у цикла по `[data-px]` ниже). Разводить два разных правила
     // внутри одной общей ветки было бы менее понятно, чем две своих, — как у
     // `data-panel` и `data-axis` рядом.
+    // Отказ поля пикселей обязан быть виден человеку, а не только браузеру:
+    // `setCustomValidity` сама по себе ничего не рисует — она лишь готовит
+    // сообщение для `reportValidity()`/отправки формы, а тут нет ни того, ни
+    // другого (`<form>` в файле нет вовсе). Показывает отказ статусная
+    // строка внизу — тот же `#status`, которым уже отвечает `validate()` при
+    // сохранении; второго места для ошибок в этом окне нет, и заводить его
+    // ради одного поля незачем. `setCustomValidity` при этом не убрана: она
+    // бесплатно включает нативную рамку `:invalid` у поля, пока сообщение не
+    // снято, — планка тут просто не единственная.
+    const sizeStatus = (bad, text) => {
+      const status = document.getElementById('status');
+      if (!status) return;
+      status.className = bad ? 'bad' : '';
+      status.textContent = text || '';
+    };
     for (const radio of page.querySelectorAll('[data-size]')) {
       radio.addEventListener('change', () => {
         const id = radio.dataset.size;
         fields[id] = Number(radio.value);
         dirtyFields.add(id);
         // Доля и пиксели — одно значение поля, а не два независимых: выбор
-        // радиокнопки отменяет то, что было набрано в поле пикселей рядом.
+        // радиокнопки отменяет то, что было набрано в поле пикселей рядом,
+        // вместе с отказом, который оно, возможно, показывало.
         const px = radio.closest('.field').querySelector('[data-px]');
         if (px) { px.value = ''; px.setCustomValidity(''); }
+        sizeStatus(false);
         scheduleAutosave();
       });
     }
@@ -599,20 +621,42 @@
       px.addEventListener('input', () => {
         const id = px.dataset.px;
         const raw = px.value.trim();
-        if (!raw) { px.setCustomValidity(''); return; }
+        const container = px.closest('.field');
+        if (!raw) {
+          // Стёртое руками поле пикселей — это отказ от прежнего числа, а не
+          // «не трогали»: не запиши сюда 0, следующее сохранение вернуло бы
+          // человеку удалённое им значение как ни в чём не бывало — то самое
+          // молчаливое воскрешение стёртого, которого правило избегает и у
+          // числовых полей (`fromField` про пустую строку порта), только тут
+          // источник другой. Default — тот же смысл, что у возврата
+          // радиокнопкой, и радиокнопка красится в него же, а не остаётся
+          // пустой: иначе на экране не было бы видно вовсе, что теперь выбрано.
+          fields[id] = 0;
+          dirtyFields.add(id);
+          for (const radio of container.querySelectorAll('input[type=radio]')) {
+            radio.checked = radio.value === '0';
+          }
+          px.setCustomValidity('');
+          sizeStatus(false);
+          scheduleAutosave();
+          return;
+        }
         const n = Number(raw);
         // 1–100 сюда не записываются вовсе — для них есть радиокнопки, и
         // поле пикселей не второй, конкурирующий способ задать то же самое.
         // `fields[id]` остаётся тем, чем было (прежний выбор или Default), а
-        // не «не трогали» ничего не значащим числом.
+        // не «не трогали» ничего не значащим числом — но отказ обязан быть
+        // виден, а не тих, иначе поле выглядело бы сломанным.
         if (!Number.isFinite(n) || n < 101) {
           px.setCustomValidity('must be at least 101 px');
+          sizeStatus(true, 'must be at least 101 px');
           return;
         }
         px.setCustomValidity('');
+        sizeStatus(false);
         fields[id] = n;
         dirtyFields.add(id);
-        for (const radio of px.closest('.field').querySelectorAll('input[type=radio]')) {
+        for (const radio of container.querySelectorAll('input[type=radio]')) {
           radio.checked = false;
         }
         scheduleAutosave();

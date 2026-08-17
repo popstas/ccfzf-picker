@@ -277,6 +277,27 @@ test('validate размера принимает 0, доли 1-100 и пиксе
   assert.notDeepStrictEqual(ok(-10), []);
 });
 
+// Ревью Task 8: этот путь не про поле пикселей (то само не даёт написать
+// 1–100 и не пишет пиксели меньше 101 вовсе) — он про config.yaml, правленный
+// руками мимо формы. `toField`/`baselineFields` там ничего не отсекают
+// (числа пропускаются как есть), и единственный сторож на этом пути —
+// `validate` в момент сохранения: полный проход raw-конфиг → configToFields →
+// validate, а не собранный вручную `fields`, — чтобы не остаться голословным
+// про «где-то ловится».
+test('испорченное вручную значение в config.yaml ловит validate, а не только форма', () => {
+  const config = {
+    sshHost: 'host',
+    pickerSize: { narrow: { width: -5000, height: 0.3 }, wide: { width: 0, height: 0 } },
+  };
+  const fields = configToFields(config);
+  // Значения дошли до формы как есть — обрезать их тут некому.
+  assert.strictEqual(fields['pickerSize.narrow.width'], -5000);
+  assert.strictEqual(fields['pickerSize.narrow.height'], 0.3);
+  const problems = validate(fields);
+  assert.ok(problems.some(p => p.includes('pickerSize.narrow.width')), problems.join('; '));
+  assert.ok(problems.some(p => p.includes('pickerSize.narrow.height')), problems.join('; '));
+});
+
 // Ноль — не «пусто», а полноценный выбор: он значит «встроенный размер».
 // Пропусти его патч, как пропускает пустую строку, и вернуться с 80% на
 // Default стало бы нечем — удалять ключи merge_patch не умеет.

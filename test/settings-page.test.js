@@ -822,6 +822,132 @@ test('повторное открытие после записи 65 не пат
     'save_config не должен был позваться — высота уже записана');
 });
 
+// ── Ревью Task 8: отказ поля пикселей виден, стёртое не воскресает ──────────
+//
+// `setCustomValidity` сама по себе ничего не показывает без `reportValidity`
+// или отправки формы — а тут нет ни того, ни другого. Отказ поэтому обязан
+// быть виден через `#status`, ту же строку, которой отвечает `validate()`
+// при сохранении. Проверяется настоящая проводка `[data-size]`/`[data-px]`
+// из renderPage() — вычитана и прогнана в vm, как и остальные куски этого
+// файла: вторая копия в тесте разошлась бы с настоящей молча.
+function sizeWiringSrc() {
+  const found = SETTINGS_HTML.match(
+    /(\n {4}\/\/ Радиокнопки размера и поле пикселей рядом[\s\S]*?\n {4}\})\n {4}document\.getElementById\('save'\)/,
+  );
+  assert.ok(found, 'проводка [data-size]/[data-px] не найдена в settings.html — тест сторожит не то');
+  return found[1];
+}
+
+/** Фиктивная строка размера: радиокнопки и поле пикселей внутри общего .field. */
+function fakeSizeRow(id, radioValues, pxValue) {
+  const radios = radioValues.map(v => ({
+    dataset: { size: id },
+    value: String(v),
+    checked: false,
+    listeners: {},
+    addEventListener(type, fn) { this.listeners[type] = fn; },
+  }));
+  const px = {
+    dataset: { px: id },
+    value: pxValue || '',
+    validity: '',
+    listeners: {},
+    setCustomValidity(msg) { this.validity = msg; },
+    addEventListener(type, fn) { this.listeners[type] = fn; },
+  };
+  const container = {
+    querySelectorAll: (sel) => (sel === 'input[type=radio]' ? radios : []),
+    querySelector: (sel) => (sel === '[data-px]' ? px : null),
+  };
+  for (const r of radios) r.closest = () => container;
+  px.closest = () => container;
+  return { radios, px };
+}
+
+/** Прогнать настоящую проводку [data-size]/[data-px] на одной фиктивной строке. */
+function runSizeWiring({ id, radioValues, pxValue, fields, dirtyFields }) {
+  const row = fakeSizeRow(id, radioValues, pxValue);
+  const status = { className: '', textContent: '' };
+  const calls = { scheduleAutosave: 0 };
+  const ctx = {
+    page: {
+      querySelectorAll: (sel) => (sel === '[data-size]' ? row.radios : sel === '[data-px]' ? [row.px] : []),
+    },
+    document: { getElementById: (elId) => (elId === 'status' ? status : null) },
+    fields,
+    dirtyFields,
+    scheduleAutosave: () => { calls.scheduleAutosave += 1; },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(sizeWiringSrc(), ctx, { filename: 'settings.html' });
+  return { row, status, calls };
+}
+
+test('пиксели 1–100 не пишутся и подсвечиваются статусной строкой', () => {
+  const fields = { 'pickerSize.narrow.width': 0 };
+  const dirtyFields = new Set();
+  const { row, status, calls } = runSizeWiring({
+    id: 'pickerSize.narrow.width', radioValues: [0, 50, 65, 80, 95, 100], fields, dirtyFields,
+  });
+  row.px.value = '50';
+  row.px.listeners.input();
+  assert.strictEqual(fields['pickerSize.narrow.width'], 0, 'значение не должно было записаться');
+  assert.strictEqual(dirtyFields.has('pickerSize.narrow.width'), false);
+  assert.strictEqual(status.className, 'bad');
+  assert.strictEqual(status.textContent, 'must be at least 101 px');
+  assert.strictEqual(calls.scheduleAutosave, 0, 'автосохранение не должно было планироваться на отказ');
+});
+
+test('пиксели ≥ 101 пишутся и снимают отказ', () => {
+  const fields = { 'pickerSize.narrow.width': 0 };
+  const dirtyFields = new Set();
+  const { row, status, calls } = runSizeWiring({
+    id: 'pickerSize.narrow.width', radioValues: [0, 50, 65, 80, 95, 100], fields, dirtyFields,
+  });
+  row.px.value = '50';
+  row.px.listeners.input();
+  row.px.value = '1400';
+  row.px.listeners.input();
+  assert.strictEqual(fields['pickerSize.narrow.width'], 1400);
+  assert.ok(dirtyFields.has('pickerSize.narrow.width'));
+  assert.strictEqual(status.className, '');
+  assert.strictEqual(status.textContent, '');
+  assert.strictEqual(calls.scheduleAutosave, 1, 'автосохранение обязано было запланироваться ровно на удачную правку');
+  assert.ok(row.radios.every(r => r.checked === false), 'радиокнопки обязаны остаться пустыми у пикселей');
+});
+
+test('стёртое поле пикселей падает на Default, а не воскресает при сохранении', () => {
+  // До фикса стёртое поле оставляло fields[id] прежним пиксельным числом —
+  // человек стирал значение и видел его вернувшимся на следующем сохранении.
+  const fields = { 'pickerSize.narrow.width': 1400 };
+  const dirtyFields = new Set();
+  const { row } = runSizeWiring({
+    id: 'pickerSize.narrow.width', radioValues: [0, 50, 65, 80, 95, 100], pxValue: '1400', fields, dirtyFields,
+  });
+  row.px.value = '';
+  row.px.listeners.input();
+  assert.strictEqual(fields['pickerSize.narrow.width'], 0,
+    'стёртое поле обязано стать Default, а не остаться прежним числом');
+  assert.ok(dirtyFields.has('pickerSize.narrow.width'));
+  const zero = row.radios.find(r => r.value === '0');
+  assert.strictEqual(zero.checked, true, 'радиокнопка Default обязана закраситься при очистке поля');
+});
+
+test('радиокнопка снимает отказ поля пикселей рядом', () => {
+  const fields = { 'pickerSize.narrow.width': 0 };
+  const dirtyFields = new Set();
+  const { row, status } = runSizeWiring({
+    id: 'pickerSize.narrow.width', radioValues: [0, 50, 65, 80, 95, 100], fields, dirtyFields,
+  });
+  row.px.value = '50';
+  row.px.listeners.input();
+  assert.strictEqual(status.className, 'bad');
+  row.radios.find(r => r.value === '80').listeners.change();
+  assert.strictEqual(fields['pickerSize.narrow.width'], 80);
+  assert.strictEqual(status.className, '', 'выбор радиокнопки обязан снять отказ поля пикселей рядом');
+  assert.strictEqual(row.px.value, '');
+});
+
 // ── Ревью: реентерабельность persist() под автосохранением ──────────────────
 //
 // 400 мс дебаунса — это окно, в которое ручной клик почти никогда не попадал,
