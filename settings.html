@@ -94,6 +94,7 @@
     // сюда идёт по тому же правилу, что и showTerminalIcon: TOGGLE_LABELS —
     // всё, что не FILTER_LABELS, и парность двух окон проверяет именно это.
     dimStale: 'dim stale',
+    dimProject: 'dim project',
   };
   const FILTER_LABELS = { onlyWindow: 'only sessions with a window', showAll: 'show all sessions' };
   const UI_DEFAULTS = {
@@ -118,6 +119,12 @@
       // литералом — этой осью распоряжается только человек, ни один конфиг
       // её не выводит.
       dimStale: { list: true, statusline: true },
+      // Плейсхолдера тут нет: у dimProject нет ключа в config.yaml, из
+      // которого выводилось бы умолчание, — оба числа литеральные и обязаны
+      // совпадать с уиToggles пикера дословно. Разойдись они, окно настроек
+      // показывало бы галку не в том состоянии, в каком её видит человек в
+      // списке, — ровно та болезнь, которой уже болел dimStale.
+      dimProject: { list: true, statusline: false },
     },
   };
 
@@ -353,13 +360,17 @@
 
   // Recommended — всё, кроме редко нужного: agent event и cost читаются не
   // на каждый взгляд, а terminal icon — новая строка, включённая по умолчанию
-  // выключенной. dimStale сюда тоже не идёт: это не колонка, и щёлкнутый
-  // заголовок Recommended не должен решать за неё заодно. Считается от
-  // TOGGLE_LABELS, а не вторым списком ключей: та же причина, по которой
-  // FILTER_KEYS в sessions.html считается от TOGGLE_CHECKS, а не пишется
-  // рядом заново.
+  // выключенной. Обе галки затемнения сюда тоже не идут: это не колонки, и
+  // щёлкнутый заголовок Recommended не должен решать за них заодно.
+  // Считается от TOGGLE_LABELS, а не вторым списком ключей: та же причина, по
+  // которой FILTER_KEYS в sessions.html считается от TOGGLE_CHECKS, а не
+  // пишется рядом заново.
+  // Список отдельной константой не выносить: тесты вычитывают из страницы
+  // кусок исходника и гоняют его в vm — объявление, стоящее выше куска, там
+  // просто не существует, и падает всё, что зовёт RECOMMENDED_KEYS.
   const RECOMMENDED_KEYS = Object.keys(TOGGLE_LABELS).filter(
-    key => key !== 'showEvent' && key !== 'showCost' && key !== 'showTerminalIcon' && key !== 'dimStale',
+    key => key !== 'showEvent' && key !== 'showCost' && key !== 'showTerminalIcon'
+      && key !== 'dimStale' && key !== 'dimProject',
   );
 
   /**

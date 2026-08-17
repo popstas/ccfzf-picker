@@ -905,11 +905,38 @@ test('подсветка восстанавливается после кажд�
 
 // ── Каталог, по которому гасим: наведение или фокус ──────────────────────────
 
+test('выключенная галка гасит и наведение, и фокус', () => {
+  // Точка отключения одна и самая нижняя: обработчики мыши и paintProjectDim
+  // о галке не знают вовсе. Две точки — два места, где о ней можно забыть,
+  // и забытая вторая означала бы галку, которая работает через раз.
+  const source = pageFunctions('dimCwd(rows, active, hoverCwd)');
+  const ctx = {
+    HEADER_KINDS: new Set(['section', 'snapshot-day']),
+    toggles: { dimProject: false },
+  };
+  vm.createContext(ctx);
+  const rows = [
+    { kind: 'project', cwd: '/home/user/a' },
+    { kind: 'session', cwd: '/home/user/b' },
+  ];
+  const byHover = vm.runInContext(
+    `${source}\ndimCwd(${JSON.stringify(rows)}, 1, '/home/user/a');`,
+    ctx, { filename: 'sessions.html' });
+  const byFocus = vm.runInContext(
+    `${source}\ndimCwd(${JSON.stringify(rows)}, 0, '');`,
+    ctx, { filename: 'sessions.html' });
+  assert.equal(byHover, '', 'выключенная галка не отменила гашение по наведению');
+  assert.equal(byFocus, '', 'выключенная галка не отменила гашение по фокусу');
+});
+
 test('наведение перебивает фокус', () => {
   // Мышь — жест более свежий и намеренный, чем выбор, который стоит на
   // строке всегда и сам собой.
   const source = pageFunctions('dimCwd(rows, active, hoverCwd)');
-  const ctx = { HEADER_KINDS: new Set(['section', 'snapshot-day']) };
+  const ctx = {
+    HEADER_KINDS: new Set(['section', 'snapshot-day']),
+    toggles: { dimProject: true },
+  };
   vm.createContext(ctx);
   const rows = [
     { kind: 'project', cwd: '/home/user/a' },
@@ -923,7 +950,10 @@ test('наведение перебивает фокус', () => {
 
 test('фокус на строке проекта гасит остальное в смешанном списке', () => {
   const source = pageFunctions('dimCwd(rows, active, hoverCwd)');
-  const ctx = { HEADER_KINDS: new Set(['section', 'snapshot-day']) };
+  const ctx = {
+    HEADER_KINDS: new Set(['section', 'snapshot-day']),
+    toggles: { dimProject: true },
+  };
   vm.createContext(ctx);
   const rows = [
     { kind: 'section' },
@@ -942,7 +972,10 @@ test('в списке из одних проектов фокус не гаси�
   // источник правды разошёлся бы с первым, а отделять здесь всё равно нечего
   // — выбор и так подсвечен.
   const source = pageFunctions('dimCwd(rows, active, hoverCwd)');
-  const ctx = { HEADER_KINDS: new Set(['section', 'snapshot-day']) };
+  const ctx = {
+    HEADER_KINDS: new Set(['section', 'snapshot-day']),
+    toggles: { dimProject: true },
+  };
   vm.createContext(ctx);
   const rows = [
     { kind: 'section' },
@@ -960,7 +993,10 @@ test('фокус на строке сессии не гасит ничего', (
   // по ней притушило бы соседей по тому же проекту — то есть ровно то, что
   // человек в этот момент и разглядывает.
   const source = pageFunctions('dimCwd(rows, active, hoverCwd)');
-  const ctx = { HEADER_KINDS: new Set(['section', 'snapshot-day']) };
+  const ctx = {
+    HEADER_KINDS: new Set(['section', 'snapshot-day']),
+    toggles: { dimProject: true },
+  };
   vm.createContext(ctx);
   const rows = [
     { kind: 'project', cwd: '/home/user/a' },
