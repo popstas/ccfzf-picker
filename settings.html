@@ -112,9 +112,11 @@
       onlyWindow: { list: false, statusline: false },
       showAll: { list: false, statusline: true },
       showTerminalIcon: { list: false, statusline: false },
-      // Плейсхолдер: настоящее умолчание считает toggleDefaults() в
-      // sessions.html от CONFIG.stale.enabled, а тут читаются только ключи
-      // (тест «окно настроек знает все галки»), не значения.
+      // `list` тут — плейсхолдер: настоящее значение переписывает строка
+      // `UI_DEFAULTS.toggles.dimStale.list = Boolean(config?.stale?.enabled)`
+      // ниже, сразу после загрузки config. `statusline: true` остаётся
+      // литералом — этой осью распоряжается только человек, ни один конфиг
+      // её не выводит.
       dimStale: { list: true, statusline: true },
     },
   };
@@ -929,6 +931,13 @@
     config = {};
   }
   fields = configToFields(config);
+  // Умолчание dimStale — от того же config.stale.enabled, что видит пикер в
+  // toggleDefaults() (sessions.html), а не от литерала true чуть выше: без
+  // этого свежая установка (stale.enabled: false по умолчанию, см.
+  // config-shape.js) рисовала бы галку в окне настроек нажатой, пока сам
+  // список остаётся без затемнения, — расхождение двух окон об одной
+  // настройке.
+  UI_DEFAULTS.toggles.dimStale.list = Boolean(config?.stale?.enabled);
   try {
     ui = window.UiState.normalizeUiState(await invoke('load_ui'), UI_DEFAULTS);
   } catch (e) {

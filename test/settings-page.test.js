@@ -1257,3 +1257,39 @@ test('подпись opacity обновляется сразу при движе
   vm.runInContext(`${src}\nupdateRangeCurrent(input);`, ctx, { filename: 'settings.html' });
   assert.strictEqual(output.textContent, 'Current: 0.7');
 });
+
+// ── Ревью Task 3: умолчание dim stale не расходится с пикером ───────────────
+//
+// UI_DEFAULTS.toggles.dimStale.list в объявлении — заглушка true, только
+// чтобы ключ существовал (см. комментарий рядом с ним). Настоящее значение
+// пишет отдельная строка после загрузки config, тем же приёмом, что
+// toggleDefaults() в sessions.html. Тест выше (`defaults()`/`allToggles()`)
+// её не видит вовсе — он вычитывает только литерал UI_DEFAULTS, а не хвост
+// загрузки окна, — и обе прежних правки (заведение галки и добавление её в
+// settings.html) прошли бы мимо него молча: сторожа парности ключей
+// (row-contract.test.js) сверяют только Object.keys, не значения умолчаний.
+//
+// Вычитывается настоящая строка присваивания, а не переписанная в тесте
+// копия правила: разошедшийся литерал (например, снова true) обязан уронить
+// именно этот тест.
+function dimStaleDefaultFromConfig(configStale) {
+  const uiDefaultsSrc = sourceOf(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/, 'UI_DEFAULTS');
+  const fixSrc = sourceOf(
+    /\n {2}UI_DEFAULTS\.toggles\.dimStale\.list = [^\n]*;\n/,
+    'вывод умолчания dimStale из config.stale.enabled',
+  );
+  const ctx = { config: { stale: configStale } };
+  vm.createContext(ctx);
+  vm.runInContext(`${uiDefaultsSrc}\n${fixSrc}\nvar out = UI_DEFAULTS.toggles.dimStale.list;`,
+    ctx, { filename: 'settings.html' });
+  return ctx.out;
+}
+
+test('умолчание dim stale в окне настроек берётся из config.stale.enabled, а не из литерала', () => {
+  assert.strictEqual(dimStaleDefaultFromConfig({ enabled: false }), false,
+    'на выключенном stale.enabled галка не должна показываться нажатой');
+  assert.strictEqual(dimStaleDefaultFromConfig({ enabled: true }), true,
+    'на включённом stale.enabled умолчание обязано включиться следом');
+  assert.strictEqual(dimStaleDefaultFromConfig(undefined), false,
+    'у свежей установки (config без секции stale) умолчание — false, как в config-shape.js');
+});
