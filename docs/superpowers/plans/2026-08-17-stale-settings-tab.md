@@ -460,7 +460,7 @@ git commit -m "feat(settings): add stale opacity slider"
 
 **Files:**
 - Verify only: all changed JavaScript, HTML, and test files from Tasks 1-3
-- External script: `/home/popstas/projects/js/ccfzf-picker/data/scripts/deploy-win.sh` (ignored by git; run from the original checkout)
+- External script: `data/scripts/deploy-win.sh` (ignored by git; run from the original checkout)
 
 **Interfaces:**
 - Consumes: committed branch `feat/stale-settings-tab`; Windows deployment pulls this branch from `origin` before building.
@@ -508,7 +508,7 @@ Expected: `origin/feat/stale-settings-tab` points at the reviewed `HEAD`.
 
 - [ ] **Step 6: Deploy that pushed branch**
 
-Run from `/home/popstas/projects/js/ccfzf-picker`, where the ignored script exists:
+Run from the original checkout, where the ignored script exists:
 
 ```bash
 BRANCH=feat/stale-settings-tab ./data/scripts/deploy-win.sh
