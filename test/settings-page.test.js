@@ -88,6 +88,10 @@ function axesHtml() {
     // поэтому вычитывается своим шаблоном, до первого `;\n` на отступе в два
     // пробела, а не фигурными скобками, как остальные константы выше.
     + sourceOf(/\n {2}const RECOMMENDED_KEYS = [\s\S]*?;\n/, 'RECOMMENDED_KEYS')
+    // axesTableHtml зовёт recommendedListState для checked заголовка
+    // Recommended — без неё вызов упал бы ReferenceError, а не молча дал
+    // неверную разметку.
+    + sourceOf(/\n {2}function recommendedListState\(toggles\) \{[\s\S]*?\n {2}\}\n/, 'recommendedListState')
     + sourceOf(/\n {2}function axesTableHtml\(\) \{[\s\S]*?\n {2}\}\n/, 'axesTableHtml');
   const ctx = {
     esc: s => String(s).replace(/[&<>"]/g, c => (
@@ -98,6 +102,118 @@ function axesHtml() {
   vm.runInContext(`${src}\nvar out = axesTableHtml();`, ctx, { filename: 'settings.html' });
   return ctx.out;
 }
+
+// ── чекбокс recommended-all: тройное состояние и эффект клика ───────────────
+//
+// axesHtml() выше проверяет только разметку — что чекбокс на месте и что он
+// красится каким-то title'ом. Контракт задачи («включён, когда все Recommended
+// list=true; выключен, когда ни один; неопределён на смеси; клик решает по
+// текущему состоянию, а не по input.checked; трогает только list; метит
+// dirtyAxes») живёт в двух чистых функциях, recommendedListState и
+// applyRecommendedToggle, и вычитывается тем же приёмом, что и markToggleId в
+// row-contract.test.js — извлечённая ссылка на функцию зовётся прямо из
+// теста, минуя DOM и renderPage целиком.
+function recommendedLogic() {
+  const src = sourceOf(/\n {2}const TOGGLE_LABELS = \{[\s\S]*?\n {2}\};\n/, 'TOGGLE_LABELS')
+    + sourceOf(/\n {2}const RECOMMENDED_KEYS = [\s\S]*?;\n/, 'RECOMMENDED_KEYS')
+    + sourceOf(/\n {2}function recommendedListState\(toggles\) \{[\s\S]*?\n {2}\}\n/, 'recommendedListState')
+    + sourceOf(
+      /\n {2}function applyRecommendedToggle\(toggles, dirtyAxes\) \{[\s\S]*?\n {2}\}\n/,
+      'applyRecommendedToggle',
+    );
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(
+    `${src}\nvar state = recommendedListState;\nvar apply = applyRecommendedToggle;`
+    + `\nvar keys = RECOMMENDED_KEYS;`,
+    ctx, { filename: 'settings.html' },
+  );
+  return {
+    recommendedListState: ctx.state,
+    applyRecommendedToggle: ctx.apply,
+    RECOMMENDED_KEYS: Array.from(ctx.keys),
+  };
+}
+
+// Полный набор осей на все ключи TOGGLE_LABELS — умолчания страницы, чтобы не
+// заводить третью копию таблицы галок прямо в тесте.
+function allToggles() {
+  return { ...defaults().toggles };
+}
+
+test('recommended-all отмечен, когда у всех Recommended list=true', () => {
+  const { recommendedListState, RECOMMENDED_KEYS } = recommendedLogic();
+  const toggles = allToggles();
+  for (const key of RECOMMENDED_KEYS) toggles[key] = { ...toggles[key], list: true };
+  const state = recommendedListState(toggles);
+  assert.strictEqual(state.checked, true);
+  assert.strictEqual(state.indeterminate, false);
+});
+
+test('recommended-all снят, когда ни у одного Recommended list не включён', () => {
+  const { recommendedListState, RECOMMENDED_KEYS } = recommendedLogic();
+  const toggles = allToggles();
+  for (const key of RECOMMENDED_KEYS) toggles[key] = { ...toggles[key], list: false };
+  const state = recommendedListState(toggles);
+  assert.strictEqual(state.checked, false);
+  assert.strictEqual(state.indeterminate, false);
+});
+
+test('recommended-all в неопределённом состоянии на смеси', () => {
+  const { recommendedListState, RECOMMENDED_KEYS } = recommendedLogic();
+  const toggles = allToggles();
+  RECOMMENDED_KEYS.forEach((key, i) => { toggles[key] = { ...toggles[key], list: i === 0 }; });
+  const state = recommendedListState(toggles);
+  assert.strictEqual(state.checked, false);
+  assert.strictEqual(state.indeterminate, true);
+});
+
+test('клик на смеси включает list у всех Recommended и метит их dirty', () => {
+  const { applyRecommendedToggle, RECOMMENDED_KEYS } = recommendedLogic();
+  const toggles = allToggles();
+  // Смешанное состояние по list, вперемешку с включённой statusline — она
+  // не должна дрогнуть.
+  RECOMMENDED_KEYS.forEach((key, i) => {
+    toggles[key] = { ...toggles[key], list: i === 0, statusline: true };
+  });
+  const before = JSON.parse(JSON.stringify(toggles));
+  const dirtyAxes = new Map();
+  const next = applyRecommendedToggle(toggles, dirtyAxes);
+  for (const key of RECOMMENDED_KEYS) {
+    assert.strictEqual(next[key].list, true, `${key}.list`);
+    assert.strictEqual(next[key].statusline, before[key].statusline, `${key}.statusline`);
+    assert.ok(dirtyAxes.has(key), `${key} не помечен dirty`);
+    assert.deepStrictEqual([...dirtyAxes.get(key)], ['list'], `${key} помечен не только по list`);
+  }
+  // Other-строки (showEvent, showCost, showTerminalIcon) клик не касается
+  // вовсе — ни по значению, ни по dirty-отметке.
+  for (const key of Object.keys(toggles)) {
+    if (RECOMMENDED_KEYS.includes(key)) continue;
+    assert.deepStrictEqual(next[key], before[key], key);
+    assert.ok(!dirtyAxes.has(key), `${key} помечен dirty, а это не Recommended`);
+  }
+});
+
+test('клик, когда все Recommended включены, выключает их все и тоже метит dirty', () => {
+  const { applyRecommendedToggle, RECOMMENDED_KEYS } = recommendedLogic();
+  const toggles = allToggles();
+  RECOMMENDED_KEYS.forEach((key) => {
+    toggles[key] = { ...toggles[key], list: true, statusline: true };
+  });
+  const before = JSON.parse(JSON.stringify(toggles));
+  const dirtyAxes = new Map();
+  const next = applyRecommendedToggle(toggles, dirtyAxes);
+  for (const key of RECOMMENDED_KEYS) {
+    assert.strictEqual(next[key].list, false, `${key}.list`);
+    assert.strictEqual(next[key].statusline, before[key].statusline, `${key}.statusline`);
+    assert.ok(dirtyAxes.get(key).has('list'), `${key} не помечен dirty`);
+  }
+  for (const key of Object.keys(toggles)) {
+    if (RECOMMENDED_KEYS.includes(key)) continue;
+    assert.deepStrictEqual(next[key], before[key], key);
+    assert.ok(!dirtyAxes.has(key), `${key} помечен dirty, а это не Recommended`);
+  }
+});
 
 test('у каждой галки осей есть подсказка', () => {
   const html = axesHtml();

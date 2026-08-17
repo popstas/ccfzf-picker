@@ -280,6 +280,44 @@
   );
 
   /**
+   * Тройное состояние заголовка Recommended, по оси list.
+   *
+   * Общая для разметки и для перерисовки функция, а не вычисление по месту в
+   * каждой из них: `axesTableHtml` красит `checked` в исходной строке,
+   * `renderPage` следом ставит `indeterminate` DOM-свойством (строкой его не
+   * выразить) — разошедшиеся вычисления одного и того же дали бы галку,
+   * которая красится по одному правилу, а щёлкается по другому.
+   */
+  function recommendedListState(toggles) {
+    const on = RECOMMENDED_KEYS.filter(key => Boolean((toggles[key] || {}).list));
+    return {
+      checked: on.length === RECOMMENDED_KEYS.length,
+      indeterminate: on.length > 0 && on.length < RECOMMENDED_KEYS.length,
+    };
+  }
+
+  /**
+   * Эффект клика по заголовку Recommended.
+   *
+   * Чистая по отношению к DOM функция — мутирует только переданные `toggles`
+   * (копией, не на месте) и `dirtyAxes` — специально, чтобы её можно было
+   * прогнать в тесте без имитации браузера. Ось statusline не трогает вовсе:
+   * заголовок отвечает только за list. Если не все Recommended включены,
+   * включает все; если все включены — выключает все.
+   */
+  function applyRecommendedToggle(toggles, dirtyAxes) {
+    const allOn = recommendedListState(toggles).checked;
+    const turnOn = !allOn;
+    const next = { ...toggles };
+    for (const key of RECOMMENDED_KEYS) {
+      next[key] = { ...next[key], list: turnOn };
+      if (!dirtyAxes.has(key)) dirtyAxes.set(key, new Set());
+      dirtyAxes.get(key).add('list');
+    }
+    return next;
+  }
+
+  /**
    * Таблицы вкладки Columns: Recommended, Other и Filters.
    *
    * Оси в шапке — list, затем statusline: list главная, ей отвечает большая
@@ -306,10 +344,9 @@
     // расчёт indeterminate — в renderPage, отдельной веткой мимо
     // [data-axis]: тот пишет правку в ui.toggles[key] по данному ключу, а у
     // recommended-all настоящего ключа в ui.toggles нет и быть не должно.
-    const recommendedAllOn = RECOMMENDED_KEYS.every(key => ui.toggles[key].list);
     const recommendedHead = `<th title="${esc(AXIS_HINTS.list)}"><label class="axis-head">`
       + `<input type="checkbox" data-axis="list" data-key="recommended-all"${
-        recommendedAllOn ? ' checked' : ''} title="${
+        recommendedListState(ui.toggles).checked ? ' checked' : ''} title="${
         esc('Turn every recommended column on or off in the list')}"> <span>list</span></label></th>`;
     const groupTable = (title, keys, listHeadCell) => '<div class="field axes-group">'
       + `<label>${esc(title)}</label><table class="axes"><tr><th>Column</th>`
@@ -405,11 +442,11 @@
       + '<div id="bar"><button id="save">Save</button><span id="status"></span></div>';
 
     // `indeterminate` — свойство DOM, а не HTML-атрибут: строкой его не
-    // выразить, и ставится оно уже по вставленной разметке.
+    // выразить, и ставится оно уже по вставленной разметке. `checked` уже
+    // верен из разметки — та же `recommendedListState`, что и здесь.
     const recommendedAll = page.querySelector('[data-key="recommended-all"]');
     if (recommendedAll) {
-      const states = RECOMMENDED_KEYS.map(key => Boolean(ui.toggles[key].list));
-      recommendedAll.indeterminate = states.some(Boolean) && !states.every(Boolean);
+      recommendedAll.indeterminate = recommendedListState(ui.toggles).indeterminate;
     }
 
     for (const input of page.querySelectorAll('[data-field]')) {
@@ -462,14 +499,9 @@
       recommendedAll.addEventListener('change', () => {
         // Не читается сам input.checked: у смешанного состояния клик обязан
         // включить всё, а не подстроиться под то, где случайно остановился
-        // курсор индикатора. Ось statusline эта галка не трогает вовсе.
-        const allOn = RECOMMENDED_KEYS.every(key => ui.toggles[key].list);
-        const turnOn = !allOn;
-        for (const key of RECOMMENDED_KEYS) {
-          ui.toggles[key] = { ...ui.toggles[key], list: turnOn };
-          if (!dirtyAxes.has(key)) dirtyAxes.set(key, new Set());
-          dirtyAxes.get(key).add('list');
-        }
+        // курсор индикатора — applyRecommendedToggle решает это сама, по
+        // текущим ui.toggles, а не по DOM-состоянию щёлкнутого чекбокса.
+        ui.toggles = applyRecommendedToggle(ui.toggles, dirtyAxes);
         renderPage();
       });
     }
