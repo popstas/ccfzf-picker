@@ -101,7 +101,7 @@
     },
     {
       id: 'window',
-      title: 'Window size',
+      title: 'Window popup',
       fields: [
         { id: 'pickerSize.narrow.width', label: 'List width', type: 'size',
           options: SIZE_CHOICES },

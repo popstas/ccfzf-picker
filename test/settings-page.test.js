@@ -634,7 +634,7 @@ test('вкладки называются по спеке и Integrations нет
   // 2026-08-17-stale-settings-tab-design.md); список из семи здесь был верен
   // только до слияния с той веткой.
   assert.deepStrictEqual(PAGES.map(p => p.title), [
-    'General', 'Dim stale sessions', 'Window size', 'Columns', 'Layout panels',
+    'General', 'Dim stale sessions', 'Window popup', 'Columns', 'Layout panels',
     'Hotkeys', 'MQTT', 'Paths',
   ]);
 });

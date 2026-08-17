@@ -216,10 +216,10 @@ test('SIZE_CHOICES содержит 100', () => {
   assert.ok(field.options.some(o => o.value === 100));
 });
 
-// Подложка позади пикера — две галки на странице Window size, после полей
+// Подложка позади пикера — две галки на странице Window popup, после полей
 // размера: решение «затемнять ли» относится к тому же выбору «каким видеть
 // окно», что и сам размер, и на отдельную страницу его заводить незачем.
-test('scrim.narrow и scrim.wide — булевы поля на странице Window size, после размеров', () => {
+test('scrim.narrow и scrim.wide — булевы поля на странице Window popup, после размеров', () => {
   const ids = PAGES.find(p => p.id === 'window').fields.map(f => f.id);
   assert.ok(ids.includes('scrim.narrow'));
   assert.ok(ids.includes('scrim.wide'));
