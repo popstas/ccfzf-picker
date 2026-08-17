@@ -580,11 +580,62 @@ test('windowHtml оставляет прежний глиф без записи 
 test('windowHtml меняет глиф, когда трекер назвал знакомый терминал', () => {
   assert.strictEqual(
     windowHtml({ window: { hwnd: 1, app: 'wezterm-gui.exe' } }, true, true),
-    '<div class="win open">⌨</div>',
+    '<div class="win open" title="WezTerm">w</div>',
   );
   assert.strictEqual(
     windowHtml({ window: { hwnd: 1, process: 'WindowsTerminal.exe' } }, true, true),
-    '<div class="win open">⌨</div>',
+    '<div class="win open" title="Windows Terminal">t</div>',
+  );
+});
+
+test('терминалы Windows различаются между собой — wt не читается как wezterm', () => {
+  // Ради этого правило и заведено поимённым: на popstas-pc рядом живут оба, и
+  // общий знак ⌨ на них двоих не отвечал бы на единственный вопрос к пометке.
+  const glyph = (named) => windowHtml({ window: { app: named } }, true, true);
+  assert.strictEqual(glyph('wt.exe'), '<div class="win open" title="Windows Terminal">t</div>');
+  assert.strictEqual(glyph('wezterm-gui.exe'), '<div class="win open" title="WezTerm">w</div>');
+  assert.notStrictEqual(glyph('wt.exe'), glyph('wezterm-gui.exe'));
+});
+
+test('маковский Terminal.app не читается как Windows Terminal', () => {
+  // Порядок в таблице значим: `windowsterminal` проверяется первым, иначе
+  // отображаемое имя `Terminal` увело бы обе строки под один глиф.
+  assert.strictEqual(
+    windowHtml({ window: { app: 'Terminal' } }, true, true),
+    '<div class="win open" title="Terminal">T</div>',
+  );
+  assert.strictEqual(
+    windowHtml({ window: { app: 'WindowsTerminal.exe' } }, true, true),
+    '<div class="win open" title="Windows Terminal">t</div>',
+  );
+});
+
+test('маковские имена приложений узнаются наравне с exe', () => {
+  // На маке трекер называет отображаемое имя, а не файл: `kitty`, `iTerm2`.
+  assert.strictEqual(
+    windowHtml({ window: { app: 'kitty' } }, true, true),
+    '<div class="win open" title="kitty">k</div>',
+  );
+  assert.strictEqual(
+    windowHtml({ window: { app: 'iTerm2' } }, true, true),
+    '<div class="win open" title="iTerm2">i</div>',
+  );
+  assert.strictEqual(
+    windowHtml({ window: { app: 'Ghostty' } }, true, true),
+    '<div class="win open" title="Ghostty">g</div>',
+  );
+});
+
+test('имя терминала приписывается к подсказке рядом со столом, а не вместо', () => {
+  // Стол называет трекер Windows, терминал — оба; обе части нужны, и обе
+  // склеиваются одной подсказкой.
+  assert.strictEqual(
+    windowHtml({ window: { desktop: 2, app: 'kitty' } }, true, true),
+    '<div class="win open" title="Desktop 2 · kitty">k</div>',
+  );
+  assert.strictEqual(
+    windowHtml({ window: { desktop: 2, app: 'kitty' } }, true, false),
+    '<div class="win open" title="Desktop 2">▣</div>',
   );
 });
 

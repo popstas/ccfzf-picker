@@ -257,6 +257,25 @@ test('у terminal icon нет чекбокса statusline — это мёртв�
     `ячейка statusline обязана остаться пустой, но присутствовать: ${row}`);
 });
 
+// Подсказка перечисляет буквы терминалов, а таблица этих букв живёт в
+// session-glyph.js — то есть список здесь второй по счёту. Второму источнику
+// правды в этом проекте полагается сторож: разойдись они, настройки обещали бы
+// человеку букву, которой список не рисует, и заметить это можно было бы
+// только глазами на живом окне с открытым терминалом.
+test('подсказка terminal icon называет каждый терминал из таблицы глифов', () => {
+  const { TERMINAL_GLYPHS } = require('../frontend-src/session-glyph');
+  const src = sourceOf(/\n {2}const COLUMN_HINTS = \{[\s\S]*?\n {2}\};\n/, 'COLUMN_HINTS');
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(`${src}\nvar out = COLUMN_HINTS;`, ctx, { filename: 'settings.html' });
+  const hint = ctx.out.showTerminalIcon;
+  assert.ok(hint, 'у terminal icon нет подсказки');
+  for (const terminal of TERMINAL_GLYPHS) {
+    assert.ok(hint.includes(`${terminal.glyph} ${terminal.name}`),
+      `подсказка не называет ${terminal.glyph} ${terminal.name}: ${hint}`);
+  }
+});
+
 test('второй столбец фильтров объяснён иначе, чем у колонок', () => {
   // Поле под ним то же самое (`list`), а значит разное: у колонки — «показывать
   // колонку», у фильтра — «фильтр включён». Одинаковая подсказка врала бы.

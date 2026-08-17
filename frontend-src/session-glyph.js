@@ -161,22 +161,60 @@
    * Пустой элемент вместо пропуска — по той же причине, что у hotkeyHtml:
    * правые колонки стоят друг за другом, и дырка сдвинула бы соседние строки.
    */
-  // Терминал, а не окно вообще. Трекер сегодня не пишет ни `app`, ни
-  // `process` ни у одной записи — задача 5 завела саму галку, а поля
-  // остаются на будущее у того, кто их напишет. До тех пор регэксп просто не
-  // находит совпадения, и глиф остаётся прежним; подставлять вместо этого
-  // пресет терминала пикера было бы неправдой — у соседних строк терминалы
-  // бывают разные.
-  const TERMINAL_APP_RE = /wezterm|kitty|ghostty|WindowsTerminal|wt|iTerm/i;
+  /**
+   * Терминалы, которые пометка различает поимённо.
+   *
+   * Один общий знак ⌨ на все терминалы сразу не годится: на Windows рядом
+   * живут Windows Terminal и WezTerm, и вопрос к пометке — не «терминал ли
+   * это» (это и так видно по ▣), а «какой именно». Отсюда буква на терминал,
+   * а не картинка: колонка `.win` шириной в один знак, и иконке приложения
+   * там места нет — а брать её было бы неоткуда вдвойне, окно стоит на
+   * соседней машине, и её exe у нас не спросить.
+   *
+   * Порядок значим: `windowsterminal` обязан проверяться раньше `terminal`,
+   * иначе Windows Terminal читался бы маковским Terminal.app. Имя приезжает
+   * от трекера: на Windows это basename exe (`WindowsTerminal.exe`,
+   * `wezterm-gui.exe`), на маке — отображаемое имя приложения (`kitty`,
+   * `iTerm2`). Регэкспы поэтому свободные, но не настолько, как прежний общий
+   * `wt` — тот совпадал в любом слове с этими двумя буквами подряд.
+   */
+  const TERMINAL_GLYPHS = [
+    { re: /wezterm/i, glyph: 'w', name: 'WezTerm' },
+    { re: /kitty/i, glyph: 'k', name: 'kitty' },
+    { re: /ghostty/i, glyph: 'g', name: 'Ghostty' },
+    { re: /iterm/i, glyph: 'i', name: 'iTerm2' },
+    { re: /windowsterminal|(^|[\\/])wt(\.exe)?$/i, glyph: 't', name: 'Windows Terminal' },
+    { re: /alacritty/i, glyph: 'a', name: 'Alacritty' },
+    { re: /^terminal(\.app)?$/i, glyph: 'T', name: 'Terminal' },
+  ];
+
+  /**
+   * Терминал записи окна, если трекер его назвал и он знаком.
+   *
+   * `null` значит «оставить ▣»: и когда поля нет вовсе (старый трекер), и
+   * когда названо незнакомое приложение. Подставлять вместо этого пресет
+   * терминала самого пикера было бы неправдой — у соседних строк терминалы
+   * бывают разные, а окно вообще может стоять на чужой машине.
+   */
+  function terminalOf(win) {
+    const named = String(win?.app || win?.process || '');
+    if (!named) return null;
+    return TERMINAL_GLYPHS.find(t => t.re.test(named)) || null;
+  }
 
   function windowHtml(session, showWindow = true, showTerminalIcon = false) {
     if (!showWindow) return '';
     const win = session?.window;
     if (!win) return '<div class="win"></div>';
-    const desktop = Number.isFinite(win.desktop) ? ` title="Desktop ${win.desktop}"` : '';
-    const named = String(win.app || win.process || '');
-    const glyph = showTerminalIcon && TERMINAL_APP_RE.test(named) ? '⌨' : '▣';
-    return `<div class="win open"${desktop}>${glyph}</div>`;
+    const terminal = showTerminalIcon ? terminalOf(win) : null;
+    // Подсказка складывается из того, что известно: стол называет трекер
+    // Windows, имя терминала — оба, но только с новой правкой. Пустых
+    // разделителей не бывает — склеиваются только непустые части.
+    const parts = [];
+    if (Number.isFinite(win.desktop)) parts.push(`Desktop ${win.desktop}`);
+    if (terminal) parts.push(terminal.name);
+    const title = parts.length ? ` title="${escapeHtml(parts.join(' · '))}"` : '';
+    return `<div class="win open"${title}>${terminal ? terminal.glyph : '▣'}</div>`;
   }
 
   /**
@@ -452,6 +490,7 @@
   return {
     statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
     sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml, windowHostHtml,
+    TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
     prNumber, prBadgeHtml, wordSet, hidesProject, projectLine,
   };

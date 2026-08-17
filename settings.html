@@ -23,6 +23,11 @@
     font: inherit;
   }
   .hint { color: #999; margin-top: 3px; }
+  /* Свёрнутая подробность терминала — такое же поле формы, как соседние, и
+     отбивка снизу у неё обязана быть та же: без неё следующая строка (выбор
+     пресета или галка) прилипает к `<summary>` вплотную и читается его
+     продолжением. */
+  #page details { margin-bottom: 14px; }
   .range-row { display: flex; align-items: center; gap: 10px; }
   .range-row input[type=range] { flex: 1; }
   .range-current { white-space: nowrap; color: #bbb; }
@@ -326,6 +331,14 @@
     showEvent: "The agent's last event, such as stop, fail, or waiting for input",
     showWindow: 'The glyph marking whether a window is open for this session',
     showWindowHost: 'The name of the machine that owns the open window',
+    // Буквы те же, что в таблице TERMINAL_GLYPHS (session-glyph.js), и список
+    // здесь второй — но не молчаливый: сторож в test/settings-page.test.js
+    // сверяет подсказку с самой таблицей, имя за именем.
+    showTerminalIcon: 'Replaces the window glyph with a letter naming the terminal: '
+      + 'w WezTerm, k kitty, g Ghostty, i iTerm2, t Windows Terminal, a Alacritty, T Terminal. '
+      + 'Windows trackers report wt, WezTerm, kitty, Ghostty and Alacritty; macOS ones report '
+      + 'kitty, WezTerm, Ghostty, iTerm2, Terminal and Alacritty. A window whose tracker does '
+      + 'not name the app keeps the plain glyph.',
   };
 
   // Recommended — всё, кроме редко нужного: agent event и cost читаются не
