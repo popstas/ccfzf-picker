@@ -1469,7 +1469,7 @@ Expected: FAIL — `labelSessions` пока отдаёт голый `title`.
   const TWIN_MARK = ' · ';
 
   function twinKey(s) {
-    return `${s.label} ${s.cwd || ''}`;
+    return JSON.stringify([s.label, s.cwd || '']);
   }
 
   /**
