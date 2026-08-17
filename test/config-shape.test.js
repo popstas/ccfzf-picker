@@ -277,7 +277,11 @@ test('границы доли те же, по которым судит Rust', (
   const src = fs.readFileSync(path.join(__dirname, '..', 'src-tauri', 'src', 'main.rs'), 'utf8');
   const fn = src.match(/fn scale_axis\([\s\S]*?\n\}\n/);
   assert.ok(fn, 'scale_axis не найдена в main.rs — тест сторожит не то');
-  assert.ok(fn[0].includes('(1.0..=100.0)'), 'диапазон в Rust разошёлся с диапазоном здесь');
+  assert.ok(fn[0].includes('(1.0..=100.0)'), 'диапазон долей в Rust разошёлся с диапазоном здесь');
+  assert.ok(
+    fn[0].includes('101.0') || fn[0].includes('>= 101'),
+    'ветка пикселей (≥101) в Rust разошлась с диапазоном здесь',
+  );
 });
 
 // ── Затемнение старых строк ────────────────────────────────────────────────
