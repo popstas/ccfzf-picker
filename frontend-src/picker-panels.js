@@ -4,7 +4,13 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.PickerPanels = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
-  const WIDE_COLUMNS = 3;
+  // Число колонок — у ui-state: там оно и решает, сколько их разбирается из
+  // ui.json. Второе такое же число здесь уже стояло и разошлось бы с первым
+  // на первой же правке.
+  const uiApi = typeof module === 'object' && module.exports
+    ? require('./ui-state')
+    : globalThis.UiState;
+  const WIDE_COLUMNS = uiApi.WIDE_COLUMNS;
 
   /**
    * Панели с постоянными ключами и их имена для окна настроек.

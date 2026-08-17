@@ -1,6 +1,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { normalizeUiState, uiStateToSave, listColumns } = require('../frontend-src/ui-state');
+// Целиком — ради самого объявления числа колонок: оно живёт здесь, и сверяться
+// с ним другим модулям неоткуда больше.
+const UiState = require('../frontend-src/ui-state');
 
 const DEFAULTS = {
   sort: 'recent',
@@ -22,7 +25,7 @@ test('пустой файл даёт вид по умолчанию', () => {
     },
     fullscreen: false,
     collapsed: { narrow: {}, wide: {} },
-    order: { narrow: [], wide: [[], [], []] },
+    order: { narrow: [], wide: [[], [], [], [], []] },
     hidden: { narrow: {}, wide: {} },
   });
   assert.deepStrictEqual(normalizeUiState(null, DEFAULTS), normalizeUiState({}, DEFAULTS));
@@ -39,7 +42,7 @@ test('сохранённый вид возвращается как был', () 
     },
     fullscreen: true,
     collapsed: { narrow: { past: true }, wide: {} },
-    order: { narrow: ['past', 'live'], wide: [['live'], [], ['past']] },
+    order: { narrow: ['past', 'live'], wide: [['live'], [], ['past'], [], []] },
     hidden: { narrow: { projects: true }, wide: {} },
   };
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
@@ -149,7 +152,7 @@ test('в файл уходит ровно то, что читается обра
   const saved = uiStateToSave('name', toggles);
   assert.deepStrictEqual(saved,
     { sort: 'name', toggles, fullscreen: false, collapsed: { narrow: {}, wide: {} },
-      order: { narrow: [], wide: [[], [], []] },
+      order: { narrow: [], wide: [[], [], [], [], []] },
       hidden: { narrow: {}, wide: {} } });
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
   // Мусорная сортировка не должна попасть даже в файл: перезапуск молча
@@ -204,7 +207,7 @@ test('порядок секций читается по раскладкам', (
   }, { toggles: {} });
   assert.deepStrictEqual(ui.order, {
     narrow: ['past', 'live', 'projects'],
-    wide: [['live'], ['remote', 'projects'], ['past', 'snapshots']],
+    wide: [['live'], ['remote', 'projects'], ['past', 'snapshots'], [], []],
   });
 });
 
@@ -215,7 +218,7 @@ test('старый ui.json без order читается как «человек
   for (const raw of [{}, { order: null }, { order: 'нет' }, { order: 42 }]) {
     assert.deepStrictEqual(
       normalizeUiState(raw, { toggles: {} }).order,
-      { narrow: [], wide: [[], [], []] },
+      { narrow: [], wide: [[], [], [], [], []] },
       JSON.stringify(raw),
     );
   }
@@ -233,24 +236,40 @@ test('в порядке остаются только строки, и кажд�
   assert.deepStrictEqual(ui.order.narrow, ['past', 'live']);
   // Ключ не может стоять в двух колонках сразу: секция одна, и вторая
   // запись про неё — это спор, который надо разрешить, а не сохранить.
-  assert.deepStrictEqual(ui.order.wide, [['live'], ['projects'], ['past']]);
+  assert.deepStrictEqual(ui.order.wide,
+    [['live'], ['projects'], ['past'], [], []]);
 });
 
-test('широкий порядок всегда о трёх колонках', () => {
-  // Колонок в раскладке ровно три, и список другой длины сделал бы номер
-  // колонки зависимым от содержимого файла.
+test('широкий порядок всегда о пяти колонках', () => {
+  // Колонок в раскладке ровно столько, сколько их у раскладки, и список другой
+  // длины сделал бы номер колонки зависимым от содержимого файла.
   const short = normalizeUiState({ order: { wide: [['live']] } }, { toggles: {} });
-  assert.deepStrictEqual(short.order.wide, [['live'], [], []]);
+  assert.deepStrictEqual(short.order.wide, [['live'], [], [], [], []]);
   const long = normalizeUiState(
-    { order: { wide: [['a'], ['b'], ['c'], ['d']] } }, { toggles: {} });
-  assert.deepStrictEqual(long.order.wide, [['a'], ['b'], ['c']]);
+    { order: { wide: [['a'], ['b'], ['c'], ['d'], ['e'], ['f']] } }, { toggles: {} });
+  assert.deepStrictEqual(long.order.wide, [['a'], ['b'], ['c'], ['d'], ['e']]);
   const notArrays = normalizeUiState(
     { order: { wide: ['live', null, 7] } }, { toggles: {} });
-  assert.deepStrictEqual(notArrays.order.wide, [[], [], []]);
+  assert.deepStrictEqual(notArrays.order.wide, [[], [], [], [], []]);
+});
+
+test('порядок разбирается на пять колонок', () => {
+  // Панель, попавшая в пятую колонку, обязана оттуда читаться: разбор на три
+  // молча терял бы её место при каждом сохранении.
+  const ui = UiState.normalizeUiState({
+    order: { wide: [['live'], [], [], ['past'], ['snapshots']] },
+  }, {});
+  assert.strictEqual(ui.order.wide.length, 5);
+  assert.deepStrictEqual(ui.order.wide[3], ['past']);
+  assert.deepStrictEqual(ui.order.wide[4], ['snapshots']);
+});
+
+test('число колонок объявлено и вывешено наружу', () => {
+  assert.strictEqual(UiState.WIDE_COLUMNS, 5);
 });
 
 test('порядок доезжает до файла пятым аргументом', () => {
-  const order = { narrow: ['past', 'live'], wide: [['live'], [], ['past']] };
+  const order = { narrow: ['past', 'live'], wide: [['live'], [], ['past'], [], []] };
   const saved = uiStateToSave('cost', {}, false, { narrow: {}, wide: {} }, order);
   assert.deepStrictEqual(saved.order, order);
   // И читается обратно тем же: файл пишет и читает одна пара функций.

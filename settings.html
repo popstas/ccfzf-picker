@@ -478,7 +478,11 @@
   function panelTableHtml(layout, title, hint) {
     const wide = layout !== 'narrow';
     const rows = window.PickerPanels.panelRows(ui, layout);
-    const column = (row) => [0, 1, 2, 3].map(n =>
+    // Ноль — «колонку назначает смысл секции»; остальные номера — от одного
+    // до числа колонок раскладки, и это то же число, которым живёт пикер.
+    const columnNumbers = [0, ...Array.from(
+      { length: window.PickerPanels.WIDE_COLUMNS }, (_, i) => i + 1)];
+    const column = (row) => columnNumbers.map(n =>
       `<option value="${n}"${row.column === n ? ' selected' : ''}>`
       + `${n === 0 ? 'default' : n}</option>`).join('');
     const box = (row, prop, on) => `<td><input type="checkbox" data-panel="${esc(row.key)}"`

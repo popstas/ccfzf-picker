@@ -4,7 +4,9 @@ const {
   KNOWN_PANELS, knownPanelsFor, panelRows, withColumn, columnOf, labelForUnknown,
   defaultCollapsedFor,
 } = require('../frontend-src/picker-panels');
+const PickerPanels = require('../frontend-src/picker-panels');
 const { normalizeUiState } = require('../frontend-src/ui-state');
+const UiState = require('../frontend-src/ui-state');
 const { buildSections } = require('../frontend-src/picker-sections');
 
 const EMPTY = normalizeUiState({}, { toggles: {} });
@@ -168,14 +170,25 @@ test('незнакомый ключ без разбора остаётся со�
 test('перестановка в колонку вынимает ключ из прежней', () => {
   // Секция одна, и в двух колонках сразу стоять не может.
   const order = withColumn({ narrow: [], wide: [['past'], [], []] }, 'past', 3);
-  assert.deepStrictEqual(order.wide, [[], [], ['past']]);
+  assert.deepStrictEqual(order.wide, [[], [], ['past'], [], []]);
+});
+
+test('колонку можно назначить пятой', () => {
+  const order = PickerPanels.withColumn({ wide: [[], [], [], [], []] }, 'past', 5);
+  assert.deepStrictEqual(order.wide[4], ['past']);
+});
+
+test('число колонок у настроек то же, что у разбора ui.json', () => {
+  // Второе число разошлось бы с первым, и окно настроек предлагало бы
+  // колонку, которой пикер не рисует, — или не предлагало бы ту, что рисует.
+  assert.strictEqual(PickerPanels.WIDE_COLUMNS, UiState.WIDE_COLUMNS);
 });
 
 test('колонка ноль возвращает панель к умолчанию', () => {
   // Ключ уходит из порядка вовсе, и колонку снова назначает смысл секции.
   // Без этого выбор «по умолчанию» в окне настроек нечем было бы выразить.
   const order = withColumn({ narrow: [], wide: [[], ['past'], []] }, 'past', 0);
-  assert.deepStrictEqual(order.wide, [[], [], []]);
+  assert.deepStrictEqual(order.wide, [[], [], [], [], []]);
   assert.strictEqual(columnOf({ order }, 'past'), 0);
 });
 
@@ -189,15 +202,16 @@ test('внутри колонки панель встаёт в конец', () =
 test('соседние колонки перестановка не трогает', () => {
   const order = withColumn(
     { narrow: ['live'], wide: [['live'], ['remote'], ['snapshots']] }, 'past', 1);
-  assert.deepStrictEqual(order.wide, [['live', 'past'], ['remote'], ['snapshots']]);
+  assert.deepStrictEqual(order.wide,
+    [['live', 'past'], ['remote'], ['snapshots'], [], []]);
   // Узкая половинка — не её дело: вкладка правит только широкий режим.
   assert.deepStrictEqual(order.narrow, ['live']);
 });
 
 test('негодный номер колонки не роняет порядок', () => {
-  for (const bad of [4, -1, 'два', null, undefined, 1.5]) {
+  for (const bad of [6, -1, 'два', null, undefined, 1.5]) {
     const order = withColumn({ narrow: [], wide: [['past'], [], []] }, 'past', bad);
-    assert.deepStrictEqual(order.wide, [[], [], []], String(bad));
+    assert.deepStrictEqual(order.wide, [[], [], [], [], []], String(bad));
   }
 });
 

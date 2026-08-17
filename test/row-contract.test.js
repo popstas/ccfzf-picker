@@ -982,7 +982,7 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
     // Свёрнутых секций человек не трогал — обе половинки пусты.
     collapsed: { narrow: {}, wide: {} },
     // Порядка не назначал — тоже пусто, то есть «как по умолчанию».
-    order: { narrow: [], wide: [[], [], []] },
+    order: { narrow: [], wide: [[], [], [], [], []] },
     hidden: { narrow: {}, wide: {} },
   });
 });
@@ -1902,4 +1902,26 @@ test('буква в меню сверяется по e.code', () => {
   // слушаться ровно у того, кто набирает вслепую.
   assert.match(SESSIONS_HTML, /e\.code\.match\(\/\^Key\(\[A-Z\]\)\$\/\)/,
     'буква пункта меню разбирается не из e.code');
+});
+
+test('число колонок написано ровно один раз', () => {
+  // Оно было написано пять раз: разбор ui.json, окно настроек, сборка
+  // колонок, зоны перетаскивания и выпадашка. Поднятое в четырёх из пяти,
+  // оно даёт панель, которая из файла читается, а на экране не рисуется, —
+  // и молча.
+  const files = ['frontend-src/ui-state.js', 'frontend-src/picker-panels.js',
+    'sessions.html', 'settings.html'];
+  const declarations = files.flatMap((rel) => {
+    const src = fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
+    return (src.match(/WIDE_COLUMNS = \d/g) || []).map(m => `${rel}: ${m}`);
+  });
+  assert.deepStrictEqual(declarations, ['frontend-src/ui-state.js: WIDE_COLUMNS = 5']);
+  // Литералы списков колонок — тоже объявление числа, просто другой формы.
+  assert.ok(!/\[1, 2, 3\]/.test(SESSIONS_HTML), 'в sessions.html остался литерал [1, 2, 3]');
+  assert.ok(!/\['1', '2', '3'\]/.test(SESSIONS_HTML), "в sessions.html остался литерал ['1', '2', '3']");
+  // Стартовый `order.wide` — того же рода литерал: до загрузки ui.json это
+  // единственный порядок, который есть у страницы, и короткий список оставил
+  // бы commitDrag дыру в массиве при переносе в четвёртую колонку.
+  assert.ok(!/wide: \[\[\], \[\], \[\]\]/.test(SESSIONS_HTML),
+    'в sessions.html остался литерал wide: [[], [], []]');
 });
