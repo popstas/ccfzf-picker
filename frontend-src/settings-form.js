@@ -377,17 +377,22 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
     validNumber('stale.projectHours', Number.MIN_VALUE, Infinity, 'must be greater than 0');
     validNumber('stale.opacity', 0.1, 1, 'must be between 0.1 and 1.0');
     // Размер: 0 (Default), 1–100 (доля экрана) или ≥101 (пиксели) — тот же
-    // диапазон, что и у `normalizePickerSize` в config-shape.js. Своя, не
-    // `validNumber`: у той один сплошной [min, max], а здесь дыра между 0 и
-    // 1 — дробная доля меньше единицы не значит ничего ни как процент, ни
-    // как пиксели.
+    // диапазон, что и у `normalizePickerSize` в config-shape.js, и он же
+    // обязан совпасть с тем, что принимает `scale_axis` в Rust (иначе форма
+    // пропустила бы значение, которое Rust молча отклонит, — окно вышло бы
+    // не того размера без единого объяснения на экране). Своя, не
+    // `validNumber`: у той один сплошной [min, max], а здесь две дыры —
+    // дробная доля меньше единицы (не значит ничего ни как процент, ни как
+    // пиксели) и зазор `(100..101)` между долей и пикселями (не дотягивает
+    // ни до сотни процентов, ни до сотни первого пикселя).
     for (const field of FIELDS) {
       if (field.type !== 'size') continue;
       if (fields[field.id] === undefined) continue;
       const raw = fields[field.id];
       const numeric = typeof raw === 'number' || (typeof raw === 'string' && raw.trim());
       const value = numeric ? Number(raw) : NaN;
-      if (!Number.isFinite(value) || (value !== 0 && value < 1)) {
+      const inGap = value > 100 && value < 101;
+      if (!Number.isFinite(value) || (value !== 0 && value < 1) || inGap) {
         problems.push(`${field.id} must be 0 (Default), 1-100 (percent of screen), or 101 or more (pixels)`);
       }
     }
