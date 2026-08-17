@@ -3,6 +3,13 @@ const assert = require('node:assert');
 const { normalizeConfig } = require('../frontend-src/config-shape');
 const { PAGES, configToFields, fieldsToPatch, validate } = require('../frontend-src/settings-form');
 
+// Обе высоты присутствуют явно и нейтральны (0 — Default): без этого
+// `configToFields` подставила бы отсутствующим ключам 65 (см. тесты про
+// высоту ниже), и раунд-трип `configToFields → fieldsToPatch` без единой
+// правки человека давал бы непустой патч на pickerSize — тесты ниже проверяют
+// совсем другое и не должны спотыкаться об этот побочный эффект.
+const NO_PICKER_SIZE = { pickerSize: { narrow: { height: 0 }, wide: { height: 0 } } };
+
 test('страницы перечисляют поля без повторов', () => {
   // Одно поле на двух страницах означало бы два источника правды для одного
   // ключа: сохранив одну страницу, человек молча откатил бы вторую.
@@ -59,7 +66,7 @@ test('умолчание галки не уезжает в патч само п�
   // Иначе первое же сохранение вписало бы человеку в config.yaml три ключа,
   // которых он не трогал, — а файл этот ведёт окно и комментарии в нём при
   // перезаписи теряются. Снятая галка при этом обязана дойти.
-  const original = { sshHost: 'host' };
+  const original = { sshHost: 'host', ...NO_PICKER_SIZE };
   const fields = configToFields(original);
   assert.deepStrictEqual(fieldsToPatch(fields, original), {});
   assert.deepStrictEqual(
@@ -69,7 +76,7 @@ test('умолчание галки не уезжает в патч само п�
 });
 
 test('в патч уходит только изменённое', () => {
-  const original = { sshHost: 'host', onlyLive: true };
+  const original = { sshHost: 'host', onlyLive: true, ...NO_PICKER_SIZE };
   const fields = configToFields(original);
   assert.deepStrictEqual(fieldsToPatch(fields, original), {});
   assert.deepStrictEqual(
@@ -81,7 +88,7 @@ test('в патч уходит только изменённое', () => {
 test('пустой пароль не уезжает в патч', () => {
   // Иначе первое же сохранение стёрло бы настроенный пароль брокера — а
   // заметить это можно только по молчащему Enter на чужой машине.
-  const original = { mqtt: { host: 'broker', base: 'home/room/pc' } };
+  const original = { mqtt: { host: 'broker', base: 'home/room/pc' }, ...NO_PICKER_SIZE };
   const fields = configToFields(original);
   assert.deepStrictEqual(fieldsToPatch(fields, original), {});
   const patch = fieldsToPatch({ ...fields, 'mqtt.password': 'новый' }, original);
@@ -89,7 +96,7 @@ test('пустой пароль не уезжает в патч', () => {
 });
 
 test('строка аргументов возвращается массивом', () => {
-  const original = { terminal: { file: '/usr/bin/wt', args: [] } };
+  const original = { terminal: { file: '/usr/bin/wt', args: [] }, ...NO_PICKER_SIZE };
   const patch = fieldsToPatch({ ...configToFields(original), 'terminal.args': '-w\n0' }, original);
   assert.deepStrictEqual(patch, { terminal: { args: ['-w', '0'] } });
 });
@@ -98,7 +105,7 @@ test('стёртое числовое поле не превращается в 
   // `Number('')` в JS даёт 0 — но стёртое поле порта значит «не трогали»,
   // а не «порт 0»: 0 — недопустимый порт брокера, и сохранить его молча
   // значит сломать mqtt так, что ни одна проверка формы этого не поймает.
-  const original = { mqtt: { host: 'broker', port: 1883, base: 'home/room/pc' } };
+  const original = { mqtt: { host: 'broker', port: 1883, base: 'home/room/pc' }, ...NO_PICKER_SIZE };
   const fields = configToFields(original);
   assert.strictEqual(fields['mqtt.port'], 1883);
   const patch = fieldsToPatch({ ...fields, 'mqtt.port': '  ' }, original);
@@ -110,7 +117,7 @@ test('число, отданное строкой из DOM, не считает�
   // Сравнение должно идти по приведённым значениям, иначе "1883" от DOM и
   // сохранённое число 1883 считались бы разным — и нетронутое поле порта
   // попадало бы в патч при каждом сохранении.
-  const original = { mqtt: { host: 'broker', port: 1883, base: 'home/room/pc' } };
+  const original = { mqtt: { host: 'broker', port: 1883, base: 'home/room/pc' }, ...NO_PICKER_SIZE };
   const fields = configToFields(original);
   const patch = fieldsToPatch({ ...fields, 'mqtt.port': '1883' }, original);
   assert.deepStrictEqual(patch, {});
@@ -191,8 +198,8 @@ test('размер окна ходит по кругу числом, а не с�
   const config = { pickerSize: { narrow: { width: 0, height: 80 }, wide: { width: 0, height: 0 } } };
   const fields = configToFields(config);
   assert.strictEqual(fields['pickerSize.narrow.height'], 80);
-  // Ключа нет вовсе — показывается умолчание, то есть встроенный размер.
-  assert.strictEqual(configToFields({})['pickerSize.narrow.height'], 0);
+  // Ключа нет вовсе — показывается 65%, а не встроенный размер (см. тест
+  // ниже); тут ключ height есть и равен явному числу, случай другой.
 
   // Нетронутая форма патча не даёт, хотя из DOM всё пришло бы строками.
   const fromDom = { ...fields, 'pickerSize.narrow.height': '80' };
@@ -203,11 +210,81 @@ test('размер окна ходит по кругу числом, а не с�
   assert.deepStrictEqual(patch, { pickerSize: { wide: { width: 95 } } });
 });
 
+test('SIZE_CHOICES содержит 100', () => {
+  const field = PAGES.flatMap(p => p.fields).find(f => f.id === 'pickerSize.narrow.height');
+  assert.strictEqual(field.type, 'size');
+  assert.ok(field.options.some(o => o.value === 100));
+});
+
+// Отсутствующая высота — это то немногое число, за которое отвечает сам
+// пикер (`wanted_size` берёт долю по умолчанию), и форма обязана показать не
+// «Default», а ту же долю, 65%, — иначе человек читал бы включённую по
+// умолчанию функцию как выключенную. Явный ноль в файле — это Default,
+// записанный кем-то намеренно (в том числе самой формой при возврате
+// человеком к встроенному размеру), и превращать его обратно в 65 нельзя.
+test('отсутствующая высота в форме — 65, явный ноль — Default', () => {
+  assert.strictEqual(configToFields({})['pickerSize.narrow.height'], 65);
+  assert.strictEqual(configToFields({})['pickerSize.wide.height'], 65);
+  // Ширины отсутствие ключа не трогает — путать «сколько сессий влезет» с
+  // «насколько окно широкое» нечем.
+  assert.strictEqual(configToFields({})['pickerSize.narrow.width'], 0);
+  assert.strictEqual(configToFields({})['pickerSize.wide.width'], 0);
+  assert.strictEqual(configToFields({
+    pickerSize: { narrow: { width: 0, height: 0 }, wide: { width: 0, height: 0 } },
+  })['pickerSize.narrow.height'], 0);
+  assert.strictEqual(configToFields({
+    pickerSize: { narrow: { width: 0, height: 0 }, wide: { width: 0, height: 0 } },
+  })['pickerSize.wide.height'], 0);
+});
+
+// Показанная человеку подмена (65 вместо 0) и база, с которой сверяется
+// патч, обязаны быть разными функциями: сверься патч с тем же `configToFields`,
+// что рисует форму, обе стороны читали бы 65 одинаково, патч выходил бы
+// пустым, и высота никогда не долетела бы до config.yaml — то есть подмена
+// делала бы ровно противоположное задуманному, молча.
+test('подмена 65 не топит патч: отсутствующий ключ патчится, явный ноль — нет', () => {
+  const missing = configToFields({});
+  const patchFromMissing = fieldsToPatch(missing, {});
+  assert.ok('pickerSize' in patchFromMissing, 'патч не увидел отсутствующую высоту');
+  assert.strictEqual(patchFromMissing.pickerSize.narrow.height, 65);
+
+  const zeroed = {
+    pickerSize: { narrow: { width: 0, height: 0 }, wide: { width: 0, height: 0 } },
+  };
+  const fieldsFromZeroed = configToFields(zeroed);
+  const patchFromZeroed = fieldsToPatch(fieldsFromZeroed, zeroed);
+  assert.deepStrictEqual(patchFromZeroed, {}, 'явный ноль не должен снова стать патчем на 65');
+});
+
+// Пиксели — вписанные вручную (или подобранные раньше) — форма обязана
+// довести до конфига как есть: fromField у size — тот же путь, что у choice,
+// и границу 101 он не проверяет вовсе, её сторожит validate.
+test('пиксели ≥ 101 доходят до патча числом', () => {
+  const patch = fieldsToPatch(
+    { ...configToFields({}), 'pickerSize.narrow.width': 1400 }, {},
+  );
+  assert.strictEqual(patch.pickerSize.narrow.width, 1400);
+});
+
+test('validate размера принимает 0, доли 1-100 и пиксели ≥ 101', () => {
+  const base = configToFields({});
+  const ok = (width) => validate({ ...base, sshHost: 'host', 'pickerSize.narrow.width': width });
+  assert.deepStrictEqual(ok(0), []);
+  assert.deepStrictEqual(ok(50), []);
+  assert.deepStrictEqual(ok(100), []);
+  assert.deepStrictEqual(ok(1400), []);
+  assert.notDeepStrictEqual(ok(0.5), []);
+  assert.notDeepStrictEqual(ok(-10), []);
+});
+
 // Ноль — не «пусто», а полноценный выбор: он значит «встроенный размер».
 // Пропусти его патч, как пропускает пустую строку, и вернуться с 80% на
 // Default стало бы нечем — удалять ключи merge_patch не умеет.
 test('возврат к встроенному размеру записывается, а не пропускается', () => {
-  const config = { pickerSize: { narrow: { height: 80 } } };
+  // wide.height задан явно (0), а не пропущен: иначе отсутствие подставило бы
+  // 65 и добавило бы в патч лишний `pickerSize.wide.height`, замутив
+  // проверку про narrow.
+  const config = { pickerSize: { narrow: { height: 80 }, wide: { height: 0 } } };
   const fields = configToFields(config);
   const patch = fieldsToPatch({ ...fields, 'pickerSize.narrow.height': '0' }, config);
   assert.deepStrictEqual(patch, { pickerSize: { narrow: { height: 0 } } });
@@ -222,16 +299,19 @@ test('stale-настройки находятся в General и показыва
   assert.ok(ids.includes('stale.projectHours'), ids);
   assert.ok(ids.includes('stale.opacity'), ids);
 
-  const fields = configToFields({});
+  const fields = configToFields(NO_PICKER_SIZE);
   assert.strictEqual(fields['stale.enabled'], false);
   assert.strictEqual(fields['stale.sessionHours'], 2);
   assert.strictEqual(fields['stale.projectHours'], 168);
   assert.strictEqual(fields['stale.opacity'], 0.5);
-  assert.deepStrictEqual(fieldsToPatch(fields, {}), {});
+  assert.deepStrictEqual(fieldsToPatch(fields, NO_PICKER_SIZE), {});
 });
 
 test('stale-настройка уезжает точечным числовым патчем', () => {
-  const original = { stale: { enabled: true, sessionHours: 2, projectHours: 168, opacity: 0.5 } };
+  const original = {
+    stale: { enabled: true, sessionHours: 2, projectHours: 168, opacity: 0.5 },
+    ...NO_PICKER_SIZE,
+  };
   const fields = configToFields(original);
   assert.deepStrictEqual(
     fieldsToPatch({ ...fields, 'stale.opacity': '0.7' }, original),

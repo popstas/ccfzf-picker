@@ -232,14 +232,41 @@ test('доли экрана читаются по стороне и по рас�
 test('испорченная доля выбрасывается, а не роняет конфиг', () => {
   const height = raw => normalizeConfig({ pickerSize: { narrow: { height: raw } } })
     .pickerSize.narrow.height;
-  for (const bad of ['восемьдесят', null, undefined, {}, [], NaN, 0, -10, 300, Infinity]) {
+  // 300 из этого списка ушёл: с приходом пикселей это больше не мусор, а
+  // валидный размер, — см. отдельные проверки ниже.
+  for (const bad of ['восемьдесят', null, undefined, {}, [], NaN, -10, Infinity]) {
     assert.strictEqual(height(bad), 0, `${JSON.stringify(bad)} должно читаться как встроенный размер`);
   }
+  // Дробное меньше единицы — не доля и не пиксели, отсекается тем же нулём.
+  assert.strictEqual(height(0.5), 0);
+  assert.strictEqual(height(0), 0);
   // Границы диапазона — рабочие значения, а не отказ. Число строкой тоже
   // годится: yaml отдаёт `height: "80"` строкой, а значит это то же самое.
   assert.strictEqual(height(1), 1);
   assert.strictEqual(height(100), 100);
   assert.strictEqual(height('80'), 80);
+});
+
+// ≥101 — пиксели, а не доля экрана: тот же счётчик без верхней границы.
+// Здесь только JS-сторона (Task 8); Rust читает то же число своим
+// scale_axis/wanted_size в Task 9.
+test('пиксели ≥ 101 проходят нормализацию', () => {
+  assert.strictEqual(
+    normalizeConfig({ pickerSize: { narrow: { width: 1400, height: 65 } } }).pickerSize.narrow.width,
+    1400,
+  );
+  assert.strictEqual(
+    normalizeConfig({ pickerSize: { wide: { width: 101 } } }).pickerSize.wide.width,
+    101,
+  );
+  assert.strictEqual(
+    normalizeConfig({ pickerSize: { wide: { width: 80 } } }).pickerSize.wide.width,
+    80,
+  );
+  assert.strictEqual(
+    normalizeConfig({ pickerSize: { wide: { width: 0 } } }).pickerSize.wide.width,
+    0,
+  );
 });
 
 // Проверок две — размер ставит Rust (`scale_axis` в main.rs), а показывает

@@ -552,15 +552,16 @@ test('у каждого типа поля есть своя ветка отри�
   }
 });
 
-// Значение, которого в списке нет, дописывается пунктом, а не теряется:
-// config.yaml правят и руками, а `<select>` без совпадения показал бы первый
-// пункт — то есть соврал бы, что размер встроенный. Та же цена и та же
-// причина, что у «Custom» в выпадашке терминалов.
-test('размер, вписанный руками, виден в выпадашке', () => {
+// Пять долей — фиксированный список радиокнопок ("Четыре доли, а не десять" —
+// список, по которому надо водить глазами, хуже короткого; сам список теперь
+// из пяти, но принцип тот же). Значение вне этого списка — пиксели, вписанные
+// руками или подобранные раньше, — не теряется молча, а видно в соседнем
+// числовом поле, а не как «совпавшая» радиокнопка, которой для него нет.
+test('пиксельный размер виден в числовом поле, а не как радиокнопка', () => {
   const { PAGES } = require('../frontend-src/settings-form');
   const src = sourceOf(/\n {2}function fieldHtml\(field\) \{[\s\S]*?\n {2}\}\n/, 'fieldHtml');
-  const field = PAGES.flatMap(p => p.fields).find(f => f.type === 'choice');
-  assert.ok(field, 'поля-выпадашки в PAGES нет — тест сторожит не то');
+  const field = PAGES.flatMap(p => p.fields).find(f => f.type === 'size');
+  assert.ok(field, 'поля-радио в PAGES нет — тест сторожит не то');
 
   const html = (value) => {
     const ctx = {
@@ -574,13 +575,15 @@ test('размер, вписанный руками, виден в выпада�
   };
 
   const known = html(80);
-  assert.match(known, /<option value="80" selected>/);
-  assert.strictEqual((known.match(/<option/g) || []).length, field.options.length,
-    'известное значение лишнего пункта не заводит');
+  assert.match(known, /<input type="radio"[^>]*value="80"[^>]* checked>/);
+  assert.strictEqual((known.match(/type="radio"/g) || []).length, field.options.length,
+    'радиокнопок должно быть ровно по числу вариантов SIZE_CHOICES');
+  // Известное значение в поле пикселей не утекает.
+  assert.doesNotMatch(known, /data-px="[^"]*"[^>]*value="80"/);
 
-  const handmade = html(70);
-  assert.match(handmade, /<option value="70" selected>70% of screen<\/option>/);
-  assert.strictEqual((handmade.match(/<option/g) || []).length, field.options.length + 1);
+  const handmade = html(1400);
+  assert.doesNotMatch(handmade, /checked/, 'пиксели не должны совпасть ни с одной радиокнопкой');
+  assert.match(handmade, /data-px="[^"]+"[^>]*value="1400"/);
 });
 
 // ── маршрутизация вкладок после переименования 'ui'/'integrations' ──────────
@@ -745,6 +748,78 @@ test('validate, провалившийся под автосохранением
   assert.ok(!calls.some(c => c.cmd === 'save_config'), 'save_config не должен был позваться');
   assert.strictEqual(status.className, 'bad');
   assert.match(status.textContent, /sshHost is not set/);
+});
+
+// ── стартовый persist() отсутствующей высоты (65%) ──────────────────────────
+//
+// Хвост IIFE в settings.html: после renderTabs()/renderPage() форма сама
+// решает, нужен ли разовый persist() — без правки человека и мимо 400 мс
+// дебаунса Task 6. Тем же приёмом, что и у остального в этом файле,
+// настоящий хвост вычитывается из страницы и выполняется в vm — вторая копия
+// этой логики в тесте разошлась бы с настоящей молча.
+function startupTailSrc() {
+  return sourceOf(
+    /\n {2}renderTabs\(\);\n {2}renderPage\(\);\n[\s\S]*?if \(fieldsToPatch\(fields, config\)\.pickerSize\) persist\(\);\n/,
+    'хвост загрузки (renderTabs/renderPage/стартовый persist)',
+  );
+}
+
+/**
+ * Прогнать настоящий хвост загрузки с данным `config`.
+ *
+ * `persist()` внутри хвоста не ждут (`if (...) persist();`, без await) — то
+ * же самое верно и в настоящем файле: это последняя строка загрузочного
+ * IIFE, дожидаться там некому. Тест поэтому вычерпывает микрозадачи вручную,
+ * пока не перестанут прилетать новые вызовы `invoke` — все промисы в моках
+ * уже разрешены (`Promise.resolve`), реального таймера или сети тут нет, и
+ * несколько проходов очереди микрозадач гарантированно всё раскрутят.
+ */
+async function runStartupTail({ config }) {
+  const src = persistCoreSrc() + startupTailSrc();
+  const calls = [];
+  const status = { className: '', textContent: '' };
+  const ctx = {
+    document: { getElementById: () => status },
+    window: {},
+    invoke: (cmd, args) => {
+      calls.push({ cmd, args });
+      return Promise.resolve(cmd === 'load_config' ? config : undefined);
+    },
+    current: 'general',
+    validate,
+    fieldsToPatch,
+    configToFields,
+    config,
+    fields: configToFields(config),
+    dirtyFields: new Set(),
+    renderTabs: () => {},
+    renderPage: () => {},
+  };
+  vm.createContext(ctx);
+  vm.runInContext(src, ctx, { filename: 'settings.html' });
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  return { calls };
+}
+
+test('отсутствующая высота патчится один раз при загрузке', async () => {
+  const { calls } = await runStartupTail({ config: { sshHost: 'host' } });
+  const saved = calls.find(c => c.cmd === 'save_config');
+  assert.ok(saved, 'save_config не был позван при отсутствующей высоте');
+  assert.strictEqual(saved.args.patch.pickerSize.narrow.height, 65);
+  assert.strictEqual(saved.args.patch.pickerSize.wide.height, 65);
+});
+
+test('повторное открытие после записи 65 не патчит снова', async () => {
+  // Второй раз ключ в config.yaml уже есть (65, записанные первым persist()),
+  // и подмена в configToFields не срабатывает: baseline и показанное
+  // совпадают, патч пуст, второй save_config не уходит.
+  const config = {
+    sshHost: 'host',
+    pickerSize: { narrow: { width: 0, height: 65 }, wide: { width: 0, height: 65 } },
+  };
+  const { calls } = await runStartupTail({ config });
+  assert.ok(!calls.some(c => c.cmd === 'save_config'),
+    'save_config не должен был позваться — высота уже записана');
 });
 
 // ── Ревью: реентерабельность persist() под автосохранением ──────────────────

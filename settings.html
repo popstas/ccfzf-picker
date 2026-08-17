@@ -36,6 +36,14 @@
   .col-icon { display: inline-block; width: 1.4em; color: #999; }
   table.axes label.axis-head { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
   table.axes span[title] { border-bottom: 1px dotted #666; cursor: help; }
+  /* Пять радиокнопок и поле пикселей в один ряд, а не столбиком, как
+     остальные поля формы, — их и так пять, вертикально они заняли бы
+     четверть страницы. */
+  .size-row { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .size-choice { display: inline-flex; align-items: center; gap: 4px; margin: 0; width: auto; }
+  /* Общее правило `.field input[type=number] { width: 100% }` тут неверно:
+     поле пикселей — часть строки радиокнопок, а не поле само по себе. */
+  .size-px input[type=number] { width: 6em; }
 </style>
 </head>
 <body>
@@ -196,20 +204,26 @@
       return `<div class="field"><label>${esc(field.label)}</label>`
         + `<select data-preset>${options}</select>${hint}</div>`;
     }
-    if (field.type === 'choice') {
-      // Значение, которого в списке нет, дописывается пунктом, а не молча
-      // теряется: `config.yaml` правят и руками, а `<select>` без совпадения
-      // показал бы первый пункт — то есть соврал бы, что размер встроенный.
-      // Тот же приём и та же причина, что у «Custom» в выпадашке терминалов.
-      const options = field.options.slice();
-      if (!options.some(o => o.value === value)) {
-        options.push({ value, label: `${value}% of screen` });
-      }
-      const html = options
-        .map(o => `<option value="${esc(o.value)}"${o.value === value ? ' selected' : ''}>`
-          + `${esc(o.label)}</option>`).join('');
+    if (field.type === 'size') {
+      // Пять долей — радиокнопками, а не выпадашкой: список фиксирован
+      // намеренно ("Четыре доли, а не десять" — теперь их пять — из
+      // settings-form.js), лишнего пункта под значение, которого в нём нет,
+      // сюда не дописывают. Значение вне списка — пиксели, вписанные вручную
+      // или подобранные раньше: как совпавшую радиокнопку его не показать
+      // (ни одна не совпадёт), и оно уходит в соседнее числовое поле — тот же
+      // мотив, что был у лишнего пункта выпадашки, только форма другая.
+      const known = field.options.some(o => o.value === value);
+      const radios = field.options.map(o => '<label class="size-choice">'
+        + `<input type="radio" name="${esc(field.id)}" data-size="${esc(field.id)}" `
+        + `value="${esc(o.value)}"${o.value === value ? ' checked' : ''}> ${esc(o.label)}</label>`).join('');
+      // Пустое поле у известного значения — не только сохранённое пусто:
+      // радиокнопка и так его показывает, а число рядом дублировало бы её.
+      const pxValue = known ? '' : esc(value);
       return `<div class="field"><label>${esc(field.label)}</label>`
-        + `<select data-field="${field.id}">${html}</select>${hint}</div>`;
+        + `<div class="size-row">${radios}`
+        + '<label class="size-choice size-px">'
+        + `<input type="number" min="101" data-px="${esc(field.id)}" value="${pxValue}" `
+        + `placeholder="px" title="must be at least 101 px"> px</label></div>${hint}</div>`;
     }
     if (field.type === 'bool') {
       // title, а не вторая строка под полем: подсказка всплывает по наведению,
@@ -563,6 +577,47 @@
         renderPage();
       });
     }
+    // Радиокнопки размера и поле пикселей рядом — не через общий `[data-field]`
+    // выше: та ветка пишет `input.value` как есть на каждый ввод, а поле
+    // пикселей обязано молчать, пока в нём не набрано 101 и больше (см.
+    // комментарий у цикла по `[data-px]` ниже). Разводить два разных правила
+    // внутри одной общей ветки было бы менее понятно, чем две своих, — как у
+    // `data-panel` и `data-axis` рядом.
+    for (const radio of page.querySelectorAll('[data-size]')) {
+      radio.addEventListener('change', () => {
+        const id = radio.dataset.size;
+        fields[id] = Number(radio.value);
+        dirtyFields.add(id);
+        // Доля и пиксели — одно значение поля, а не два независимых: выбор
+        // радиокнопки отменяет то, что было набрано в поле пикселей рядом.
+        const px = radio.closest('.field').querySelector('[data-px]');
+        if (px) { px.value = ''; px.setCustomValidity(''); }
+        scheduleAutosave();
+      });
+    }
+    for (const px of page.querySelectorAll('[data-px]')) {
+      px.addEventListener('input', () => {
+        const id = px.dataset.px;
+        const raw = px.value.trim();
+        if (!raw) { px.setCustomValidity(''); return; }
+        const n = Number(raw);
+        // 1–100 сюда не записываются вовсе — для них есть радиокнопки, и
+        // поле пикселей не второй, конкурирующий способ задать то же самое.
+        // `fields[id]` остаётся тем, чем было (прежний выбор или Default), а
+        // не «не трогали» ничего не значащим числом.
+        if (!Number.isFinite(n) || n < 101) {
+          px.setCustomValidity('must be at least 101 px');
+          return;
+        }
+        px.setCustomValidity('');
+        fields[id] = n;
+        dirtyFields.add(id);
+        for (const radio of px.closest('.field').querySelectorAll('input[type=radio]')) {
+          radio.checked = false;
+        }
+        scheduleAutosave();
+      });
+    }
     document.getElementById('save').addEventListener('click', persist);
   }
 
@@ -754,6 +809,17 @@
   }
   renderTabs();
   renderPage();
+  // Отсутствующая высота показана как 65% (`configToFields` в
+  // settings-form.js подменяет её при отрисовке), но в config.yaml её как не
+  // было, так и нет — Rust при каждом показе окна по-прежнему читает
+  // отсутствие ключа как 0. Патч уходит один раз прямо тут, после
+  // renderPage() (иначе persist() было бы некуда писать статус — #status
+  // рисует она), а не ждёт 400 мс дебаунса Task 6: тот собирает правки
+  // человека, а это стартовая просьба записать уже показанное. На повторном
+  // открытии, после того как высота однажды долетела до файла, ключ в config
+  // уже не отсутствует — подмена не срабатывает, патч выходит пустым, и
+  // второй persist() не заводится вовсе.
+  if (fieldsToPatch(fields, config).pickerSize) persist();
 })();
 </script>
 </body>
