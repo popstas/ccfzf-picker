@@ -263,6 +263,31 @@ test('строка без окон баз не называет — просьб
   assert.deepStrictEqual(unreadBases({}, {}), []);
 });
 
+test('unreadBases читает sessionWindows карточки, а не её собственное окно', () => {
+  // Карточка теперь несёт одно окно (row.windows), а сессия открыта на двух
+  // машинах сразу. Отмотать «просмотрено» надо у обоих трекеров — иначе
+  // сосед, которого не тронули, вернёт «просмотрено» на следующем же опросе,
+  // и кнопка будет выглядеть сломанной молча (у публикации в MQTT нет ответа).
+  const row = {
+    windows: [{ host: 'mac-host', mqttBase: 'home/mac/windows' }],
+    sessionWindows: [
+      { host: 'mac-host', mqttBase: 'home/mac/windows' },
+      { host: 'windows-box', mqttBase: 'home/pc/windows' },
+    ],
+  };
+  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', 'home/pc/windows']);
+});
+
+test('unreadBases без sessionWindows откатывается на windowsOf(row, state)', () => {
+  // Строки, собранные не buildSessionList (старые вызовы в тестах, чужие
+  // источники строк), поля sessionWindows не несут вовсе.
+  const row = { windows: [
+    { host: 'mac-host', mqttBase: 'home/mac/windows' },
+    { host: 'windows-box', mqttBase: 'home/pc/windows' },
+  ] };
+  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', 'home/pc/windows']);
+});
+
 test('окно без адреса просит отмотку по своей базе, а не пропускается', () => {
   // windows11-manager поля mqttBase не пишет вовсе, и агрегатор приписывает
   // такому окну пустую строку. Выбрось её unreadBases — и просьба до этого
