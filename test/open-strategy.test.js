@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand, newSessionCommand,
-  newSessionName,
+  newSessionName, commandParts, LOCAL_SOURCE,
 } = require('../frontend-src/open-strategy');
 
 const ATTACH_42 = `reptyr -T 42 || reptyr "$(pgrep -x -f 'reptyr -T 42' | head -1)"`;
@@ -199,6 +199,40 @@ test('незнакомая стратегия не даёт команды', () 
   assert.strictEqual(buildOpenCommand(row(), 'нет такой', OPTS), null);
 });
 
+// ── commandParts: одно место, где команда встречается с транспортом ─────────
+
+test('местная команда идёт без ssh, но через интерактивный шелл', () => {
+  // Строка команды та же: `exec $SHELL -ic` нужна ровно затем же, зачем и на
+  // удалённой машине — поднять интерактивный шелл, чтобы отработал хук chpwd и
+  // телеметрия получила имя проекта. Меняется только транспорт.
+  const parts = commandParts("exec $SHELL -ic 'cd -- /a && claude'", LOCAL_SOURCE);
+  assert.deepStrictEqual(parts, ['/bin/sh', '-c', "exec $SHELL -ic 'cd -- /a && claude'"]);
+});
+
+test('удалённая команда по-прежнему уезжает одной строкой в ssh', () => {
+  const parts = commandParts('claude --resume x', 'remote-host');
+  assert.deepStrictEqual(parts, ['ssh', '-t', 'remote-host', 'claude --resume x']);
+});
+
+test('buildOpenCommand берёт источник у строки, а не у конфига', () => {
+  // CONFIG.sshHost перестал быть адресом чего бы то ни было: местная сессия
+  // открылась бы на удалённой машине, где её нет вовсе.
+  const row = { id: 'b5a54ce3-a022-4c9a-aa91-e306d75bdc76', cwd: '/a', source: LOCAL_SOURCE };
+  const out = buildOpenCommand(row, 'resume', {
+    sshHost: 'remote-host', terminal: { file: 'kitty', args: ['--hold'] },
+  });
+  assert.ok(!out.argv.includes('ssh'), `ssh в местной команде: ${JSON.stringify(out.argv)}`);
+  assert.deepStrictEqual(out.argv.slice(0, 3), ['kitty', '--hold', '/bin/sh']);
+});
+
+test('строка без источника открывается по sshHost — как до этой правки', () => {
+  const row = { id: 'b5a54ce3-a022-4c9a-aa91-e306d75bdc76', cwd: '/a' };
+  const out = buildOpenCommand(row, 'resume', {
+    sshHost: 'remote-host', terminal: { file: 'kitty', args: [] },
+  });
+  assert.deepStrictEqual(out.argv.slice(0, 4), ['kitty', 'ssh', '-t', 'remote-host']);
+});
+
 // ── terminalArgv: одно место, где команда встречается с терминалом ──────────
 //
 // Мина, ради которой это заведено, уже сработала: `newSession` в
@@ -381,4 +415,15 @@ test('страница не собирает argv терминала мимо te
   // И обратное: обе дороги открытия обязаны звать общую сборку.
   const calls = page.match(/OpenStrategy\.terminalArgv\(/g) || [];
   assert.ok(calls.length >= 1, 'terminalArgv со страницы не зовётся вовсе');
+});
+
+test('страница не собирает ssh-хвост мимо commandParts', () => {
+  // Поведением такое не поймать: argv тут собирается верным для удалённых
+  // строк и молча неверным для местных — то есть ровно та же мина, что
+  // взорвалась на `newSession` и iTerm2.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const page = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+  const hits = page.match(/'ssh',\s*'-t'/g) || [];
+  assert.deepStrictEqual(hits, [], 'ssh-хвост собран на странице, а не в commandParts');
 });
