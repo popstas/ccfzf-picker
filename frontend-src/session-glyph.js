@@ -340,6 +340,28 @@
   }
 
   /**
+   * Размер сессии — сколько раз человек в ней писал.
+   *
+   * Своя колонка, а не третья величина внутри `usage`: та отвечает на вопрос
+   * «во что обошлось и сколько осталось до сжатия», а эта — «насколько
+   * длинный тут разговор». Считает число агрегатор (`count_prompts` в ccfzf),
+   * досчитывая, а не пересчитывая.
+   *
+   * Ноль печатается нулём. Сессия, в которой человек ещё ничего не написал,
+   * бывает — её только что завели, — и пустота на её месте читалась бы как
+   * «данных нет», а различать эти два случая нечем. То же решение и та же
+   * причина, что у нулевой цены в usageHtml.
+   *
+   * Выключенная галка не оставляет пустого элемента: правые колонки стоят
+   * друг за другом, и пустой div сдвигал бы соседей.
+   */
+  function promptsHtml(session, show = true) {
+    if (!show) return '';
+    const n = Number.isFinite((session || {}).promptCount) ? session.promptCount : 0;
+    return `<div class="prompts">✎${n}</div>`;
+  }
+
+  /**
    * Значок «у сессии есть спека или план».
    *
    * Пути приезжают полями `spec` и `plan` от агрегатора — он находит их в
@@ -635,6 +657,6 @@
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
     prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, windowNameHtml,
-    docsBadgeHtml, docKindOf,
+    docsBadgeHtml, docKindOf, promptsHtml,
   };
 });

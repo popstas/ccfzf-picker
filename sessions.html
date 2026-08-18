@@ -408,6 +408,15 @@
             flex: 0 0 auto; padding-left: 10px;
             font-size: 11px; color: #7d838c; white-space: nowrap;
         }
+        /* Размер сессии: сколько раз человек писал. Своя колонка, а не третья
+           величина в `.usage` — та про деньги и запас контекста, эта про длину
+           разговора. Форма общая с соседями: правые колонки не должны
+           разъезжаться кеглем и отступом. */
+        .prompts {
+            flex: 0 0 auto; padding-left: 10px;
+            font-size: 11px; color: #7d838c; white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
         /* Контекст и деньги, между статусом и возрастом. */
         /* Значок бумаг. Тусклее имени и той же природы, что `.pr`: не
            колонка, а пометка внутри строки имени. */
@@ -833,6 +842,10 @@
     { key: 'showId', label: 'id', side: 'right' },
     { key: 'showCost', label: 'cost', side: 'right' },
     { key: 'showContext', label: 'context', side: 'right' },
+    // Размер сессии, своя колонка рядом с usage. Отдельная галка, а не часть
+    // `context`: величины отвечают на разные вопросы — «сколько осталось до
+    // сжатия» против «насколько длинный разговор», — и выключают их порознь.
+    { key: 'showPrompts', label: 'prompts', side: 'right' },
     { key: 'showWindow', label: 'window', side: 'right' },
     { key: 'showWindowHost', label: 'window host', side: 'right' },
     // Колонка строки проекта, а не сессии: галочки живут в docs/TODO.md
@@ -874,6 +887,9 @@
     showId: { list: false, statusline: true },
     showCost: { list: false, statusline: false },
     showContext: { list: true, statusline: true },
+    // Включена: это ответ на вопрос «большая ли сессия», ради которого её и
+    // заводили. В статуслайн не вынесена — место внизу кончилось.
+    showPrompts: { list: true, statusline: false },
     showWindow: { list: true, statusline: false },
     // Включена, хотя у одного трекера пустует всегда: имя машины появляется
     // ровно тогда, когда оно нужно, — у окна, стоящего не здесь. Выключенной
@@ -1029,7 +1045,7 @@
 
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml, todoHtml,
-    docsBadgeHtml,
+    docsBadgeHtml, promptsHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
     windowNameHtml,
   } = window.SessionGlyph;
@@ -1358,6 +1374,7 @@
       sessionIdHtml(session, toggles.showId) +
       hotkeyHtml(session, toggles.showHotkey) +
       usageHtml(session, toggles) +
+      promptsHtml(session, toggles.showPrompts) +
       ageHtml(session, nowSec) +
       `</div></div>`;
     return { key: rowKey(session), html };

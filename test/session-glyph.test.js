@@ -4,7 +4,7 @@ const {
   escapeHtml, statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
   sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
   shortPath, rowTitle, titleAttr, windowHostHtml, windowHtml,
-  prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, todoHtml, docsBadgeHtml,
+  prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, todoHtml, docsBadgeHtml, promptsHtml,
 } = require('../frontend-src/session-glyph');
 
 test('shortPath collapses the agent home directory, and survives a missing path', () => {
@@ -803,4 +803,32 @@ test('docsBadgeHtml молчит без бумаг', () => {
 
 test('docsBadgeHtml не верит нестроке', () => {
   assert.strictEqual(docsBadgeHtml({ plan: 42 }), '');
+});
+
+// --- Размер сессии: число реплик человека (Task T2) ----------------------
+
+test('promptsHtml показывает число реплик своей колонкой', () => {
+  assert.strictEqual(promptsHtml({ promptCount: 97 }, true),
+    '<div class="prompts">✎97</div>');
+});
+
+test('promptsHtml печатает ноль, а не пустоту', () => {
+  // Ноль здесь честен: сессия, в которой человек ещё ничего не написал,
+  // бывает — её только что завели. Пустота на её месте читалась бы как
+  // «данных нет», а различать эти два случая нечем. То же решение и та же
+  // причина, что у usageHtml с нулевой ценой.
+  assert.strictEqual(promptsHtml({ promptCount: 0 }, true),
+    '<div class="prompts">✎0</div>');
+});
+
+test('promptsHtml молчит при выключенной галке', () => {
+  // Колонки нет вовсе, а не пустой элемент: правые колонки стоят друг за
+  // другом, и пустой div сдвигал бы соседей.
+  assert.strictEqual(promptsHtml({ promptCount: 5 }, false), '');
+});
+
+test('promptsHtml не верит нечислу из ответа', () => {
+  assert.strictEqual(promptsHtml({ promptCount: 'много' }, true),
+    '<div class="prompts">✎0</div>');
+  assert.strictEqual(promptsHtml({}, true), '<div class="prompts">✎0</div>');
 });

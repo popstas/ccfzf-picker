@@ -1587,6 +1587,7 @@ function renderSessionRows(state, query, toggles, stale) {
     hotkeyHtml: Glyph.hotkeyHtml,
     usageHtml: Glyph.usageHtml,
     todoHtml: Glyph.todoHtml,
+    promptsHtml: Glyph.promptsHtml,
     ageHtml: Glyph.ageHtml,
     query: query || '',
     nowSec: NOW,
@@ -2005,4 +2006,14 @@ test('спека и план доезжают с ответа агрегатор
 test('сессия без бумаг значка не получает', () => {
   const { items } = renderSessionRows({ ok: true, sessions: [aggregatorSession()] });
   assert.doesNotMatch(items[1].html, /class="docs"/);
+});
+
+test('число реплик доезжает с ответа агрегатора до колонки строки', () => {
+  // Сквозной сторож дороги целиком: поле `prompts` агрегатора → session-list →
+  // разметка. Половинки по отдельности зелены, а разъехаться могут ровно
+  // здесь.
+  const { items } = renderSessionRows(
+    { ok: true, sessions: [aggregatorSession({ prompts: 97 })] },
+    '', { showPaths: true, showPrompts: true });
+  assert.match(items[1].html, /<div class="prompts">✎97<\/div>/);
 });

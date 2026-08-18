@@ -90,6 +90,8 @@
     showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
     showCost: 'cost', showContext: 'context', showWindow: 'window',
     showWindowHost: 'window host', showTerminalIcon: 'terminal icon',
+    // Размер сессии: сколько раз человек в ней писал.
+    showPrompts: 'prompts',
     // Колонка строки проекта, а не сессии — единственная такая в списке. В
     // таблице она всё равно наравне с соседями: вкладка распоряжается осями
     // показа, а не тем, каким видам строк колонка достаётся.
@@ -114,6 +116,7 @@
       showContext: { list: true, statusline: true },
       showWindow: { list: true, statusline: false },
       showWindowHost: { list: true, statusline: false },
+      showPrompts: { list: true, statusline: false },
       showTodo: { list: true, statusline: false },
       onlyWindow: { list: false, statusline: false },
       showAll: { list: false, statusline: true },
@@ -345,6 +348,7 @@
     showWindow: '▣',
     showWindowHost: '⌂',
     showTerminalIcon: '⌨',
+    showPrompts: '✎',
     // Тот же знак, каким колонку открывает сама строка (todoHtml в
     // session-glyph.js) и каким её печатает статуслайн агента
     // (statusline-block.sh): счёт у всех трёх один и тот же файл.
@@ -362,6 +366,8 @@
     showEvent: "The agent's last event, such as stop, fail, or waiting for input",
     showWindow: 'The glyph marking whether a window is open for this session',
     showWindowHost: 'The name of the machine that owns the open window',
+    showPrompts: 'How many times a human wrote in this session. Unlike the context '
+      + 'percentage it only grows, and it compares across sessions',
     showTodo: 'Checkbox progress from the project\u2019s docs/TODO.md: the leading '
       + 'section, plus the number of tasks still open in the rest. Project rows only; '
       + 'hover the row for the full breakdown',
