@@ -1323,16 +1323,12 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
     };
 
     if let Some(poller) = app.try_state::<poller::Poller>() {
-        let ssh_host = config
-            .get("sshHost")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
+        let sources = state_source::sources_from(&config);
         let background = config
             .get("backgroundRefresh")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-        poller.set_config(ssh_host, background);
+        poller.set_config(sources, background);
     }
 
     // Гашение по потере фокуса — тоже без перезапуска: обработчик стоит всегда
@@ -1943,16 +1939,12 @@ fn main() {
             // тормозит таймеры, а WebView2 у свёрнутого умеет усыплять
             // страницу целиком. Фон на setInterval замолчал бы, и узнать об
             // этом было бы неоткуда — панель просто перестала бы обновляться.
-            let ssh_host = config
-                .get("sshHost")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
+            let sources = state_source::sources_from(&config);
             let background = config
                 .get("backgroundRefresh")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            app.manage(poller::Poller::start(app.handle().clone(), ssh_host, background));
+            app.manage(poller::Poller::start(app.handle().clone(), sources, background));
 
             // Клик мимо окна закрывает пикер. Окно безрамочное и всегда
             // поверх: не закрывшись само, оно осталось бы висеть над той
