@@ -61,10 +61,16 @@
    * Местный запуск шелла не поднимает вовсе, поэтому строка отдаётся `sh -c`:
    * сама команда (`exec $SHELL -ic 'cd -- … && …'`) не меняется — она нужна
    * затем же, зачем и на той стороне, чтобы отработал хук `chpwd`.
+   *
+   * Пустая метка идёт той же местной дорогой, а не ssh с пустым хостом:
+   * `ssh -t ''` не работает никогда, и второй адресат для пустой строки
+   * взяться неоткуда. Не названо ни source у строки, ни sshHost в конфиге —
+   * значит машина одна, эта самая, а список источников вообще не пуст лишь
+   * потому, что включён localSource.
    */
   function commandParts(remote, source) {
     const label = String(source || '').trim();
-    if (label === LOCAL_SOURCE) return ['/bin/sh', '-c', remote];
+    if (!label || label === LOCAL_SOURCE) return ['/bin/sh', '-c', remote];
     return ['ssh', '-t', label, remote];
   }
 

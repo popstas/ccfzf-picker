@@ -214,6 +214,13 @@ test('удалённая команда по-прежнему уезжает о�
   assert.deepStrictEqual(parts, ['ssh', '-t', 'remote-host', 'claude --resume x']);
 });
 
+test('пустая метка источника идёт местной дорогой, а не ssh с пустым хостом', () => {
+  // Пустая строка — не ssh-адрес: `ssh -t ''` не работает никогда, и второй
+  // адресат для пустой строки взяться неоткуда.
+  const parts = commandParts('claude --resume x', '');
+  assert.deepStrictEqual(parts, ['/bin/sh', '-c', 'claude --resume x']);
+});
+
 test('buildOpenCommand берёт источник у строки, а не у конфига', () => {
   // CONFIG.sshHost перестал быть адресом чего бы то ни было: местная сессия
   // открылась бы на удалённой машине, где её нет вовсе.
@@ -231,6 +238,18 @@ test('строка без источника открывается по sshHost
     sshHost: 'remote-host', terminal: { file: 'kitty', args: [] },
   });
   assert.deepStrictEqual(out.argv.slice(0, 4), ['kitty', 'ssh', '-t', 'remote-host']);
+});
+
+test('строка без источника и без sshHost — местный запуск, а не ssh с пустым хостом', () => {
+  // Тот самый обход: localSource включён, sshHost пуст, у строки source не
+  // проставлен (просьба проектного хоткея). До правки это давало
+  // ['ssh', '-t', '', remote] — гарантированно неработающую команду,
+  // о которой пикер никогда не узнаёт.
+  const row = { id: 'b5a54ce3-a022-4c9a-aa91-e306d75bdc76', cwd: '/a' };
+  const out = buildOpenCommand(row, 'resume', {
+    sshHost: '', terminal: { file: 'kitty', args: [] },
+  });
+  assert.ok(!out.argv.includes('ssh'), `ssh при пустом sshHost и localSource: ${JSON.stringify(out.argv)}`);
 });
 
 // ── terminalArgv: одно место, где команда встречается с терминалом ──────────
