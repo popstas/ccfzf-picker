@@ -316,3 +316,53 @@ test('у строки без окна заголовок окна пуст, а �
   const rows = buildSessionList({ sessions: [state({ id: 'a' })], seen: {} });
   assert.strictEqual(rows[0].windowTitle, '');
 });
+
+test('окно фонового форка достаётся строке родителя, и та оживает', () => {
+  // Фоновое задание уводит работу в форк со своим id, и трекер привязывает
+  // окно терминала к нему — id ему называют хуки самого форка. Родитель при
+  // этом перестаёт быть живым (процесс ушёл), то есть его строка уезжает в
+  // историю, а форка в списке нет вовсе: он спрятан, чтобы не отбирать у
+  // родителя его же окно. В итоге живое отслеживаемое окно не показано ничем.
+  const parent = state({ id: 'p', title: 'work', live: false, pid: 0, agent: null });
+  const fork = state({
+    id: 'f', title: 'work', live: true, kind: 'background', parent: 'p',
+    windows: [{ host: 'mac-host', title: 'work', lastSeen: 9, focusedAt: 9 }],
+    agent: { state: 'idle', event: 'stop', summary: 'Готово', updated: 500 },
+  });
+  const rows = buildSessionList({ sessions: [parent, fork], seen: {}, configHost: 'mac-host' });
+  assert.deepStrictEqual(rows.map(r => r.id), ['p'], 'форк по-прежнему без своей строки');
+  assert.strictEqual(rows[0].live, true, 'работает форк — значит работает и сессия');
+  assert.strictEqual(rows[0].window && rows[0].window.host, 'mac-host');
+  assert.strictEqual(rows[0].windowTitle, 'work');
+});
+
+test('своё окно родителя главнее форкового', () => {
+  // Обычный `claude agents`: окно остаётся за родителем, форк работает без
+  // окна. Складывать оба списка нельзя — одно и то же окно, привязанное
+  // разными трекерами к разным id, дало бы на одной машине две карточки.
+  const parent = state({
+    id: 'p', title: 'work', live: true,
+    windows: [{ host: 'mac-host', title: 'parent-window', lastSeen: 9, focusedAt: 9 }],
+    agent: { state: 'idle', event: 'stop', summary: '', updated: 10 },
+  });
+  const fork = state({
+    id: 'f', title: 'work', live: true, kind: 'background', parent: 'p',
+    windows: [{ host: 'mac-host', title: 'fork-window', lastSeen: 9, focusedAt: 9 }],
+    agent: { state: 'idle', event: 'stop', summary: '', updated: 500 },
+  });
+  const rows = buildSessionList({ sessions: [parent, fork], seen: {}, configHost: 'mac-host' });
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].windowTitle, 'parent-window');
+});
+
+test('живость родителя не отбирается уснувшим форком', () => {
+  // Обратный ход: форк кончился, а родитель работает — строка обязана
+  // остаться живой. Живость складывается, а не подменяется.
+  const parent = state({ id: 'p', live: true, agent: { state: 'idle', updated: 10 } });
+  const fork = state({
+    id: 'f', live: false, kind: 'background', parent: 'p',
+    agent: { state: 'idle', updated: 500 },
+  });
+  const rows = buildSessionList({ sessions: [parent, fork], seen: {}, configHost: 'mac-host' });
+  assert.strictEqual(rows[0].live, true);
+});
