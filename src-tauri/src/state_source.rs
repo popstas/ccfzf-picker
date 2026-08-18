@@ -60,33 +60,69 @@ pub fn sources_from(config: &serde_json::Value) -> Vec<Source> {
     out
 }
 
-/// Один вызов агрегатора на удалённом хосте.
+/// Аргументы вызова `--state`, свои у каждой дороги.
+///
+/// Через ssh уезжает одна строка: её заново разбирает удалённый шелл, и
+/// `ccfzf --state` там команда. Местный вызов шелла не поднимает вовсе —
+/// `--state` обязан быть отдельным аргументом процесса.
+fn state_args(source: &Source) -> Vec<String> {
+    match source {
+        Source::Ssh(_) => vec!["ccfzf --state".to_string()],
+        Source::Local => vec!["--state".to_string()],
+    }
+}
+
+/// То же для комментария. Текст сюда не входит: он уходит на stdin.
+fn comment_args(source: &Source, id: &str, from: &str) -> Vec<String> {
+    let mut out = match source {
+        Source::Ssh(_) => vec!["ccfzf".to_string()],
+        Source::Local => vec![],
+    };
+    out.push("--comment".to_string());
+    out.push(id.to_string());
+    out.push(from.to_string());
+    out
+}
+
+/// Заготовка процесса для источника.
+///
+/// `hidden_command`, а не `Command::new`: на Windows иначе на каждый опрос
+/// всплывает консольное окно, а опрос идёт раз в секунду.
+fn command_for(source: &Source) -> Result<std::process::Command, String> {
+    match source {
+        Source::Ssh(host) => Ok(ssh(host)),
+        Source::Local => {
+            let (program, args) = crate::local_ccfzf::resolve()?;
+            let mut cmd = hidden_command(&program);
+            cmd.args(args);
+            Ok(cmd)
+        }
+    }
+}
+
+/// Один вызов агрегатора.
 ///
 /// Ответ не разбирается и не чинится: форму проверяет фронтенд той же
 /// функцией, что и тесты. Здесь важно только отличить «не смогли спросить» от
 /// «спросили, ответили не тем».
 ///
-/// `ssh` поднимается через `hidden_command`, а не `Command::new`: на Windows
-/// иначе на каждый опрос всплывает консольное окно. Опрос идёт раз в секунду,
-/// пока пикер показан, — см. `proc.rs`.
-///
-/// Опции таймаута обязательны с тех пор, как опрос переехал в фоновый поток
-/// Rust (`poller.rs`): это единственный поток, и повисший ssh не просто
+/// Опции таймаута у ssh обязательны с тех пор, как опрос переехал в фоновый
+/// поток Rust (`poller.rs`): это единственный поток, и повисший ssh не просто
 /// задерживает кадр — он не даёт разобрать ни одного сигнала (`Shown`,
 /// `Hidden`, `Nudge`), пока не отвалится сам. `BatchMode=yes` не даёт ssh
 /// уйти в запрос пароля вместо ошибки, `ConnectTimeout=5` — не даёт зависнуть
 /// на установке соединения после сна машины или обрыва VPN,
 /// `ServerAliveInterval`/`ServerAliveCountMax` обрывают уже установленное, но
 /// замолчавшее соединение самое большее через 10 секунд.
-pub fn fetch(ssh_host: &str) -> Result<serde_json::Value, String> {
-    let out = ssh(ssh_host)
-        .arg("ccfzf --state")
+pub fn fetch(source: &Source) -> Result<serde_json::Value, String> {
+    let out = command_for(source)?
+        .args(state_args(source))
         .output()
-        .map_err(|e| format!("ssh failed to start: {e}"))?;
+        .map_err(|e| format!("failed to start: {e}"))?;
 
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
-        return Err(format!("ssh exited with {}: {}", out.status, err.trim()));
+        return Err(format!("exited with {}: {}", out.status, err.trim()));
     }
 
     serde_json::from_slice(&out.stdout).map_err(|e| format!("bad json from ccfzf --state: {e}"))
@@ -110,7 +146,7 @@ fn ssh(ssh_host: &str) -> std::process::Command {
     cmd
 }
 
-/// Записать комментарий к сессии на машине агрегатора.
+/// Записать комментарий к сессии на машине её источника.
 ///
 /// Текст уходит на **stdin**, а не аргументом, и это не удобство. `ssh host
 /// cmd args…` склеивает аргументы в одну строку, которую заново разбирает
@@ -123,20 +159,17 @@ fn ssh(ssh_host: &str) -> std::process::Command {
 /// намеренно — вторая стоит там, куда ходит не только пикер.
 ///
 /// Пустой текст стирает комментарий: отдельного «удалить» у него нет.
-pub fn set_comment(ssh_host: &str, id: &str, text: &str, from: &str) -> Result<(), String> {
+pub fn set_comment(source: &Source, id: &str, text: &str, from: &str) -> Result<(), String> {
     if !looks_like_session_id(id) {
         return Err("not a session id".into());
     }
-    let mut child = ssh(ssh_host)
-        .arg("ccfzf")
-        .arg("--comment")
-        .arg(id)
-        .arg(from)
+    let mut child = command_for(source)?
+        .args(comment_args(source, id, from))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("ssh failed to start: {e}"))?;
+        .map_err(|e| format!("failed to start: {e}"))?;
     child
         .stdin
         .take()
@@ -145,10 +178,10 @@ pub fn set_comment(ssh_host: &str, id: &str, text: &str, from: &str) -> Result<(
         .map_err(|e| format!("cannot send the comment: {e}"))?;
     let out = child
         .wait_with_output()
-        .map_err(|e| format!("ssh failed: {e}"))?;
+        .map_err(|e| format!("ccfzf failed: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
-        return Err(format!("ssh exited with {}: {}", out.status, err.trim()));
+        return Err(format!("ccfzf exited with {}: {}", out.status, err.trim()));
     }
     Ok(())
 }
@@ -172,7 +205,7 @@ fn looks_like_session_id(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{looks_like_session_id, sources_from, Source};
+    use super::{comment_args, looks_like_session_id, sources_from, state_args, Source};
 
     #[test]
     fn id_sessii_prinimaetsya_tolko_v_forme_uuid() {
@@ -225,5 +258,30 @@ mod tests {
         }
         assert_eq!(Source::Ssh("remote-host".into()).label(), "remote-host");
         assert_eq!(Source::Local.label(), "local");
+    }
+
+    /// Аргументы у двух дорог разные, и это не оплошность. Через ssh уезжает
+    /// **одна строка**, которую заново разбирает удалённый шелл; местный вызов
+    /// шелла не поднимает вовсе, и `--state` обязан быть отдельным аргументом.
+    /// Склей мы их одинаково — местный ccfzf получил бы аргумент `ccfzf --state`.
+    #[test]
+    fn state_args_differ_by_transport() {
+        assert_eq!(state_args(&Source::Ssh("remote-host".into())), vec!["ccfzf --state".to_string()]);
+        assert_eq!(state_args(&Source::Local), vec!["--state".to_string()]);
+    }
+
+    /// То же и у комментария: id и имя машины едут аргументами по обеим
+    /// дорогам, а текст — на stdin, потому что через ssh его разбирал бы шелл.
+    #[test]
+    fn comment_args_differ_by_transport() {
+        let id = "b5a54ce3-a022-4c9a-aa91-e306d75bdc76";
+        assert_eq!(
+            comment_args(&Source::Ssh("remote-host".into()), id, "mac"),
+            vec!["ccfzf".to_string(), "--comment".to_string(), id.to_string(), "mac".to_string()]
+        );
+        assert_eq!(
+            comment_args(&Source::Local, id, "mac"),
+            vec!["--comment".to_string(), id.to_string(), "mac".to_string()]
+        );
     }
 }

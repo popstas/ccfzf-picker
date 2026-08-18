@@ -122,21 +122,22 @@ impl Poller {
                     // читал фронтенд. После A5 команда для показа списка
                     // больше не зовётся, и без этой строки ненастроенный
                     // пикер молча показывал бы пустой список без единого
-                    // слова о причине. Текст — дословно тот же, что даёт
-                    // `check_ssh_host`: другой текст на то же самое читался
-                    // бы как два разных отказа.
-                    if let Err(msg) = crate::check_ssh_host(&host) {
-                        let mut cache = thread_cache.lock().unwrap();
-                        cache.error = msg;
-                        if visible {
-                            let body = payload(&cache);
-                            drop(cache);
-                            let _ = app.emit("state", body);
-                        }
+                    // слова о причине. Текст держим здесь же литералом:
+                    // прежде его отдавал `check_ssh_host`, но Задача 5
+                    // перепишет этот цикл целиком под несколько источников,
+                    // и заводить под временный текст отдельную функцию смысла
+                    // нет.
+                    let msg = "sshHost is not set: copy config.example.yml to ~/.config/ccfzf-picker/config.yaml".to_string();
+                    let mut cache = thread_cache.lock().unwrap();
+                    cache.error = msg;
+                    if visible {
+                        let body = payload(&cache);
+                        drop(cache);
+                        let _ = app.emit("state", body);
                     }
                 }
                 if !idle {
-                    let changed = match crate::state_source::fetch(&host) {
+                    let changed = match crate::state_source::fetch(&crate::state_source::Source::Ssh(host.clone())) {
                         Ok(state) => {
                             let fp = fingerprint(&state);
                             let changed = prev_fingerprint.as_deref() != Some(fp.as_str());
