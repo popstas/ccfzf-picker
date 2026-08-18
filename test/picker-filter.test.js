@@ -2,6 +2,9 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { filterProjects, filterSessions, matchesText } = require('../frontend-src/picker-filter');
 
+const filterRows = (rows, q) =>
+  (filterSessions([{ sessions: rows }], q)[0] || { sessions: [] }).sessions;
+
 const ROWS = [
   { label: 'ccfzf', cwd: '/home/user/projects/shell/ccfzf' },
   { label: 'demo', cwd: '/home/user/projects/js/demo' },
@@ -108,4 +111,15 @@ test('строка без окна не находится по слову undef
     sessions: [{ id: 'bbbb2222-aaaa-bbbb-cccc-000000000002', label: 'x', cwd: '/home/user/x' }],
   }];
   assert.deepStrictEqual(filterSessions(groups, 'undefined'), []);
+});
+
+test('поиск находит сессию по комментарию', () => {
+  // Комментарий пишут своими словами — именно теми, по которым потом и ищут.
+  // Четвёртый в стоге, рядом с именем, каталогом и именем окна.
+  const rows = [
+    { kind: 'session', label: 'esm-migration', cwd: '/p/a', comment: 'чинит окна' },
+    { kind: 'session', label: 'other', cwd: '/p/b' },
+  ];
+  const got = filterRows(rows, 'окна');
+  assert.deepStrictEqual(got.map(r => r.label), ['esm-migration']);
 });

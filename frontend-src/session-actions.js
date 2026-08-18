@@ -108,6 +108,19 @@
     }
     const num = prNumber((row || {}).pr_url);
     if (num) actions.push({ id: 'pr', label: `Open PR #${num}` });
+    // Спека и план — файлы внутри `cwd`, и открыть их можно только там, где
+    // путь переводится на эту машину: то же правило и та же проверка, что у
+    // действий с папкой выше. Без pathMap пункт вёл бы в никуда.
+    //
+    // План первым: спека отвечает «что решили», план — «где сейчас», и из
+    // списка приходят за вторым. Тот же порядок, что и у значка в строке
+    // (docKindOf в session-glyph.js).
+    if (pathApi.mapPath((row || {}).cwd, cfg.pathMap) !== null) {
+      for (const [id, label] of [['plan', 'Open plan'], ['spec', 'Open spec']]) {
+        const rel = (row || {})[id];
+        if (typeof rel === 'string' && rel) actions.push({ id, label });
+      }
+    }
     if (row && row.lastActivity && row.agentSeen) actions.push({ id: 'unread', label: 'Mark unread' });
     // Зеркало предыдущего, и условие у него зеркальное же: отмечать
     // просмотренным нечего у строки без записи агента и незачем у той, что уже
@@ -124,6 +137,10 @@
     // известен: пункт, который ничего не сделает, хуже отсутствующего — то же
     // правило, что и у действий папки выше.
     if (row && row.cwd) actions.push({ id: 'new', label: 'New session' });
+    // Комментарий — у любой строки с настоящим id: он про сессию, а не про её
+    // окно, живость или каталог. Живёт общим списком на машине агрегатора, и
+    // потому же не спрашивает ни pathMap, ни трекера.
+    if (row && row.id) actions.push({ id: 'comment', label: 'Edit comment' });
     actions.push({ id: 'info', label: 'Session info' });
     return actions;
   }

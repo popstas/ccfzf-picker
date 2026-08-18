@@ -20,7 +20,9 @@
    * Буква `pr` — `g`, а не напрашивавшаяся `p`: `^P` отдан ярлыку режима
    * проектов. Мнемоника у `g` своя — GitHub, куда действие и ведёт.
    */
-  const BUILTIN_ACTION_KEYS = { new: 'n', pr: 'g', unread: 'u', seen: 'd', attach: 'r', info: 'i' };
+  const BUILTIN_ACTION_KEYS = {
+    new: 'n', pr: 'g', unread: 'u', seen: 'd', attach: 'r', info: 'i', comment: 'm',
+  };
 
   /**
    * Буква на пункт меню `^K` — в том же порядке, что и сами пункты.
@@ -66,6 +68,7 @@
     seen: 'Mark seen',
     attach: 'Copy reptyr command',
     info: 'Session info',
+    comment: 'Edit comment',
   };
 
   /**

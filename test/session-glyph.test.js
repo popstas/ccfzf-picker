@@ -4,7 +4,7 @@ const {
   escapeHtml, statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
   sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
   shortPath, rowTitle, titleAttr, windowHostHtml, windowHtml,
-  prNumber, prBadgeHtml, wordSet, hidesProject, projectLine,
+  prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, todoHtml, docsBadgeHtml, promptsHtml, commentHtml,
 } = require('../frontend-src/session-glyph');
 
 test('shortPath collapses the agent home directory, and survives a missing path', () => {
@@ -701,4 +701,155 @@ test('имя окна экранируется: оно приезжает с ч�
   const { windowNameHtml } = require('../frontend-src/session-glyph');
   const html = windowNameHtml({ title: 'x', windowTitle: '<img src=x>' });
   assert.ok(!html.includes('<img'), 'заголовок окна пишет чужой трекер, и в разметку он не уходит');
+});
+
+// --- Счётчики docs/TODO.md у строки проекта (Task T4) ---------------------
+//
+// Приезжают полем `todo` от агрегатора: список секций по заголовкам первого
+// уровня. Форматирует их читатель — то же правило, по которому он же считает
+// возраст: вторая форма на стороне агрегатора разошлась бы с колонкой.
+
+test('todoHtml показывает ведущую секцию, а остаток — числом', () => {
+  // Ведущая секция — как в statusline-block.sh: сделано из всего в ней.
+  // Остальные сворачиваются в одно число открытых: полная разбивка уезжает в
+  // подсказку, потому что в колонке у неё нет ширины — у ccfzf-picker она
+  // самая длинная из двадцати трёх проектов с TODO на живой машине.
+  const sections = [
+    { label: 'next', done: 0, todo: 4 },
+    { label: 'future', done: 0, todo: 4 },
+    { label: 'minor', done: 0, todo: 8 },
+  ];
+  assert.strictEqual(todoHtml({ todo: sections }, true),
+    '<div class="todo">☑ 0/4 next <span class="rest">+12</span></div>');
+});
+
+test('todoHtml без хвоста не приписывает +0', () => {
+  assert.strictEqual(todoHtml({ todo: [{ label: 'next', done: 1, todo: 2 }] }, true),
+    '<div class="todo">☑ 1/3 next</div>');
+});
+
+test('todoHtml обходится без метки, когда её нет', () => {
+  // Галочки до первого заголовка — обычное дело у мелкого проекта. Пустая
+  // метка значит «называть нечем», и лишний пробел за ней был бы виден.
+  assert.strictEqual(todoHtml({ todo: [{ label: '', done: 2, todo: 0 }] }, true),
+    '<div class="todo">☑ 2/2</div>');
+});
+
+test('todoHtml молчит, когда считать нечего или галка выключена', () => {
+  // Пустого элемента здесь быть не должно: у двадцати проектов из сорока пяти
+  // docs/TODO.md нет вовсе, и пустая колонка стояла бы у половины списка.
+  // Это та же развилка, что у usageHtml с обеими выключенными галками.
+  assert.strictEqual(todoHtml({ todo: [] }, true), '');
+  assert.strictEqual(todoHtml({}, true), '');
+  assert.strictEqual(todoHtml({ todo: [{ label: 'next', done: 0, todo: 1 }] }, false), '');
+});
+
+test('todoHtml экранирует метку из файла', () => {
+  // Метку пишет человек в своём docs/TODO.md, а файл этот приезжает с чужой
+  // машины через агрегатор: в разметку она попадает как данные, а не как
+  // разметка.
+  assert.match(todoHtml({ todo: [{ label: '<b>x', done: 0, todo: 1 }] }, true),
+    /&lt;b&gt;x/);
+});
+
+test('todoHtml не верит числам из ответа', () => {
+  // Поле приезжает по сети из файла на чужой машине. NaN в колонке выглядел бы
+  // поломкой пикера, а не испорченным входом.
+  assert.strictEqual(todoHtml({ todo: [{ label: 'next', done: 'нет', todo: null }] }, true),
+    '<div class="todo">☑ 0/0 next</div>');
+  assert.strictEqual(todoHtml({ todo: 'нет' }, true), '');
+});
+
+test('подсказка строки несёт полную разбивку по секциям', () => {
+  // Ради этого разбивка и не влезает в строку: вопрос «а где именно они»
+  // задают редко, и ответ на него место в колонке не окупает.
+  const title = rowTitle({
+    cwd: '/home/user/p',
+    todo: [{ label: 'next', done: 0, todo: 4 }, { label: 'minor', done: 1, todo: 8 }],
+  });
+  assert.match(title, /next 0\/4 · minor 1\/9/);
+});
+
+test('подсказка без счёта остаётся прежней', () => {
+  assert.strictEqual(rowTitle({ cwd: '/home/user/p' }), rowTitle({ cwd: '/home/user/p', todo: [] }));
+});
+
+// --- Спека и план сессии (Task T5) ---------------------------------------
+
+test('docsBadgeHtml ставит один знак, когда бумаги есть', () => {
+  // Знак один на обе бумаги: их у сессии почти всегда две сразу, и два
+  // одинаковых значка рядом отвечали бы на один и тот же вопрос дважды.
+  assert.strictEqual(docsBadgeHtml({ plan: 'docs/superpowers/plans/a.md' }),
+    '<span class="docs" title="plan">▤</span>');
+  assert.strictEqual(docsBadgeHtml({ spec: 'docs/superpowers/specs/a-design.md' }),
+    '<span class="docs" title="spec">▤</span>');
+});
+
+test('docsBadgeHtml называет план, когда есть обе', () => {
+  // План главнее спеки: спека отвечает «что решили», план — «где сейчас», и
+  // из списка приходят за вторым.
+  assert.strictEqual(
+    docsBadgeHtml({ plan: 'docs/superpowers/plans/a.md', spec: 'docs/superpowers/specs/a.md' }),
+    '<span class="docs" title="plan">▤</span>');
+});
+
+test('docsBadgeHtml молчит без бумаг', () => {
+  // Пустого элемента быть не должно: бумаг нет у трёх сессий из четырёх, и
+  // пустой значок стоял бы почти в каждой строке.
+  assert.strictEqual(docsBadgeHtml({}), '');
+  assert.strictEqual(docsBadgeHtml({ plan: '' }), '');
+  assert.strictEqual(docsBadgeHtml(null), '');
+});
+
+test('docsBadgeHtml не верит нестроке', () => {
+  assert.strictEqual(docsBadgeHtml({ plan: 42 }), '');
+});
+
+// --- Размер сессии: число реплик человека (Task T2) ----------------------
+
+test('promptsHtml показывает число реплик своей колонкой', () => {
+  assert.strictEqual(promptsHtml({ promptCount: 97 }, true),
+    '<div class="prompts">✎97</div>');
+});
+
+test('promptsHtml печатает ноль, а не пустоту', () => {
+  // Ноль здесь честен: сессия, в которой человек ещё ничего не написал,
+  // бывает — её только что завели. Пустота на её месте читалась бы как
+  // «данных нет», а различать эти два случая нечем. То же решение и та же
+  // причина, что у usageHtml с нулевой ценой.
+  assert.strictEqual(promptsHtml({ promptCount: 0 }, true),
+    '<div class="prompts">✎0</div>');
+});
+
+test('promptsHtml молчит при выключенной галке', () => {
+  // Колонки нет вовсе, а не пустой элемент: правые колонки стоят друг за
+  // другом, и пустой div сдвигал бы соседей.
+  assert.strictEqual(promptsHtml({ promptCount: 5 }, false), '');
+});
+
+test('promptsHtml не верит нечислу из ответа', () => {
+  assert.strictEqual(promptsHtml({ promptCount: 'много' }, true),
+    '<div class="prompts">✎0</div>');
+  assert.strictEqual(promptsHtml({}, true), '<div class="prompts">✎0</div>');
+});
+
+// --- Комментарий человека к сессии (Task T3) -----------------------------
+
+test('commentHtml рисует строку под ответом', () => {
+  assert.strictEqual(commentHtml({ comment: 'чинит окна' }, true),
+    '<div class="comment">чинит окна</div>');
+});
+
+test('commentHtml молчит без комментария и при выключенной галке', () => {
+  // Пустой строки быть не должно: она заняла бы высоту у каждой сессии без
+  // комментария, а таких почти все.
+  assert.strictEqual(commentHtml({}, true), '');
+  assert.strictEqual(commentHtml({ comment: '' }, true), '');
+  assert.strictEqual(commentHtml({ comment: 'есть' }, false), '');
+});
+
+test('commentHtml экранирует текст', () => {
+  // Пишет его человек, и приезжает он с чужой машины через агрегатор: в
+  // разметку попадает как данные.
+  assert.match(commentHtml({ comment: '<b>жирно' }, true), /&lt;b&gt;жирно/);
 });

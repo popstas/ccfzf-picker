@@ -396,3 +396,16 @@ test('scrim принимает один флаг, не трогая соседн
   assert.deepStrictEqual(normalizeConfig({ scrim: { narrow: true } }).scrim,
     { narrow: true, wide: false });
 });
+
+test('editor: умолчание cursor, пустая строка возвращает его же', () => {
+  // Ключ нужен ради встроенных пунктов «Open plan» / «Open spec»: они обязаны
+  // работать из коробки, иначе значок в строке обещал бы то, чего нет.
+  // Умолчание — cursor: им и открывают.
+  assert.strictEqual(normalizeConfig({}).editor, 'cursor');
+  assert.strictEqual(normalizeConfig({ editor: '   ' }).editor, 'cursor');
+  assert.strictEqual(normalizeConfig({ editor: 42 }).editor, 'cursor');
+});
+
+test('editor: названный редактор доезжает подрезанным', () => {
+  assert.strictEqual(normalizeConfig({ editor: '  code  ' }).editor, 'code');
+});

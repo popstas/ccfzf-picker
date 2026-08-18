@@ -261,6 +261,18 @@
            показе окна и при каждой правке запроса, то есть без участия человека.
            Наведение — наоборот, прямой жест и по одной строке. */
         .row.stale:hover { opacity: 1; }
+        /* И только прозрачность: фон наведение старой строке не даёт. Оба
+           сигнала разом делали строку под мышью такой же громкой, как
+           выделенную, а скачок прозрачности 0.5 → 1 и сам по себе — самая
+           заметная перемена в списке.
+
+           `:not(.active)` не украшение. Без него вес правила (0,3,0) побил бы
+           `.row.active` (0,2,0), и выделенная старая строка под мышью теряла
+           бы фон выделения. Сузить вместо этого сам `.row:hover` до
+           `:not(.stale)` нельзя по обратной причине: это подняло бы вес
+           наведения над выделением уже у обычных строк — то самое, что
+           сегодня удерживается порядком правил выше. */
+        .row.stale:not(.active):hover { background: none; }
         /* Гашение по наведённому проекту. Стоит после `.row.stale` намеренно: обе
            правки меняют opacity, и на строке с обоими классами они не складываются, а
            перекрывают друг друга по порядку в файле. Главнее здесь наведение — оно
@@ -396,12 +408,35 @@
             flex: 0 0 auto; padding-left: 10px;
             font-size: 11px; color: #7d838c; white-space: nowrap;
         }
+        /* Размер сессии: сколько раз человек писал. Своя колонка, а не третья
+           величина в `.usage` — та про деньги и запас контекста, эта про длину
+           разговора. Форма общая с соседями: правые колонки не должны
+           разъезжаться кеглем и отступом. */
+        .prompts {
+            flex: 0 0 auto; padding-left: 10px;
+            font-size: 11px; color: #7d838c; white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
         /* Контекст и деньги, между статусом и возрастом. */
+        /* Значок бумаг. Тусклее имени и той же природы, что `.pr`: не
+           колонка, а пометка внутри строки имени. */
+        .docs { margin-left: 6px; font-size: 11px; color: #7d838c; }
         .usage {
             flex: 0 0 auto; padding-left: 10px;
             font-size: 11px; color: #7d838c; white-space: nowrap;
             font-variant-numeric: tabular-nums;
         }
+        /* Галочки docs/TODO.md у строки проекта. Форма та же, что у .usage:
+           это колонка справа, а не подпись, и разъезжаться с соседями по
+           отступу и кеглю ей нельзя. Хвост «+N» тусклее ведущей секции:
+           читают в первую очередь её счёт, а «сколько ещё где-то» — то, за
+           чем возвращаются вторым взглядом. */
+        .todo {
+            flex: 0 0 auto; padding-left: 10px;
+            font-size: 11px; color: #7d838c; white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+        .todo .rest { color: #6f757e; }
         /* Заполненность контекста. Жёлтый — тот же, что у спрашивающего агента:
            «обрати внимание». Красный — «скоро начнёт забывать начало». */
         .usage .ctx.warn { color: #d29922; }
@@ -489,12 +524,35 @@
            значение», и вторая копия этих правил разъехалась бы с первой на
            первой же правке цвета. С `#actions-menu` роднить их незачем — та
            про действия над строкой, у неё выбор стрелками и запуск. */
-        #info-backdrop, #keys-backdrop {
+        #info-backdrop, #keys-backdrop, #comment-backdrop {
             display: none; position: absolute; inset: 0; z-index: 10;
             background: rgba(0, 0, 0, .45);
             align-items: center; justify-content: center; padding: 24px;
         }
-        #info-backdrop.open, #keys-backdrop.open { display: flex; }
+        #info-backdrop.open, #keys-backdrop.open, #comment-backdrop.open { display: flex; }
+        #comment-card {
+            width: min(420px, 100%);
+            background: #25262a; border: 1px solid #3a3d42; border-radius: 10px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+        }
+        #comment-title {
+            padding: 12px 16px 8px; font-size: 11px; color: #7d838c;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        /* Поле без рамки и на фоне карточки: это единственный элемент внутри
+           неё, и рамка вокруг рамки читалась бы вторым окном. */
+        #comment-input {
+            width: 100%; box-sizing: border-box; padding: 8px 16px 14px;
+            background: none; border: none; outline: none;
+            color: #e6e6e6; font: inherit; font-size: 13px;
+        }
+        /* Комментарий человека — под ответом и той же формы, что prompt и
+           answer: это третья строка тела, а не колонка. Отличается цветом
+           подписи: сказал его не агент, а человек. */
+        .comment {
+            margin-top: 3px; font-size: 11px; color: #8b939c;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
         #info-card, #keys-card {
             width: min(560px, 100%); max-height: 100%; overflow-y: auto;
             background: #25262a; border: 1px solid #3a3d42; border-radius: 10px;
@@ -608,6 +666,13 @@
   <div id="info-card" role="dialog">
     <div id="info-title"></div>
     <div id="info-rows"></div>
+  </div>
+</div>
+<div id="comment-backdrop" aria-hidden="true">
+  <div id="comment-card" role="dialog">
+    <div id="comment-title"></div>
+    <input id="comment-input" type="text" maxlength="200" spellcheck="false"
+      placeholder="Three or four words — Enter saves, Esc cancels">
   </div>
 </div>
 <div id="drop-line"></div>
@@ -802,13 +867,23 @@
     { key: 'showPrompt', label: 'prompt', side: 'left' },
     { key: 'showAnswer', label: 'answer', side: 'left' },
     { key: 'showPaths', label: 'project', side: 'left' },
+    // Третья строка тела, рядом с prompt и answer: это тоже текст под именем,
+    // а не колонка справа.
+    { key: 'showComment', label: 'comment', side: 'left' },
     { key: 'showHotkey', label: 'hotkeys', side: 'right' },
     { key: 'showEvent', label: 'events', side: 'right' },
     { key: 'showId', label: 'id', side: 'right' },
     { key: 'showCost', label: 'cost', side: 'right' },
     { key: 'showContext', label: 'context', side: 'right' },
+    // Размер сессии, своя колонка рядом с usage. Отдельная галка, а не часть
+    // `context`: величины отвечают на разные вопросы — «сколько осталось до
+    // сжатия» против «насколько длинный разговор», — и выключают их порознь.
+    { key: 'showPrompts', label: 'prompts', side: 'right' },
     { key: 'showWindow', label: 'window', side: 'right' },
     { key: 'showWindowHost', label: 'window host', side: 'right' },
+    // Одна галка на обе колонки: галочки живут в docs/TODO.md каталога, а
+    // каталог есть и у проекта, и у сессии — файл у них один и тот же.
+    { key: 'showTodo', label: 'todo', side: 'right' },
     { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
     { key: 'showAll', label: 'show all', side: 'filter' },
     // Четвёртая группа, `dim`, — и не колонка, и не фильтр. Состав списка
@@ -838,16 +913,25 @@
     showPrompt: { list: true, statusline: true },
     showAnswer: { list: true, statusline: true },
     showPaths: { list: true, statusline: true },
+    // Включён: комментарий пишут ровно затем, чтобы видеть его в списке.
+    showComment: { list: true, statusline: false },
     showHotkey: { list: true, statusline: false },
     showEvent: { list: false, statusline: false },
     showId: { list: false, statusline: true },
     showCost: { list: false, statusline: false },
     showContext: { list: true, statusline: true },
+    // Включена: это ответ на вопрос «большая ли сессия», ради которого её и
+    // заводили. В статуслайн не вынесена — место внизу кончилось.
+    showPrompts: { list: true, statusline: false },
     showWindow: { list: true, statusline: false },
     // Включена, хотя у одного трекера пустует всегда: имя машины появляется
     // ровно тогда, когда оно нужно, — у окна, стоящего не здесь. Выключенной
     // её бы никто и не нашёл, а лишней ширины она не занимает.
     showWindowHost: { list: true, statusline: false },
+    // Включена: у половины проектов счёт есть, и колонка отвечает на вопрос
+    // «сколько там осталось» ровно тогда, когда в проект и заходят. В
+    // статуслайн не вынесена — место внизу кончилось.
+    showTodo: { list: true, statusline: false },
     // Выключен: список без трекера и так весь без окон, и включённый фильтр
     // показал бы пустоту вместо сессий — с виду неотличимо от сломанного ssh.
     onlyWindow: { list: false, statusline: false },
@@ -917,6 +1001,11 @@
   // старте и на config-changed, см. loadActionIcons.
   let actionIcons = {};
   let infoOpen = false;
+// Оверлей комментария. `commentRow` держит строку, к которой он открыт: список
+// тикает раз в секунду и к моменту сохранения успевает перерисоваться, а
+// искать строку заново по индексу было бы поиском не той.
+let commentOpen = false;
+let commentRow = null;
   let keysOpen = false;
 
   // Одна таблица «id действия ⇄ клавиша» на всё: подписи в меню Ctrl+K и
@@ -975,7 +1064,10 @@
   const actionsTitle = document.getElementById('actions-title');
   const actionsList = document.getElementById('actions-list');
   const actionsEmpty = document.getElementById('actions-empty');
-  const infoBackdrop = document.getElementById('info-backdrop');
+  const commentBackdrop = document.getElementById('comment-backdrop');
+const commentTitle = document.getElementById('comment-title');
+const commentInput = document.getElementById('comment-input');
+const infoBackdrop = document.getElementById('info-backdrop');
   const infoTitle = document.getElementById('info-title');
   const infoRows = document.getElementById('info-rows');
   const keysButton = document.getElementById('keys-button');
@@ -993,7 +1085,8 @@
   }
 
   const {
-    statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml,
+    statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml, todoHtml,
+    docsBadgeHtml, promptsHtml, commentHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
     windowNameHtml,
   } = window.SessionGlyph;
@@ -1157,6 +1250,11 @@
       (cwdLine ? `<div class="cwd">${escapeHtml(cwdLine)}</div>` : '') +
       `</div>` +
       `<div class="meta">` +
+      // Счётчики docs/TODO.md — первой колонкой, как и у строки сессии: это
+      // тот же вопрос «сколько в ней всего», только у каталога, и рисует его
+      // та же функция. Стоять они обязаны на том же месте, иначе правый край
+      // списка разъедется между двумя видами строк.
+      todoHtml(project, toggles.showTodo) +
       `<div class="count">${project.sessionCount}` +
       (project.liveCount ? ` · ${project.liveCount}●` : '') +
       `</div>` +
@@ -1292,6 +1390,10 @@
       // когда расходится с первым: см. windowNameHtml.
       `${windowNameHtml(session)}` +
       `${prBadgeHtml(session)}` +
+      // Значок «есть спека или план» — рядом с PR и той же природы: оба
+      // говорят, что у сессии есть бумага снаружи транскрипта, и оба ведут в
+      // пункт меню, а не открываются кликом.
+      `${docsBadgeHtml(session)}` +
       `</div>` +
       (sessionCwdLine ? `<div class="cwd">${escapeHtml(sessionCwdLine)}</div>` : '') +
       // Две строки под карточкой: что спросили и чем ответили. Пустой div
@@ -1302,17 +1404,28 @@
         ? `<div class="prompt">${escapeHtml(session.agentPrompt)}</div>` : '') +
       (toggles.showAnswer && session.agentDescription
         ? `<div class="summary">${escapeHtml(session.agentDescription)}</div>` : '') +
+      // Комментарий — последней строкой тела, под ответом: он про сессию
+      // целиком, а не про текущий ход, и над ответом перебивал бы то, ради
+      // чего в строку и смотрят.
+      commentHtml(session, toggles.showComment) +
       `</div>` +
       // Правые колонки — одной группой: она и прижимает их вправо. Порознь
       // это делала `.state` своим margin-left: auto, и стоило снять с неё
       // чекбокс, как всё съезжало к названию сессии.
       `<div class="meta">` +
+      // Счётчики TODO — первой колонкой группы, до пометки терминала: за
+      // «сколько там осталось» в строку смотрят чаще, чем за тем, открыто ли
+      // окно. Колонка и функция те же, что у строки проекта, и место у неё
+      // там такое же — первое: разъедься они, правый край списка ломался бы
+      // на границе двух видов строк.
+      todoHtml(session, toggles.showTodo) +
       windowHtml(session, toggles.showWindow, toggles.showTerminalIcon) +
       windowHostHtml(session, toggles.showWindowHost) +
       stateHtml(session, toggles.showEvent) +
       sessionIdHtml(session, toggles.showId) +
       hotkeyHtml(session, toggles.showHotkey) +
       usageHtml(session, toggles) +
+      promptsHtml(session, toggles.showPrompts) +
       ageHtml(session, nowSec) +
       `</div></div>`;
     return { key: rowKey(session), html };
@@ -2311,6 +2424,66 @@
     search.focus();
   }
 
+  /**
+   * Оверлей комментария к сессии.
+   *
+   * Поле сфокусировано и предзаполнено нынешним текстом: комментарий чаще
+   * правят, чем пишут с нуля, а стирать его руками ради правки — работа, за
+   * которую человек ничего не получает.
+   *
+   * Строка запоминается целиком, а не индексом: подача тикает раз в секунду, и
+   * к моменту сохранения список успевает перерисоваться — индекс указывал бы
+   * уже на другую сессию.
+   */
+  function openComment(row) {
+    if (!row || !row.id) return;
+    commentRow = row;
+    commentTitle.textContent = `${sessionName(row)} — comment`;
+    commentInput.value = row.comment || '';
+    commentOpen = true;
+    commentBackdrop.classList.add('open');
+    commentBackdrop.setAttribute('aria-hidden', 'false');
+    commentInput.focus();
+    commentInput.select();
+  }
+
+  function closeComment() {
+    commentOpen = false;
+    commentRow = null;
+    commentBackdrop.classList.remove('open');
+    commentBackdrop.setAttribute('aria-hidden', 'true');
+    search.focus();
+  }
+
+  /**
+   * Отправить комментарий на машину агрегатора.
+   *
+   * Пикер гасить не надо и нельзя: человек остаётся в списке, а не уходит в
+   * терминал, — это правило про «гасить до просьбы» касается веток,
+   * кончающихся чужим окном.
+   *
+   * Строка правится на месте, не дожидаясь ответа агрегатора: такт до минуты
+   * на скрытом окне, а до восьми — на спящем, и человек видел бы свой
+   * комментарий не сразу. Настоящее значение придёт следующим опросом и
+   * заменит это.
+   */
+  async function saveComment() {
+    const row = commentRow;
+    const text = commentInput.value.trim();
+    closeComment();
+    if (!row) return;
+    row.comment = text;
+    render();
+    try {
+      await invoke('set_comment', {
+        sshHost: CONFIG.sshHost, id: row.id, text, from: CONFIG.windowHost || '',
+      });
+    } catch (e) {
+      error = String(e);
+      render();
+    }
+  }
+
   // ── Перетаскивание заголовков секций ───────────────────────────────────
   //
   // Тащат за заголовок, а не за строку: строки заняты кликом, который
@@ -2505,7 +2678,7 @@
   }
 
   list.addEventListener('pointerdown', (e) => {
-    if (menuOpen || infoOpen || keysOpen) return;
+    if (menuOpen || infoOpen || keysOpen || commentOpen) return;
     // Только левой кнопкой: правая открывает меню строки.
     if (e.button !== 0) return;
     const node = e.target.closest('.row.section');
@@ -2919,6 +3092,33 @@
       invoke('hide_picker');
       return;
     }
+    if (id === 'comment') {
+      openComment(row);
+      return;
+    }
+    if (id === 'plan' || id === 'spec') {
+      // Каталог переводится на эту машину, а имя файла приклеивается тем же
+      // разделителем, который выбрал сам pathMap: локальный корень бывает и
+      // windows-путём. Форму пути уже проверил агрегатор — регулярка DOC_RE
+      // не пускает туда ни пробела, ни кавычки.
+      //
+      // Применимость проверена в availableActions, но проверяется и здесь:
+      // прямые клавиши — второй вход, и правило «что этой строке можно»
+      // обязано быть одно на оба.
+      const base = window.PathMap.mapPath(row.cwd, CONFIG.pathMap);
+      const rel = row[id];
+      if (base === null || !rel) return;
+      const sep = window.PathMap.separatorFor(base);
+      const full = `${base}${base.endsWith(sep) ? '' : sep}${rel.split('/').join(sep)}`;
+      // Через open_in_editor, а не spawn_detached с готовым argv: как звать
+      // редактор, зависит от системы, а страница её не знает и знать не
+      // должна. На маке голое имя уходит в `open -a` — CLI редактора там может
+      // не быть вовсе, и прямой запуск падает (проверено с cursor).
+      invoke('open_in_editor', { editor: CONFIG.editor, path: full })
+        .then(() => invoke('hide_picker'))
+        .catch((e) => { error = String(e); render(); });
+      return;
+    }
     if (id === 'unread') {
       markUnread(row);
       return;
@@ -3011,6 +3211,14 @@
         e.preventDefault();
         closeKeys();
       } else if (!(e.ctrlKey || e.metaKey || e.altKey)) { e.preventDefault(); }
+      return;
+    }
+    // Стоит до прочих оверлеев: у этого внутри поле ввода, и все клавиши,
+    // кроме Enter и Esc, обязаны достаться ему, а не списку. Гасить их здесь
+    // нельзя — набрать комментарий стало бы нечем.
+    if (commentOpen) {
+      if (e.key === 'Escape') { e.preventDefault(); closeComment(); }
+      else if (e.key === 'Enter') { e.preventDefault(); saveComment(); }
       return;
     }
     if (infoOpen) {

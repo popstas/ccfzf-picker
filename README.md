@@ -160,3 +160,5 @@ panels пишет `~/.config/ccfzf-picker/ui.json`, остальных —
 
 - [CLAUDE.md](CLAUDE.md) — как собирать и какие правила уже оплачены багами.
 - [docs/TODO.md](docs/TODO.md) — что отложено и почему.
+- [docs/window-layouts.md](docs/window-layouts.md) — как просить оконный трекер
+  расставить окна плиткой или каскадом.

@@ -35,7 +35,7 @@ test('порядок тегов таков, что каждый модуль н�
   // прототипы, и deepStrictEqual сравнивает в том числе их.
   assert.deepStrictEqual(
     [...ctx.SessionActions.availableActions({ id: 'a', live: true, pid: 42 }).map(a => a.id)],
-    ['attach', 'info'],
+    ['attach', 'comment', 'info'],
   );
   assert.strictEqual(
     ctx.SessionGroups.buildSessionsPayload(

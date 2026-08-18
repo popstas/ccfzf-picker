@@ -15,27 +15,30 @@ const CONFIGURED = {
 };
 
 test('информация о сессии есть всегда', () => {
+  // Комментарий — рядом с ней и по той же причине: оба про сессию как
+  // таковую, а не про её окно, живость или каталог, и потому есть у любой
+  // строки с настоящим id.
   const ids = availableActions({ id: 'a' }).map(a => a.id);
-  assert.deepStrictEqual(ids, ['info']);
+  assert.deepStrictEqual(ids, ['comment', 'info']);
 });
 
 test('без конфига список действий прежний', () => {
   // Второй аргумент необязателен: вызов остаётся годным там, где конфига под
   // рукой нет.
   const row = { id: 'a', cwd: '/home/user/x' };
-  assert.deepStrictEqual(availableActions(row).map(a => a.id), ['new', 'info']);
-  assert.deepStrictEqual(availableActions(row, {}).map(a => a.id), ['new', 'info']);
+  assert.deepStrictEqual(availableActions(row).map(a => a.id), ['new', 'comment', 'info']);
+  assert.deepStrictEqual(availableActions(row, {}).map(a => a.id), ['new', 'comment', 'info']);
 });
 
 test('настроенные действия идут первыми, когда путь переводится', () => {
   const ids = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED).map(a => a.id);
-  assert.deepStrictEqual(ids, ['explorer', 'new', 'info']);
+  assert.deepStrictEqual(ids, ['explorer', 'new', 'comment', 'info']);
 });
 
 test('сессия вне общего дерева настроенных действий не получает', () => {
   // Пункт, открывающий несуществующую папку, хуже отсутствующего.
   const ids = availableActions({ id: 'a', cwd: '/etc/nginx' }, CONFIGURED).map(a => a.id);
-  assert.deepStrictEqual(ids, ['new', 'info']);
+  assert.deepStrictEqual(ids, ['new', 'comment', 'info']);
 });
 
 test('настроенное действие доносит до меню свою подпись и клавишу', () => {
@@ -248,7 +251,10 @@ test('меню решено для каждого вида строки, а не
     zellij: 'home', snapshotId: 'snap-1',
   };
   const decided = {
-    interactive: ['explorer', 'pr', 'unread', 'attach', 'new', 'info'],
+    interactive: ['explorer', 'pr', 'unread', 'attach', 'new', 'comment', 'info'],
+    // Комментария у зелийной строки нет намеренно: настоящего id сессии у
+    // неё не бывает, а комментарий ключуется именно им — общий список на
+    // машине агрегатора хранится по id.
     zellij: ['info'],
     project: ['new', 'explorer'],
     snapshot: ['restore'],
@@ -304,4 +310,37 @@ test('каждый встроенный пункт меню обработан �
       `пункт ${id} есть в меню, но runAction его не разбирает — нажатие промолчит`,
     );
   }
+});
+
+// --- Спека и план в меню ^K (Task T5) ------------------------------------
+
+test('план и спека дают пункты меню, план первым', () => {
+  // План главнее спеки — за ним и приходят: спека отвечает «что решили», план
+  // — «где сейчас».
+  const acts = availableActions({
+    kind: 'session',
+    cwd: '/home/user/p',
+    plan: 'docs/superpowers/plans/a.md',
+    spec: 'docs/superpowers/specs/a-design.md',
+  }, { pathMap: { remote: '/home/user', local: '/local' }, actions: [] });
+  const docs = acts.filter(a => a.id === 'plan' || a.id === 'spec').map(a => a.id);
+  assert.deepStrictEqual(docs, ['plan', 'spec']);
+});
+
+test('без pathMap пунктов бумаг нет вовсе', () => {
+  // Файл лежит на машине агрегатора, и открыть его здесь можно только через
+  // переведённый путь. То же правило, что у действий с папкой: пункт меню,
+  // ведущий в никуда, хуже отсутствующего.
+  const acts = availableActions({
+    kind: 'session', cwd: '/home/user/p', plan: 'docs/superpowers/plans/a.md',
+  }, { pathMap: {}, actions: [] });
+  assert.deepStrictEqual(acts.filter(a => a.id === 'plan'), []);
+});
+
+test('есть только спека — только её пункт', () => {
+  const acts = availableActions({
+    kind: 'session', cwd: '/home/user/p', spec: 'docs/superpowers/specs/a-design.md',
+  }, { pathMap: { remote: '/home/user', local: '/local' }, actions: [] });
+  const docs = acts.filter(a => a.id === 'plan' || a.id === 'spec').map(a => a.id);
+  assert.deepStrictEqual(docs, ['spec']);
 });

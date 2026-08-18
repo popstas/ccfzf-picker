@@ -717,6 +717,33 @@ fn check_ssh_host(ssh_host: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Записать комментарий к сессии на машине агрегатора.
+///
+/// Ходит по ssh на тот же `sshHost`, что и список: файл комментариев лежит
+/// там, и общим он выходит именно поэтому — `--state` этой машины читают
+/// пикеры всех машин сразу.
+///
+/// `async` обязателен: ssh идёт до пяти секунд (`ConnectTimeout`), а
+/// синхронную команду Tauri выполняет в потоке цикла событий — окно замерло бы
+/// на всё это время, включая отрисовку самого оверлея, из которого её позвали.
+///
+/// Имя своей машины уезжает вместе с текстом: на той стороне его не угадать —
+/// ssh приходит с любой из машин, а `$HOSTNAME` назвал бы агрегатора.
+#[tauri::command]
+async fn set_comment(
+    ssh_host: String,
+    id: String,
+    text: String,
+    from: String,
+) -> Result<(), String> {
+    check_ssh_host(&ssh_host)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        state_source::set_comment(&ssh_host, &id, &text, &from)
+    })
+    .await
+    .map_err(|e| format!("comment task failed: {e}"))?
+}
+
 /// Отдать фронтенду то, что уже известно, и подтолкнуть опрос.
 ///
 /// Зовётся один раз, сразу после подписки на событие `state`: поток мог
@@ -1417,6 +1444,89 @@ fn spawn_detached(argv: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("failed to spawn {file}: {e}"))
 }
 
+/// Как звать редактор, чтобы он открыл файл.
+///
+/// На macOS голое имя уходит в `open -a`, и это не удобство, а единственная
+/// работающая дорога. Проверено на живом маке (2026-08-18): CLI `cursor` там не
+/// установлен вовсе — `which cursor` пуст даже в логин-шелле, — зато
+/// `/Applications/Cursor.app` на месте, и `open -a` находит приложение по
+/// имени в любом регистре (`id of app "cursor"` и `"Cursor"` дают один и тот же
+/// bundle id). Прямой запуск при этом падал `unable to spawn cursor`, и правкой
+/// PATH это не лечится: программы, о которой идёт речь, на диске нет.
+///
+/// Имя с разделителем каталогов — это путь, и его зовут напрямую: человек
+/// назвал файл, а не приложение, и `open -a` такой строке не обрадуется.
+///
+/// На Windows и Linux ветки нет: там редактор и есть программа в PATH.
+fn editor_argv(editor: &str, path: &str) -> Vec<String> {
+    let editor = editor.trim();
+    #[cfg(target_os = "macos")]
+    if !editor.is_empty() && !editor.contains('/') {
+        return vec![
+            "open".to_string(),
+            "-a".to_string(),
+            editor.to_string(),
+            path.to_string(),
+        ];
+    }
+    vec![editor.to_string(), path.to_string()]
+}
+
+/// Пускач ли это — то есть программа, которая сама сразу завершится.
+///
+/// Разница не косметическая: у `open -a` отказ приходит **кодом возврата**, а
+/// не отказом запуска. «Приложение не найдено», «файл не открылся» — всё это
+/// успешно запущенный `open`, который через миг вернёт единицу и напишет
+/// причину в stderr. Не дождавшись его, пикер отвечает Ok на неудачу.
+///
+/// Прямой запуск редактора — противоположный случай: там процесс и есть
+/// редактор, он живёт, пока человек работает, и ждать его значило бы
+/// подвесить пикер до закрытия окна.
+fn editor_is_launcher(argv: &[String]) -> bool {
+    argv.first().map(String::as_str) == Some("open")
+}
+
+/// Открыть спеку или план в редакторе.
+///
+/// Отдельная команда, а не `spawn_detached` с готовым argv со страницы:
+/// страница системы не знает и знать не должна — то же правило, по которому
+/// умолчание второго хоткея живёт в Rust, а не в `config-shape.js`.
+///
+/// Отказ обязан быть виден. Прежде здесь стоял один `spawn_detached`, и он
+/// отвечал Ok, едва процесс родился: страница по этому Ok гасила окно, а
+/// человек оставался с закрытым пикером и не открывшимся редактором — то
+/// есть с отказом, не сказавшим о себе ничего. Поймано на маке 2026-08-18
+/// живьём.
+#[tauri::command]
+fn open_in_editor(editor: String, path: String) -> Result<(), String> {
+    if editor.trim().is_empty() {
+        return Err("editor is not set".into());
+    }
+    if path.trim().is_empty() {
+        return Err("nothing to open".into());
+    }
+    let argv = editor_argv(&editor, &path);
+    if !editor_is_launcher(&argv) {
+        return spawn_detached(argv);
+    }
+    let (file, args) = argv.split_first().expect("argv пускача не бывает пустым");
+    let out = std::process::Command::new(file)
+        .args(args)
+        .output()
+        .map_err(|e| format!("failed to spawn {file}: {e}"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    // Причину называет сам пускач, и она короткая («Unable to find application
+    // named …»). Пустой stderr бывает тоже — тогда остаётся код.
+    let said = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    Err(if said.is_empty() {
+        format!("{file} failed: {}", out.status)
+    } else {
+        said
+    })
+}
+
 /// Утилита, забирающая буфер обмена со стандартного ввода.
 ///
 /// Своя на каждой системе, но обе есть из коробки: pbcopy в macOS, clip.exe в
@@ -1796,7 +1906,8 @@ fn main() {
             terminal_helper,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, open_session_mqtt, open_project_mqtt, new_session_mqtt,
-            save_config, open_settings, project_hotkeys_taken, action_icons
+            save_config, open_settings, project_hotkeys_taken, action_icons,
+            set_comment, open_in_editor
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
@@ -2041,6 +2152,65 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn redaktor_na_make_zovetsya_cherez_open_a() {
+        // Живая проверка на маке (2026-08-18): CLI `cursor` там не установлен
+        // вовсе, а /Applications/Cursor.app есть. Прямой запуск падал
+        // `unable to spawn cursor`, и правкой PATH это не лечится —
+        // программы на диске нет. `open -a` находит приложение по имени.
+        let got = super::editor_argv("cursor", "/x/plan.md");
+        if cfg!(target_os = "macos") {
+            assert_eq!(got, vec!["open", "-a", "cursor", "/x/plan.md"]);
+        } else {
+            assert_eq!(got, vec!["cursor", "/x/plan.md"]);
+        }
+    }
+
+    #[test]
+    fn nazvannyy_put_zovetsya_napryamuyu_na_lyuboy_sisteme() {
+        // Разделитель каталогов значит, что человек назвал файл, а не
+        // приложение: `open -a /usr/local/bin/cursor` такой строке не
+        // обрадуется.
+        assert_eq!(
+            super::editor_argv("/usr/local/bin/cursor", "/x/plan.md"),
+            vec!["/usr/local/bin/cursor", "/x/plan.md"]
+        );
+    }
+
+    #[test]
+    fn otkaz_puskacha_dohodit_slovami_a_ne_teryaetsya() {
+        // `open` завершается сразу, и отказ у него — код возврата, а не отказ
+        // запуска. Не дождись его пикер, он ответил бы Ok на неудачу, страница
+        // погасила бы окно, и человек остался бы без редактора и без слова о
+        // причине. Ветка только для пускача: прямой запуск — это сам редактор,
+        // и ждать его значило бы висеть до закрытия окна.
+        assert!(super::editor_is_launcher(&[
+            "open".to_string(),
+            "-a".to_string(),
+            "cursor".to_string(),
+        ]));
+        assert!(!super::editor_is_launcher(&[
+            "/usr/local/bin/cursor".to_string(),
+            "/x/plan.md".to_string(),
+        ]));
+        assert!(!super::editor_is_launcher(&[]));
+        // Тот же вход, каким страница зовёт редактор на маке, — argv обязан
+        // опознаваться пускачом, иначе ветка ожидания не включится вовсе.
+        assert_eq!(
+            super::editor_is_launcher(&super::editor_argv("cursor", "/x/plan.md")),
+            cfg!(target_os = "macos")
+        );
+    }
+
+    #[test]
+    fn pustoy_redaktor_i_pustoy_put_otkazyvayut_slovami() {
+        // Пустой argv[0] превратился бы в попытку запустить пустую строку, а
+        // отказ у неё невнятный. Человеку это видно строкой ошибки в
+        // статуслайне, и она обязана называть причину.
+        assert!(super::open_in_editor("  ".into(), "/x/plan.md".into()).is_err());
+        assert!(super::open_in_editor("cursor".into(), " ".into()).is_err());
+    }
     use super::*;
 
     fn at(y: i32, m: u32, d: u32, hh: u32, mm: u32) -> NaiveDateTime {

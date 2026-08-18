@@ -408,6 +408,7 @@ function renderProjectRows(projects, query, toggles, taken, stale) {
     projectLine: Glyph.projectLine,
     ageHtml: Glyph.ageHtml,
     hotkeyHtml: Glyph.hotkeyHtml,
+    todoHtml: Glyph.todoHtml,
     titleAttr: Glyph.titleAttr,
     query: query || '',
     nowSec: PROJECTS_NOW,
@@ -1577,6 +1578,8 @@ function renderSessionRows(state, query, toggles, stale) {
     titleAttr: Glyph.titleAttr,
     statusDotHtml: Glyph.statusDotHtml,
     prBadgeHtml: Glyph.prBadgeHtml,
+    docsBadgeHtml: Glyph.docsBadgeHtml,
+    commentHtml: Glyph.commentHtml,
     windowNameHtml: Glyph.windowNameHtml,
     windowHtml: Glyph.windowHtml,
     windowHostHtml: Glyph.windowHostHtml,
@@ -1584,6 +1587,8 @@ function renderSessionRows(state, query, toggles, stale) {
     sessionIdHtml: Glyph.sessionIdHtml,
     hotkeyHtml: Glyph.hotkeyHtml,
     usageHtml: Glyph.usageHtml,
+    todoHtml: Glyph.todoHtml,
+    promptsHtml: Glyph.promptsHtml,
     ageHtml: Glyph.ageHtml,
     query: query || '',
     nowSec: NOW,
@@ -1982,4 +1987,82 @@ test('число колонок написано ровно один раз', ()
   // бы commitDrag дыру в массиве при переносе в четвёртую колонку.
   assert.ok(!/wide: \[\[\], \[\], \[\]\]/.test(SESSIONS_HTML),
     'в sessions.html остался литерал wide: [[], [], []]');
+});
+
+test('спека и план доезжают с ответа агрегатора до значка в строке', () => {
+  // Сквозной сторож: поле агрегатора → session-list → разметка. Половинки по
+  // отдельности уже проверены, а разъехаться они могут ровно здесь — так уже
+  // было с колонкой `hk`, которую довели до строки проекта и не позвали.
+  const { items } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({
+      plan: 'docs/superpowers/plans/2026-08-18-x.md',
+      spec: 'docs/superpowers/specs/2026-08-18-x-design.md',
+    })],
+  });
+  // items[0] — заголовок секции: он тоже строка списка (см. buildSections).
+  assert.match(items[1].html, /<span class="docs" title="plan">▤<\/span>/);
+});
+
+test('сессия без бумаг значка не получает', () => {
+  const { items } = renderSessionRows({ ok: true, sessions: [aggregatorSession()] });
+  assert.doesNotMatch(items[1].html, /class="docs"/);
+});
+
+test('число реплик доезжает с ответа агрегатора до колонки строки', () => {
+  // Сквозной сторож дороги целиком: поле `prompts` агрегатора → session-list →
+  // разметка. Половинки по отдельности зелены, а разъехаться могут ровно
+  // здесь.
+  const { items } = renderSessionRows(
+    { ok: true, sessions: [aggregatorSession({ prompts: 97 })] },
+    '', { showPaths: true, showPrompts: true });
+  assert.match(items[1].html, /<div class="prompts">✎97<\/div>/);
+});
+
+test('комментарий доезжает с ответа агрегатора до строки под ответом', () => {
+  // Сквозной сторож дороги целиком: поле `comment` агрегатора → session-list →
+  // разметка. Комментарий приходит из общего файла на машине агрегатора, то
+  // есть его мог написать человек с любой машины, не только с этой.
+  const { items } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({ comment: 'чинит окна' })],
+  });
+  assert.match(items[1].html, /<div class="comment">чинит окна<\/div>/);
+});
+
+test('счётчики TODO доезжают и до строки сессии, а не только проекта', () => {
+  // Человек читает список сессий, а не проектов, и счёт нужен ему там же, где
+  // он работает. Каталог у сессии свой, файл — тот же самый, что у её проекта.
+  const { items } = renderSessionRows(
+    { ok: true, sessions: [aggregatorSession({ todo: [{ label: 'next', done: 1, todo: 3 }] })] },
+    '', { showPaths: true, showTodo: true });
+  assert.match(items[1].html, /<div class="todo">☑ 1\/4 next<\/div>/);
+});
+
+test('сессия без TODO колонки не получает', () => {
+  const { items } = renderSessionRows(
+    { ok: true, sessions: [aggregatorSession()] }, '', { showPaths: true, showTodo: true });
+  assert.doesNotMatch(items[1].html, /class="todo"/);
+});
+
+test('счётчики TODO стоят первой колонкой у обоих видов строк', () => {
+  // Порядок колонок виден только глазами, а разъехаться половинкам легко:
+  // рисует их одна функция, но зовут её два разных места. Разойдись они —
+  // правый край списка ломался бы ровно на границе строки сессии и строки
+  // проекта, и заметить это можно было бы лишь на списке, где есть обе.
+  const todo = [{ label: 'next', done: 1, todo: 3 }];
+  const session = renderSessionRows(
+    { ok: true, sessions: [aggregatorSession({ todo })] },
+    '', { showPaths: true, showTodo: true, showWindow: true });
+  // До пометки терминала: за «сколько осталось» в строку смотрят чаще, чем за
+  // тем, открыто ли окно.
+  assert.match(session.items[1].html, /<div class="meta"><div class="todo">/);
+  assert.ok(session.items[1].html.indexOf('class="todo"')
+    < session.items[1].html.indexOf('class="win"'),
+    'колонка TODO обязана стоять до пометки окна');
+
+  const project = renderProjectRows(
+    [Object.assign({}, AGGREGATOR_PROJECTS[0], { todo })],
+    '', { showPaths: true, showTodo: true });
+  assert.match(project.items[0].html, /<div class="meta"><div class="todo">/);
 });
