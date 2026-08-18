@@ -8,7 +8,10 @@
 //! необязательным `sessionIds`, и `<база машины>/claude-session-open` с телом
 //! `{"action": "terminal"}`, где необязательны оба опознавателя — `id`
 //! известной сессии и `cwd` проекта), и придумывать
-//! рядом свои значило бы заводить приёмник, которого нет.
+//! рядом свои значило бы заводить приёмник, которого нет. Пятая просьба,
+//! `<база машины>/claude-place` с телом `{"mode": …, "ids": [...]}`, говорит
+//! не о сессии, а обо всём экране: её слушает macos-windows-manager, протокол
+//! выписан в `docs/window-layouts.md`.
 //!
 //! Базу называет трекер той машины, куда адресована просьба, — она приезжает
 //! в ответе агрегатора. `<config.base>/windows` — только запасной ход: на
@@ -36,6 +39,15 @@ const RESTORE_TOPIC: &str = "/claude-snapshot-restore";
 /// `FOCUS_TOPIC` тем, что ни окна, ни самой сессии у трекера может не быть
 /// вовсе: по каталогу проекта менеджер поднимет терминал с нужным профилем.
 const OPEN_TOPIC: &str = "/claude-session-open";
+/// Просьба разложить окна — плиткой или каскадом. Единственная из всех, что
+/// говорит не об одной сессии, а обо всём экране машины: расставляет окна сам
+/// трекер, а пикер называет лишь порядок.
+const PLACE_TOPIC: &str = "/claude-place";
+
+/// Раскладки, которые понимает приёмник (`parse_arrange` в `mwm-core`).
+/// Незнакомую он отбрасывает молча — расставить окна наугад хуже, чем не
+/// расставить, — поэтому отказ случается на нашей стороне.
+const LAYOUT_MODES: [&str; 2] = ["tile", "cascade"];
 
 pub struct Broker {
     pub host: String,
@@ -302,6 +314,38 @@ pub fn restore(broker: &Broker, base: &str, id: &str, session_ids: &[String]) ->
     publish(broker, base, RESTORE_TOPIC, &restore_payload(id, session_ids))
 }
 
+/// Тело просьбы о раскладке.
+///
+/// `ids` — сессии в том порядке, в каком они стоят **в списке пикера**. Это и
+/// есть смысл поля: порядок знает только тот, кто список показывает, и на
+/// стороне трекера его не восстановить.
+///
+/// Пустой список ключа не получает вовсе: у приёмника «нет ключа» значит «все
+/// ведомые окна, порядком той машины», а `"ids": []` он прочитал бы как
+/// «разложить ноль окон». Та же разница между «все» и «никого», что у
+/// `restore_payload`, и стоит она целой раскладки.
+///
+/// Незнакомая раскладка — отказ, а не публикация: приёмник её отбрасывает
+/// молча, и ошибка выглядела бы сработавшей просьбой. Страница шлёт только
+/// свои две константы, но команда Tauri — второй вход в ту же дорогу.
+fn place_payload(mode: &str, ids: &[String]) -> Result<String, String> {
+    if !LAYOUT_MODES.contains(&mode) {
+        return Err(format!("unknown layout mode: {mode}"));
+    }
+    if ids.is_empty() {
+        return Ok(serde_json::json!({ "mode": mode }).to_string());
+    }
+    Ok(serde_json::json!({ "mode": mode, "ids": ids }).to_string())
+}
+
+/// Попросить разложить окна на машине трекера.
+///
+/// Ответа у просьбы нет, как и у подъёма окна: трекер отчитывается своему
+/// человеку строкой в трее. Отказ виден на экране — окна там же.
+pub fn place(broker: &Broker, base: &str, mode: &str, ids: &[String]) -> Result<(), String> {
+    publish(broker, base, PLACE_TOPIC, &place_payload(mode, ids)?)
+}
+
 /// Полный топик: разрешённая база плюс заданный приёмником хвост.
 fn topic_of(base: &str, tail: &str) -> String {
     format!("{base}{tail}")
@@ -426,9 +470,9 @@ fn publish(broker: &Broker, base: &str, tail: &str, payload: &str) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::{
-        broker_from_config, open_new_payload, open_payload, open_project_payload, resolve_base,
-        restore_payload, terminal_name, topic_of, unread_bases, FOCUS_TOPIC, OPEN_TOPIC,
-        RESTORE_TOPIC, UNREAD_TOPIC,
+        broker_from_config, open_new_payload, open_payload, open_project_payload, place_payload,
+        resolve_base, restore_payload, terminal_name, topic_of, unread_bases, FOCUS_TOPIC,
+        OPEN_TOPIC, PLACE_TOPIC, RESTORE_TOPIC, UNREAD_TOPIC,
     };
 
     fn broker(base: &str) -> super::Broker {
@@ -690,6 +734,47 @@ mod tests {
     fn single_session_body_names_it() {
         let body = restore_payload("snap-1", &["aaa".to_string()]);
         assert_eq!(body, r#"{"id":"snap-1","sessionIds":["aaa"]}"#);
+    }
+
+    // Хвост задан приёмником — `mwm-core` разбирает его в `parse_request`.
+    // Опечатка здесь тиха вдвойне: публикация проходит, PubAck приходит, а
+    // окна остаются как стояли, потому что команду никто не узнал.
+    #[test]
+    fn place_topic_is_the_one_the_tracker_listens_to() {
+        let broker = broker("home/room/mac");
+        assert_eq!(
+            topic_of(&resolve_base(&broker, ""), PLACE_TOPIC),
+            "home/room/mac/windows/claude-place"
+        );
+    }
+
+    // Порядок в `ids` — тот, в каком строки стоят в списке пикера, и это
+    // единственный смысл поля: на стороне трекера его не восстановить.
+    // Порядок ключей в объекте алфавитный — так их складывает serde_json, и
+    // приёмнику он безразличен. Значим порядок **внутри** `ids`, его и
+    // сверяем.
+    #[test]
+    fn place_body_carries_the_order_of_the_list() {
+        let body = place_payload("tile", &["aaa".to_string(), "bbb".to_string()]).unwrap();
+        assert_eq!(body, r#"{"ids":["aaa","bbb"],"mode":"tile"}"#);
+    }
+
+    // Пустой список значит «все ведомые окна, порядком той машины», и говорит
+    // это отсутствие ключа: `"ids": []` приёмник прочитал бы как «разложить
+    // ноль окон». То же правило, что у `restore_payload`.
+    #[test]
+    fn place_body_without_ids_means_all_windows() {
+        assert_eq!(place_payload("cascade", &[]).unwrap(), r#"{"mode":"cascade"}"#);
+    }
+
+    // Незнакомую раскладку приёмник отбрасывает молча — расставить окна наугад
+    // хуже, чем не расставить, — и потому отказ обязан случиться здесь.
+    // Страница шлёт только свои две константы, но команда Tauri — второй вход,
+    // и опечатка в нём иначе выглядела бы сработавшей просьбой.
+    #[test]
+    fn an_unknown_layout_mode_is_refused() {
+        assert!(place_payload("mosaic", &[]).is_err());
+        assert!(place_payload("", &[]).is_err());
     }
 
     #[test]

@@ -42,7 +42,9 @@ function callsOf(name, extra = {}) {
     window: {
       OpenTransport: { rowProjectDir: (row) => row.cwd, chooseProjectOpenAction: () => 'manager' },
       OpenStrategy: { newSessionName: () => 'x-2' },
+      SessionWindows: { placeIds: () => ['ffff-1111'] },
     },
+    rows: [ROW],
     issuedNames: new Map(),
     takenSessionNames: () => [],
     newSession: () => { calls.push('newSession'); return Promise.resolve(); },
@@ -58,7 +60,9 @@ function callsOf(name, extra = {}) {
     ...extra,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${sourceOf(name)}\nresult = ${name}(row);`, ctx, { filename: 'sessions.html' });
+  // Второй аргумент — раскладка: он нужен только placeWindows, а прочие
+  // ветки лишний аргумент не замечают.
+  vm.runInContext(`${sourceOf(name)}\nresult = ${name}(row, 'tile');`, ctx, { filename: 'sessions.html' });
   return ctx.result.then(() => calls);
 }
 
@@ -67,6 +71,10 @@ const BRANCHES = [
   ['openProjectRow', 'open_project_mqtt'],
   ['newSessionHere', 'new_session_mqtt'],
   ['openViaManager', 'open_session_mqtt'],
+  // Пятая ветка: разложенные окна трекер выводит на передний план
+  // (macos-windows-manager v0.4.0), то есть кончается она окном — и правило
+  // про гашение до просьбы у неё то же.
+  ['placeWindows', 'place_windows_mqtt'],
 ];
 
 for (const [fn, command] of BRANCHES) {

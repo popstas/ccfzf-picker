@@ -404,9 +404,13 @@ test('statusDotHtml keeps a stopped session orange until its window is focused',
 
 // Раньше id и событие делили одну колонку: выключенное событие показывало id.
 // Теперь у каждого свой чекбокс, и они независимы — в том числе оба сразу.
-test('sessionIdHtml is its own column, independent of the event one', () => {
+//
+// Элемент строчный (`span`), а не блочный: id переехал из правой группы
+// колонок в строку имени, а там соседи — подписи (`wname`, `pr`), и блок
+// сломал бы им ряд.
+test('sessionIdHtml is its own toggle, independent of the event one', () => {
   const session = { live: true, id: 'e8afde49-4254-4c64-970e-46c05bf5d516', agentState: 'active' };
-  assert.strictEqual(sessionIdHtml(session, true), '<div class="sid">e8af</div>');
+  assert.strictEqual(sessionIdHtml(session, true), '<span class="sid">e8af</span>');
   assert.strictEqual(sessionIdHtml(session, false), '');
   assert.strictEqual(sessionIdHtml(session), '', 'id занимает место — по умолчанию выключен');
   assert.strictEqual(stateHtml(session, true), '<div class="state">active</div>');

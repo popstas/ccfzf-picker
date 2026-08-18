@@ -1115,11 +1115,13 @@ test('вынесена часть — статуслайн рисует ровн
     showPrompt: { list: true, statusline: true },
     showAnswer: { list: true, statusline: false },
     showId: { list: false, statusline: true },
-    showCost: { list: false, statusline: false },
+    showCost: { list: false, statusline: true },
   });
-  assert.deepStrictEqual([...toggleInputs.keys()], ['showPrompt', 'showId']);
+  // Порядок — из TOGGLE_CHECKS, а не из порядка ключей в ui.json: id стоит в
+  // строке имени, то есть выше тела, и в таблице он первый.
+  assert.deepStrictEqual([...toggleInputs.keys()], ['showId', 'showPrompt', 'showCost']);
   // Отбивка между группами (left → right) стоит на первом чекбоксе новой
-  // группы — showId идёт вторым и сразу после showPrompt (left), сам group 'right'.
+  // группы — showCost идёт третьим, сразу после двух левых.
   assert.ok(statusChecks.innerHTML.includes('class="status-check gap"'), statusChecks.innerHTML);
 });
 
@@ -1649,6 +1651,53 @@ test('сессия mac-wezterm показывает каталог ccfzf-picker,
   // Подсказка не поменялась: тот же titleAttr, что и раньше, полный путь
   // через shortPath.
   assert.ok(session.html.includes('~/ccfzf-picker'), session.html);
+});
+
+// id переехал из правой группы колонок в строку имени: прижат вправо и
+// приглушён — не спорит с именем, но даёт глазу зацепку для поиска (по началу
+// id пикер искать умеет). Проверяется на настоящей разметке: разметку строки и
+// sessionIdHtml связывает только вызов из шаблона, и разойтись они могут
+// молча — id просто вернулся бы в правую группу, никого не сломав на вид.
+test('id сессии стоит в строке имени, а не в правой группе колонок', () => {
+  const { items } = renderSessionRows(
+    { ok: true, sessions: [aggregatorSession({ title: 'esm-migration' })] },
+    '',
+    { showPaths: true, showId: true },
+  );
+  const session = items.find(i => i.key.startsWith('s:'));
+  const name = session.html.match(/<div class="name">[\s\S]*?<\/div>/);
+  assert.ok(name, session.html);
+  assert.ok(name[0].includes('<span class="sid">'), name[0]);
+  // Имя обёрнуто своим элементом: без него многоточие обрезки повисло бы на
+  // безымянном flex-элементе, а прижать id вправо было бы нечем.
+  assert.ok(name[0].includes('<span class="label">'), name[0]);
+  const meta = session.html.match(/<div class="meta">[\s\S]*$/);
+  assert.ok(!meta[0].includes('class="sid"'), meta[0]);
+});
+
+// Двe строчки стилей, без которых перенос выглядит сделанным наполовину, а
+// сломать их можно молча — разметка и тесты выше останутся зелёными.
+// `margin-left: auto` и есть «прижат вправо»: без него id встал бы вплотную к
+// подписям. Растяжение текста — то, от чего правый край один на все строки:
+// ширина по содержимому у каждой строки своя, и id стоял бы лесенкой.
+// Замерено в обоих движках (Chromium и WebKit — на втором пикер живёт на маке):
+// длинное имя обрезается многоточием, id остаётся на месте.
+test('id прижат вправо, и правый край у всех строк общий', () => {
+  const style = SESSIONS_HTML.match(/<style>[\s\S]*?<\/style>/)[0];
+  assert.match(style, /\.name \.sid \{[^}]*margin-left: auto/,
+    'id перестал прижиматься вправо — встанет вплотную к подписям');
+  assert.match(style, /\.row\.session \.text[^{]*\{[^}]*flex: 1 1 auto/,
+    'текст строки перестал растягиваться — id встанет лесенкой, по ширине содержимого');
+});
+
+test('выключенная галка id не оставляет в строке имени ничего', () => {
+  const { items } = renderSessionRows(
+    { ok: true, sessions: [aggregatorSession({ title: 'esm-migration' })] },
+    '',
+    { showPaths: true, showId: false },
+  );
+  const session = items.find(i => i.key.startsWith('s:'));
+  assert.ok(!session.html.includes('class="sid"'), session.html);
 });
 
 // Имён у сессии два, и второе — имя окна — до отрисовки доезжало только в
