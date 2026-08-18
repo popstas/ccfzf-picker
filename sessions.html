@@ -906,7 +906,10 @@
   // отрисовке: подпись и обработчик обязаны смотреть в один список.
   let menuKeysShown = [];
   let menuActive = 0;
-  let menuSessionId = null;
+  // Ключ карточки (rowKey), а не голый id: две карточки одной сессии делят
+  // id, и голый id при перерисовке всегда нашёл бы первую из пары — действие
+  // ушло бы не по той карточке, на которой открыли меню.
+  let menuKey = null;
   // Иконки приложений: id действия → data-URI. Заполняется один раз при
   // старте и на config-changed, см. loadActionIcons.
   let actionIcons = {};
@@ -1237,6 +1240,23 @@
     return window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query, collapsedDays);
   }
 
+  /**
+   * Ключ карточки для planListSync и для меню.
+   *
+   * Сессия с N окнами (buildSessionList) даёт N карточек с общим id — голого
+   * `s:<id>` мало: перерисовка и `^K` не отличили бы их друг от друга. Хвост —
+   * машина окна именно этой карточки (session.window), а не row.windowHost:
+   * тот пуст у своей машины, и две карточки на своей же машине (два окна
+   * одного терминала на ней) снова слиплись бы. normHost — тот же приём, что
+   * у canFocusRow: одна сторона имени — hostname трекера, другая — то, что
+   * человек набрал в конфиге, и регистр с пробелами по краям тут не в счёт.
+   * У строки без окна ключ остаётся прежним — различать нечего.
+   */
+  function rowKey(session) {
+    const host = window.SessionWindows.normHost((session.window || {}).host);
+    return host ? `s:${session.id}@${host}` : `s:${session.id}`;
+  }
+
   function sessionItem(session, nowSec) {
     const index = rows.length;
     rows.push(session);
@@ -1288,7 +1308,7 @@
       usageHtml(session, toggles) +
       ageHtml(session, nowSec) +
       `</div></div>`;
-    return { key: `s:${session.id}`, html };
+    return { key: rowKey(session), html };
   }
 
   /**
@@ -2271,7 +2291,7 @@
     menuOpen = false;
     menuActions = [];
     menuActive = 0;
-    menuSessionId = null;
+    menuKey = null;
     actionsBackdrop.classList.remove('open');
     actionsBackdrop.setAttribute('aria-hidden', 'true');
     search.focus();
@@ -2600,7 +2620,7 @@
   }
 
   function renderMenu(data) {
-    menuSessionId = data.id;
+    menuKey = data.key;
     menuActions = data.actions || [];
     menuActive = 0;
     const name = data.label ? sessionName(data) : '';
@@ -2679,6 +2699,7 @@
     if (!actions.length) return;
     renderMenu({
       id: session.id,
+      key: rowKey(session),
       label: session.label,
       cwd: session.cwd,
       actions,
@@ -2930,17 +2951,19 @@
 
   function runMenuAction() {
     const action = menuActions[menuActive];
-    if (!action || !menuSessionId) return;
-    const id = menuSessionId;
+    if (!action || !menuKey) return;
+    const key = menuKey;
     const actionId = action.id;
     closeMenu();
-    // По id, а не по индексу active: список перерисовывается раз в секунду,
-    // пока меню открыто, render() пересобирает rows в порядке текущей
-    // сортировки, и active остаётся числом — строка под этим индексом может
-    // смениться на другую сессию. Прямые клавиши из списка (обработчик ниже)
-    // этой ловушке не подвержены: там меню не открыто, и active — это и есть
-    // выбранная строка.
-    runAction(rows.find(r => r.id === id), actionId);
+    // По ключу карточки, а не по индексу active и не по голому id: список
+    // перерисовывается раз в секунду, пока меню открыто, render() пересобирает
+    // rows в порядке текущей сортировки, и active остаётся числом — строка под
+    // этим индексом может смениться на другую сессию. Голого id тоже мало —
+    // сессия с несколькими окнами даёт несколько карточек с общим id, и он
+    // всегда нашёл бы первую из пары, а не ту, на которой открыли меню.
+    // Прямые клавиши из списка (обработчик ниже) этой ловушке не подвержены:
+    // там меню не открыто, и active — это и есть выбранная строка.
+    runAction(rows.find(r => rowKey(r) === key), actionId);
   }
 
   function moveMenu(delta) {

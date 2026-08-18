@@ -21,6 +21,7 @@ const { filterSessions, filterProjects } = require('../frontend-src/picker-filte
 const { buildProjectList, markHotkeysTaken } = require('../frontend-src/project-list');
 const { availableActions } = require('../frontend-src/session-actions');
 const StaleItems = require('../frontend-src/stale-items');
+const SessionWindows = require('../frontend-src/session-windows');
 
 // Форма — с живого ответа `ccfzf --state` (см. scripts/check-state.js), поля
 // в том же порядке и с теми же именами.
@@ -1548,7 +1549,7 @@ function renderSessionRows(state, query, toggles, stale) {
   // от неё зависит класс `markable`, то есть обещание про Shift+клик, и копия
   // разошлась бы с настоящим правилом молча.
   const source = pageFunctions(
-    'markToggleId(row)', 'sessionItem(session, nowSec)', 'subheadItem(row)',
+    'markToggleId(row)', 'rowKey(session)', 'sessionItem(session, nowSec)', 'subheadItem(row)',
     'sectionItem(section)', 'itemsOfSection(section, nowSec)', 'staleSettings()');
   const staleConfig = stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 };
   // Та же подстановка умолчания, что и в renderProjectRows: тест, назвавший
@@ -1561,6 +1562,7 @@ function renderSessionRows(state, query, toggles, stale) {
       SessionActions: { availableActions },
       PickerSections,
       StaleItems,
+      SessionWindows,
     },
     CONFIG: {
       stale: staleConfig,

@@ -50,28 +50,53 @@
   }
 
   /**
-   * Приписать пометку тем строкам, у которых совпали имя и каталог.
+   * Приписать пометку тем СЕССИЯМ, у которых совпали имя и каталог.
    *
-   * Пометка, одинаковая у всей группы, пропускается: она не отвечает на
-   * вопрос «которая из двух», а место в строке занимает. Пустая пометка —
+   * Сравнение идёт по id, а не по карточке: у сессии с несколькими окнами
+   * (`buildSessionList`) несколько карточек делят один id и попадают в один
+   * `twinKey` (имя, каталог, живость), а различаются как раз тем полем, по
+   * которому ищут двойников (`windowHost` в первом проходе). Сравнивай мы
+   * карточки, а не сессии, — пара своих же карточек помечала бы друг друга,
+   * хотя это одна сессия, показанная дважды, а не тёзки. Двойник — это
+   * ДРУГОЙ id с тем же именем и каталогом.
+   *
+   * Представитель сессии для сравнения — пометка её первой карточки (порядок
+   * тот же, что у `window` — первый элемент `windows`, «свежайший взгляд
+   * первым»): все карточки сессии получают итоговую метку одинаковой, иначе
+   * одна и та же сессия читалась бы в списке как две разные.
+   *
+   * Пометка, одинаковая у всей группы сессий, пропускается: она не отвечает
+   * на вопрос «которая из двух», а место в строке занимает. Пустая пометка —
    * тоже ответ: своя машина названа пустотой, и голая строка рядом с
    * помеченной читается как «здесь».
    */
   function withTwinMarks(list, markOf) {
-    const groups = new Map();
+    const bySession = new Map(); // id -> { indexes, mark, key }
     list.forEach((s, i) => {
-      const key = twinKey(s);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(i);
+      let entry = bySession.get(s.id);
+      if (!entry) {
+        entry = { indexes: [], mark: String(markOf(s) || '').trim(), key: twinKey(s) };
+        bySession.set(s.id, entry);
+      }
+      entry.indexes.push(i);
     });
+
+    const groups = new Map();
+    for (const [id, entry] of bySession) {
+      if (!groups.has(entry.key)) groups.set(entry.key, []);
+      groups.get(entry.key).push(id);
+    }
+
     const out = list.slice();
-    for (const indexes of groups.values()) {
-      if (indexes.length < 2) continue;
-      const marks = indexes.map(i => String(markOf(list[i]) || '').trim());
+    for (const ids of groups.values()) {
+      if (ids.length < 2) continue;
+      const marks = ids.map(id => bySession.get(id).mark);
       if (new Set(marks).size < 2) continue;
-      indexes.forEach((i, n) => {
+      ids.forEach((id, n) => {
         if (!marks[n]) return;
-        out[i] = { ...list[i], label: `${list[i].label}${TWIN_MARK}${marks[n]}` };
+        for (const i of bySession.get(id).indexes) {
+          out[i] = { ...list[i], label: `${list[i].label}${TWIN_MARK}${marks[n]}` };
+        }
       });
     }
     return out;
@@ -123,8 +148,18 @@
     return asc ? aVal - bVal : bVal - aVal;
   }
 
+  /**
+   * У карточки на окно (`sessionItem`/`buildSessionList`) имя и id — общие для
+   * всех окон одной сессии, так что до этой правки пара совпадала по обоим
+   * ключам и compareSessions возвращал 0: порядок карточек дрожал бы вслед за
+   * тем, в каком порядке агрегатор в этот раз прислал окна. Машина окна
+   * последним ключом снимает дрожь — она у карточек одной сессии как раз и
+   * разная.
+   */
   function tieBreak(a, b) {
-    return nameOf(a).localeCompare(nameOf(b)) || String(a.id).localeCompare(String(b.id));
+    return nameOf(a).localeCompare(nameOf(b))
+      || String(a.id).localeCompare(String(b.id))
+      || String(a.windowHost || '').localeCompare(String(b.windowHost || ''));
   }
 
   /**
