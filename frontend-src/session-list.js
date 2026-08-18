@@ -52,6 +52,23 @@
     return String(raw).trim();
   }
 
+  /**
+   * Машина, названная источником строки.
+   *
+   * Ответ на вопрос «чья это сессия» у строки без окна: раньше его давало
+   * отсутствие окна («нет окна — значит своя»), и при одном источнике это было
+   * верно. С двумя источниками так соврёшь: удалённая сессия без окна встала бы
+   * в блок местных.
+   *
+   * Отдаётся дословно, как записан `sshHost`: этой же строкой адресуются
+   * действия, и «красивое» имя машины увело бы ssh не туда.
+   */
+  function sourceHostOf(source) {
+    const label = String(source || '').trim();
+    if (!label || label === 'local') return '';
+    return label;
+  }
+
   function buildSessionList({ sessions, seen, state, configHost } = {}) {
     const list = Array.isArray(sessions) ? sessions : [];
     const byId = {};
@@ -135,8 +152,10 @@
           // глиф на карточке, и верный Enter: `focusWindowOf` ходит через
           // `windowsOf`, а та читает именно это поле.
           windows: w ? [w] : [],
-          // Машина этого окна, если она чужая, и пустота, если своя.
-          windowHost: windowHostOf(w, configHost),
+          source: String(s.source || ''),
+          // Запись окна главнее источника: окно называет машину, на экране которой
+          // сессия видна, а источник — только ту, у которой про неё спросили.
+          windowHost: windowHostOf(w, configHost) || sourceHostOf(s.source),
           // Заголовок своего окна — то самое имя, которым сессию завёл человек
           // (`claude -n tray-build-time`): по нему её и опознают. `title`
           // строки приезжает из транскрипта (custom-title/ai-title) и с ним
