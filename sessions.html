@@ -2248,7 +2248,12 @@ const infoBackdrop = document.getElementById('info-backdrop');
       .filter(s => !wanted.size || wanted.has(s.id));
     for (const s of list) {
       error = '';
-      await openSession({ id: s.id, cwd: s.cwd || '', title: s.title || '', kind: 'snapshot-session' });
+      await openSession({
+        id: s.id, cwd: s.cwd || '', title: s.title || '', kind: 'snapshot-session',
+        // Источник — снимка: восстановление идёт на ту же машину, которая
+        // его сняла, а без поля транспорт откатился бы на CONFIG.sshHost.
+        source: snap.source || '',
+      });
       if (error) return;
       await new Promise(resolve => setTimeout(resolve, 1200));
     }

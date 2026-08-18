@@ -71,6 +71,23 @@ test('строка проекта несёт всё, что рисует спи�
   assert.strictEqual(b.sessionCount, 0);
 });
 
+test('источник переезжает в строку под тем же именем, что и у сессии', () => {
+  // merge_state.rs метит источником и projects тоже; транспорт действия
+  // (commandParts) читает row.source, а не CONFIG.sshHost, — без поля
+  // местный проект открылся бы ssh-командой на удалённой машине.
+  const rows = buildProjectList({
+    projects: [{ path: '/p', name: 'p', source: 'remote-host' }],
+  });
+  assert.strictEqual(rows[0].source, 'remote-host');
+});
+
+test('пустой источник — пустая строка, а не undefined', () => {
+  // Стог поиска и транспорт склеиваются из полей, и недостающее уехало бы
+  // туда словом «undefined».
+  const rows = buildProjectList({ projects: [{ path: '/p', name: 'p' }] });
+  assert.strictEqual(rows[0].source, '');
+});
+
 test('счётчик живых не зовётся live', () => {
   // У строки сессии live — булево, и render вешает по нему класс closed.
   // Счётчик под тем же именем молча превратил бы «две живые» в «живая».
