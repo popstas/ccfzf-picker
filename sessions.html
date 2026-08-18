@@ -348,7 +348,24 @@
            строками сессий, и выброшенный элемент сдвинул бы их текст. */
         .row.snapshot .dot { background: transparent; }
         .text { min-width: 0; }
+        /* Текст строки сессии занимает всю свободную ширину — ради одного: id
+           прижимается к правому краю строки имени, и без этого правый край был
+           бы у каждой строки свой (ширина по содержимому), а id стоял бы
+           лесенкой вместо колонки. Ни одну строку тела это не удлиняет: они и
+           так обрезаются по доступной ширине, а `.meta` держится справа своим
+           `margin-left: auto`. */
+        .row.session .text, .row.zellij .text { flex: 1 1 auto; }
         .name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* Строка имени сессии — flex, ради одного: id прижимается вправо своим
+           `margin-left: auto`. Только у сессий и зелийных строк: у проекта,
+           снимка и заголовка секции имя — голый текст, и flex отнял бы у него
+           многоточие (обрезка на безымянном flex-элементе идёт без него). */
+        .row.session .name, .row.zellij .name { display: flex; align-items: baseline; }
+        /* Обрезка переехала сюда с самой `.name`: многоточие принадлежит
+           имени, а не всей строке с подписями. */
+        .row.session .name .label, .row.zellij .name .label {
+            min-width: 0; overflow: hidden; text-overflow: ellipsis;
+        }
         .cwd { font-size: 11px; color: #868c95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         /* Чем сессия закончила / что спросили. Тусклее пути: это подсказка, а
            не опознание — строку ищут глазами по названию и каталогу. */
@@ -375,10 +392,14 @@
             font-size: 11px; color: #7d838c; white-space: nowrap;
         }
         /* Короткий id сессии — тем же, чем `claude --resume` и имя транскрипта.
-           Моноширинные цифры, как у контекста и возраста: колонка из четырёх
-           знаков не должна дышать от строки к строке. */
-        .sid {
-            flex: 0 0 auto; padding-left: 10px;
+           Стоит в строке имени, прижатый вправо: правая группа колонок отвечает
+           на вопрос «стоит ли сюда заходить», а id — на «та ли это строка», и
+           спрашивают его глазами там же, где читают имя. Тусклость та же, что
+           у метки PR и имени окна, и по той же причине: это подсказка рядом.
+           Моноширинные цифры, как у контекста и возраста: четыре знака не
+           должны дышать от строки к строке. */
+        .name .sid {
+            flex: 0 0 auto; margin-left: auto; padding-left: 8px;
             font-size: 11px; color: #7d838c; white-space: nowrap;
             font-variant-numeric: tabular-nums;
         }
@@ -864,6 +885,11 @@
   // поэтому: перепутать «спрятать колонку» с «спрятать сессии» стоит дороже
   // всего остального в этом ряду.
   const TOGGLE_CHECKS = [
+    // Первым: id стоит в строке имени, то есть выше всего остального тела.
+    // Группа `left` — «то, что рисуется слева, под именем и в нём», а не
+    // правая колонка: колонкой id был раньше и вернулся бы в неё молча,
+    // разъехавшись с порядком строки.
+    { key: 'showId', label: 'id', side: 'left' },
     { key: 'showPrompt', label: 'prompt', side: 'left' },
     { key: 'showAnswer', label: 'answer', side: 'left' },
     { key: 'showPaths', label: 'project', side: 'left' },
@@ -872,7 +898,6 @@
     { key: 'showComment', label: 'comment', side: 'left' },
     { key: 'showHotkey', label: 'hotkeys', side: 'right' },
     { key: 'showEvent', label: 'events', side: 'right' },
-    { key: 'showId', label: 'id', side: 'right' },
     { key: 'showCost', label: 'cost', side: 'right' },
     { key: 'showContext', label: 'context', side: 'right' },
     // Размер сессии, своя колонка рядом с usage. Отдельная галка, а не часть
@@ -1385,7 +1410,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
     const sessionCwdLine = toggles.showPaths ? projectLine(session.label, session.cwd) : '';
     const html = `<div class="row ${rowKind}${session.live ? '' : ' closed'}${markable ? ' markable' : ''}${stale}" data-index="${index}"${titleAttr(session)}>` +
       statusDotHtml(session) +
-      `<div class="text"><div class="name">${escapeHtml(session.label)}` +
+      // Имя — своим элементом, а не голым текстом: строка имени здесь flex,
+      // и обрезка многоточием держится именно на нём. Безымянный flex-элемент
+      // (текстовый узел) обрезался бы без многоточия, а прижать id вправо было
+      // бы нечем.
+      `<div class="text"><div class="name"><span class="label">${escapeHtml(session.label)}</span>` +
       // Второе имя строки — то, которым сессию завёл человек. Рисуется, только
       // когда расходится с первым: см. windowNameHtml.
       `${windowNameHtml(session)}` +
@@ -1394,6 +1423,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // говорят, что у сессии есть бумага снаружи транскрипта, и оба ведут в
       // пункт меню, а не открываются кликом.
       `${docsBadgeHtml(session)}` +
+      // id — последним и прижатым вправо: он не спорит с именем, а даёт глазу
+      // зацепку для поиска (по началу id пикер искать умеет).
+      sessionIdHtml(session, toggles.showId) +
       `</div>` +
       (sessionCwdLine ? `<div class="cwd">${escapeHtml(sessionCwdLine)}</div>` : '') +
       // Две строки под карточкой: что спросили и чем ответили. Пустой div
@@ -1422,7 +1454,6 @@ const infoBackdrop = document.getElementById('info-backdrop');
       windowHtml(session, toggles.showWindow, toggles.showTerminalIcon) +
       windowHostHtml(session, toggles.showWindowHost) +
       stateHtml(session, toggles.showEvent) +
-      sessionIdHtml(session, toggles.showId) +
       hotkeyHtml(session, toggles.showHotkey) +
       usageHtml(session, toggles) +
       promptsHtml(session, toggles.showPrompts) +
