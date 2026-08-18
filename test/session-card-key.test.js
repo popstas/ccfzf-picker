@@ -38,8 +38,13 @@ test('rowKey различает машину окна этой карточки,
 test('меню передаёт ключ карточки, а не только id', () => {
   // openMenu собирает данные для renderMenu; без ключа переоткрыть меню по
   // той самой карточке, на которой его вызвали, нечем.
-  assert.match(SESSIONS_HTML, /renderMenu\(\{\s*id: session\.id,\s*key: rowKey\(session\),/,
+  assert.match(SESSIONS_HTML, /renderMenu\(\{\s*key: rowKey\(session\),/,
     'openMenu не передаёт key: rowKey(session) в renderMenu');
+  // `id: session.id` рядом с ключом — мёртвое поле: renderMenu читает только
+  // key/label/cwd/actions, а sessionName до фолбэка на id не доходит, пока
+  // label непуст. Ревью нашло это Minor-находкой — сторож на возврат.
+  assert.ok(!/renderMenu\(\{\s*id: session\.id,/.test(SESSIONS_HTML),
+    'renderMenu снова получает мёртвое поле id: session.id');
 });
 
 test('runMenuAction ищет строку по ключу карточки, а не по голому id', () => {
