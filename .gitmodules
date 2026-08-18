@@ -1,0 +1,3 @@
+[submodule "vendor/ccfzf"]
+	path = vendor/ccfzf
+	url = git@github.com:popstas/ccfzf.git

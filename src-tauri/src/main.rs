@@ -14,6 +14,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 mod config_file;
 mod icons;
+mod local_ccfzf;
 mod mqtt;
 mod poller;
 mod proc;

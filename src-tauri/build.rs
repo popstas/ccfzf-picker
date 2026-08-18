@@ -32,6 +32,11 @@ fn main() {
     // измерением: правка одного файла во `frontend/` из чистого состояния
     // даёт «Compiling ccfzf-picker». Врал только штамп.
     println!("cargo:rerun-if-changed=../frontend");
+    // Копия агрегатора вшивается на компиляции (`include_str!`), и обновление
+    // подмодуля обязано пересобирать крейт. Про сам `include_str!` cargo знает,
+    // а про build.rs — нет: он решает про него до того, как хоть что-то наше
+    // начнёт выполняться.
+    println!("cargo:rerun-if-changed=../vendor/ccfzf/ccfzf");
     let stamp = if std::env::var_os("CCFZF_RELEASE").is_some() {
         0
     } else {
