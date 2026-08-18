@@ -299,3 +299,57 @@ test('окно без адреса просит отмотку по своей �
   ] };
   assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', '']);
 });
+
+// ---- placeIds: порядок для просьбы о раскладке ----------------------------
+
+test('placeIds отдаёт id строк своей машины в порядке списка', () => {
+  // Порядок и есть смысл поля: на стороне трекера его не восстановить, а
+  // список знает только тот, кто его показывает.
+  const rows = [
+    { kind: 'session', id: 'aaa', ...rowOn('desktop-box') },
+    { kind: 'session', id: 'bbb', ...rowOn('desktop-box') },
+  ];
+  assert.deepStrictEqual(SessionWindows.placeIds(rows, STATE, 'desktop-box'), ['aaa', 'bbb']);
+});
+
+test('placeIds не берёт окна чужих машин', () => {
+  // Раскладка осмысленна там, где человек смотрит на экран. Окно соседней
+  // машины в список порядка попасть не должно — трекер этой машины его всё
+  // равно не ведёт, а порядок бы сдвинуло.
+  const rows = [
+    { kind: 'session', id: 'aaa', ...rowOn('macbook') },
+    { kind: 'session', id: 'bbb', ...rowOn('desktop-box') },
+  ];
+  assert.deepStrictEqual(SessionWindows.placeIds(rows, STATE, 'desktop-box'), ['bbb']);
+});
+
+test('placeIds не берёт строки без окна', () => {
+  // Заголовок секции, строка проекта, снимок и просто сессия без окна: окна
+  // нет — раскладывать нечего.
+  const rows = [
+    { kind: 'section', id: undefined },
+    { kind: 'project', id: 'proj', cwd: '/home/user/x' },
+    { kind: 'session', id: 'aaa' },
+    { kind: 'session', id: 'bbb', ...rowOn('desktop-box') },
+  ];
+  assert.deepStrictEqual(SessionWindows.placeIds(rows, STATE, 'desktop-box'), ['bbb']);
+});
+
+test('placeIds не повторяет id сессии с двумя карточками', () => {
+  // Карточка — на окно, и у сессии, открытой дважды на одной машине, их две.
+  // Повторённый id приёмник посчитал бы за два окна и сдвинул бы раскладку.
+  const rows = [
+    { kind: 'session', id: 'aaa', ...rowOn('desktop-box') },
+    { kind: 'session', id: 'aaa', ...rowOn('desktop-box') },
+  ];
+  assert.deepStrictEqual(SessionWindows.placeIds(rows, STATE, 'desktop-box'), ['aaa']);
+});
+
+test('placeIds без имени своей машины отдаёт пустой список', () => {
+  // Пустой windowHost в конфиге значит «фокуса не бывает» — то же умолчание,
+  // что у canFocusRow. Пустой список Rust прочитал бы как «разложи всё», и
+  // просьба ушла бы шире, чем спрашивали, — поэтому пункты меню при таком
+  // конфиге не появляются вовсе (rowCanFocus), а список тут честно пуст.
+  const rows = [{ kind: 'session', id: 'aaa', ...rowOn('desktop-box') }];
+  assert.deepStrictEqual(SessionWindows.placeIds(rows, STATE, ''), []);
+});

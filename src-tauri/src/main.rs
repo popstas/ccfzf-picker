@@ -898,6 +898,35 @@ async fn restore_snapshot_mqtt(
         .map_err(|e| format!("restore_snapshot_mqtt task failed: {e}"))?
 }
 
+/// Попросить трекер разложить окна — плиткой или каскадом.
+///
+/// Единственная просьба, говорящая не об одной сессии, а обо всём экране
+/// машины: что расставлять, трекер знает сам, а пикер называет порядок —
+/// `ids` в том виде, в каком строки стоят у него в списке.
+///
+/// Право на передний план выдаётся, как у подъёма окна: разложенные окна
+/// трекер выводит наверх (macos-windows-manager v0.4.0), то есть ветка
+/// кончается окном. Выдаётся оно до публикации, пока нажатие ещё наше, —
+/// гашение пикера страница делает там же и по той же причине.
+///
+/// Незнакомую раскладку отвергает `mqtt::place`, а не эта команда: приёмник
+/// такое тело отбрасывает молча, и отказ обязан случиться до публикации.
+#[tauri::command]
+async fn place_windows_mqtt(
+    mode: String,
+    ids: Vec<String>,
+    base: Option<String>,
+) -> Result<(), String> {
+    allow_any_foreground();
+    let broker = configured_broker()?;
+    // Адрес называет трекер той машины, чьи окна раскладываем; свой из
+    // конфига — запасной ход для трекера прежней версии.
+    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+    tauri::async_runtime::spawn_blocking(move || mqtt::place(&broker, &base, &mode, &ids))
+        .await
+        .map_err(|e| format!("place_windows_mqtt task failed: {e}"))?
+}
+
 /// Попросить трекер открыть сессию у себя.
 ///
 /// Зовётся и с машины, которая не является трекером — пункт меню «Open on
@@ -1905,7 +1934,8 @@ fn main() {
             hide_picker, app_version, set_picker_size, poll_now, spawn_detached, load_seen, save_seen, load_config,
             terminal_helper,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
-            restore_snapshot_mqtt, open_session_mqtt, open_project_mqtt, new_session_mqtt,
+            restore_snapshot_mqtt, place_windows_mqtt, open_session_mqtt, open_project_mqtt,
+            new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
             set_comment, open_in_editor
         ])

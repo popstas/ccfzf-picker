@@ -110,6 +110,31 @@
   }
 
   /**
+   * Порядок сессий для просьбы о раскладке.
+   *
+   * Список строк — тот, что человек видит сейчас: отфильтровал `/l foo` —
+   * разложил найденное. Порядок и есть смысл поля `ids`: знает его только тот,
+   * кто список показывает, а на стороне трекера его не восстановить.
+   *
+   * Берутся строки, чьё окно стоит на своей машине, — тем же `focusWindowOf`,
+   * которым Enter решает «поднимать ли окно»: второе правило про то же самое
+   * разошлось бы с первым молча. Окно соседней машины трекер этой всё равно
+   * не ведёт, а порядок сдвинуло бы.
+   *
+   * Повторы выброшены: карточка — на окно, и у сессии, открытой дважды на
+   * одной машине, их две, а id один. Приёмник посчитал бы такой id за два окна.
+   */
+  function placeIds(rows, state, configHost) {
+    const out = [];
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const id = (row || {}).id;
+      if (!id || !focusWindowOf(row, state, configHost)) continue;
+      if (!out.includes(id)) out.push(id);
+    }
+    return out;
+  }
+
+  /**
    * Куда просить о подъёме окна этой строки.
    *
    * Адрес — свойство машины окна, которое поднимаем, а не всего ответа:
@@ -185,5 +210,5 @@
     return out;
   }
 
-  return { windowOf, windowsOf, normHost, canFocusRow, focusWindowOf, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager, unreadBases };
+  return { windowOf, windowsOf, normHost, canFocusRow, focusWindowOf, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager, unreadBases, placeIds };
 });
