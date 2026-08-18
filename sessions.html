@@ -881,10 +881,8 @@
     { key: 'showPrompts', label: 'prompts', side: 'right' },
     { key: 'showWindow', label: 'window', side: 'right' },
     { key: 'showWindowHost', label: 'window host', side: 'right' },
-    // Колонка строки проекта, а не сессии: галочки живут в docs/TODO.md
-    // каталога, и у сессии своего счёта нет. Сторона всё равно `right` —
-    // сторона про то, где чекбокс стоит в статуслайне, а не про то, каким
-    // строкам достаётся колонка.
+    // Одна галка на обе колонки: галочки живут в docs/TODO.md каталога, а
+    // каталог есть и у проекта, и у сессии — файл у них один и тот же.
     { key: 'showTodo', label: 'todo', side: 'right' },
     { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
     { key: 'showAll', label: 'show all', side: 'filter' },
@@ -1252,6 +1250,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
       (cwdLine ? `<div class="cwd">${escapeHtml(cwdLine)}</div>` : '') +
       `</div>` +
       `<div class="meta">` +
+      // Счётчики docs/TODO.md — первой колонкой, как и у строки сессии: это
+      // тот же вопрос «сколько в ней всего», только у каталога, и рисует его
+      // та же функция. Стоять они обязаны на том же месте, иначе правый край
+      // списка разъедется между двумя видами строк.
+      todoHtml(project, toggles.showTodo) +
       `<div class="count">${project.sessionCount}` +
       (project.liveCount ? ` · ${project.liveCount}●` : '') +
       `</div>` +
@@ -1262,11 +1265,6 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // проекта, а на экран это не попадало, потому что здесь функция не
       // звалась вовсе). Порядок — как у строки сессии: hotkeyHtml перед
       // ageHtml.
-      // Счётчики docs/TODO.md — на месте колонки `usage` у строки сессии:
-      // это тот же вопрос «сколько в ней всего», только у каталога, и стоять
-      // они обязаны в той же колонке, иначе правый край списка разъедется
-      // между двумя видами строк.
-      todoHtml(project, toggles.showTodo) +
       hotkeyHtml(project, toggles.showHotkey) +
       ageHtml(project, nowSec) +
       `</div></div>`;
@@ -1415,6 +1413,12 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // это делала `.state` своим margin-left: auto, и стоило снять с неё
       // чекбокс, как всё съезжало к названию сессии.
       `<div class="meta">` +
+      // Счётчики TODO — первой колонкой группы, до пометки терминала: за
+      // «сколько там осталось» в строку смотрят чаще, чем за тем, открыто ли
+      // окно. Колонка и функция те же, что у строки проекта, и место у неё
+      // там такое же — первое: разъедься они, правый край списка ломался бы
+      // на границе двух видов строк.
+      todoHtml(session, toggles.showTodo) +
       windowHtml(session, toggles.showWindow, toggles.showTerminalIcon) +
       windowHostHtml(session, toggles.showWindowHost) +
       stateHtml(session, toggles.showEvent) +
@@ -1422,10 +1426,6 @@ const infoBackdrop = document.getElementById('info-backdrop');
       hotkeyHtml(session, toggles.showHotkey) +
       usageHtml(session, toggles) +
       promptsHtml(session, toggles.showPrompts) +
-      // Та же колонка и та же функция, что у строки проекта: счёт человек
-      // читает в том списке, где работает, а работает он в списке сессий.
-      // Второй рисовальщик того же числа разошёлся бы с первым.
-      todoHtml(session, toggles.showTodo) +
       ageHtml(session, nowSec) +
       `</div></div>`;
     return { key: rowKey(session), html };

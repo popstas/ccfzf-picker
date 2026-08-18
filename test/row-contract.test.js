@@ -2044,3 +2044,25 @@ test('сессия без TODO колонки не получает', () => {
     { ok: true, sessions: [aggregatorSession()] }, '', { showPaths: true, showTodo: true });
   assert.doesNotMatch(items[1].html, /class="todo"/);
 });
+
+test('счётчики TODO стоят первой колонкой у обоих видов строк', () => {
+  // Порядок колонок виден только глазами, а разъехаться половинкам легко:
+  // рисует их одна функция, но зовут её два разных места. Разойдись они —
+  // правый край списка ломался бы ровно на границе строки сессии и строки
+  // проекта, и заметить это можно было бы лишь на списке, где есть обе.
+  const todo = [{ label: 'next', done: 1, todo: 3 }];
+  const session = renderSessionRows(
+    { ok: true, sessions: [aggregatorSession({ todo })] },
+    '', { showPaths: true, showTodo: true, showWindow: true });
+  // До пометки терминала: за «сколько осталось» в строку смотрят чаще, чем за
+  // тем, открыто ли окно.
+  assert.match(session.items[1].html, /<div class="meta"><div class="todo">/);
+  assert.ok(session.items[1].html.indexOf('class="todo"')
+    < session.items[1].html.indexOf('class="win"'),
+    'колонка TODO обязана стоять до пометки окна');
+
+  const project = renderProjectRows(
+    [Object.assign({}, AGGREGATOR_PROJECTS[0], { todo })],
+    '', { showPaths: true, showTodo: true });
+  assert.match(project.items[0].html, /<div class="meta"><div class="todo">/);
+});
