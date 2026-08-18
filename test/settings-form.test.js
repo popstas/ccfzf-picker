@@ -16,7 +16,7 @@ test('страницы перечисляют поля без повторов',
   const ids = PAGES.flatMap(p => p.fields.map(f => f.id));
   assert.deepStrictEqual([...new Set(ids)], ids);
   assert.deepStrictEqual(PAGES.map(p => p.id),
-    ['general', 'stale', 'window', 'columns', 'panels', 'hotkeys', 'mqtt', 'paths']);
+    ['general', 'stale', 'window', 'columns', 'panels', 'hotkeys', 'mqtt', 'paths', 'log']);
 });
 
 test('windowHost живёт на General, mqtt и pathMap — на своих вкладках', () => {

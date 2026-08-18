@@ -633,10 +633,27 @@ test('вкладки называются по спеке и Integrations нет
   // #13 параллельно с этой перестройкой (см. docs/superpowers/specs/
   // 2026-08-17-stale-settings-tab-design.md); список из семи здесь был верен
   // только до слияния с той веткой.
+  // 'Log' — девятая и последняя: она не правит конфиг вовсе, а показывает
+  // буфер строк лога, и потому стоит за всеми, кто правит.
   assert.deepStrictEqual(PAGES.map(p => p.title), [
     'General', 'Dim stale sessions', 'Window popup', 'Columns', 'Layout panels',
-    'Hotkeys', 'MQTT', 'Paths',
+    'Hotkeys', 'MQTT', 'Paths', 'Log',
   ]);
+});
+
+test('вкладка Log спрашивает буфер и гасит опрос при уходе', () => {
+  // Вкладка Log — единственный способ увидеть лог у пикера, запущенного из
+  // ярлыка: stderr оттуда уходит в никуда. Пропади маршрут — страница осталась
+  // бы пустой, а команда `read_log` живой и никем не зовущейся.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  // Именно маршрут, а не просто упоминание `current === 'log'`: та же строка
+  // стоит и у таймера ниже, и проверка по ней оставалась бы зелёной с
+  // разорванным маршрутом — вкладка при этом открывалась бы пустой.
+  assert.match(src, /current === 'log' \? logBodyHtml\(\)/);
+  assert.match(src, /invoke\('read_log'\)/);
+  // `renderPage` сносит узлы прошлой страницы; таймер, её переживший, дёргал
+  // бы `<pre>`, которого уже нет, — раз в секунду и до закрытия окна.
+  assert.match(src, /clearInterval\(logTimer\)/);
 });
 
 test('renderPage знает columns и paths, а не ui и integrations', () => {

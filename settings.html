@@ -32,6 +32,16 @@
   .range-row input[type=range] { flex: 1; }
   .range-current { white-space: nowrap; color: #bbb; }
   #bar { position: sticky; bottom: 0; padding: 12px 0 0; background: #1c1c1e; }
+  /* Лог прокручивается сам, а не страницей: строк в буфере тысяча, и уедь они
+     страницей — вместе с ними уехал бы липкий `#bar`. */
+  #log-view {
+    margin: 0; height: 420px; overflow: auto;
+    box-sizing: border-box; padding: 8px;
+    border: 1px solid #3a3a3c; border-radius: 4px;
+    background: #2c2c2e; color: #d6d6d6;
+    font: 11px ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
   #save { padding: 8px 18px; }
   #status { color: #999; margin-left: 10px; }
   #status.bad { color: #ff7b72; }
@@ -457,6 +467,34 @@
    * enabled: это отдельная таблица про состав списка, а не про колонки, и
    * трогать её форму эта правка не должна.
    */
+  /* Вкладка Log: буфер строк, которые раньше уходили только в stderr — то
+     есть в никуда у пикера, запущенного из ярлыка или из `.app`. */
+  function logBodyHtml() {
+    return '<p class="note">What this app has written since it started. '
+      + 'Newest at the bottom.</p><pre id="log-view"></pre>';
+  }
+
+  // Опрос, а не событие Tauri: подписка потребовала бы `AppHandle` там, где
+  // сейчас голый макрос `ccfzf_log!` — в том числе в модулях, до которых
+  // handle не доходит. Секунда — такт опроса пикера; чаще незачем.
+  let logTimer = null;
+
+  async function refreshLog() {
+    const view = document.getElementById('log-view');
+    if (!view) return;
+    const lines = await invoke('read_log') || [];
+    const text = lines.length ? lines.join('\n') : 'nothing logged yet';
+    // Молчаливый такт не трогает узел вовсе: перезапись того же текста сбивала
+    // бы выделение под курсором раз в секунду — а лог читают, выделяя строки.
+    if (text === view.textContent) return;
+    // Прокрутка едет вниз, только если человек и так был внизу. Уехал он
+    // читать старую строку — дёргать его под низ каждую секунду значило бы не
+    // дать дочитать.
+    const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 20;
+    view.textContent = text;
+    if (atBottom) view.scrollTop = view.scrollHeight;
+  }
+
   function axesTableHtml() {
     const row = (key) => {
       const label = TOGGLE_LABELS[key];
@@ -620,12 +658,23 @@
     const def = PAGES.find(p => p.id === current);
     const body = current === 'columns' ? axesTableHtml()
       : current === 'panels' ? panelsTableHtml()
+      : current === 'log' ? logBodyHtml()
       : current === 'general' ? generalBodyHtml(def.fields)
       : (current === 'mqtt' ? mqttIntroHtml() : '')
         + def.fields.map(fieldHtml).join('')
         + (current === 'paths' ? actionsListHtml() : '');
     page.innerHTML = body
       + '<div id="bar"><button id="save">Save</button><span id="status"></span></div>';
+
+    // Опрос лога живёт ровно столько, сколько видна его вкладка: `renderPage`
+    // сносит узлы прошлой страницы, и таймер, её переживший, дёргал бы
+    // `<pre>`, которого уже нет, — раз в секунду и до закрытия окна.
+    clearInterval(logTimer);
+    logTimer = null;
+    if (current === 'log') {
+      refreshLog();
+      logTimer = setInterval(refreshLog, 1000);
+    }
 
     // `indeterminate` — свойство DOM, а не HTML-атрибут: строкой его не
     // выразить, и ставится оно уже по вставленной разметке. `checked` уже

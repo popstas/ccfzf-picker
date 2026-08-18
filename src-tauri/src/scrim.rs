@@ -126,7 +126,7 @@ fn on_main_thread(
     app.clone()
         .run_on_main_thread(move || {
             if let Err(e) = f(&app) {
-                eprintln!("ccfzf-picker: {e}");
+                ccfzf_log!("{e}");
             }
         })
         .map_err(|e| format!("cannot schedule the scrim: {e}"))
@@ -300,11 +300,11 @@ mod win {
     /// такое пришлось бы глазами на экране, а не по логу.
     fn reassert_picker_on_top(app: &tauri::AppHandle) {
         let Some(window) = app.get_webview_window("picker") else {
-            eprintln!("ccfzf-picker: cannot reassert the picker on top of the scrim: no picker window");
+            ccfzf_log!("cannot reassert the picker on top of the scrim: no picker window");
             return;
         };
         let Ok(hwnd) = window.hwnd() else {
-            eprintln!("ccfzf-picker: cannot reassert the picker on top of the scrim: no hwnd");
+            ccfzf_log!("cannot reassert the picker on top of the scrim: no hwnd");
             return;
         };
         unsafe {
@@ -317,7 +317,7 @@ mod win {
                 0,
                 SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
             ) {
-                eprintln!("ccfzf-picker: cannot reassert the picker on top of the scrim: {e}");
+                ccfzf_log!("cannot reassert the picker on top of the scrim: {e}");
             }
         }
     }

@@ -432,7 +432,7 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
     let raw = match crate::load_config() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("ccfzf-picker: cannot read config, falling back to a new session: {e}");
+            ccfzf_log!("cannot read config, falling back to a new session: {e}");
             serde_json::Value::Null
         }
     };
@@ -442,7 +442,7 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
         // `is_configured` в `mqtt.rs`). Просить некого. Прежняя дорога:
         // страница поднимет новую сессию сама — это и было поведением до
         // всей правки, и без брокера другого нет.
-        eprintln!("ccfzf-picker: mqtt broker is not configured, falling back to a new session");
+        ccfzf_log!("mqtt broker is not configured, falling back to a new session");
         let _ = app.emit("project-hotkey", cwd.to_string());
         return;
     }
@@ -468,7 +468,7 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
     let terminal = crate::mqtt::terminal_name(&raw);
     tauri::async_runtime::spawn_blocking(move || {
         if let Err(e) = crate::mqtt::open_project(&broker, &base, &cwd, &terminal) {
-            eprintln!("ccfzf-picker: cannot ask to open {cwd}: {e}");
+            ccfzf_log!("cannot ask to open {cwd}: {e}");
         }
     });
 }
@@ -542,7 +542,7 @@ fn apply_once(app: &tauri::AppHandle, reg: &Registered, wanted: Vec<Project>) {
         match hooked {
             Ok(()) => live.push((project, shortcut)),
             Err(e) => {
-                eprintln!("ccfzf-picker: cannot register hotkey {}: {e}", project.hotkey);
+                ccfzf_log!("cannot register hotkey {}: {e}", project.hotkey);
                 failed.push(Taken {
                     cwd: project.cwd,
                     hotkey: project.hotkey,
@@ -571,7 +571,7 @@ fn apply_once(app: &tauri::AppHandle, reg: &Registered, wanted: Vec<Project>) {
         return;
     }
     if let Err(e) = crate::save_json("hotkeys.json", &to_cache(&wanted)) {
-        eprintln!("ccfzf-picker: cannot remember hotkeys: {e}");
+        ccfzf_log!("cannot remember hotkeys: {e}");
     }
     let _ = app.emit(
         "project-hotkeys",
@@ -616,7 +616,7 @@ pub fn apply_from_state(app: &tauri::AppHandle, state: &serde_json::Value) {
             // Один раз за запуск: опрос идёт раз в секунду, и повторять эту
             // строку значило бы залить ею весь stderr.
             static SAID: Once = Once::new();
-            SAID.call_once(|| eprintln!("{note}"));
+            SAID.call_once(|| ccfzf_log!("{note}"));
         }
         return;
     };
