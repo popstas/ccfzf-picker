@@ -49,6 +49,10 @@
 локальной машине; на удалённой — `ccfzf`.
 Без `tauri-cli` `cargo tauri build` упадёт с `no such subcommand: tauri`.
 
+Clone with `git clone --recurse-submodules`, or run `git submodule update --init`
+in an existing checkout — the vendored `vendor/ccfzf` aggregator is compiled
+into the binary, and without it the whole build fails.
+
 ```
 npm test                      # тесты фронтенда
 cd src-tauri && cargo test    # тесты оболочки

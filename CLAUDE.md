@@ -10,6 +10,11 @@ npm test                      # фронтенд, node --test, без завис
 cd src-tauri && cargo test    # оболочка
 ```
 
+`vendor/ccfzf` — сабмодуль: `local_ccfzf.rs` вшивает его `include_str!`-ом
+в бинарь, и без `git clone --recurse-submodules` (или `git submodule update
+--init` в уже склонированном каталоге) сборка не доходит до этой строчки —
+падает весь крейт, а не только местный источник.
+
 `node --test test/` на этих версиях Node не работает — только `npm test`.
 
 ## Выкатка
