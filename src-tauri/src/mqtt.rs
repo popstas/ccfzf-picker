@@ -386,7 +386,7 @@ pub fn resolve_base(broker: &Broker, asked: &str) -> String {
         // равно уйдёт — на другую машину, — и без единого слова это неотличимо
         // от намеренного адреса. Молчащий откат такого рода уже стоил здесь
         // полдня расследования: `Ctrl+F11` в `project_hotkeys.rs`.
-        eprintln!("resolve_base: '{s}' не прошла белый список, откат на {fallback}");
+        ccfzf_log!("resolve_base: '{s}' is not in the whitelist, falling back to {fallback}");
         fallback
     }
 }

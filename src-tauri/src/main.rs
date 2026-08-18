@@ -15,6 +15,10 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 mod config_file;
 mod icons;
 mod local_ccfzf;
+// `#[macro_use]`, а не `use` по файлам: `ccfzf_log!` зовут четыре модуля из
+// пяти ниже, и все они объявлены после этой строки — макрос виден им всем.
+#[macro_use]
+mod log;
 mod merge_state;
 mod mqtt;
 mod poller;
@@ -103,7 +107,7 @@ fn hide_window(app: &tauri::AppHandle) {
     // Подложка гасится безусловно, не спрашивая флаги: пикер спрятан — ни
     // одна раскладка не оправдывает затемнённый стол без списка над ним.
     if let Err(e) = scrim::set_visible(app, false) {
-        eprintln!("ccfzf-picker: {e}");
+        ccfzf_log!("{e}");
     }
     let _ = app.emit("picker-hidden", ());
     if let Some(state) = app.try_state::<LastHidden>() {
@@ -210,7 +214,7 @@ fn show_picker(app: &tauri::AppHandle) {
         .and_then(|state| state.0.lock().unwrap().shown())
     {
         if let Err(e) = apply_picker_size(&window, fullscreen, picker_scale_now(app)) {
-            eprintln!("ccfzf-picker: {e}");
+            ccfzf_log!("{e}");
         }
     }
     let _ = window.set_focus();
@@ -319,7 +323,7 @@ fn scale_axis(node: Option<&serde_json::Value>, name: &str) -> f64 {
         return 0.0;
     }
     let Some(pct) = value.as_f64() else {
-        eprintln!("ccfzf-picker: pickerSize.{name} is not a number, using the built-in size");
+        ccfzf_log!("pickerSize.{name} is not a number, using the built-in size");
         return 0.0;
     };
     if pct == 0.0 {
@@ -335,8 +339,8 @@ fn scale_axis(node: Option<&serde_json::Value>, name: &str) -> f64 {
     if pct.is_finite() && ((1.0..=100.0).contains(&pct) || pct >= 101.0) {
         return pct;
     }
-    eprintln!(
-        "ccfzf-picker: pickerSize.{name} = {pct} must be 0 (Default), 1-100 (percent of screen), or 101 or more (pixels); using the built-in size"
+    ccfzf_log!(
+        "pickerSize.{name} = {pct} must be 0 (Default), 1-100 (percent of screen), or 101 or more (pixels); using the built-in size"
     );
     0.0
 }
@@ -660,7 +664,7 @@ fn apply_scrim(app: &tauri::AppHandle, fullscreen: bool) {
     let (narrow, wide) = scrim_flags_now(app);
     let show = scrim::scrim_wanted(fullscreen, narrow, wide);
     if let Err(e) = scrim::set_visible(app, show) {
-        eprintln!("ccfzf-picker: {e}");
+        ccfzf_log!("{e}");
     }
 }
 
@@ -766,7 +770,7 @@ fn poll_now(poller: tauri::State<poller::Poller>) -> serde_json::Value {
 fn allow_any_foreground() {
     use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
     if let Err(e) = unsafe { AllowSetForegroundWindow(ASFW_ANY) } {
-        eprintln!("ccfzf-picker: cannot grant foreground: {e}");
+        ccfzf_log!("cannot grant foreground: {e}");
     }
 }
 
@@ -1074,7 +1078,7 @@ fn reject_null_values(patch: &serde_json::Value) -> Result<(), String> {
 fn restrict_permissions(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
     if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
-        eprintln!("ccfzf-picker: cannot restrict {}: {e}", path.display());
+        ccfzf_log!("cannot restrict {}: {e}", path.display());
     }
 }
 
@@ -1171,7 +1175,7 @@ fn register_picker_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) ->
     }) {
         Ok(()) => true,
         Err(e) => {
-            eprintln!("ccfzf-picker: cannot register picker hotkey: {e}");
+            ccfzf_log!("cannot register picker hotkey: {e}");
             false
         }
     };
@@ -1194,7 +1198,7 @@ fn register_projects_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) 
         Err(e) => {
             // Отказ не фатален и обязан быть виден — то же правило, что у
             // проектных хоткеев: молчащая клавиша выглядит сломанным конфигом.
-            eprintln!("ccfzf-picker: cannot register projects hotkey: {e}");
+            ccfzf_log!("cannot register projects hotkey: {e}");
             false
         }
     };
@@ -1282,10 +1286,10 @@ fn update_show_item(item: &MenuItem<tauri::Wry>, registered: bool, accelerator: 
 fn update_menu_item(item: &MenuItem<tauri::Wry>, label: &str, accelerator: &str) {
     let (text, accel) = menu_item_parts(label, accelerator);
     if let Err(e) = item.set_text(&text) {
-        eprintln!("ccfzf-picker: cannot update tray label: {e}");
+        ccfzf_log!("cannot update tray label: {e}");
     }
     if let Err(e) = item.set_accelerator(accel.as_deref()) {
-        eprintln!("ccfzf-picker: cannot show hotkey {accelerator} in tray menu: {e}");
+        ccfzf_log!("cannot show hotkey {accelerator} in tray menu: {e}");
     }
 }
 
@@ -1317,7 +1321,7 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
             // поток опроса в простой, а хоткеи откатываются на умолчания —
             // и без этой строки узнать о причине можно было бы только по
             // внезапно замолчавшему списку.
-            eprintln!("ccfzf-picker: bad config.yaml, falling back to defaults: {e}");
+            ccfzf_log!("bad config.yaml, falling back to defaults: {e}");
             serde_json::Value::Null
         }
     };
@@ -1396,6 +1400,17 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
 /// `async` здесь не украшение и не задел на будущее. Синхронную команду Tauri
 /// выполняет прямо в потоке цикла событий, а создание webview на Windows этот
 /// же цикл и ждёт: `build()` возвращает Ok, окно появляется, а страница в нём
+/// Отдать вкладке Log то, что накопилось в буфере.
+///
+/// Не `Result`: читать тут нечего — буфер живёт в памяти этого же процесса, и
+/// отказать он может разве что паникой соседнего потока, которую `log::lines`
+/// и переживает молча. Отказ, который нельзя показать иначе как в том же
+/// логе, показывать было бы негде.
+#[tauri::command]
+fn read_log() -> Vec<String> {
+    log::lines()
+}
+
 /// не загружается никогда — белый прямоугольник с рамкой и без содержимого.
 /// `async` уводит команду в пул, цикл остаётся свободен, и webview
 /// дозревает. Заодно это единственная причина, по которой команда не может
@@ -1772,7 +1787,7 @@ pub(crate) fn picker_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
     if let Some(s) = config.get("hotkey").and_then(|v| v.as_str()) {
         match s.parse::<Shortcut>() {
             Ok(sc) => return (sc, s.to_string()),
-            Err(_) => eprintln!("ccfzf-picker: cannot parse hotkey {s}, using default"),
+            Err(_) => ccfzf_log!("cannot parse hotkey {s}, using default"),
         }
     }
     (
@@ -1799,7 +1814,7 @@ pub(crate) fn projects_hotkey(config: &serde_json::Value) -> (Shortcut, String) 
     {
         match s.parse::<Shortcut>() {
             Ok(sc) => return (sc, s.to_string()),
-            Err(_) => eprintln!("ccfzf-picker: cannot parse projectsHotkey {s}, using default"),
+            Err(_) => ccfzf_log!("cannot parse projectsHotkey {s}, using default"),
         }
     }
     (
@@ -1918,7 +1933,7 @@ fn main() {
             restore_snapshot_mqtt, place_windows_mqtt, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
-            set_comment, open_in_editor
+            set_comment, open_in_editor, read_log
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
@@ -2023,8 +2038,8 @@ fn main() {
             ) {
                 Ok(item) => item,
                 Err(e) => {
-                    eprintln!(
-                        "ccfzf-picker: cannot show hotkey {hotkey_accelerator} in tray menu: {e}"
+                    ccfzf_log!(
+                        "cannot show hotkey {hotkey_accelerator} in tray menu: {e}"
                     );
                     MenuItem::with_id(app, "show", &show_text, true, None::<&str>)?
                 }
@@ -2050,8 +2065,8 @@ fn main() {
             ) {
                 Ok(item) => item,
                 Err(e) => {
-                    eprintln!(
-                        "ccfzf-picker: cannot show hotkey {projects_accelerator} in tray menu: {e}"
+                    ccfzf_log!(
+                        "cannot show hotkey {projects_accelerator} in tray menu: {e}"
                     );
                     MenuItem::with_id(app, "show-projects", &projects_text, true, None::<&str>)?
                 }
@@ -2124,7 +2139,7 @@ fn main() {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
                             if let Err(e) = open_settings(app).await {
-                                eprintln!("ccfzf-picker: {e}");
+                                ccfzf_log!("{e}");
                             }
                         });
                     }
