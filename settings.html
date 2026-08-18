@@ -116,6 +116,16 @@
     dimProject: 'dim project',
   };
   const FILTER_LABELS = { onlyWindow: 'only sessions with a window', showAll: 'show all sessions' };
+
+  // Как назвать человеку не вставший хоткей и по какому ключу спросить о нём
+  // ответ `save_config`. Подпись здесь своя, а не поле формы: там она про то,
+  // что клавиша делает («Show the picker»), а тут — про то, какая именно из
+  // трёх не отозвалась.
+  const HOTKEY_REPORTS = [
+    ['hotkey', 'hotkey'],
+    ['projects hotkey', 'projectsHotkey'],
+    ['tile hotkey', 'tileHotkey'],
+  ];
   const UI_DEFAULTS = {
     sort: 'recent',
     toggles: {
@@ -1013,9 +1023,19 @@
         // Регистрация глобального хоткея могла не удаться (Windows держит
         // часть комбинаций за собой). Отказ не фатален, но молчать о нём
         // нельзя: человек будет думать, что хоткей сменился, а тот мёртв.
-        if (result && result.hotkeyRegistered === false) {
+        //
+        // Спрашиваются все три, а не первый: пары «встал ли» и «на какой»
+        // Rust отдаёт по хоткею, но показывалась одна, и отказ второго молчал
+        // с самого его появления. С третьим клавиша к тому же отбирается у
+        // оконного трекера — «занята» там значит «трекер ещё не выкачен», и
+        // это ровно тот случай, о котором надо сказать вслух.
+        const failed = HOTKEY_REPORTS
+          .filter(([, key]) => result && result[`${key}Registered`] === false)
+          .map(([name, key]) => `${name} ${result[`${key}Accelerator`]}`);
+        if (failed.length) {
           status.className = 'bad';
-          status.textContent = `saved, but hotkey ${result.hotkeyAccelerator} did not take — it is held by the system or another application`;
+          status.textContent = `saved, but ${failed.join(', ')} did not take`
+            + ' — held by the system or another application';
           return;
         }
         status.textContent = 'saved';

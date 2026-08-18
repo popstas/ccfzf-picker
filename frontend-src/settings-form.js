@@ -139,6 +139,10 @@
         { id: 'projectsHotkey', label: 'Show the picker on projects', type: 'text',
           hint: 'Leave empty for the built-in one: Win+Shift+F10 on Windows, '
             + 'Option+Cmd+Shift+C on a Mac.' },
+        { id: 'tileHotkey', label: 'Tile the windows on this machine', type: 'text',
+          hint: 'Asks the window tracker for the tile layout, in the order of this list. '
+            + 'Leave empty for the built-in one: Ctrl+Win+F10 on Windows, '
+            + 'Ctrl+Option+Cmd+C on a Mac.' },
       ],
     },
     {
@@ -182,6 +186,14 @@
 // нет, и `configToFields`/`fieldsToPatch` полезли бы за значением, которого не
 // существует, а патч унёс бы в config.yaml выдуманный ключ.
 const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !== 'preset');
+
+  // Глобальные хоткеи — те три, что вешает Rust. Список считается из самой
+  // страницы, а не пишется вторым рядом: разойдись он с полями, проверка на
+  // занятую комбинацию молча пропустила бы одну из клавиш, а молчащий хоткей
+  // читается как сломанный конфиг — здесь за это уже заплачено полднём
+  // расследования (`Ctrl+F11` в `project_hotkeys.rs`).
+  const GLOBAL_HOTKEYS = (PAGES.find(page => page.id === 'hotkeys') || { fields: [] })
+    .fields.map(field => field.id);
 
   function at(source, path) {
     return path.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), source);
@@ -388,22 +400,27 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
       // две разных.
       problems.push('no source: set the host with sessions, or turn on sessions from this machine');
     }
-    const hotkey = String(fields.hotkey || '').trim();
-    // isReserved, а не свой разбор строки: комбинации, которые окно пикера
-    // забирает себе, перечислены там, и второй список разошёлся бы с первым.
-    if (hotkey && hotkeyApi.isReserved(hotkeyApi.parseHotkey(hotkey))) {
-      problems.push(`${hotkey} is taken by the picker window itself — inside it, it will not respond`);
-    }
-    const projects = String(fields.projectsHotkey || '').trim();
-    if (projects && hotkeyApi.isReserved(hotkeyApi.parseHotkey(projects))) {
-      problems.push(`${projects} is taken by the picker window itself — inside it, it will not respond`);
+    // Три глобальных хоткея проверяются одним проходом, а не тремя копиями
+    // подряд: копий было две, и с третьей клавишей забыть одну из них стало
+    // делом времени — а забытая молчит.
+    const globals = GLOBAL_HOTKEYS.map(id => String(fields[id] || '').trim());
+    for (const combo of globals) {
+      // isReserved, а не свой разбор строки: комбинации, которые окно пикера
+      // забирает себе, перечислены там, и второй список разошёлся бы с первым.
+      if (combo && hotkeyApi.isReserved(hotkeyApi.parseHotkey(combo))) {
+        problems.push(`${combo} is taken by the picker window itself — inside it, it will not respond`);
+      }
     }
     // Две одинаковые комбинации — это молчащая вторая: система отдаёт
     // сочетание одному слушателю, и второй регистрируется отказом. Отказ
     // виден в трее, но сказать о нём здесь дешевле, чем отправлять человека
     // туда искать.
-    if (projects && hotkey && projects.toLowerCase() === hotkey.toLowerCase()) {
-      problems.push(`${projects} is set for both hotkeys — only one of them will work`);
+    for (let i = 0; i < globals.length; i += 1) {
+      for (let j = i + 1; j < globals.length; j += 1) {
+        if (!globals[i] || !globals[j]) continue;
+        if (globals[i].toLowerCase() !== globals[j].toLowerCase()) continue;
+        problems.push(`${globals[i]} is set for two hotkeys — only one of them will work`);
+      }
     }
     const validNumber = (id, min, max, message) => {
       // Частичные вызовы validate в тестах старых полей не обязаны знать про

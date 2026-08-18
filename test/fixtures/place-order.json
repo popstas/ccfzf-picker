@@ -1,0 +1,82 @@
+{
+  "comment": [
+    "Общий вход для двух сторожей одного и того же порядка: JS-теста",
+    "test/place-order.test.js и Rust-теста в src-tauri/src/place_order.rs.",
+    "Файл один намеренно — две копии фикстуры разошлись бы на первой же правке,",
+    "и сторож перестал бы сторожить, ничего об этом не сказав.",
+    "",
+    "Что в нём проверяется, по строкам:",
+    "  alpha  — живая, окно здесь; обычный случай;",
+    "  beta   — живая, окно здесь, свежее alpha и дороже её;",
+    "  gamma  — НЕ живая, окно здесь и свежайшее из всех: обязана быть последней,",
+    "           потому что в списке она стоит в History, ниже всех живых;",
+    "  delta  — живая, но окно на соседней машине: не наша забота;",
+    "  epsilon— живая без окна вовсе: раскладывать нечего;",
+    "  zeta   — живая, своего окна нет, но работает её фоновый форк, и окно у",
+    "           форка; строки форк не получает, окно достаётся родителю;",
+    "  zeta-bg— сам форк: в списке его нет.",
+    "",
+    "У gamma окно с ненулевым pid — так и бывает: трекер видит окно",
+    "закончившейся сессии, пока терминал не закрыли."
+  ],
+  "configHost": "desk-pc",
+  "state": {
+    "generated": 100000,
+    "windowHost": "desk-pc",
+    "windowPid": 4242,
+    "windowHosts": [
+      { "host": "desk-pc", "pid": 4242, "mqttBase": "home/desk/windows" },
+      { "host": "laptop", "pid": 77, "mqttBase": "home/laptop/windows" }
+    ],
+    "sessions": [
+      {
+        "id": "aaa", "title": "alpha", "cwd": "/p/a", "mtime": 1, "live": true, "kind": "session",
+        "pid": 11,
+        "windows": [{ "host": "desk-pc", "pid": 4242 }],
+        "agent": { "updated": 6000, "costUsd": 2, "started": 100 }
+      },
+      {
+        "id": "bbb", "title": "beta", "cwd": "/p/b", "mtime": 1, "live": true, "kind": "session",
+        "pid": 12,
+        "windows": [{ "host": "desk-pc", "pid": 4242 }],
+        "agent": { "updated": 6120, "costUsd": 9, "started": 50 }
+      },
+      {
+        "id": "ccc", "title": "gamma", "cwd": "/p/c", "mtime": 1, "live": false, "kind": "session",
+        "windows": [{ "host": "desk-pc", "pid": 4242 }],
+        "agent": { "updated": 9999, "costUsd": 1, "started": 10 }
+      },
+      {
+        "id": "ddd", "title": "delta", "cwd": "/p/d", "mtime": 1, "live": true, "kind": "session",
+        "pid": 14,
+        "windows": [{ "host": "laptop", "pid": 77 }],
+        "agent": { "updated": 8000, "costUsd": 7, "started": 20 }
+      },
+      {
+        "id": "eee", "title": "epsilon", "cwd": "/p/e", "mtime": 1, "live": true, "kind": "session",
+        "pid": 15,
+        "windows": [],
+        "agent": { "updated": 8500, "costUsd": 8, "started": 30 }
+      },
+      {
+        "id": "fff", "title": "zeta", "cwd": "/p/f", "mtime": 1, "live": false, "kind": "session",
+        "windows": [],
+        "agent": { "updated": 10, "costUsd": 0, "started": 200 }
+      },
+      {
+        "id": "ggg", "title": "zeta-bg", "cwd": "/p/f", "mtime": 1, "live": true,
+        "kind": "background", "parent": "fff", "pid": 17,
+        "windows": [{ "host": "desk-pc", "pid": 4242 }],
+        "agent": { "updated": 7000, "costUsd": 5, "started": 300 }
+      }
+    ]
+  },
+  "expected": {
+    "recent": ["fff", "bbb", "aaa", "ccc"],
+    "cost": ["bbb", "fff", "aaa", "ccc"],
+    "oldest": ["bbb", "aaa", "fff", "ccc"],
+    "newest": ["fff", "aaa", "bbb", "ccc"],
+    "name": ["aaa", "bbb", "fff", "ccc"]
+  },
+  "expectedBase": "home/desk/windows"
+}

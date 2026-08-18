@@ -155,31 +155,55 @@ test('исправная форма претензий не вызывает', (
   assert.deepStrictEqual(validate(configToFields({ sshHost: 'host' })), []);
 });
 
-// ── второй глобальный хоткей в форме ────────────────────────────────────────
-test('второй хоткей правится на той же странице, что и первый', () => {
+// ── глобальные хоткеи в форме ──────────────────────────────────────────────
+test('все глобальные хоткеи правятся на одной странице', () => {
   const page = PAGES.find(p => p.id === 'hotkeys');
   const ids = page.fields.map(f => f.id);
-  assert.ok(ids.includes('projectsHotkey'), ids);
+  // Список тот же, по которому validate ходит проверкой на занятую
+  // комбинацию: страница и есть его единственный источник.
+  assert.deepStrictEqual(ids, ['hotkey', 'projectsHotkey', 'tileHotkey']);
 });
 
-test('форма не даёт повесить оба хоткея на одну комбинацию', () => {
+test('форма не даёт повесить два хоткея на одну комбинацию', () => {
   // Система отдаёт сочетание одному слушателю, и второй регистрируется
   // отказом: молча не сработал бы именно он.
   const problems = validate({
     sshHost: 'host', hotkey: 'Cmd+Shift+C', projectsHotkey: 'cmd+shift+c',
   });
   assert.strictEqual(problems.length, 1, problems);
-  assert.match(problems[0], /both hotkeys/);
+  assert.match(problems[0], /two hotkeys/);
+});
+
+test('третий хоткей проверяется теми же двумя правилами, что и первые два', () => {
+  // Проверка идёт одним проходом по GLOBAL_HOTKEYS, и этот тест — сторож
+  // того, что новое поле в неё попало: копия проверки, забытая для одной
+  // клавиши, молчала бы ровно про неё.
+  const clash = validate({
+    sshHost: 'host', hotkey: 'Cmd+Shift+C', tileHotkey: 'cmd+shift+c',
+  });
+  assert.strictEqual(clash.length, 1, clash);
+  assert.match(clash[0], /two hotkeys/);
+
+  // `Ctrl+F` окно пикера забирает себе (RESERVED_CODES), и такая комбинация
+  // внутри него не отзовётся.
+  const reserved = validate({ sshHost: 'host', tileHotkey: 'Ctrl+F' });
+  assert.strictEqual(reserved.length, 1, reserved);
+  assert.match(reserved[0], /taken by the picker window itself/);
 });
 
 test('разные комбинации возражений не вызывают', () => {
   assert.deepStrictEqual(
-    validate({ sshHost: 'host', hotkey: 'Cmd+Shift+C', projectsHotkey: 'Alt+Cmd+Shift+C' }),
+    validate({
+      sshHost: 'host',
+      hotkey: 'Cmd+Shift+C',
+      projectsHotkey: 'Alt+Cmd+Shift+C',
+      tileHotkey: 'Ctrl+Alt+Cmd+C',
+    }),
     [],
   );
 });
 
-test('пустой второй хоткей возражений не вызывает', () => {
+test('пустые второй и третий хоткеи возражений не вызывают', () => {
   // Пусто значит «взять встроенное», а не «сломанная комбинация».
   assert.deepStrictEqual(validate({ sshHost: 'host', hotkey: 'Cmd+Shift+C' }), []);
 });
