@@ -43,14 +43,34 @@ pub fn choose(in_path: bool, vendored: Option<&str>) -> Result<(String, Vec<Stri
 
 /// Есть ли программа в PATH. Своим перебором, а не крейтом `which`: дерево
 /// зависимостей у пикера и так 323 крейта, а вопрос здесь на десять строк.
+///
+/// `is_file()` одного мало: неисполняемый `ccfzf`, случайно оказавшийся
+/// раньше в PATH, побеждал бы вшитую копию — работающую — и спотыкался на
+/// `Permission denied` при запуске, а причина отказа выглядела бы вообще
+/// не связанной с PATH. Бит `x` проверяется только на unix — на других
+/// системах, куда PATH ещё доедет, разбор бита не наш вопрос.
 pub fn on_path(name: &str) -> bool {
     let Some(paths) = std::env::var_os("PATH") else {
         return false;
     };
-    std::env::split_paths(&paths).any(|dir| {
-        let candidate = dir.join(name);
-        candidate.is_file()
-    })
+    std::env::split_paths(&paths).any(|dir| is_executable(&dir.join(name)))
+}
+
+fn is_executable(candidate: &std::path::Path) -> bool {
+    if !candidate.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        return std::fs::metadata(candidate)
+            .map(|m| m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false);
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 /// Распаковать вшитую копию рядом с конфигом и вернуть путь к ней.
@@ -93,6 +113,8 @@ pub fn resolve() -> Result<(String, Vec<String>), String> {
 #[cfg(test)]
 mod tests {
     use super::choose;
+    #[cfg(unix)]
+    use super::is_executable;
 
     /// PATH первым — и это не вкусовщина. На машине, где `ccfzf` уже стоит,
     /// он же переписывает `~/.ccfzf.sessions.json`, с которого живут оконный
@@ -120,5 +142,47 @@ mod tests {
     fn without_either_it_says_so() {
         let err = choose(false, None).unwrap_err();
         assert!(err.contains("ccfzf"), "текст обязан называть, чего не нашлось: {err}");
+    }
+
+    /// Свой файл на каждый тест в общем временном каталоге: параллельные
+    /// прогоны не должны видеть чужие права.
+    #[cfg(unix)]
+    fn temp_file(tag: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("ccfzf-picker-test-on-path-{}-{tag}-{n}", std::process::id()))
+    }
+
+    /// Файл есть, но бита `x` нет — `on_path` был бы обманут: программа
+    /// в PATH нашлась бы, а запуск падал `Permission denied`, при том что
+    /// рабочая вшитая копия рядом молчала бы неиспользованной.
+    #[cfg(unix)]
+    #[test]
+    fn a_non_executable_file_does_not_count() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = temp_file("no-x");
+        std::fs::write(&path, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!is_executable(&path));
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Файл с битом `x` — засчитывается.
+    #[cfg(unix)]
+    #[test]
+    fn an_executable_file_counts() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = temp_file("x");
+        std::fs::write(&path, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(is_executable(&path));
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Несуществующий путь — не панацея и не паника, просто «нет».
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_file_is_not_executable() {
+        assert!(!is_executable(&temp_file("missing")));
     }
 }
