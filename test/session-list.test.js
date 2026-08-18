@@ -404,3 +404,28 @@ test('источник едет в строку полем', () => {
   });
   assert.strictEqual(rows[0].source, 'local');
 });
+
+test('окно на своей машине возвращает пустоту, несмотря на чужой источник', () => {
+  // Запись окна ответ полный — включая когда ответ «своя машина». Даже если
+  // источник другой (агрегатор слил данные нескольких трекеров), окно на
+  // экране пикера отправляет сессию в локальный блок — туда и встанет.
+  const rows = buildSessionList({
+    sessions: [{
+      id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session',
+      source: 'remote-host',
+      windows: [{ host: 'host-a', pid: 1, lastSeen: 1 }],
+    }],
+    seen: {}, state: {}, configHost: 'host-a',
+  });
+  assert.strictEqual(rows[0].windowHost, '', 'окно на экране пикера — своя машина');
+});
+
+test('источник в форме user@host достаётся без правок', () => {
+  // Этой же строкой адресуются действия: ssh или местный запуск. Красивое имя
+  // машины увело бы ssh не туда.
+  const rows = buildSessionList({
+    sessions: [{ id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session', source: 'user@remote-host' }],
+    seen: {}, state: {}, configHost: 'host-a',
+  });
+  assert.strictEqual(rows[0].windowHost, 'user@remote-host');
+});
