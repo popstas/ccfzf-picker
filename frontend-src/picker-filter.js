@@ -75,8 +75,13 @@
     const q = String(query ?? '').trim().toLowerCase();
     if (!q) return groups;
     return groups
+      // Имя окна в стоге третьим: `label` приходит из заголовка транскрипта, а
+      // человек ищет сессию по тому имени, которым сам её завёл, — и оно живёт
+      // только в заголовке окна (см. windowNameHtml). `?? ''` обязателен: окна
+      // у строки может не быть вовсе, и undefined уехало бы в стог словом,
+      // которое нашло бы разом всю историю.
       .map(g => ({ ...g, sessions: g.sessions.filter(s =>
-        matchesText(`${s.label} ${searchableCwd(s.cwd)}`, q)
+        matchesText(`${s.label} ${searchableCwd(s.cwd)} ${s.windowTitle ?? ''}`, q)
         || matchesId(s.id, q)) }))
       .filter(g => g.sessions.length > 0);
   }

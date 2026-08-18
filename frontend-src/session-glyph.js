@@ -439,6 +439,30 @@
   }
 
   /**
+   * Имя окна рядом с именем строки — и только когда они разошлись.
+   *
+   * Имён у сессии два, и приезжают они разными дорогами. `title` — заголовок
+   * транскрипта (`custom-title`/`ai-title`), его пишет агент; `windowTitle` —
+   * то, чем сессию назвал человек, заводя окно, и то, по чему её привязывает к
+   * окну трекер. У долгой сессии первое остаётся от работы, ради которой её
+   * когда-то завели, а второе называет сегодняшнюю: строка `esm-migration`
+   * оказывалась единственным следом сессии, которую человек знает как
+   * `tray-build-time`, — и найти её в списке было нечем.
+   *
+   * Мерка совпадения — та же, что у второй строки с каталогом (hidesProject):
+   * множества слов, а не строки целиком. Разделители у людей разные, и
+   * `ccfzf_picker` рядом с `ccfzf-picker` был бы подписью ни о чём.
+   */
+  function windowNameHtml(session) {
+    const name = String(session?.windowTitle ?? '').trim();
+    if (!name) return '';
+    const own = wordSet(session?.title);
+    const win = wordSet(name);
+    if (own.size && win.size && (isSubset(own, win) || isSubset(win, own))) return '';
+    return `<span class="wname">${escapeHtml(name)}</span>`;
+  }
+
+  /**
    * Подсказка при наведении на строку.
    *
    * Здесь оседает то, чему в строке не хватает места: полный путь (в строке он
@@ -519,6 +543,6 @@
     sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml, windowHostHtml,
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
-    prNumber, prBadgeHtml, wordSet, hidesProject, projectLine,
+    prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, windowNameHtml,
   };
 });

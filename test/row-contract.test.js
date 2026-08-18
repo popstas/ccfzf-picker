@@ -1577,6 +1577,7 @@ function renderSessionRows(state, query, toggles, stale) {
     titleAttr: Glyph.titleAttr,
     statusDotHtml: Glyph.statusDotHtml,
     prBadgeHtml: Glyph.prBadgeHtml,
+    windowNameHtml: Glyph.windowNameHtml,
     windowHtml: Glyph.windowHtml,
     windowHostHtml: Glyph.windowHostHtml,
     stateHtml: Glyph.stateHtml,
@@ -1643,6 +1644,38 @@ test('сессия mac-wezterm показывает каталог ccfzf-picker,
   // Подсказка не поменялась: тот же titleAttr, что и раньше, полный путь
   // через shortPath.
   assert.ok(session.html.includes('~/ccfzf-picker'), session.html);
+});
+
+// Имён у сессии два, и второе — имя окна — до отрисовки доезжало только в
+// подсказке ▣, то есть нигде: строку опознавали по `title` из транскрипта, а
+// человек знает её по имени, которым сам её завёл. Проверяется на настоящей
+// разметке, а не на одной windowNameHtml: разойтись они могут молча — вызов
+// из шаблона строки не сторожит ничто другое.
+test('имя окна доезжает до строки, когда расходится с именем сессии', () => {
+  const { items } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({
+      title: 'esm-migration',
+      windows: [{ title: 'tray-build-time', host: 'mac-host', lastSeen: 2, focusedAt: 2 }],
+    })],
+    windowHost: 'mac-host',
+    windowPid: 7,
+  });
+  const session = items.find(i => i.key.startsWith('s:'));
+  assert.ok(session.html.includes('<span class="wname">tray-build-time</span>'), session.html);
+
+  // Совпали — подписи нет: та же мерка слов, что у второй строки с каталогом.
+  const { items: same } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({
+      title: 'tray-build-time',
+      windows: [{ title: 'tray-build-time', host: 'mac-host', lastSeen: 2, focusedAt: 2 }],
+    })],
+    windowHost: 'mac-host',
+    windowPid: 7,
+  });
+  const row = same.find(i => i.key.startsWith('s:'));
+  assert.ok(!row.html.includes('wname'), row.html);
 });
 
 // Маркер вида строки — самый хрупкий инвариант широкого режима: карточка в

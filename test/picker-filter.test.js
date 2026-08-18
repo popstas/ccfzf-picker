@@ -82,3 +82,30 @@ test('id по кириллице не находится', () => {
   assert.deepStrictEqual(filterSessions(groups, 'face').length, 1);
   assert.deepStrictEqual(filterSessions(groups, 'афсу'), []);
 });
+
+test('сессия находится по имени своего окна, а не только по имени сессии', () => {
+  // Имя окна — то, которым человек завёл сессию (`claude -n tray-build-time`),
+  // а `label` приходит из заголовка транскрипта и с ним расходится: сессию,
+  // названную человеком, поиск по её имени обязан находить.
+  const groups = [{
+    title: 'Active sessions',
+    sessions: [{
+      id: 'aaaa1111-aaaa-bbbb-cccc-000000000001',
+      label: 'esm-migration', cwd: '/home/user/windows-mqtt',
+      windowTitle: 'tray-build-time',
+    }],
+  }];
+  assert.strictEqual(filterSessions(groups, 'tray-build').length, 1);
+  assert.strictEqual(filterSessions(groups, 'tray-build')[0].sessions.length, 1);
+});
+
+test('строка без окна не находится по слову undefined', () => {
+  // Стог собирается склейкой полей, и отсутствующее поле уехало бы в него
+  // строкой `undefined`: запрос из этого слова нашёл бы разом все строки без
+  // окна — то есть всю историю.
+  const groups = [{
+    title: 'Active sessions',
+    sessions: [{ id: 'bbbb2222-aaaa-bbbb-cccc-000000000002', label: 'x', cwd: '/home/user/x' }],
+  }];
+  assert.deepStrictEqual(filterSessions(groups, 'undefined'), []);
+});

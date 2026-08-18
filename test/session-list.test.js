@@ -292,3 +292,27 @@ test('у каждой карточки своё время — максимум 
   assert.strictEqual(rowMac.focusedAt, 500); // max(500, 10)
   assert.strictEqual(rowWin.focusedAt, 900); // max(500, 900)
 });
+
+test('карточка несёт заголовок своего окна', () => {
+  // Имя окна — то, которым сессию завёл человек; заголовок сессии приезжает из
+  // транскрипта и с ним расходится. По имени окна её ищут и опознают, поэтому
+  // оно едет в строку отдельным полем, а не достаётся из `window` по месту:
+  // читателей у него двое — поиск и разметка имени.
+  const rows = buildSessionList({
+    sessions: [state({ id: 'a', live: true, title: 'esm-migration', windows: [
+      { host: 'mac-host', title: 'tray-build-time', lastSeen: 2, focusedAt: 2 },
+      { host: 'windows-box', title: 'tray-build-time', lastSeen: 1, focusedAt: 1 },
+    ] })],
+    seen: {},
+    configHost: 'mac-host',
+  });
+  assert.strictEqual(rows.length, 2);
+  assert.deepStrictEqual(rows.map(r => r.windowTitle), ['tray-build-time', 'tray-build-time']);
+});
+
+test('у строки без окна заголовок окна пуст, а не отсутствует', () => {
+  // Пустая строка, а не undefined: поле склеивается в стог поиска, и
+  // отсутствующее уехало бы туда словом `undefined`.
+  const rows = buildSessionList({ sessions: [state({ id: 'a' })], seen: {} });
+  assert.strictEqual(rows[0].windowTitle, '');
+});

@@ -345,6 +345,9 @@
         /* Метка PR — той же тусклостью, что и колонка хоткея: опознают строку
            по имени и пути, это подсказка рядом. */
         .name .pr { margin-left: 6px; font-size: 11px; color: #7d838c; font-weight: normal; }
+        /* Имя окна — той же тусклостью, что и метка PR, и по той же причине:
+           опознают строку по первому имени, это подсказка рядом. */
+        .name .wname { margin-left: 6px; font-size: 11px; color: #7d838c; font-weight: normal; }
         /* Правые колонки одной группой: статус, id, контекст с деньгами,
            возраст. Прижимает их сюда именно она — раньше это делала `.state`
            своим margin-left: auto, и выключенный чекбокс события уносил
@@ -992,6 +995,7 @@
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
+    windowNameHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -1284,6 +1288,9 @@
     const html = `<div class="row ${rowKind}${session.live ? '' : ' closed'}${markable ? ' markable' : ''}${stale}" data-index="${index}"${titleAttr(session)}>` +
       statusDotHtml(session) +
       `<div class="text"><div class="name">${escapeHtml(session.label)}` +
+      // Второе имя строки — то, которым сессию завёл человек. Рисуется, только
+      // когда расходится с первым: см. windowNameHtml.
+      `${windowNameHtml(session)}` +
       `${prBadgeHtml(session)}` +
       `</div>` +
       (sessionCwdLine ? `<div class="cwd">${escapeHtml(sessionCwdLine)}</div>` : '') +
