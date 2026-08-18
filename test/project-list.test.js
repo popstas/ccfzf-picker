@@ -194,3 +194,20 @@ test('пустой список занятых — пустая строка, а
   assert.strictEqual(hotkeysTakenMessage([]), '');
   assert.strictEqual(hotkeysTakenMessage(undefined), '');
 });
+
+test('счётчики docs/TODO.md доезжают до строки проекта, а мусор — нет', () => {
+  // Ключа в ответе нет у половины проектов: агрегатор ставит его только
+  // непустым. Пустой массив здесь значит ровно то же — считать нечего, — и
+  // отрисовщику не приходится различать «нет ключа» и «нет задач».
+  const sections = [{ label: 'next', done: 1, todo: 2 }];
+  const [withTodo, without, broken] = buildProjectList({
+    projects: [
+      { path: '/p/a', name: 'a', sessions: 1, live: 0, mtime: 3, todo: sections },
+      { path: '/p/b', name: 'b', sessions: 1, live: 0, mtime: 2 },
+      { path: '/p/c', name: 'c', sessions: 1, live: 0, mtime: 1, todo: 'нет' },
+    ],
+  });
+  assert.deepStrictEqual(withTodo.todo, sections);
+  assert.deepStrictEqual(without.todo, []);
+  assert.deepStrictEqual(broken.todo, []);
+});

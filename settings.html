@@ -90,6 +90,10 @@
     showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
     showCost: 'cost', showContext: 'context', showWindow: 'window',
     showWindowHost: 'window host', showTerminalIcon: 'terminal icon',
+    // Колонка строки проекта, а не сессии — единственная такая в списке. В
+    // таблице она всё равно наравне с соседями: вкладка распоряжается осями
+    // показа, а не тем, каким видам строк колонка достаётся.
+    showTodo: 'todo',
     // Не колонка (`side: 'dim'` в sessions.html, а не показ/скрытие поля), но
     // сюда идёт по тому же правилу, что и showTerminalIcon: TOGGLE_LABELS —
     // всё, что не FILTER_LABELS, и парность двух окон проверяет именно это.
@@ -110,6 +114,7 @@
       showContext: { list: true, statusline: true },
       showWindow: { list: true, statusline: false },
       showWindowHost: { list: true, statusline: false },
+      showTodo: { list: true, statusline: false },
       onlyWindow: { list: false, statusline: false },
       showAll: { list: false, statusline: true },
       showTerminalIcon: { list: false, statusline: false },
@@ -340,6 +345,10 @@
     showWindow: '▣',
     showWindowHost: '⌂',
     showTerminalIcon: '⌨',
+    // Тот же знак, каким колонку открывает сама строка (todoHtml в
+    // session-glyph.js) и каким её печатает статуслайн агента
+    // (statusline-block.sh): счёт у всех трёх один и тот же файл.
+    showTodo: '☑',
     // Обе галки затемнения — не колонки, но в таблице стоят строками наравне
     // с ними, и без глифа выглядели бы голее соседей. Знак один на обе, он
     // про приглушение как таковое; что именно приглушается, говорит подсказка.
@@ -353,6 +362,9 @@
     showEvent: "The agent's last event, such as stop, fail, or waiting for input",
     showWindow: 'The glyph marking whether a window is open for this session',
     showWindowHost: 'The name of the machine that owns the open window',
+    showTodo: 'Checkbox progress from the project\u2019s docs/TODO.md: the leading '
+      + 'section, plus the number of tasks still open in the rest. Project rows only; '
+      + 'hover the row for the full breakdown',
     // Буквы те же, что в таблице TERMINAL_GLYPHS (session-glyph.js), и список
     // здесь второй — но не молчаливый: сторож в test/settings-page.test.js
     // сверяет подсказку с самой таблицей, имя за именем.

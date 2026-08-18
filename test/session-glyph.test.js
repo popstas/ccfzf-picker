@@ -4,7 +4,7 @@ const {
   escapeHtml, statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
   sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
   shortPath, rowTitle, titleAttr, windowHostHtml, windowHtml,
-  prNumber, prBadgeHtml, wordSet, hidesProject, projectLine,
+  prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, todoHtml,
 } = require('../frontend-src/session-glyph');
 
 test('shortPath collapses the agent home directory, and survives a missing path', () => {
@@ -701,4 +701,75 @@ test('имя окна экранируется: оно приезжает с ч�
   const { windowNameHtml } = require('../frontend-src/session-glyph');
   const html = windowNameHtml({ title: 'x', windowTitle: '<img src=x>' });
   assert.ok(!html.includes('<img'), 'заголовок окна пишет чужой трекер, и в разметку он не уходит');
+});
+
+// --- Счётчики docs/TODO.md у строки проекта (Task T4) ---------------------
+//
+// Приезжают полем `todo` от агрегатора: список секций по заголовкам первого
+// уровня. Форматирует их читатель — то же правило, по которому он же считает
+// возраст: вторая форма на стороне агрегатора разошлась бы с колонкой.
+
+test('todoHtml показывает ведущую секцию, а остаток — числом', () => {
+  // Ведущая секция — как в statusline-block.sh: сделано из всего в ней.
+  // Остальные сворачиваются в одно число открытых: полная разбивка уезжает в
+  // подсказку, потому что в колонке у неё нет ширины — у ccfzf-picker она
+  // самая длинная из двадцати трёх проектов с TODO на живой машине.
+  const sections = [
+    { label: 'next', done: 0, todo: 4 },
+    { label: 'future', done: 0, todo: 4 },
+    { label: 'minor', done: 0, todo: 8 },
+  ];
+  assert.strictEqual(todoHtml({ todo: sections }, true),
+    '<div class="todo">☑ 0/4 next <span class="rest">+12</span></div>');
+});
+
+test('todoHtml без хвоста не приписывает +0', () => {
+  assert.strictEqual(todoHtml({ todo: [{ label: 'next', done: 1, todo: 2 }] }, true),
+    '<div class="todo">☑ 1/3 next</div>');
+});
+
+test('todoHtml обходится без метки, когда её нет', () => {
+  // Галочки до первого заголовка — обычное дело у мелкого проекта. Пустая
+  // метка значит «называть нечем», и лишний пробел за ней был бы виден.
+  assert.strictEqual(todoHtml({ todo: [{ label: '', done: 2, todo: 0 }] }, true),
+    '<div class="todo">☑ 2/2</div>');
+});
+
+test('todoHtml молчит, когда считать нечего или галка выключена', () => {
+  // Пустого элемента здесь быть не должно: у двадцати проектов из сорока пяти
+  // docs/TODO.md нет вовсе, и пустая колонка стояла бы у половины списка.
+  // Это та же развилка, что у usageHtml с обеими выключенными галками.
+  assert.strictEqual(todoHtml({ todo: [] }, true), '');
+  assert.strictEqual(todoHtml({}, true), '');
+  assert.strictEqual(todoHtml({ todo: [{ label: 'next', done: 0, todo: 1 }] }, false), '');
+});
+
+test('todoHtml экранирует метку из файла', () => {
+  // Метку пишет человек в своём docs/TODO.md, а файл этот приезжает с чужой
+  // машины через агрегатор: в разметку она попадает как данные, а не как
+  // разметка.
+  assert.match(todoHtml({ todo: [{ label: '<b>x', done: 0, todo: 1 }] }, true),
+    /&lt;b&gt;x/);
+});
+
+test('todoHtml не верит числам из ответа', () => {
+  // Поле приезжает по сети из файла на чужой машине. NaN в колонке выглядел бы
+  // поломкой пикера, а не испорченным входом.
+  assert.strictEqual(todoHtml({ todo: [{ label: 'next', done: 'нет', todo: null }] }, true),
+    '<div class="todo">☑ 0/0 next</div>');
+  assert.strictEqual(todoHtml({ todo: 'нет' }, true), '');
+});
+
+test('подсказка строки несёт полную разбивку по секциям', () => {
+  // Ради этого разбивка и не влезает в строку: вопрос «а где именно они»
+  // задают редко, и ответ на него место в колонке не окупает.
+  const title = rowTitle({
+    cwd: '/home/user/p',
+    todo: [{ label: 'next', done: 0, todo: 4 }, { label: 'minor', done: 1, todo: 8 }],
+  });
+  assert.match(title, /next 0\/4 · minor 1\/9/);
+});
+
+test('подсказка без счёта остаётся прежней', () => {
+  assert.strictEqual(rowTitle({ cwd: '/home/user/p' }), rowTitle({ cwd: '/home/user/p', todo: [] }));
 });

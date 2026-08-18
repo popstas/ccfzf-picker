@@ -340,6 +340,56 @@
   }
 
   /**
+   * Счётчики docs/TODO.md у строки проекта.
+   *
+   * Поле `todo` приезжает от агрегатора списком секций по заголовкам первого
+   * уровня — данными, а не готовой строкой: то же правило, по которому он не
+   * отдаёт и `age`, а вторая форма на его стороне разошлась бы с колонкой.
+   *
+   * В строке — ведущая секция, как её рисует statusline-block.sh, и остаток
+   * одним числом открытых. Полная разбивка уезжает в подсказку (rowTitle):
+   * ширины на неё в колонке нет — у самого длинного из двадцати трёх проектов
+   * с TODO на живой машине это «☑ 0/4 next │ 4 future │ 8 minor».
+   *
+   * Пустого элемента при пустом счёте не остаётся, и это не мелочь: файла нет
+   * у двадцати проектов из сорока пяти, и пустая колонка стояла бы у половины
+   * списка. Та же развилка и по той же причине — у usageHtml с обеими
+   * выключенными галками.
+   *
+   * Числам из ответа функция не верит: поле собрано из файла на чужой машине,
+   * и `NaN` в колонке читался бы поломкой пикера, а не испорченным входом.
+   */
+  function todoHtml(row, show = true) {
+    const sections = todoSections(row);
+    if (!show || !sections.length) return '';
+    const lead = sections[0];
+    const total = lead.done + lead.todo;
+    // Хвост — сумма открытых, а не всех: сделанное в дальних секциях на
+    // вопрос «сколько ещё осталось» не отвечает.
+    const rest = sections.slice(1).reduce((n, sec) => n + sec.todo, 0);
+    const label = lead.label ? ` ${escapeHtml(lead.label)}` : '';
+    const tail = rest ? ` <span class="rest">+${rest}</span>` : '';
+    return `<div class="todo">☑ ${lead.done}/${total}${label}${tail}</div>`;
+  }
+
+  /** Секции счётчика, приведённые к числам. Не список — пустота. */
+  function todoSections(row) {
+    const raw = row && row.todo;
+    if (!Array.isArray(raw)) return [];
+    // Имя переменной не `s` намеренно: сторож контракта строки
+    // (row-contract.test.js) считает всякое `s.<имя>` обращением к полю
+    // сессии, и секция под этим именем записала бы `done` и `todo` в её
+    // контракт — поля, которых у сессии нет и быть не должно.
+    return raw
+      .filter(sec => sec && typeof sec === 'object')
+      .map(sec => ({
+        label: typeof sec.label === 'string' ? sec.label : '',
+        done: Number.isFinite(sec.done) ? sec.done : 0,
+        todo: Number.isFinite(sec.todo) ? sec.todo : 0,
+      }));
+  }
+
+  /**
    * Возраст в строке. У работающей сессии — время текущего хода.
    *
    * Колонка отвечает на вопрос «сколько уже», и у работающей сессии прежний
@@ -499,6 +549,17 @@
     }
     const message = session.agentMessage ?? '';
     if (message && !message.includes(IDLE_NOTICE)) lines.push(message);
+    // Полная разбивка счётчика docs/TODO.md — ради неё колонка и показывает
+    // только ведущую секцию. Вопрос «а в какой секции они лежат» задают
+    // редко, и ответ на него ширины в строке не окупает.
+    //
+    // Каждая секция — сделано из всего в ней, а не число открытых: в колонке
+    // хвост сложен в «сколько ещё», здесь же человек читает состав, и дробь
+    // отвечает на «сколько из скольких» у каждой.
+    const todo = todoSections(session)
+      .map(sec => `${sec.label ? `${sec.label} ` : ''}${sec.done}/${sec.done + sec.todo}`)
+      .join(' · ');
+    if (todo) lines.push(todo);
     return lines.join('\n');
   }
 
@@ -541,6 +602,7 @@
   return {
     statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
     sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml, windowHostHtml,
+    todoHtml,
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
     prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, windowNameHtml,

@@ -414,6 +414,17 @@
             font-size: 11px; color: #7d838c; white-space: nowrap;
             font-variant-numeric: tabular-nums;
         }
+        /* Галочки docs/TODO.md у строки проекта. Форма та же, что у .usage:
+           это колонка справа, а не подпись, и разъезжаться с соседями по
+           отступу и кеглю ей нельзя. Хвост «+N» тусклее ведущей секции:
+           читают в первую очередь её счёт, а «сколько ещё где-то» — то, за
+           чем возвращаются вторым взглядом. */
+        .todo {
+            flex: 0 0 auto; padding-left: 10px;
+            font-size: 11px; color: #7d838c; white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+        .todo .rest { color: #6f757e; }
         /* Заполненность контекста. Жёлтый — тот же, что у спрашивающего агента:
            «обрати внимание». Красный — «скоро начнёт забывать начало». */
         .usage .ctx.warn { color: #d29922; }
@@ -821,6 +832,11 @@
     { key: 'showContext', label: 'context', side: 'right' },
     { key: 'showWindow', label: 'window', side: 'right' },
     { key: 'showWindowHost', label: 'window host', side: 'right' },
+    // Колонка строки проекта, а не сессии: галочки живут в docs/TODO.md
+    // каталога, и у сессии своего счёта нет. Сторона всё равно `right` —
+    // сторона про то, где чекбокс стоит в статуслайне, а не про то, каким
+    // строкам достаётся колонка.
+    { key: 'showTodo', label: 'todo', side: 'right' },
     { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
     { key: 'showAll', label: 'show all', side: 'filter' },
     // Четвёртая группа, `dim`, — и не колонка, и не фильтр. Состав списка
@@ -860,6 +876,10 @@
     // ровно тогда, когда оно нужно, — у окна, стоящего не здесь. Выключенной
     // её бы никто и не нашёл, а лишней ширины она не занимает.
     showWindowHost: { list: true, statusline: false },
+    // Включена: у половины проектов счёт есть, и колонка отвечает на вопрос
+    // «сколько там осталось» ровно тогда, когда в проект и заходят. В
+    // статуслайн не вынесена — место внизу кончилось.
+    showTodo: { list: true, statusline: false },
     // Выключен: список без трекера и так весь без окон, и включённый фильтр
     // показал бы пустоту вместо сессий — с виду неотличимо от сломанного ssh.
     onlyWindow: { list: false, statusline: false },
@@ -1005,7 +1025,7 @@
   }
 
   const {
-    statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml,
+    statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml, todoHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
     windowNameHtml,
   } = window.SessionGlyph;
@@ -1179,6 +1199,11 @@
       // проекта, а на экран это не попадало, потому что здесь функция не
       // звалась вовсе). Порядок — как у строки сессии: hotkeyHtml перед
       // ageHtml.
+      // Счётчики docs/TODO.md — на месте колонки `usage` у строки сессии:
+      // это тот же вопрос «сколько в ней всего», только у каталога, и стоять
+      // они обязаны в той же колонке, иначе правый край списка разъедется
+      // между двумя видами строк.
+      todoHtml(project, toggles.showTodo) +
       hotkeyHtml(project, toggles.showHotkey) +
       ageHtml(project, nowSec) +
       `</div></div>`;
