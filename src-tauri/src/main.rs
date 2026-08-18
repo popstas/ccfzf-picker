@@ -1296,6 +1296,10 @@ struct ShowMenuItem(MenuItem<tauri::Wry>);
 /// Пункт трея «проекты» — по той же причине и с той же судьбой.
 struct ProjectsMenuItem(MenuItem<tauri::Wry>);
 
+/// Пункт трея «плитка» — туда же и затем же: смена `tileHotkey` в настройках
+/// обязана переписать и правую колонку, и подпись об отказе.
+struct TileMenuItem(MenuItem<tauri::Wry>);
+
 /// Подпись и акселератор пункта трея — по тому же правилу, что и на старте:
 /// акселератор — украшение и показывается всегда, а работает ли клавиша на
 /// самом деле, говорит подпись (`show_item_label`).
@@ -1410,6 +1414,9 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
             projects_item_label(projects_registered),
             &projects_accelerator,
         );
+    }
+    if let Some(item) = app.try_state::<TileMenuItem>() {
+        update_menu_item(&item.0, tile_item_label(tile_registered), &tile_accelerator);
     }
 
     let _ = app.emit("config-changed", ());
@@ -2093,6 +2100,24 @@ fn projects_item_label(hotkey_registered: bool) -> &'static str {
     }
 }
 
+/// Подпись пункта трея «плитка» — и она же говорит, слушается ли хоткей.
+///
+/// Правило то же, что у двух соседей: комбинация показывается всегда (её рисует
+/// правая колонка), а встала ли она на самом деле, колонка знать не может —
+/// занять сочетание могло любое чужое приложение. Здесь это стоит дороже, чем у
+/// соседей: клавишу пикер только что отобрал у оконного трекера, и «занята»
+/// значит «трекер ещё не выкачен» — самый ожидаемый отказ из трёх.
+///
+/// Сам пункт от отказа не страдает: раскладку он просит по нажатию, а не по
+/// клавише, — поэтому подпись говорит про хоткей, а не про пункт.
+fn tile_item_label(hotkey_registered: bool) -> &'static str {
+    if hotkey_registered {
+        "Tile windows"
+    } else {
+        "Tile windows (hotkey is taken)"
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(LastToggle(Mutex::new(None)))
@@ -2195,12 +2220,8 @@ fn main() {
                 register_picker_hotkey(app.handle(), &config);
             let (projects_registered, projects_accelerator) =
                 register_projects_hotkey(app.handle(), &config);
-            // Пункта трея у плитки нет, поэтому ответ регистрации никуда не
-            // запоминается: об отказе говорит строка в журнале и красная
-            // подпись в окне настроек при сохранении. Пункта нет намеренно —
-            // раскладка не про пикер, а про окна той машины, и просить о ней
-            // из трея уже можно у самого трекера.
-            let _ = register_tile_hotkey(app.handle(), &config);
+            let (tile_registered, tile_accelerator) =
+                register_tile_hotkey(app.handle(), &config);
 
             // Меню трея строится здесь, а не в начале setup: ему нужны и
             // хоткей, и то, чем кончилась его регистрация.
@@ -2264,6 +2285,27 @@ fn main() {
                 .iter()
                 .map(|(id, _, label)| MenuItem::with_id(app, *id, *label, true, None::<&str>))
                 .collect::<Result<Vec<_>, _>>()?;
+            // Плитка — действие, а не режим, поэтому она не в `MODE_MENU` и
+            // стоит под пунктами-режимами: те открывают список, а этот трогает
+            // окна на экране и списка не показывает вовсе. Комбинация здесь
+            // тоже украшение — меню трея клавиш не слушает, — и едет она тем же
+            // `menu_item_parts`: на Windows в подпись, на маке в слот.
+            let (tile_text, tile_accel) =
+                menu_item_parts(tile_item_label(tile_registered), &tile_accelerator);
+            let tile_item = match MenuItem::with_id(
+                app,
+                "tile",
+                &tile_text,
+                true,
+                tile_accel.as_deref(),
+            ) {
+                Ok(item) => item,
+                Err(e) => {
+                    ccfzf_log!("cannot show hotkey {tile_accelerator} in tray menu: {e}");
+                    MenuItem::with_id(app, "tile", &tile_text, true, None::<&str>)?
+                }
+            };
+            app.manage(TileMenuItem(tile_item.clone()));
             // Настройки — второй пункт, между показом и выходом. Из трея они
             // достижимы и тогда, когда до шестерёнки в статуслайне не добраться:
             // хоткей не встал, а пикер не открывается по той самой настройке,
@@ -2295,6 +2337,7 @@ fn main() {
                     .iter()
                     .map(|item| item as &dyn tauri::menu::IsMenuItem<tauri::Wry>),
             );
+            items.push(&tile_item);
             items.push(&settings_item);
             items.push(&quit_item);
             items.push(&version_item);
@@ -2326,6 +2369,15 @@ fn main() {
                             }
                         });
                     }
+                    // Та же работа, что и у хоткея, той же функцией: второй
+                    // сбор просьбы разошёлся бы с первым молча — публикация
+                    // прошла бы, а окна встали бы не в том порядке.
+                    //
+                    // Вызовом на месте, а не через spawn, в отличие от
+                    // «Settings…»: окна эта ветка не создаёт, а гашение пикера
+                    // и чтение конфига цикл событий не занимают. Публикация и
+                    // так уходит в `spawn_blocking` внутри.
+                    "tile" => tile_press(app),
                     "quit" => app.exit(0),
                     // Пункты-режимы разбираются таблицей, а не веткой на
                     // каждый: ветка, забытая при заведении пятого режима, дала
@@ -2888,6 +2940,42 @@ mod tests {
             handler.contains("async_runtime::spawn"),
             "открытие настроек из трея должно уходить в пул, а не в цикл событий"
         );
+    }
+
+    /// Пункт трея без своей ветки в `on_menu_event` — самый тихий отказ из
+    /// возможных: нажатие проходит, ветки не находит, ни ошибки, ни следа. То
+    /// же правило, за которое в `sessions.html` уже заплачено сторожем «каждый
+    /// встроенный пункт меню обработан в runAction». Поведением не поймать
+    /// вовсе — `build()` отвечает `Ok` и с пунктом, и без него.
+    #[test]
+    fn every_active_tray_item_is_handled() {
+        let src = include_str!("main.rs");
+        let handler = src
+            .split_once(".on_menu_event(|app, event| match event.id.as_ref() {")
+            .expect("обработчик меню трея пропал — тест сторожит не то")
+            .1;
+        let (handler, _) = handler
+            .split_once(".on_tray_icon_event")
+            .expect("обработчик меню не закрыт");
+        // `version` сюда не входит намеренно: он заведён неактивным (подпись,
+        // а не действие), и ветки ему не полагается.
+        for id in ["show", "show-projects", "tile", "settings", "quit"] {
+            assert!(
+                handler.contains(&format!("\"{id}\"")) || mode_for_menu_id(id).is_some(),
+                "пункт трея {id} не разобран в on_menu_event — нажатие молча не сделает ничего"
+            );
+        }
+    }
+
+    /// Про занятый хоткей плитки говорит подпись пункта, а не правая колонка:
+    /// колонка рисует комбинацию в обоих случаях и отличить их не может.
+    ///
+    /// Стоит это дороже, чем у соседей: клавишу пикер отобрал у оконного
+    /// трекера, и «занята» здесь значит «трекер ещё не выкачен».
+    #[test]
+    fn tile_label_tells_when_the_hotkey_is_taken() {
+        assert_eq!(tile_item_label(true), "Tile windows");
+        assert_ne!(tile_item_label(false), tile_item_label(true));
     }
 
     /// Команда о занятых клавишах обязана быть `async`.
