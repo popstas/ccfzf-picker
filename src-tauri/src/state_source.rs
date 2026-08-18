@@ -2,6 +2,64 @@ use crate::proc::hidden_command;
 use std::io::Write;
 use std::process::Stdio;
 
+/// Метка местного источника — она же значение поля `source` у его строк.
+///
+/// `sshHost`, буквально равный `local`, зарезервирован: обратный разбор
+/// (`from_label`) принял бы его за местный источник и пошёл бы не по ssh.
+/// Случай выдуманный, а вторая дорога различать их стоила бы поля рядом с
+/// меткой в каждой строке ответа.
+pub const LOCAL_LABEL: &str = "local";
+
+/// Кого спрашивать. Дорог две, и они не сводятся друг к другу: у ssh чужой
+/// шелл на той стороне, у местного вызова — свой процесс и никакого шелла.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Source {
+    Ssh(String),
+    Local,
+}
+
+impl Source {
+    /// Как источник называется в поле `source` строки.
+    ///
+    /// `sshHost` отдаётся дословно, включая форму `user@host`: этой же строкой
+    /// потом адресуются действия, и приведи её пикер к «красивому» имени
+    /// машины — ssh пошёл бы не туда.
+    pub fn label(&self) -> String {
+        match self {
+            Source::Ssh(host) => host.clone(),
+            Source::Local => LOCAL_LABEL.to_string(),
+        }
+    }
+
+    pub fn from_label(label: &str) -> Source {
+        if label == LOCAL_LABEL {
+            Source::Local
+        } else {
+            Source::Ssh(label.to_string())
+        }
+    }
+}
+
+/// Источники по конфигу. Пустой список — «спрашивать некого», и это
+/// единственная проверка ненастроенности: раньше их было две (`check_ssh_host`
+/// в Rust и `sshHostMissing()` на странице), и второе правило про то же самое
+/// молчало бы, разойдись с первым.
+pub fn sources_from(config: &serde_json::Value) -> Vec<Source> {
+    let mut out = Vec::new();
+    let host = config
+        .get("sshHost")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .trim();
+    if !host.is_empty() {
+        out.push(Source::Ssh(host.to_string()));
+    }
+    if config.get("localSource").and_then(|v| v.as_bool()) == Some(true) {
+        out.push(Source::Local);
+    }
+    out
+}
+
 /// Один вызов агрегатора на удалённом хосте.
 ///
 /// Ответ не разбирается и не чинится: форму проверяет фронтенд той же
@@ -114,7 +172,7 @@ fn looks_like_session_id(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::looks_like_session_id;
+    use super::{looks_like_session_id, sources_from, Source};
 
     #[test]
     fn id_sessii_prinimaetsya_tolko_v_forme_uuid() {
@@ -128,5 +186,44 @@ mod tests {
         // Длины сегментов проверяются каждая своя: без этого сошёлся бы любой
         // набор из пяти шестнадцатеричных кусков.
         assert!(!looks_like_session_id("b5a54ce-3a022-4c9a-aa91-e306d75bdc76"));
+    }
+
+    /// Список источников — это весь ответ на вопрос «кого спрашивать».
+    /// Пустой `sshHost` не источник, а ненастроенное поле; выключенный
+    /// `localSource` не добавляет ничего.
+    #[test]
+    fn sources_come_from_the_config() {
+        let cfg = serde_json::json!({"sshHost": "remote-host"});
+        assert_eq!(sources_from(&cfg), vec![Source::Ssh("remote-host".into())]);
+
+        let cfg = serde_json::json!({"sshHost": "remote-host", "localSource": true});
+        assert_eq!(
+            sources_from(&cfg),
+            vec![Source::Ssh("remote-host".into()), Source::Local],
+            "удалённый первым: дедуп разрешает споры в пользу первого"
+        );
+
+        let cfg = serde_json::json!({"localSource": true});
+        assert_eq!(sources_from(&cfg), vec![Source::Local], "один местный — тоже рабочая настройка");
+
+        assert_eq!(sources_from(&serde_json::json!({})), Vec::<Source>::new());
+        assert_eq!(
+            sources_from(&serde_json::json!({"sshHost": "  ", "localSource": false})),
+            Vec::<Source>::new(),
+            "пробелы — тот же пустой хост"
+        );
+        assert_eq!(sources_from(&serde_json::Value::Null), Vec::<Source>::new());
+    }
+
+    /// Метка источника уезжает в поле `source` каждой строки и возвращается
+    /// обратно аргументом команды. Дорога круговая, и разъехаться половинкам
+    /// нельзя: по метке потом выбирается транспорт.
+    #[test]
+    fn label_survives_the_round_trip() {
+        for s in [Source::Ssh("user@remote-host".into()), Source::Local] {
+            assert_eq!(Source::from_label(&s.label()), s);
+        }
+        assert_eq!(Source::Ssh("remote-host".into()).label(), "remote-host");
+        assert_eq!(Source::Local.label(), "local");
     }
 }
