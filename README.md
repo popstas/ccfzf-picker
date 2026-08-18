@@ -49,6 +49,10 @@
 локальной машине; на удалённой — `ccfzf`.
 Без `tauri-cli` `cargo tauri build` упадёт с `no such subcommand: tauri`.
 
+Clone with `git clone --recurse-submodules`, or run `git submodule update --init`
+in an existing checkout — the vendored `vendor/ccfzf` aggregator is compiled
+into the binary, and without it the whole build fails.
+
 ```
 npm test                      # тесты фронтенда
 cd src-tauri && cargo test    # тесты оболочки
@@ -63,6 +67,26 @@ cargo tauri build             # сборка
 нет намеренно.
 
 Каждое поле описано комментарием прямо в `config.example.yml`.
+
+### Sessions from this machine
+
+`localSource: true` adds a second source: the picker runs `ccfzf --state` here,
+as a process, without ssh. Both lists are shown as one — a session keeps the
+machine of its window, and a session with no window belongs to the source that
+reported it.
+
+`ccfzf` is taken from `PATH`. If it is not there, the picker unpacks the copy
+built into the binary (`~/.config/ccfzf-picker/ccfzf`) and runs it through
+`bash`. `PATH` comes first on purpose: on a machine where `ccfzf` is already
+installed, it is the one that rewrites `~/.ccfzf.sessions.json` — the dump the
+window tracker, the Home Assistant export and the openHASP panel live on.
+
+Linux and macOS only: `ccfzf` is a bash wrapper around an embedded python
+program, and neither it nor the bundled copy runs on native Windows.
+
+With `localSource` on, `sshHost` may be left empty — one source is a working
+setup. Local sessions get no window mark and no Enter-to-focus until the window
+tracker on this machine learns to bind them; that is a separate task.
 
 Если каталоги удалённого хоста примонтированы к этой машине, укажите `pathMap`
 — пару «путь там ⇄ путь здесь». По ней пикер добавит к каждой сессии действия

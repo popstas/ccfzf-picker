@@ -264,11 +264,20 @@
    *
    * Имя уже склеено строкой в session-list.js — здесь меняется только подпись
    * подсказки: одна машина или несколько.
+   *
+   * `windowHost` без `window` — не повод рисовать значок. С двумя
+   * настроенными источниками `windowHost` ставится и без записи окна вовсе —
+   * просто по имени источника строки (`ambiguous` в session-list.js): подпись
+   * «Window is on <host>» тогда была бы неправдой — окна там нет, а с
+   * `sshHost: user@remote-host` в неё вдобавок лезла бы ssh-строка, а не имя
+   * машины. Про машину без окна уже сказано заголовком блока — вторая
+   * подпись здесь только повторила бы враньё.
    */
   function windowHostHtml(session, showWindowHost = true) {
     if (!showWindowHost) return '';
     const host = session?.windowHost;
-    if (!host) return '<div class="winhost"></div>';
+    const hasWindow = Boolean(session?.window) || (Array.isArray(session?.windows) && session.windows.length > 0);
+    if (!host || !hasWindow) return '<div class="winhost"></div>';
     // Машин бывает две: сессию открывают и на соседней машине тоже.
     const label = host.includes(',') ? 'Windows are on' : 'Window is on';
     return `<div class="winhost" title="${label} ${escapeHtml(host)}">${escapeHtml(host)}</div>`;

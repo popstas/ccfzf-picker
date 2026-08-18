@@ -7,6 +7,12 @@
 # Любая форма, понятная ssh: имя из ~/.ssh/config, user@host, host.domain.
 sshHost: example-host
 
+# Second source of the list: ccfzf on this machine, without ssh. Off by
+# default. Linux and macOS only — ccfzf is a bash wrapper around an embedded
+# python program, and neither it nor the bundled copy runs on native Windows.
+# With it on, sshHost may be left empty: one source is a working setup.
+localSource: false
+
 # Глобальный хоткей показа пикера. SUPER — это Cmd на маке и Win на Windows,
 # одна запись даёт обе комбинации. Занятую системой комбинацию зарегистрировать
 # не выйдет: приложение напишет об этом в stderr и продолжит работать — окно

@@ -62,6 +62,9 @@
       fields: [
         { id: 'sshHost', label: 'Host with sessions', type: 'text',
           hint: 'Any form ssh understands. Without it there is nowhere to get the list from.' },
+        { id: 'localSource', label: 'Also show sessions from this machine', type: 'bool',
+          default: false,
+          hint: 'Runs ccfzf here, without ssh. Linux and macOS only.' },
         // Не поле конфига, а помощник к двум следующим: подставляет в них
         // путь и аргументы разом. Своего ключа у него нет намеренно — второй
         // источник правды разошёлся бы с полями, которые правят руками, и
@@ -371,8 +374,11 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
    */
   function validate(fields) {
     const problems = [];
-    if (!String(fields.sshHost || '').trim()) {
-      problems.push('sshHost is not set: there is nowhere to get the list from');
+    if (!String(fields.sshHost || '').trim() && !fields.localSource) {
+      // Текст дословно тот же, что и в poller.rs и sessions.html, —
+      // намеренно: разная формулировка одной и той же беды читалась бы как
+      // две разных.
+      problems.push('no source: set the host with sessions, or turn on sessions from this machine');
     }
     const hotkey = String(fields.hotkey || '').trim();
     // isReserved, а не свой разбор строки: комбинации, которые окно пикера

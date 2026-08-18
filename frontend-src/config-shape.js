@@ -13,6 +13,13 @@
     // Умолчания нет намеренно: любое значение здесь — либо чужое имя машины,
     // либо ложь. Пустой хост пикер показывает как ненастроенный конфиг.
     sshHost: '',
+    // Второй источник списка: `ccfzf` на этой машине, без ssh. Выключен по
+    // умолчанию, и это не осторожность, а честность: включённым он добавил бы
+    // всем существующим установкам строку об отказе там, где сегодня всё
+    // работает — `ccfzf` и python3 есть не везде. Linux и macOS: `ccfzf` это
+    // bash-обёртка вокруг встроенной python-программы, на нативном Windows не
+    // запустится ни она, ни вшитая копия.
+    localSource: false,
     hotkey: 'Cmd+Shift+C',
     // Пусто, а не комбинация: у второго хоткея умолчание своё на каждой
     // системе (`Win+Shift+F10` против `Option+Cmd+Shift+C`), и одной строкой,
@@ -267,6 +274,7 @@
 
     return {
       sshHost: typeof src.sshHost === 'string' && src.sshHost ? src.sshHost : DEFAULTS.sshHost,
+      localSource: typeof src.localSource === 'boolean' ? src.localSource : DEFAULTS.localSource,
       hotkey: typeof src.hotkey === 'string' && src.hotkey ? src.hotkey : DEFAULTS.hotkey,
       projectsHotkey: typeof src.projectsHotkey === 'string'
         ? src.projectsHotkey : DEFAULTS.projectsHotkey,

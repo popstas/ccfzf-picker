@@ -871,7 +871,7 @@ test('validate, провалившийся под автосохранением
   const { calls, status } = await persistGeneralTab({ fields: { sshHost: '' }, config: {} });
   assert.ok(!calls.some(c => c.cmd === 'save_config'), 'save_config не должен был позваться');
   assert.strictEqual(status.className, 'bad');
-  assert.match(status.textContent, /sshHost is not set/);
+  assert.match(status.textContent, /no source/);
 });
 
 // ── нет стартового persist() при загрузке (ревью финальной волны) ───────────

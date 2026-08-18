@@ -52,11 +52,41 @@
     return String(raw).trim();
   }
 
+  /**
+   * Машина, названная источником строки.
+   *
+   * Ответ на вопрос «чья это сессия» у строки без окна: раньше его давало
+   * отсутствие окна («нет окна — значит своя»), и при одном источнике это было
+   * верно. С двумя источниками так соврёшь: удалённая сессия без окна встала бы
+   * в блок местных. Зовётся только когда источников в ответе больше одного
+   * (см. `ambiguous` в `buildSessionList`) — при одном сравнивать нечего, и
+   * прежнее «нет окна — значит своя» остаётся верным.
+   *
+   * Отдаётся дословно, как записан `sshHost`: этой же строкой адресуются
+   * действия, и «красивое» имя машины увело бы ssh не туда.
+   */
+  function sourceHostOf(source) {
+    const label = String(source || '').trim();
+    if (!label || label === 'local') return '';
+    return label;
+  }
+
   function buildSessionList({ sessions, seen, state, configHost } = {}) {
     const list = Array.isArray(sessions) ? sessions : [];
     const byId = {};
     for (const s of list) if (s && s.id) byId[s.id] = s;
     const marks = seen || {};
+
+    // Различать машины по источнику имеет смысл только тогда, когда в
+    // ответе их несколько: с одним источником отличать нечего, все строки
+    // приехали оттуда же, и старое умолчание («нет окна — значит своя»)
+    // верно по-прежнему. Обычная установка (один `sshHost`, без
+    // `localSource`) от этого правила не меняется ни на бит: сессии без
+    // окна остаются в «Active sessions», как и всегда.
+    const distinctSources = new Set(
+      list.map(s => String((s || {}).source || '').trim()).filter(Boolean),
+    );
+    const ambiguous = distinctSources.size > 1;
 
     const rows = [];
     for (const s of list) {
@@ -135,8 +165,11 @@
           // глиф на карточке, и верный Enter: `focusWindowOf` ходит через
           // `windowsOf`, а та читает именно это поле.
           windows: w ? [w] : [],
-          // Машина этого окна, если она чужая, и пустота, если своя.
-          windowHost: windowHostOf(w, configHost),
+          source: String(s.source || ''),
+          // Запись окна ответ на вопрос: окно называет машину, на экране которой
+          // сессия видна, и этот ответ полный — включая когда ответ «своя машина».
+          // Источник спрашивается только если записи окна нет вовсе.
+          windowHost: w ? windowHostOf(w, configHost) : (ambiguous ? sourceHostOf(s.source) : ''),
           // Заголовок своего окна — то самое имя, которым сессию завёл человек
           // (`claude -n tray-build-time`): по нему её и опознают. `title`
           // строки приезжает из транскрипта (custom-title/ai-title) и с ним

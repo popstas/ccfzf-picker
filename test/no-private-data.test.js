@@ -54,9 +54,15 @@ const UNIVERSAL = [
 ];
 
 function trackedFiles() {
-  return execFileSync('git', ['ls-files'], { cwd: REPO, encoding: 'utf8' })
+  // Модуль это содержимое другого репозитория: он отвечает за себя сам, а
+  // чтение его отсюда молча отключает всех трёх стражей. Фильтруем по режиму
+  // в индексе, а не по наличию на диске — это единственный источник правды про
+  // то, что действительно уедет в публикацию.
+  return execFileSync('git', ['ls-files', '-s'], { cwd: REPO, encoding: 'utf8' })
     .split('\n')
     .filter(Boolean)
+    .filter(line => !line.startsWith('160000 '))  // исключить gitlinks (submodules)
+    .map(line => line.split('\t')[1])             // извлечь путь после табуляции
     .filter(f => !ALLOWED.has(f));
 }
 
@@ -101,6 +107,22 @@ function textLines(file) {
   if (buf.includes(0)) return null;
   return buf.toString('utf8').split('\n');
 }
+
+test('список отслеживаемых файлов содержит только файлы, не директории', () => {
+  // Содержимое чужого репозитория (`vendor/ccfzf`) — не файл этого: он
+  // отвечает за свои приватные данные сам, а gitlink на него в списке — уже
+  // регрессия фильтра выше. Директорией такая запись и опознаётся: как файл
+  // её не прочитать вовсе, `fs.readFileSync` упадёт EISDIR — и упавший этим
+  // тест погасил бы сразу все три стража, ничего не проверив. Отсюда и место
+  // проверки — раньше любой попытки textLines().
+  const directories = trackedFiles().filter(f => fs.statSync(path.join(REPO, f)).isDirectory());
+  assert.deepStrictEqual(directories, [], [
+    '',
+    'Список от git ls-files содержит директории, которые нельзя читать как файлы:',
+    ...directories.map(d => `  ${d}`),
+    '',
+  ].join('\n'));
+});
 
 // Проверка идёт до содержательных: пока страж не умеет прочитать файл, он про
 // него ничего и не утверждает, а молчание тут неотличимо от чистоты.

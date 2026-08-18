@@ -366,3 +366,90 @@ test('живость родителя не отбирается уснувшим
   const rows = buildSessionList({ sessions: [parent, fork], seen: {}, configHost: 'mac-host' });
   assert.strictEqual(rows[0].live, true);
 });
+
+test('машину строке без окна называет её источник', () => {
+  // При одном источнике «своей» считалась всякая строка без окна, и это было
+  // верно. С двумя — соврёт: удалённая сессия без окна встала бы в блок
+  // местных, и отличить её было бы нечем.
+  const rows = buildSessionList({
+    sessions: [
+      { id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session', source: 'remote-host' },
+      { id: 'b', cwd: '/b', title: 'b', mtime: 1, live: true, kind: 'session', source: 'local' },
+    ],
+    seen: {}, state: {}, configHost: 'host-a',
+  });
+  assert.strictEqual(rows.find(r => r.id === 'a').windowHost, 'remote-host');
+  assert.strictEqual(rows.find(r => r.id === 'b').windowHost, '', 'местная сессия — своя');
+});
+
+test('запись окна главнее источника', () => {
+  // Окно называет машину, на экране которой сессия видна; источник — машину, у
+  // которой про неё спросили. Это разные вопросы, и первый главнее.
+  const rows = buildSessionList({
+    sessions: [{
+      id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session',
+      source: 'remote-host',
+      windows: [{ host: 'host-b', pid: 7, lastSeen: 1 }],
+    }],
+    seen: {}, state: {}, configHost: 'host-a',
+  });
+  assert.strictEqual(rows[0].windowHost, 'host-b');
+});
+
+test('источник едет в строку полем', () => {
+  // По нему выбирается транспорт действия: ssh или местный запуск.
+  const rows = buildSessionList({
+    sessions: [{ id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session', source: 'local' }],
+    seen: {}, state: {}, configHost: 'host-a',
+  });
+  assert.strictEqual(rows[0].source, 'local');
+});
+
+test('окно на своей машине возвращает пустоту, несмотря на чужой источник', () => {
+  // Запись окна ответ полный — включая когда ответ «своя машина». Даже если
+  // источник другой (агрегатор слил данные нескольких трекеров), окно на
+  // экране пикера отправляет сессию в локальный блок — туда и встанет.
+  const rows = buildSessionList({
+    sessions: [{
+      id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session',
+      source: 'remote-host',
+      windows: [{ host: 'host-a', pid: 1, lastSeen: 1 }],
+    }],
+    seen: {}, state: {}, configHost: 'host-a',
+  });
+  assert.strictEqual(rows[0].windowHost, '', 'окно на экране пикера — своя машина');
+});
+
+test('источник в форме user@host достаётся без правок', () => {
+  // Этой же строкой адресуются действия: ssh или местный запуск. Красивое имя
+  // машины увело бы ssh не туда. Источников два — иначе атрибуция не
+  // включилась бы вовсе (см. тест про byte-identical единственный источник).
+  const rows = buildSessionList({
+    sessions: [
+      { id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session', source: 'user@remote-host' },
+      { id: 'b', cwd: '/b', title: 'b', mtime: 1, live: true, kind: 'session', source: 'local' },
+    ],
+    seen: {}, state: {}, configHost: 'host-a',
+  });
+  assert.strictEqual(rows.find(r => r.id === 'a').windowHost, 'user@remote-host');
+});
+
+test('источник называет машину только когда их несколько', () => {
+  // Обычная установка — один sshHost, localSource выключен, — и все строки
+  // приехали от одного источника. Сравнивать нечего: сессия без окна остаётся
+  // в местном блоке, как было до появления двух источников. Комментарий у
+  // session-groups.js:304 обещает именно это, и это тест на его слово.
+  //
+  // Двухисточниковый случай пиннует соседний тест выше, «машину строке без
+  // окна называет её источник»: в нём два разных `source`, и атрибуция
+  // включается.
+  const rows = buildSessionList({
+    sessions: [
+      { id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session', source: 'remote-host' },
+      { id: 'b', cwd: '/b', title: 'b', mtime: 1, live: true, kind: 'session', source: 'remote-host' },
+    ],
+    seen: {}, state: {}, configHost: 'host-a',
+  });
+  assert.strictEqual(rows[0].windowHost, '', 'единственный источник — атрибуции нет');
+  assert.strictEqual(rows[1].windowHost, '');
+});

@@ -836,14 +836,17 @@
     render();
   }
 
-  // check_ssh_host в src-tauri/src/main.rs закрывает только опрос: её зовёт
-  // фоновый поток (poller.rs), и ответ его виден в списке. Запуск терминала
-  // идёт мимо неё, через spawn_detached, и без этой проверки ненастроенный
-  // конфиг показал бы сырую ошибку ssh в отдельном окне — там, где её никто
-  // не связывает с конфигом пикера.
-  function sshHostMissing() {
-    if (CONFIG.sshHost && CONFIG.sshHost.trim()) return false;
-    error = 'sshHost is not set: copy config.example.yml to ~/.config/ccfzf-picker/config.yaml';
+  // Пустой список источников — единственная проверка «ничего не настроено»
+  // теперь и на стороне poller.rs. Запуск терминала идёт мимо опроса, через
+  // spawn_detached, и без этой проверки ненастроенный конфиг показал бы
+  // сырую ошибку ssh в отдельном окне — там, где её никто не связывает с
+  // конфигом пикера.
+  //
+  // Текст дословно тот же, что и в poller.rs и settings-form.js, — намеренно:
+  // разная формулировка одной и той же беды читалась бы как две разных.
+  function noSources() {
+    if ((CONFIG.sshHost && CONFIG.sshHost.trim()) || CONFIG.localSource) return false;
+    error = 'no source: set the host with sessions, or turn on sessions from this machine';
     render();
     return true;
   }
@@ -2158,9 +2161,8 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * ни на одну из них человек не смотрел — окна лишь встали по местам.
    *
    * Ответа у просьбы нет, как и у подъёма окна: отказ трекер показывает своему
-   * человеку строкой в трее. На машине без раскладок (windows11-manager их
-   * пока не умеет) просьба и вовсе никем не разбирается — это известная цена
-   * того, что умение никто не объявляет.
+   * человеку строкой в трее. Если машина не объявила умение раскладок, просьба
+   * к ней исчезнет молча — цена необъявленного умения.
    */
   async function placeWindows(row, mode) {
     await invoke('hide_picker');
@@ -2249,11 +2251,31 @@ const infoBackdrop = document.getElementById('info-backdrop');
       .filter(s => !wanted.size || wanted.has(s.id));
     for (const s of list) {
       error = '';
-      await openSession({ id: s.id, cwd: s.cwd || '', title: s.title || '', kind: 'snapshot-session' });
+      await openSession({
+        id: s.id, cwd: s.cwd || '', title: s.title || '', kind: 'snapshot-session',
+        // Источник — снимка: восстановление идёт на ту же машину, которая
+        // его сняла, а без поля транспорт откатился бы на CONFIG.sshHost.
+        source: snap.source || '',
+      });
       if (error) return;
       await new Promise(resolve => setTimeout(resolve, 1200));
     }
     error = '';
+  }
+
+  /**
+   * Машина строки для английской фразы человеку — «on host-a», «on this
+   * machine» для местной.
+   *
+   * `row.source` дословно тот же, каким адресуются действия (ssh-строка как
+   * есть), и печатать его без разбора в предложение для человека — не то же
+   * самое, что подставлять его в команду. «Process 4711 on local will get
+   * SIGHUP» читается как имя чужой машины `local`, а сессия при этом на этом
+   * же компьютере.
+   */
+  function sourceLabel(row) {
+    const source = (row && row.source) || CONFIG.sshHost;
+    return source === 'local' ? 'this machine' : source;
   }
 
   /**
@@ -2284,7 +2306,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // Менеджер знает профиль Windows Terminal для этого проекта; собранная
     // здесь команда его теряет.
     if (action === 'manager') return openViaManager(row);
-    if (sshHostMissing()) return;
+    if (noSources()) return;
     const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, {
       sshHost: CONFIG.sshHost, terminal: CONFIG.terminal, helperPath: await helperPath(),
     });
@@ -2297,7 +2319,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (cmd.destructive) {
       const ok = confirm(
         `Take over session "${sessionName(row)}"?\n\n`
-        + `Process ${row.pid} on ${CONFIG.sshHost} will get SIGHUP and exit, and its window on Windows will close.\n`
+        + `Process ${row.pid} on ${sourceLabel(row)} will get SIGHUP and exit, and its window on Windows will close.\n`
         + `Background jobs started in its shell will die with it.`,
       );
       if (!ok) return;
@@ -2543,7 +2565,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     render();
     try {
       await invoke('set_comment', {
-        sshHost: CONFIG.sshHost, id: row.id, text, from: CONFIG.windowHost || '',
+        source: row.source || CONFIG.sshHost, id: row.id, text, from: CONFIG.windowHost || '',
       });
     } catch (e) {
       error = String(e);
@@ -3005,9 +3027,14 @@ const infoBackdrop = document.getElementById('info-backdrop');
    *
    * Отметки «просмотрено» здесь нет: смотреть ещё нечего, сессия только что
    * началась.
+   *
+   * `source` — чей это каталог: строка проекта теперь бывает и с чужой
+   * машины, и командой отсюда обязан ходить именно туда. У просьбы от
+   * проектного хоткея строки нет вовсе (только каталог), и там source не
+   * передаётся — commandParts откатывается на CONFIG.sshHost сам.
    */
-  async function newSession(cwd) {
-    if (!cwd || sshHostMissing()) return;
+  async function newSession(cwd, source) {
+    if (!cwd || noSources()) return;
     const taken = takenSessionNames();
     // Пустая команда — отказ OpenStrategy, а не поломка: путь с `;` Windows
     // Terminal порежет на панели ещё до шелла. Сказать об этом обязательно —
@@ -3023,7 +3050,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // давало окно, в которое печатается литеральный `{command}`, а ssh с
     // аргументами уезжал osascript в никуда. Поймано живьём 2026-08-15.
     const argv = window.OpenStrategy.terminalArgv(
-      CONFIG.terminal, ['ssh', '-t', CONFIG.sshHost, remote], { helperPath: await helperPath() },
+      CONFIG.terminal,
+      window.OpenStrategy.commandParts(remote, source || CONFIG.sshHost),
+      { helperPath: await helperPath() },
     );
     if (!argv) {
       error = helperError || 'terminal helper is not available';
@@ -3068,7 +3097,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     const action = window.OpenTransport.chooseProjectOpenAction(
       row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
     );
-    if (action !== 'manager') return newSession(row.cwd);
+    if (action !== 'manager') return newSession(row.cwd, row.source);
     await invoke('hide_picker');
     try {
       await invoke('open_project_mqtt', { cwd: dir, base: managerBase() });
@@ -3110,10 +3139,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
     const action = window.OpenTransport.chooseProjectOpenAction(
       row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
     );
-    if (action !== 'manager') return newSession(row.cwd);
+    if (action !== 'manager') return newSession(row.cwd, row.source);
     const taken = takenSessionNames();
     const name = window.OpenStrategy.newSessionName(dir, taken);
-    if (!name) return newSession(row.cwd);
+    if (!name) return newSession(row.cwd, row.source);
     // Имя занимается до отправки, а не после — в отличие от местной
     // newSession, где имя ждёт лишь миллисекунды локального spawn, здесь
     // invoke ждёт публикацию в брокер (таймаут до 5 с). Пикер эти секунды
@@ -3233,7 +3262,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // повторном переносе. В буфер уходит команда целиком.
       const shown = cmd.split(' || ')[0];
       invoke('copy_to_clipboard', { text: cmd })
-        .then(() => showNotice(`Copied: ${shown} — paste it into a terminal on ${CONFIG.sshHost}, wherever you want the session`))
+        .then(() => showNotice(`Copied: ${shown} — paste it into a terminal on ${sourceLabel(row)}, wherever you want the session`))
         .catch((e) => { error = String(e); render(); });
       return;
     }

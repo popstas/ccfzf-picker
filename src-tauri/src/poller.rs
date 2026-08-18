@@ -50,6 +50,48 @@ pub fn fingerprint(state: &serde_json::Value) -> String {
     copy.to_string()
 }
 
+use crate::state_source::Source;
+
+/// Сложить ответы источников в пару «состояние, текст отказа».
+///
+/// Чистая и отдельная от `poll_once`: настоящий ssh в тесте не поднять, а
+/// правило «отказ одного не гасит второй» — единственное, что здесь можно
+/// сделать неправильно.
+///
+/// Отказ называет источник поимённо: `local: ccfzf not found` и
+/// `remote-host: exited with 255` — разные беды, и чинят их в разных местах.
+pub fn combine(
+    parts: Vec<(Source, Result<serde_json::Value, String>)>,
+) -> (Option<serde_json::Value>, String) {
+    let mut good = Vec::new();
+    let mut errors = Vec::new();
+    for (source, part) in parts {
+        match part {
+            Ok(state) => good.push((source, state)),
+            Err(e) => errors.push(format!("{}: {e}", source.label())),
+        }
+    }
+    let state = if good.is_empty() {
+        None
+    } else {
+        Some(crate::merge_state::merge_states(&good))
+    };
+    (state, errors.join("; "))
+}
+
+/// Опросить все источники по очереди.
+///
+/// По очереди, а не параллельно: поток здесь один, источников два, а
+/// таймауты у ssh уже выставлены (`ConnectTimeout=5`, `ServerAlive*`), то есть
+/// худший случай ограничен. Второй поток стоил бы синхронизации ради секунд.
+pub fn poll_once(sources: &[Source]) -> (Option<serde_json::Value>, String) {
+    let parts = sources
+        .iter()
+        .map(|s| (s.clone(), crate::state_source::fetch(s)))
+        .collect();
+    combine(parts)
+}
+
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
@@ -86,7 +128,7 @@ struct Cache {
 pub struct Poller {
     tx: Mutex<Sender<Signal>>,
     cache: Arc<Mutex<Cache>>,
-    settings: Arc<Mutex<(String, bool)>>,
+    settings: Arc<Mutex<(Vec<Source>, bool)>>,
 }
 
 fn payload(cache: &Cache) -> serde_json::Value {
@@ -98,10 +140,10 @@ fn payload(cache: &Cache) -> serde_json::Value {
 
 impl Poller {
     /// Поднять поток опроса. Окно на старте скрыто.
-    pub fn start(app: tauri::AppHandle, ssh_host: String, background: bool) -> Poller {
+    pub fn start(app: tauri::AppHandle, sources: Vec<Source>, background: bool) -> Poller {
         let (tx, rx) = channel::<Signal>();
         let cache = Arc::new(Mutex::new(Cache::default()));
-        let settings = Arc::new(Mutex::new((ssh_host, background)));
+        let settings = Arc::new(Mutex::new((sources, background)));
 
         let thread_cache = Arc::clone(&cache);
         let thread_settings = Arc::clone(&settings);
@@ -111,51 +153,45 @@ impl Poller {
             let mut prev_fingerprint: Option<String> = None;
 
             loop {
-                let (host, background) = thread_settings.lock().unwrap().clone();
+                let (sources, background) = thread_settings.lock().unwrap().clone();
 
-                // Спрашивать нечего и некого: без хоста ssh не собрать, а
-                // выключенный фон при скрытом окне означает «стоим до показа».
-                let host_missing = host.trim().is_empty();
-                let idle = host_missing || (!visible && !background);
-                if host_missing {
-                    // До A5 то же самое говорила ошибка `fetch_state`, которую
-                    // читал фронтенд. После A5 команда для показа списка
-                    // больше не зовётся, и без этой строки ненастроенный
-                    // пикер молча показывал бы пустой список без единого
-                    // слова о причине. Текст — дословно тот же, что даёт
-                    // `check_ssh_host`: другой текст на то же самое читался
-                    // бы как два разных отказа.
-                    if let Err(msg) = crate::check_ssh_host(&host) {
-                        let mut cache = thread_cache.lock().unwrap();
-                        cache.error = msg;
-                        if visible {
-                            let body = payload(&cache);
-                            drop(cache);
-                            let _ = app.emit("state", body);
-                        }
+                // Спрашивать некого — единственная проверка ненастроенности.
+                // Раньше их было две, и вторая молчала бы, разойдясь с первой.
+                let idle = sources.is_empty() || (!visible && !background);
+                if sources.is_empty() {
+                    let mut cache = thread_cache.lock().unwrap();
+                    // Текст общий на все три места, где он виден человеку
+                    // (здесь, sessions.html и settings-form.js), — намеренно
+                    // дословно один и тот же: разная формулировка одной и той
+                    // же беды читалась бы как две разных.
+                    cache.error =
+                        "no source: set the host with sessions, or turn on sessions from this machine"
+                            .to_string();
+                    if visible {
+                        let body = payload(&cache);
+                        drop(cache);
+                        let _ = app.emit("state", body);
                     }
                 }
                 if !idle {
-                    let changed = match crate::state_source::fetch(&host) {
-                        Ok(state) => {
+                    let (state, error) = poll_once(&sources);
+                    let changed = match state {
+                        Some(state) => {
                             let fp = fingerprint(&state);
                             let changed = prev_fingerprint.as_deref() != Some(fp.as_str());
                             prev_fingerprint = Some(fp);
-                            // Хоткеи вешает Rust, а не страница: у скрытого
-                            // окна WebView2 умеет усыплять её целиком, и
-                            // клавиши вставали бы только при открытом пикере.
                             crate::project_hotkeys::apply_from_state(&app, &state);
                             let mut cache = thread_cache.lock().unwrap();
                             cache.state = Some(state);
-                            cache.error.clear();
+                            cache.error = error;
                             let body = payload(&cache);
                             drop(cache);
                             let _ = app.emit("state", body);
                             changed
                         }
-                        Err(e) => {
+                        None => {
                             let mut cache = thread_cache.lock().unwrap();
-                            cache.error = e;
+                            cache.error = error;
                             // Показанному окну об отказе говорим сразу;
                             // скрытому — некому, и оно узнает при показе.
                             if visible {
@@ -222,8 +258,8 @@ impl Poller {
 
     /// Новые настройки подхватываются следующим тактом: рвать текущий ssh
     /// незачем, он всё равно вот-вот кончится.
-    pub fn set_config(&self, ssh_host: String, background: bool) {
-        *self.settings.lock().unwrap() = (ssh_host, background);
+    pub fn set_config(&self, sources: Vec<Source>, background: bool) {
+        *self.settings.lock().unwrap() = (sources, background);
         self.signal(Signal::Nudge);
     }
 
@@ -317,5 +353,43 @@ mod tests {
     #[test]
     fn hidden_window_never_ticks_faster_than_a_minute() {
         assert_eq!(next_delay(false, false, VISIBLE_TICK), BACKGROUND_MIN);
+    }
+
+    use crate::state_source::Source;
+
+    /// Отказ одного источника не гасит второй. Молчаливое выпадение половины
+    /// списка — худшее, что здесь может случиться: пропавшие сессии читаются
+    /// как «сессий нет», и человек пойдёт искать сессию, а не чинить ssh.
+    #[test]
+    fn one_failure_does_not_hide_the_other_source() {
+        let parts = vec![
+            (Source::Ssh("remote-host".into()), Err("exited with 255".to_string())),
+            (Source::Local, Ok(serde_json::json!({"generated": 1, "sessions": [{"id": "a"}]}))),
+        ];
+        let (state, error) = combine(parts);
+        let state = state.expect("ответивший источник обязан дать список");
+        assert_eq!(state["sessions"].as_array().unwrap().len(), 1);
+        assert!(error.contains("remote-host"), "отказ обязан называть источник: {error}");
+    }
+
+    /// Отказ всех — прежняя ошибка на весь список, и состояния нет.
+    #[test]
+    fn all_failing_is_still_an_error() {
+        let parts = vec![
+            (Source::Ssh("remote-host".into()), Err("exited with 255".to_string())),
+            (Source::Local, Err("ccfzf not found".to_string())),
+        ];
+        let (state, error) = combine(parts);
+        assert!(state.is_none());
+        assert!(error.contains("remote-host") && error.contains("local"), "{error}");
+    }
+
+    /// Все ответили — ошибки нет вовсе.
+    #[test]
+    fn success_clears_the_error() {
+        let parts = vec![(Source::Local, Ok(serde_json::json!({"generated": 1, "sessions": []})))];
+        let (state, error) = combine(parts);
+        assert!(state.is_some());
+        assert_eq!(error, "");
     }
 }

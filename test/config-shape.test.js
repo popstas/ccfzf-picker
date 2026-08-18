@@ -12,8 +12,10 @@ const { normalizeConfig } = require('../frontend-src/config-shape');
 test('пустой конфиг даёт рабочие значения по умолчанию', () => {
   const c = normalizeConfig(null);
   // Умолчания у хоста нет и быть не может: любое значение здесь — либо чужое
-  // имя машины, либо ложь. Пустой хост пикер показывает как ненастроенный
-  // конфиг (check_ssh_host в src-tauri/src/main.rs).
+  // имя машины, либо ложь. Пустой хост при выключенном localSource даёт
+  // пустой список источников, а пустой список источников пикер показывает
+  // как ненастроенный конфиг (sources_from в src-tauri/src/state_source.rs,
+  // проверка в poller.rs).
   assert.strictEqual(c.sshHost, '');
   assert.strictEqual(c.hotkey, 'Cmd+Shift+C');
   assert.strictEqual(c.caps.reptyr, false);
@@ -408,4 +410,13 @@ test('editor: умолчание cursor, пустая строка возвра�
 
 test('editor: названный редактор доезжает подрезанным', () => {
   assert.strictEqual(normalizeConfig({ editor: '  code  ' }).editor, 'code');
+});
+
+test('localSource — булев флаг с умолчанием false', () => {
+  // Умолчание не «удобное», а единственно честное: включённый по умолчанию
+  // местный источник на машине без ccfzf и python3 добавил бы всем
+  // существующим установкам строку об отказе там, где сегодня всё работает.
+  assert.strictEqual(normalizeConfig({}).localSource, false);
+  assert.strictEqual(normalizeConfig({ localSource: true }).localSource, true);
+  assert.strictEqual(normalizeConfig({ localSource: 'да' }).localSource, false);
 });

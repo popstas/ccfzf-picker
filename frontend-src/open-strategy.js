@@ -50,6 +50,30 @@
   const HELPER_PLACEHOLDER = '{helper}';
   const COMMAND_B64_PLACEHOLDER = '{commandBase64}';
 
+  // Метка местного источника — та же строка, что в Rust (`LOCAL_LABEL`).
+  const LOCAL_SOURCE = 'local';
+
+  /**
+   * Хвост argv до терминала: чем доставить команду до шелла.
+   *
+   * Две дороги, и они не сводятся друг к другу. Через ssh уезжает одна строка,
+   * которую заново разбирает чужой шелл, — правило `q` действует ровно здесь.
+   * Местный запуск шелла не поднимает вовсе, поэтому строка отдаётся `sh -c`:
+   * сама команда (`exec $SHELL -ic 'cd -- … && …'`) не меняется — она нужна
+   * затем же, зачем и на той стороне, чтобы отработал хук `chpwd`.
+   *
+   * Пустая метка идёт той же местной дорогой, а не ssh с пустым хостом:
+   * `ssh -t ''` не работает никогда, и второй адресат для пустой строки
+   * взяться неоткуда. Не названо ни source у строки, ни sshHost в конфиге —
+   * значит машина одна, эта самая, а список источников вообще не пуст лишь
+   * потому, что включён localSource.
+   */
+  function commandParts(remote, source) {
+    const label = String(source || '').trim();
+    if (!label || label === LOCAL_SOURCE) return ['/bin/sh', '-c', remote];
+    return ['ssh', '-t', label, remote];
+  }
+
   /**
    * Строка — в base64, байтами UTF-8 и одной строкой.
    *
@@ -234,7 +258,10 @@
     }
 
     if (remote === null) return null;
-    const argv = terminalArgv(terminal, ['ssh', '-t', String(sshHost || ''), remote], opts);
+    // Источник — у строки; sshHost остаётся откатом для строк, которым
+    // источник не проставлен (старый ответ, тесты соседних функций).
+    const source = String((row || {}).source || '') || String(sshHost || '');
+    const argv = terminalArgv(terminal, commandParts(remote, source), opts);
     return argv === null ? null : { argv, destructive };
   }
 
@@ -336,7 +363,7 @@
   // рано или поздно разойдётся с первым.
   return {
     q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
-    newSessionCommand, newSessionName, terminalArgv, toBase64,
+    newSessionCommand, newSessionName, terminalArgv, toBase64, commandParts, LOCAL_SOURCE,
     HELPER_PLACEHOLDER, COMMAND_B64_PLACEHOLDER,
   };
 });

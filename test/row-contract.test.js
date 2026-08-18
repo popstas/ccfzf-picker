@@ -2115,3 +2115,28 @@ test('счётчики TODO стоят первой колонкой у обои
     '', { showPaths: true, showTodo: true });
   assert.match(project.items[0].html, /<div class="meta"><div class="todo">/);
 });
+
+// ── Фраза человеку про машину строки ────────────────────────────────────────
+//
+// Две английские фразы (takeover-подтверждение, подсказка после attach)
+// печатают row.source прямо в предложение. «Process 4711 on local will get
+// SIGHUP» читалось бы как имя чужой машины `local` — а сессия на этом же
+// компьютере, — поэтому местный источник называется словами «this machine».
+function sourceLabelOf(row, sshHost) {
+  const source = pageFunctions('sourceLabel(row)');
+  const ctx = { CONFIG: { sshHost } };
+  vm.createContext(ctx);
+  return vm.runInContext(`${source}\nsourceLabel(${JSON.stringify(row)});`, ctx, { filename: 'sessions.html' });
+}
+
+test('местный источник называется «this machine», а не своим служебным именем', () => {
+  assert.strictEqual(sourceLabelOf({ source: 'local' }, 'remote-host'), 'this machine');
+});
+
+test('удалённый источник печатается как есть', () => {
+  assert.strictEqual(sourceLabelOf({ source: 'remote-host' }, 'host-a'), 'remote-host');
+});
+
+test('без source остаётся откат на CONFIG.sshHost — старые строки этой ветки', () => {
+  assert.strictEqual(sourceLabelOf({}, 'remote-host'), 'remote-host');
+});

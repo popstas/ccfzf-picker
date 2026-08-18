@@ -76,6 +76,11 @@
         // session-glyph.js): числам из чужого файла не верит именно тот, кто
         // их печатает.
         todo: Array.isArray(p.todo) ? p.todo : [],
+        // Метка источника: слияние в Rust (merge_state.rs) ставит её на
+        // каждую строку списка, и транспорт действия (commandParts) читает
+        // именно её, а не CONFIG.sshHost, — иначе местный проект открылся бы
+        // ssh-командой на удалённой машине.
+        source: String(p.source || ''),
       }))
       .sort((a, b) => groupsApi.compareSessions(a, b, 'recent'));
   }

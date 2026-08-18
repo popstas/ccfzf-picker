@@ -14,6 +14,8 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 mod config_file;
 mod icons;
+mod local_ccfzf;
+mod merge_state;
 mod mqtt;
 mod poller;
 mod proc;
@@ -703,42 +705,25 @@ fn tray_icon() -> tauri::image::Image<'static> {
         .expect("icons/favicon.png does not parse as an image")
 }
 
-/// Хост берётся из конфига, а не зашит: список и открытие сессии обязаны
-/// ходить на одну машину. Раньше здесь стоял литерал, а `open-strategy.js`
-/// читал `sshHost` из конфига, и правка конфига молча разводила их по разным
-/// хостам.
-fn check_ssh_host(ssh_host: &str) -> Result<(), String> {
-    if ssh_host.trim().is_empty() {
-        return Err(
-            "sshHost is not set: copy config.example.yml to ~/.config/ccfzf-picker/config.yaml"
-                .to_string(),
-        );
-    }
-    Ok(())
-}
-
-/// Записать комментарий к сессии на машине агрегатора.
+/// Записать комментарий к сессии на машине её источника.
 ///
-/// Ходит по ssh на тот же `sshHost`, что и список: файл комментариев лежит
-/// там, и общим он выходит именно поэтому — `--state` этой машины читают
-/// пикеры всех машин сразу.
+/// Адрес называет строка, а не конфиг: с двумя источниками `CONFIG.sshHost`
+/// перестал быть адресом чего бы то ни было — комментарий к местной сессии
+/// уехал бы на удалённую машину, где такой сессии нет.
 ///
 /// `async` обязателен: ssh идёт до пяти секунд (`ConnectTimeout`), а
 /// синхронную команду Tauri выполняет в потоке цикла событий — окно замерло бы
-/// на всё это время, включая отрисовку самого оверлея, из которого её позвали.
-///
-/// Имя своей машины уезжает вместе с текстом: на той стороне его не угадать —
-/// ssh приходит с любой из машин, а `$HOSTNAME` назвал бы агрегатора.
+/// на всё это время.
 #[tauri::command]
 async fn set_comment(
-    ssh_host: String,
+    source: String,
     id: String,
     text: String,
     from: String,
 ) -> Result<(), String> {
-    check_ssh_host(&ssh_host)?;
+    let source = state_source::Source::from_label(&source);
     tauri::async_runtime::spawn_blocking(move || {
-        state_source::set_comment(&ssh_host, &id, &text, &from)
+        state_source::set_comment(&source, &id, &text, &from)
     })
     .await
     .map_err(|e| format!("comment task failed: {e}"))?
@@ -1338,16 +1323,12 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
     };
 
     if let Some(poller) = app.try_state::<poller::Poller>() {
-        let ssh_host = config
-            .get("sshHost")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
+        let sources = state_source::sources_from(&config);
         let background = config
             .get("backgroundRefresh")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-        poller.set_config(ssh_host, background);
+        poller.set_config(sources, background);
     }
 
     // Гашение по потере фокуса — тоже без перезапуска: обработчик стоит всегда
@@ -1958,16 +1939,12 @@ fn main() {
             // тормозит таймеры, а WebView2 у свёрнутого умеет усыплять
             // страницу целиком. Фон на setInterval замолчал бы, и узнать об
             // этом было бы неоткуда — панель просто перестала бы обновляться.
-            let ssh_host = config
-                .get("sshHost")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
+            let sources = state_source::sources_from(&config);
             let background = config
                 .get("backgroundRefresh")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            app.manage(poller::Poller::start(app.handle().clone(), ssh_host, background));
+            app.manage(poller::Poller::start(app.handle().clone(), sources, background));
 
             // Клик мимо окна закрывает пикер. Окно безрамочное и всегда
             // поверх: не закрывшись само, оно осталось бы висеть над той
@@ -2783,17 +2760,6 @@ actions:
         let actions = v["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0]["hotkey"].as_str(), Some("Ctrl+O"));
-    }
-
-    /// Пустой `sshHost` — это ненастроенный конфиг, а не «сходи в никуда».
-    /// Без этой проверки ssh звался бы с пустым первым аргументом и человек
-    /// увидел бы невнятную ошибку ssh вместо «настройте config.yaml».
-    #[test]
-    fn empty_ssh_host_is_a_config_error() {
-        let err = check_ssh_host("").unwrap_err();
-        assert!(err.contains("config.yaml"), "{err}");
-        assert!(check_ssh_host("example-host").is_ok());
-        assert!(check_ssh_host("  ").is_err(), "пробелы — тот же пустой хост");
     }
 
     /// Каталог фронтенда обязан быть объявлен входом сборочного скрипта.

@@ -63,6 +63,17 @@ test('строки сессий помечены открытостью', () => 
   assert.equal(sessions[1].open, false);
 });
 
+test('строка сессии несёт источник снимка, а не своего id', () => {
+  // Восстановление снимка идёт на ту машину, которая его сняла
+  // (snapshotBase/openSession), и без метки транспорт откатился бы на
+  // CONFIG.sshHost — то есть попытался бы поднять местный снимок по ssh.
+  const rows = buildSnapshotRows(
+    [{ ...SNAP, source: 'remote-host' }], new Set(), '');
+  const sessions = rows.filter(r => r.kind === 'snapshot-session');
+  assert.equal(sessions.length, 2);
+  for (const row of sessions) assert.equal(row.source, 'remote-host');
+});
+
 test('ключи строк разведены и стабильны', () => {
   // picker-list-sync правит только отличающиеся строки, и совпавший ключ
   // заголовка с ключом сессии подменял бы одну строку другой. День — такой же
