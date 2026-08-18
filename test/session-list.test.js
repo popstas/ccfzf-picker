@@ -422,10 +422,34 @@ test('окно на своей машине возвращает пустоту,
 
 test('источник в форме user@host достаётся без правок', () => {
   // Этой же строкой адресуются действия: ssh или местный запуск. Красивое имя
-  // машины увело бы ssh не туда.
+  // машины увело бы ssh не туда. Источников два — иначе атрибуция не
+  // включилась бы вовсе (см. тест про byte-identical единственный источник).
   const rows = buildSessionList({
-    sessions: [{ id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session', source: 'user@remote-host' }],
+    sessions: [
+      { id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session', source: 'user@remote-host' },
+      { id: 'b', cwd: '/b', title: 'b', mtime: 1, live: true, kind: 'session', source: 'local' },
+    ],
     seen: {}, state: {}, configHost: 'host-a',
   });
-  assert.strictEqual(rows[0].windowHost, 'user@remote-host');
+  assert.strictEqual(rows.find(r => r.id === 'a').windowHost, 'user@remote-host');
+});
+
+test('источник называет машину только когда их несколько', () => {
+  // Обычная установка — один sshHost, localSource выключен, — и все строки
+  // приехали от одного источника. Сравнивать нечего: сессия без окна остаётся
+  // в местном блоке, как было до появления двух источников. Комментарий у
+  // session-groups.js:304 обещает именно это, и это тест на его слово.
+  //
+  // Двухисточниковый случай пиннует соседний тест выше, «машину строке без
+  // окна называет её источник»: в нём два разных `source`, и атрибуция
+  // включается.
+  const rows = buildSessionList({
+    sessions: [
+      { id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session', source: 'remote-host' },
+      { id: 'b', cwd: '/b', title: 'b', mtime: 1, live: true, kind: 'session', source: 'remote-host' },
+    ],
+    seen: {}, state: {}, configHost: 'host-a',
+  });
+  assert.strictEqual(rows[0].windowHost, '', 'единственный источник — атрибуции нет');
+  assert.strictEqual(rows[1].windowHost, '');
 });

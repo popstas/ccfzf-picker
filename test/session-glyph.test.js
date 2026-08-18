@@ -518,7 +518,7 @@ test('prBadgeHtml renders the badge only for sessions with a pull request', () =
 
 // ── колонка с машиной чужого окна ───────────────────────────────────────────
 test('машина чужого окна выводится с подсказкой', () => {
-  const html = windowHostHtml({ windowHost: 'mac-host' });
+  const html = windowHostHtml({ windowHost: 'mac-host', window: { host: 'mac-host' } });
   assert.match(html, /mac-host/);
   assert.match(html, /title="Window is on mac-host"/);
 });
@@ -528,13 +528,23 @@ test('без чужой машины остаётся пустой элемен�
   assert.strictEqual(windowHostHtml({ windowHost: '' }), '<div class="winhost"></div>');
 });
 
+test('windowHost без записи окна ничего не рисует', () => {
+  // С двумя источниками windowHost ставится и без окна вовсе (ambiguous в
+  // session-list.js) — просто по имени источника. «Window is on <host>» тогда
+  // было бы неправдой: окна там нет, только чужая сессия без трекера.
+  assert.strictEqual(
+    windowHostHtml({ windowHost: 'remote-host', window: null, windows: [] }),
+    '<div class="winhost"></div>',
+  );
+});
+
 test('выключенная галка убирает колонку целиком', () => {
-  assert.strictEqual(windowHostHtml({ windowHost: 'mac-host' }, false), '');
+  assert.strictEqual(windowHostHtml({ windowHost: 'mac-host', window: { host: 'mac-host' } }, false), '');
 });
 
 test('имя машины экранируется', () => {
   // Строка приезжает из файла, написанного на чужой машине.
-  assert.ok(!windowHostHtml({ windowHost: '<b>x' }).includes('<b>'));
+  assert.ok(!windowHostHtml({ windowHost: '<b>x', window: { host: '<b>x' } }).includes('<b>'));
 });
 
 // ── basename проекта под именем строки ──────────────────────────────────────
@@ -679,7 +689,8 @@ test('подсказка называет машину каждого окна',
 });
 
 test('две машины в колонке названы обе', () => {
-  const html = windowHostHtml({ windowHost: 'mac-host, other-box' }, true);
+  const html = windowHostHtml(
+    { windowHost: 'mac-host, other-box', window: { host: 'mac-host' } }, true);
   assert.ok(html.includes('>mac-host, other-box<'), html);
   assert.ok(html.includes('Windows are on'), html);
 });
