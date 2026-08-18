@@ -2264,6 +2264,21 @@ const infoBackdrop = document.getElementById('info-backdrop');
   }
 
   /**
+   * Машина строки для английской фразы человеку — «on host-a», «on this
+   * machine» для местной.
+   *
+   * `row.source` дословно тот же, каким адресуются действия (ssh-строка как
+   * есть), и печатать его без разбора в предложение для человека — не то же
+   * самое, что подставлять его в команду. «Process 4711 on local will get
+   * SIGHUP» читается как имя чужой машины `local`, а сессия при этом на этом
+   * же компьютере.
+   */
+  function sourceLabel(row) {
+    const source = (row && row.source) || CONFIG.sshHost;
+    return source === 'local' ? 'this machine' : source;
+  }
+
+  /**
    * Открыть сессию в новом окне kitty.
    *
    * Стратегию выбирает эта же сторона по строке списка. Строка старше
@@ -2304,7 +2319,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (cmd.destructive) {
       const ok = confirm(
         `Take over session "${sessionName(row)}"?\n\n`
-        + `Process ${row.pid} on ${row.source || CONFIG.sshHost} will get SIGHUP and exit, and its window on Windows will close.\n`
+        + `Process ${row.pid} on ${sourceLabel(row)} will get SIGHUP and exit, and its window on Windows will close.\n`
         + `Background jobs started in its shell will die with it.`,
       );
       if (!ok) return;
@@ -3247,7 +3262,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // повторном переносе. В буфер уходит команда целиком.
       const shown = cmd.split(' || ')[0];
       invoke('copy_to_clipboard', { text: cmd })
-        .then(() => showNotice(`Copied: ${shown} — paste it into a terminal on ${row.source || CONFIG.sshHost}, wherever you want the session`))
+        .then(() => showNotice(`Copied: ${shown} — paste it into a terminal on ${sourceLabel(row)}, wherever you want the session`))
         .catch((e) => { error = String(e); render(); });
       return;
     }
