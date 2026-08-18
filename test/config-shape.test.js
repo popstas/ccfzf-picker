@@ -409,3 +409,12 @@ test('editor: умолчание cursor, пустая строка возвра�
 test('editor: названный редактор доезжает подрезанным', () => {
   assert.strictEqual(normalizeConfig({ editor: '  code  ' }).editor, 'code');
 });
+
+test('localSource — булев флаг с умолчанием false', () => {
+  // Умолчание не «удобное», а единственно честное: включённый по умолчанию
+  // местный источник на машине без ccfzf и python3 добавил бы всем
+  // существующим установкам строку об отказе там, где сегодня всё работает.
+  assert.strictEqual(normalizeConfig({}).localSource, false);
+  assert.strictEqual(normalizeConfig({ localSource: true }).localSource, true);
+  assert.strictEqual(normalizeConfig({ localSource: 'да' }).localSource, false);
+});

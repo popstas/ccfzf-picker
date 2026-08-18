@@ -124,10 +124,24 @@ test('число, отданное строкой из DOM, не считает�
 });
 
 test('пустой хост — отказ, а не пустой список', () => {
-  // Без sshHost список брать неоткуда, и сохранить такое молча значит отдать
+  // Без sshHost или localSource список брать неоткуда, и сохранить такое молча значит отдать
   // человеку пикер, который не работает и не говорит почему.
   const problems = validate({ ...configToFields({}), sshHost: '  ' });
-  assert.ok(problems.some(p => p.includes('sshHost')), problems.join('; '));
+  assert.ok(problems.some(p => p.includes('source')), problems.join('; '));
+});
+
+test('пустой sshHost при включённом localSource — не ошибка', () => {
+  // Источник есть, просто он один. Проверка ненастроенности теперь одна на
+  // всё — пустой список источников, — и второе правило про то же самое
+  // молчало бы, разойдясь с первым.
+  const fields = { ...configToFields({ localSource: true }), ...NO_PICKER_SIZE, sshHost: '' };
+  assert.deepStrictEqual(validate(fields), []);
+});
+
+test('ни sshHost, ни localSource — спрашивать некого', () => {
+  const fields = { ...configToFields({}), ...NO_PICKER_SIZE, sshHost: '' };
+  const problems = validate(fields);
+  assert.ok(problems.some(p => p.includes('source')), problems.join('; '));
 });
 
 test('комбинация, занятая самим окном пикера, не проходит', () => {
