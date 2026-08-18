@@ -319,6 +319,96 @@ test('одинокая строка и тёзка из другого катал
   assert.deepStrictEqual(rows.map(r => r.label), ['settings', 'settings', 'other']);
 });
 
+// ── карточка на окно: двойник — это тёзка, а не своя же вторая карточка ────
+//
+// Пометка двойников ловит РАЗНЫЕ сессии с одинаковым именем и каталогом.
+// Сессия с двумя окнами (buildSessionList) даёт две карточки с общим id, и
+// они совпадают по twinKey (имя, каталог, живость) точно так же, как настоящие
+// тёзки, — а различаются как раз windowHost, то есть первым же проходом
+// withTwinMarks помечались бы друг против друга. Пойман живьём (ревью
+// соседней работы): удалённая карточка получала паразитный хвост «· mac-host»,
+// хотя машина и так названа соседней колонкой, а разные подписи у одной и той
+// же сессии читаются как две разные сессии.
+test('карточки одной сессии на разных машинах не считаются двойниками друг другу', () => {
+  const res = {
+    ok: true,
+    seen: {},
+    sessions: [{
+      id: 'twin-session', title: 'myproject', cwd: '/home/user/p', live: true,
+      windows: [
+        { host: 'windows-box', pid: 7, focusedAt: 5 },
+        { host: 'mac-host', pid: 3, focusedAt: 3 },
+      ],
+    }],
+  };
+  const payload = buildSessionsPayload(res, 'recent', { configHost: 'windows-box' });
+  const labels = payload.groups.flatMap(g => g.sessions).map(s => s.label);
+  assert.deepStrictEqual(labels, ['myproject', 'myproject']);
+});
+
+/**
+ * Проверка на пару «многооконная сессия + настоящая тёзка» — общая для обоих
+ * порядков карточек ниже. Пометка обязана считаться по СВОЕЙ машине каждой
+ * карточки, а не по машине представителя (тем, кто первым встретился в
+ * списке): представитель решает только, надо ли вообще что-то различать, а
+ * какую метку носит карточка — решает её собственный windowHost.
+ */
+function assertTwinCardsDistinguished(rows) {
+  const local = rows.filter(r => r.id === 'twin-session' && r.windowHost === '')[0];
+  const foreign = rows.filter(r => r.id === 'twin-session' && r.windowHost === 'mac-host')[0];
+  const lookalike = rows.find(r => r.id === 'lookalike');
+  assert.ok(local && foreign && lookalike, 'тест сторожит не то');
+  // Критично (Critical из ревью): местная карточка не смеет носить имя чужой
+  // машины — оно принадлежит второй карточке той же сессии, не этой.
+  assert.ok(!local.label.includes('mac-host'),
+    `местная карточка помечена чужой машиной: ${local.label}`);
+  // Чужая карточка обязана нести своё имя машины — эту часть представитель не
+  // портил никогда, но регрессия здесь дешева, а сторож дёшев тоже.
+  assert.ok(foreign.label.includes('mac-host'),
+    `чужая карточка своей машины не назвала: ${foreign.label}`);
+  // Настоящая тёзка обязана остаться отличимой от местной карточки той же
+  // сессии — иначе различить их снова нечем, ровно то, что нашло ревью.
+  assert.notStrictEqual(lookalike.label, local.label,
+    `тёзка и местная карточка неотличимы: обе «${local.label}»`);
+}
+
+test('настоящий двойник рядом с многооконной сессией по-прежнему помечается (своя карточка первой)', () => {
+  // «Удачный» порядок из первой редакции починки — при нём Critical-баг не
+  // проявлялся, и тест его не ловил. Оставлен как есть (сторож на регрессию в
+  // эту сторону), рядом — тот же случай в обратном порядке.
+  const rows = labelSessions([
+    { id: 'twin-session', title: 'myproject', cwd: '/home/user/p', windowHost: '' },
+    { id: 'twin-session', title: 'myproject', cwd: '/home/user/p', windowHost: 'mac-host' },
+    { id: 'lookalike', title: 'myproject', cwd: '/home/user/p', windowHost: '' },
+  ]);
+  assertTwinCardsDistinguished(rows);
+});
+
+// Тот самый порядок из ревью: чужое окно смотрели позже своего — оно едет
+// первой карточкой сессии («свежайший взгляд первым», session-list.js), и
+// представитель (первая встреченная карточка) оказывается чужим. Прогонка
+// через настоящий buildSessionsPayload — снимает вопрос «а не подмешал ли
+// тест своё group-разбиение» и ловит баг end-to-end, как его нашло ревью.
+test('настоящий двойник рядом с многооконной сессией по-прежнему помечается (чужую карточку смотрели позже — порядок из ревью)', () => {
+  const res = {
+    ok: true,
+    seen: {},
+    sessions: [
+      {
+        id: 'twin-session', title: 'myproject', cwd: '/home/user/p', live: true,
+        windows: [
+          { host: 'mac-host', pid: 3, focusedAt: 50 },
+          { host: 'windows-box', pid: 7, focusedAt: 10 },
+        ],
+      },
+      { id: 'lookalike', title: 'myproject', cwd: '/home/user/p', live: true },
+    ],
+  };
+  const payload = buildSessionsPayload(res, 'recent', { configHost: 'windows-box' });
+  const rows = payload.groups.flatMap(g => g.sessions);
+  assertTwinCardsDistinguished(rows);
+});
+
 // Фильтр `only windowed` живёт на одном лишь наличии поля `window` и о машинах
 // не знает ничего: `rows.filter(r => r.window)` в buildSessionsPayload. Сторож
 // на то, что окно с чужой машины он считает окном — этим и чинится «чекбокс
@@ -561,6 +651,53 @@ test('на равной свежести машины разводятся по 
     groups.filter(g => g.remote).map(g => g.key),
     ['remote:alpha-host', 'remote:zeta-host'],
   );
+});
+
+// ── карточка на окно: id больше не уникален ─────────────────────────────────
+//
+// Сессию с двумя окнами buildSessionList превращает в две карточки с общим
+// id — одна карточка со своим окном, вторая с чужим. tieBreak и группировка
+// обязаны различать их без дрожи.
+
+test('тай-брейк разводит карточки одной сессии по машине окна', () => {
+  // Имя и id у карточек одной сессии совпадают всегда — их развела бы только
+  // машина окна. Без неё compareSessions вернул бы 0, и пара менялась бы
+  // местами от тика к тику вместе с порядком, в котором агрегатор шлёт окна.
+  const own = { id: 'twin', label: 'x', windowHost: '' };
+  const foreign = { id: 'twin', label: 'x', windowHost: 'mac-host' };
+  assert.notStrictEqual(compareSessions(own, foreign, 'name'), 0);
+  // Порядок стабилен независимо от того, кто передан первым.
+  assert.strictEqual(
+    compareSessions(own, foreign, 'name'),
+    -compareSessions(foreign, own, 'name'),
+  );
+});
+
+test('карточки сессии с окнами на своей и на чужой машине попадают в разные группы', () => {
+  // Ревью нашло: строка с местным и чужим окном уезжала в блок чужой машины
+  // целиком. После карточки-на-окно это чинится само — у каждой карточки
+  // своё windowHost, — и тест это подтверждает, а не полагается на слово.
+  const res = {
+    ok: true,
+    seen: {},
+    sessions: [{
+      id: 'twin', title: 'На двух машинах', cwd: '/home/user/a', live: true,
+      windows: [
+        { host: 'win-host', pid: 7, focusedAt: 5 },
+        { host: 'mac-host', pid: 9, focusedAt: 3 },
+      ],
+    }],
+  };
+  const payload = buildSessionsPayload(res, 'name', { configHost: 'win-host' });
+  assert.deepStrictEqual(payload.groups.map(g => g.label),
+    ['Active local sessions', 'Active on mac-host']);
+  assert.strictEqual(payload.groups[0].sessions.length, 1);
+  assert.strictEqual(payload.groups[0].sessions[0].windowHost, '');
+  assert.strictEqual(payload.groups[1].sessions.length, 1);
+  assert.strictEqual(payload.groups[1].sessions[0].windowHost, 'mac-host');
+  // Обе карточки несут один и тот же id сессии.
+  assert.strictEqual(payload.groups[0].sessions[0].id, 'twin');
+  assert.strictEqual(payload.groups[1].sessions[0].id, 'twin');
 });
 
 // ── activeFilters: спрошенное перебивает отобранное ────────────────────────

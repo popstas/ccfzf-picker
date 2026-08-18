@@ -48,11 +48,11 @@
    */
   const SIZE_CHOICES = [
     { value: 0, label: 'Default' },
-    { value: 50, label: '50% of screen' },
-    { value: 65, label: '65% of screen' },
-    { value: 80, label: '80% of screen' },
-    { value: 95, label: '95% of screen' },
-    { value: 100, label: '100% of screen' },
+    { value: 50, label: '50%' },
+    { value: 65, label: '65%' },
+    { value: 80, label: '80%' },
+    { value: 95, label: '95%' },
+    { value: 100, label: '100%' },
   ];
 
   const PAGES = [

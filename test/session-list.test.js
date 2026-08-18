@@ -212,3 +212,107 @@ test('без своей машины в конфиге называются вс
   })[0];
   assert.strictEqual(row.windowHost, 'mac-host');
 });
+
+// ── карточка на окно ────────────────────────────────────────────────────────
+//
+// Сессию открывают на двух машинах сразу: id один, окон два. Владелец решил
+// видеть это двумя карточками — одна встаёт в местный блок списка, вторая в
+// блок чужой машины, и у каждой своё время (см. «Дополнение от 2026-08-18:
+// карточка на окно» в design.md). Сессия без окон по-прежнему даёт одну
+// строку.
+
+test('сессия с двумя окнами даёт две карточки — по одной на окно', () => {
+  const rows = buildSessionList({
+    sessions: [{ id: 'a', title: 'x', windows: [
+      { host: 'mac-host', app: 'kitty', focusedAt: 10 },
+      { host: 'windows-box', app: 'WindowsTerminal.exe', focusedAt: 900 },
+    ] }],
+    seen: {}, state: { sessions: [] }, configHost: 'windows-box',
+  });
+  assert.strictEqual(rows.length, 2);
+  // Обе карточки — одна и та же сессия; различать их ключом строки будет
+  // следующая работа (страница и группировка сюда не входят).
+  assert.deepStrictEqual(rows.map(r => r.id), ['a', 'a']);
+  // Порядок — порядок окон в ответе агрегатора («свежайший взгляд первым»),
+  // здесь он не пересчитывается.
+  assert.deepStrictEqual(rows.map(r => r.windows[0].host), ['mac-host', 'windows-box']);
+});
+
+test('сессия без окон по-прежнему даёт одну строку', () => {
+  const rows = buildSessionList({
+    sessions: [{ id: 'a', title: 'x', windows: [] }],
+    seen: {}, state: { sessions: [] }, configHost: 'windows-box',
+  });
+  assert.strictEqual(rows.length, 1);
+  assert.deepStrictEqual(rows[0].windows, []);
+  assert.strictEqual(rows[0].windowHost, '');
+});
+
+test('у каждой карточки своя машина: своя пустая, чужая — как написал трекер', () => {
+  const rows = buildSessionList({
+    sessions: [{ id: 'a', title: 'x', windows: [
+      { host: 'mac-host', focusedAt: 0 },
+      { host: 'Windows-Box', focusedAt: 0 },
+    ] }],
+    seen: {}, state: { sessions: [] }, configHost: 'windows-box',
+  });
+  assert.strictEqual(rows[0].windowHost, 'mac-host');
+  // Своя машина по-прежнему названа пустотой: имя пикера в каждой строке шум.
+  assert.strictEqual(rows[1].windowHost, '');
+});
+
+test('у каждой карточки своё окно, а sessionWindows несёт оба без урезания', () => {
+  const rows = buildSessionList({
+    sessions: [{ id: 'a', title: 'x', windows: [
+      { host: 'mac-host', focusedAt: 10 },
+      { host: 'windows-box', focusedAt: 900 },
+    ] }],
+    seen: {}, state: { sessions: [] }, configHost: 'windows-box',
+  });
+  assert.deepStrictEqual(rows[0].windows.map(w => w.host), ['mac-host']);
+  assert.deepStrictEqual(rows[1].windows.map(w => w.host), ['windows-box']);
+  assert.strictEqual(rows[0].window.host, 'mac-host');
+  assert.strictEqual(rows[1].window.host, 'windows-box');
+  // sessionWindows — полный список у обеих карточек, не только «своё».
+  assert.deepStrictEqual(rows[0].sessionWindows.map(w => w.host), ['mac-host', 'windows-box']);
+  assert.deepStrictEqual(rows[1].sessionWindows.map(w => w.host), ['mac-host', 'windows-box']);
+});
+
+test('у каждой карточки своё время — максимум своей отметки и focusedAt именно этого окна', () => {
+  // Раньше отметка складывалась по максимуму всех окон в одной строке; теперь
+  // окна разведены по карточкам, и у каждой — максимум своей отметки и
+  // focusedAt только её собственного окна.
+  const [rowMac, rowWin] = buildSessionList({
+    sessions: [{ id: 'a', title: 'x', windows: [
+      { host: 'mac-host', focusedAt: 10 },
+      { host: 'windows-box', focusedAt: 900 },
+    ] }],
+    seen: { a: 500 }, state: { sessions: [] }, configHost: 'windows-box',
+  });
+  assert.strictEqual(rowMac.focusedAt, 500); // max(500, 10)
+  assert.strictEqual(rowWin.focusedAt, 900); // max(500, 900)
+});
+
+test('карточка несёт заголовок своего окна', () => {
+  // Имя окна — то, которым сессию завёл человек; заголовок сессии приезжает из
+  // транскрипта и с ним расходится. По имени окна её ищут и опознают, поэтому
+  // оно едет в строку отдельным полем, а не достаётся из `window` по месту:
+  // читателей у него двое — поиск и разметка имени.
+  const rows = buildSessionList({
+    sessions: [state({ id: 'a', live: true, title: 'esm-migration', windows: [
+      { host: 'mac-host', title: 'tray-build-time', lastSeen: 2, focusedAt: 2 },
+      { host: 'windows-box', title: 'tray-build-time', lastSeen: 1, focusedAt: 1 },
+    ] })],
+    seen: {},
+    configHost: 'mac-host',
+  });
+  assert.strictEqual(rows.length, 2);
+  assert.deepStrictEqual(rows.map(r => r.windowTitle), ['tray-build-time', 'tray-build-time']);
+});
+
+test('у строки без окна заголовок окна пуст, а не отсутствует', () => {
+  // Пустая строка, а не undefined: поле склеивается в стог поиска, и
+  // отсутствующее уехало бы туда словом `undefined`.
+  const rows = buildSessionList({ sessions: [state({ id: 'a' })], seen: {} });
+  assert.strictEqual(rows[0].windowTitle, '');
+});

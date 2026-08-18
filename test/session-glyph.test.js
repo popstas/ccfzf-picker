@@ -653,3 +653,52 @@ test('windowHtml не подменяет глиф у незнакомого пр
     '<div class="win open">▣</div>',
   );
 });
+
+// ── глиф на каждое окно сессии ──────────────────────────────────────────────
+
+test('у сессии с двумя окнами глиф на каждое', () => {
+  const html = windowHtml({ windows: [
+    { app: 'kitty', host: 'mac-host' },
+    { app: 'WindowsTerminal.exe', host: 'windows-box', desktop: 1 },
+  ] }, true, true);
+  assert.strictEqual((html.match(/class="win open"/g) || []).length, 2);
+  assert.ok(html.includes('Windows Terminal'), html);
+});
+
+test('подсказка называет машину каждого окна', () => {
+  const html = windowHtml({ windows: [
+    { app: 'kitty', host: 'mac-host' },
+    { app: 'WindowsTerminal.exe', host: 'windows-box', desktop: 1 },
+  ] }, true, true);
+  assert.ok(html.includes('title="kitty · mac-host"'), html);
+  assert.ok(html.includes('title="Desktop 1 · Windows Terminal · windows-box"'), html);
+});
+
+test('две машины в колонке названы обе', () => {
+  const html = windowHostHtml({ windowHost: 'mac-host, other-box' }, true);
+  assert.ok(html.includes('>mac-host, other-box<'), html);
+  assert.ok(html.includes('Windows are on'), html);
+});
+
+test('имя окна показывается только тогда, когда оно расходится с именем сессии', () => {
+  const { windowNameHtml } = require('../frontend-src/session-glyph');
+  // Разошлись — имя окна показано: иначе сессию, которую человек завёл под
+  // именем `tray-build-time`, в списке не опознать вовсе.
+  assert.match(
+    windowNameHtml({ title: 'esm-migration', windowTitle: 'tray-build-time' }),
+    /tray-build-time/,
+  );
+  // Совпали по словам — молчим: та же мерка, что у второй строки с каталогом
+  // (hidesProject), и по той же причине — вторая подпись с тем же смыслом
+  // только отнимает место.
+  assert.strictEqual(windowNameHtml({ title: 'ccfzf-picker', windowTitle: 'ccfzf_picker' }), '');
+  // Окна нет — показывать нечего.
+  assert.strictEqual(windowNameHtml({ title: 'esm-migration', windowTitle: '' }), '');
+  assert.strictEqual(windowNameHtml(null), '');
+});
+
+test('имя окна экранируется: оно приезжает с чужой машины', () => {
+  const { windowNameHtml } = require('../frontend-src/session-glyph');
+  const html = windowNameHtml({ title: 'x', windowTitle: '<img src=x>' });
+  assert.ok(!html.includes('<img'), 'заголовок окна пишет чужой трекер, и в разметку он не уходит');
+});

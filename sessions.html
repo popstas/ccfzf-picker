@@ -345,6 +345,9 @@
         /* Метка PR — той же тусклостью, что и колонка хоткея: опознают строку
            по имени и пути, это подсказка рядом. */
         .name .pr { margin-left: 6px; font-size: 11px; color: #7d838c; font-weight: normal; }
+        /* Имя окна — той же тусклостью, что и метка PR, и по той же причине:
+           опознают строку по первому имени, это подсказка рядом. */
+        .name .wname { margin-left: 6px; font-size: 11px; color: #7d838c; font-weight: normal; }
         /* Правые колонки одной группой: статус, id, контекст с деньгами,
            возраст. Прижимает их сюда именно она — раньше это делала `.state`
            своим margin-left: auto, и выключенный чекбокс события уносил
@@ -906,7 +909,10 @@
   // отрисовке: подпись и обработчик обязаны смотреть в один список.
   let menuKeysShown = [];
   let menuActive = 0;
-  let menuSessionId = null;
+  // Ключ карточки (rowKey), а не голый id: две карточки одной сессии делят
+  // id, и голый id при перерисовке всегда нашёл бы первую из пары — действие
+  // ушло бы не по той карточке, на которой открыли меню.
+  let menuKey = null;
   // Иконки приложений: id действия → data-URI. Заполняется один раз при
   // старте и на config-changed, см. loadActionIcons.
   let actionIcons = {};
@@ -989,6 +995,7 @@
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
+    windowNameHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -1237,6 +1244,23 @@
     return window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query, collapsedDays);
   }
 
+  /**
+   * Ключ карточки для planListSync и для меню.
+   *
+   * Сессия с N окнами (buildSessionList) даёт N карточек с общим id — голого
+   * `s:<id>` мало: перерисовка и `^K` не отличили бы их друг от друга. Хвост —
+   * машина окна именно этой карточки (session.window), а не row.windowHost:
+   * тот пуст у своей машины, и две карточки на своей же машине (два окна
+   * одного терминала на ней) снова слиплись бы. normHost — тот же приём, что
+   * у canFocusRow: одна сторона имени — hostname трекера, другая — то, что
+   * человек набрал в конфиге, и регистр с пробелами по краям тут не в счёт.
+   * У строки без окна ключ остаётся прежним — различать нечего.
+   */
+  function rowKey(session) {
+    const host = window.SessionWindows.normHost((session.window || {}).host);
+    return host ? `s:${session.id}@${host}` : `s:${session.id}`;
+  }
+
   function sessionItem(session, nowSec) {
     const index = rows.length;
     rows.push(session);
@@ -1264,6 +1288,9 @@
     const html = `<div class="row ${rowKind}${session.live ? '' : ' closed'}${markable ? ' markable' : ''}${stale}" data-index="${index}"${titleAttr(session)}>` +
       statusDotHtml(session) +
       `<div class="text"><div class="name">${escapeHtml(session.label)}` +
+      // Второе имя строки — то, которым сессию завёл человек. Рисуется, только
+      // когда расходится с первым: см. windowNameHtml.
+      `${windowNameHtml(session)}` +
       `${prBadgeHtml(session)}` +
       `</div>` +
       (sessionCwdLine ? `<div class="cwd">${escapeHtml(sessionCwdLine)}</div>` : '') +
@@ -1288,7 +1315,7 @@
       usageHtml(session, toggles) +
       ageHtml(session, nowSec) +
       `</div></div>`;
-    return { key: `s:${session.id}`, html };
+    return { key: rowKey(session), html };
   }
 
   /**
@@ -1711,7 +1738,7 @@
 
   /** Куда просить о подъёме окна этой строки. Пусто — спросим свой конфиг. */
   function focusBase(row) {
-    return window.SessionWindows.mqttBaseFor(row, lastState);
+    return window.SessionWindows.mqttBaseFor(row, lastState, CONFIG.windowHost);
   }
 
   /** Куда просить об открытии сессии. Пусто — спросим свой конфиг. */
@@ -1866,18 +1893,22 @@
    * чем на успех. Пикер при этом не гаснет — список перерисовывается раз в
    * секунду, и перекраску видно на глазах.
    *
-   * Адрес берётся у машины окна, а не у своего конфига: отметку ставит тот
-   * трекер, который видел взгляд, а он может стоять на соседней машине.
-   * Строка без окна адреса не назовёт — тогда просьба уходит по своей базе,
-   * как раньше: слот в windows11-manager переживает закрытие окна, и такую
-   * сессию он всё ещё может знать по id.
+   * Адреса берутся у машин окон, а не у своего конфига, и просьба уходит
+   * каждому: сессию открывают на двух машинах сразу, отметка складывается по
+   * максимуму всех, и отмотай у одного трекера — второй вернёт «просмотрено»
+   * на следующем же опросе. Строка без окон адреса не назовёт — тогда просьба
+   * уходит по своей базе, как раньше: слот в windows11-manager переживает
+   * закрытие окна, и такую сессию он всё ещё может знать по id.
    */
   function markUnread(row) {
     // Перерисовка — из последнего ответа, без похода на удалённый хост:
     // изменились отметки, а не сессии.
     markSeen(row.id, row.lastActivity - 1).then(regroup);
     if (!CONFIG.mqtt.configured) return;
-    invoke('unread_session_mqtt', { id: row.id, base: focusBase(row) })
+    invoke('unread_session_mqtt', {
+      id: row.id,
+      bases: window.SessionWindows.unreadBases(row, lastState),
+    })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -2267,7 +2298,7 @@
     menuOpen = false;
     menuActions = [];
     menuActive = 0;
-    menuSessionId = null;
+    menuKey = null;
     actionsBackdrop.classList.remove('open');
     actionsBackdrop.setAttribute('aria-hidden', 'true');
     search.focus();
@@ -2596,7 +2627,7 @@
   }
 
   function renderMenu(data) {
-    menuSessionId = data.id;
+    menuKey = data.key;
     menuActions = data.actions || [];
     menuActive = 0;
     const name = data.label ? sessionName(data) : '';
@@ -2674,7 +2705,7 @@
     // висит на Enter.
     if (!actions.length) return;
     renderMenu({
-      id: session.id,
+      key: rowKey(session),
       label: session.label,
       cwd: session.cwd,
       actions,
@@ -2926,17 +2957,19 @@
 
   function runMenuAction() {
     const action = menuActions[menuActive];
-    if (!action || !menuSessionId) return;
-    const id = menuSessionId;
+    if (!action || !menuKey) return;
+    const key = menuKey;
     const actionId = action.id;
     closeMenu();
-    // По id, а не по индексу active: список перерисовывается раз в секунду,
-    // пока меню открыто, render() пересобирает rows в порядке текущей
-    // сортировки, и active остаётся числом — строка под этим индексом может
-    // смениться на другую сессию. Прямые клавиши из списка (обработчик ниже)
-    // этой ловушке не подвержены: там меню не открыто, и active — это и есть
-    // выбранная строка.
-    runAction(rows.find(r => r.id === id), actionId);
+    // По ключу карточки, а не по индексу active и не по голому id: список
+    // перерисовывается раз в секунду, пока меню открыто, render() пересобирает
+    // rows в порядке текущей сортировки, и active остаётся числом — строка под
+    // этим индексом может смениться на другую сессию. Голого id тоже мало —
+    // сессия с несколькими окнами даёт несколько карточек с общим id, и он
+    // всегда нашёл бы первую из пары, а не ту, на которой открыли меню.
+    // Прямые клавиши из списка (обработчик ниже) этой ловушке не подвержены:
+    // там меню не открыто, и active — это и есть выбранная строка.
+    runAction(rows.find(r => rowKey(r) === key), actionId);
   }
 
   function moveMenu(delta) {

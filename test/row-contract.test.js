@@ -21,6 +21,7 @@ const { filterSessions, filterProjects } = require('../frontend-src/picker-filte
 const { buildProjectList, markHotkeysTaken } = require('../frontend-src/project-list');
 const { availableActions } = require('../frontend-src/session-actions');
 const StaleItems = require('../frontend-src/stale-items');
+const SessionWindows = require('../frontend-src/session-windows');
 
 // Форма — с живого ответа `ccfzf --state` (см. scripts/check-state.js), поля
 // в том же порядке и с теми же именами.
@@ -1548,7 +1549,7 @@ function renderSessionRows(state, query, toggles, stale) {
   // от неё зависит класс `markable`, то есть обещание про Shift+клик, и копия
   // разошлась бы с настоящим правилом молча.
   const source = pageFunctions(
-    'markToggleId(row)', 'sessionItem(session, nowSec)', 'subheadItem(row)',
+    'markToggleId(row)', 'rowKey(session)', 'sessionItem(session, nowSec)', 'subheadItem(row)',
     'sectionItem(section)', 'itemsOfSection(section, nowSec)', 'staleSettings()');
   const staleConfig = stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 };
   // Та же подстановка умолчания, что и в renderProjectRows: тест, назвавший
@@ -1561,6 +1562,7 @@ function renderSessionRows(state, query, toggles, stale) {
       SessionActions: { availableActions },
       PickerSections,
       StaleItems,
+      SessionWindows,
     },
     CONFIG: {
       stale: staleConfig,
@@ -1575,6 +1577,7 @@ function renderSessionRows(state, query, toggles, stale) {
     titleAttr: Glyph.titleAttr,
     statusDotHtml: Glyph.statusDotHtml,
     prBadgeHtml: Glyph.prBadgeHtml,
+    windowNameHtml: Glyph.windowNameHtml,
     windowHtml: Glyph.windowHtml,
     windowHostHtml: Glyph.windowHostHtml,
     stateHtml: Glyph.stateHtml,
@@ -1641,6 +1644,38 @@ test('сессия mac-wezterm показывает каталог ccfzf-picker,
   // Подсказка не поменялась: тот же titleAttr, что и раньше, полный путь
   // через shortPath.
   assert.ok(session.html.includes('~/ccfzf-picker'), session.html);
+});
+
+// Имён у сессии два, и второе — имя окна — до отрисовки доезжало только в
+// подсказке ▣, то есть нигде: строку опознавали по `title` из транскрипта, а
+// человек знает её по имени, которым сам её завёл. Проверяется на настоящей
+// разметке, а не на одной windowNameHtml: разойтись они могут молча — вызов
+// из шаблона строки не сторожит ничто другое.
+test('имя окна доезжает до строки, когда расходится с именем сессии', () => {
+  const { items } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({
+      title: 'esm-migration',
+      windows: [{ title: 'tray-build-time', host: 'mac-host', lastSeen: 2, focusedAt: 2 }],
+    })],
+    windowHost: 'mac-host',
+    windowPid: 7,
+  });
+  const session = items.find(i => i.key.startsWith('s:'));
+  assert.ok(session.html.includes('<span class="wname">tray-build-time</span>'), session.html);
+
+  // Совпали — подписи нет: та же мерка слов, что у второй строки с каталогом.
+  const { items: same } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({
+      title: 'tray-build-time',
+      windows: [{ title: 'tray-build-time', host: 'mac-host', lastSeen: 2, focusedAt: 2 }],
+    })],
+    windowHost: 'mac-host',
+    windowPid: 7,
+  });
+  const row = same.find(i => i.key.startsWith('s:'));
+  assert.ok(!row.html.includes('wname'), row.html);
 });
 
 // Маркер вида строки — самый хрупкий инвариант широкого режима: карточка в

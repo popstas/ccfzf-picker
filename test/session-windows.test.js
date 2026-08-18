@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const SessionWindows = require('../frontend-src/session-windows');
-const { canFocusRow, trackerHere, trackerHosts, focusPid, openManager } = SessionWindows;
+const { canFocusRow, trackerHere, trackerHosts, focusPid, openManager, windowsOf, windowOf, focusWindowOf, mqttBaseFor, unreadBases } = SessionWindows;
 
 // Ответ нового агрегатора: две машины, у каждой свой трекер.
 const STATE = {
@@ -68,6 +68,25 @@ test('старый агрегатор без полей у окна читает
   const row = { window: { title: 'ccfzf', lastSeen: 1, focusedAt: 0 } };
   assert.strictEqual(canFocusRow(row, old, 'desktop-box'), true);
   assert.strictEqual(canFocusRow(row, old, 'macbook'), false);
+});
+
+test('своё окно находится, даже когда главным названо чужое', () => {
+  // Агрегатор ставит первым окно со свежайшим взглядом — оно может быть на
+  // соседней машине. Поднимать при этом надо здешнее: подъём на чужом экране
+  // человеку ничего не даёт.
+  const row = { windows: [
+    { host: 'mac-host', pid: 5, canFocus: true, mqttBase: 'home/mac/windows' },
+    { host: 'windows-box', pid: 7, canFocus: true, mqttBase: 'home/pc/windows' },
+  ] };
+  assert.strictEqual(canFocusRow(row, {}, 'windows-box'), true);
+  assert.strictEqual(focusWindowOf(row, {}, 'windows-box').host, 'windows-box');
+  assert.strictEqual(mqttBaseFor(row, {}, 'windows-box'), 'home/pc/windows');
+});
+
+test('своего окна нет — фокуса нет, а база остаётся у главного окна', () => {
+  const row = { windows: [{ host: 'mac-host', pid: 5, canFocus: true, mqttBase: 'home/mac/windows' }] };
+  assert.strictEqual(canFocusRow(row, {}, 'windows-box'), false);
+  assert.strictEqual(mqttBaseFor(row, {}, 'windows-box'), 'home/mac/windows');
 });
 
 test('trackerHere находит свою машину среди трекеров', () => {
@@ -195,4 +214,88 @@ test('старый агрегатор называет одну машину, и
   // как прежде, а не терять ветку менеджера.
   const state = { windowHost: 'windows-box', windowPid: 42 };
   assert.equal(SessionWindows.openManager(state, 'windows-box').host, 'windows-box');
+});
+
+test('windowsOf отдаёт все окна строки в порядке ответа', () => {
+  const row = { windows: [{ host: 'mac-host', app: 'kitty' }, { host: 'windows-box' }] };
+  assert.deepStrictEqual(windowsOf(row, {}).map(w => w.host), ['mac-host', 'windows-box']);
+});
+
+test('пустой windows при непустом window откатывается на window', () => {
+  // Условие `Array.isArray(r.windows) && r.windows.length` несёт настоящую
+  // работу ровно здесь: одного Array.isArray хватило бы, чтобы пустой список
+  // победил непустое `window` и строка осталась вовсе без окон.
+  const row = { windows: [], window: { host: 'mac-host' } };
+  assert.deepStrictEqual(windowsOf(row, {}).map(w => w.host), ['mac-host']);
+});
+
+test('старый ответ понимается: одно окно становится списком из одного', () => {
+  // Пикер новее агрегатора обязан вести себя как прежде, а не гасить пометки:
+  // выкатываются они порознь, и порядок нам не подвластен.
+  const row = { window: { host: 'mac-host' } };
+  assert.deepStrictEqual(windowsOf(row, {}).map(w => w.host), ['mac-host']);
+});
+
+test('совсем старый ответ: машину называют верхние поля', () => {
+  const row = { window: { title: 'ccfzf' } };
+  const state = { windowHost: 'windows-box', windowPid: 7 };
+  assert.deepStrictEqual(windowsOf(row, state).map(w => w.host), ['windows-box']);
+  assert.strictEqual(windowsOf(row, state)[0].pid, 7);
+});
+
+test('строка без окон даёт пустой список, а windowOf — null', () => {
+  assert.deepStrictEqual(windowsOf({}, {}), []);
+  assert.strictEqual(windowOf({}, {}), null);
+});
+
+test('unreadBases называет базу каждого окна, без повторов', () => {
+  // Отметка складывается по максимуму всех окон, значит отмотать надо у
+  // каждого трекера: иначе второй вернёт «просмотрено» следующим же опросом.
+  const row = { windows: [
+    { host: 'mac-host', mqttBase: 'home/mac/windows' },
+    { host: 'windows-box', mqttBase: 'home/pc/windows' },
+    { host: 'other-box', mqttBase: 'home/pc/windows' },
+  ] };
+  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', 'home/pc/windows']);
+});
+
+test('строка без окон баз не называет — просьба уйдёт по своей', () => {
+  assert.deepStrictEqual(unreadBases({}, {}), []);
+});
+
+test('unreadBases читает sessionWindows карточки, а не её собственное окно', () => {
+  // Карточка теперь несёт одно окно (row.windows), а сессия открыта на двух
+  // машинах сразу. Отмотать «просмотрено» надо у обоих трекеров — иначе
+  // сосед, которого не тронули, вернёт «просмотрено» на следующем же опросе,
+  // и кнопка будет выглядеть сломанной молча (у публикации в MQTT нет ответа).
+  const row = {
+    windows: [{ host: 'mac-host', mqttBase: 'home/mac/windows' }],
+    sessionWindows: [
+      { host: 'mac-host', mqttBase: 'home/mac/windows' },
+      { host: 'windows-box', mqttBase: 'home/pc/windows' },
+    ],
+  };
+  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', 'home/pc/windows']);
+});
+
+test('unreadBases без sessionWindows откатывается на windowsOf(row, state)', () => {
+  // Строки, собранные не buildSessionList (старые вызовы в тестах, чужие
+  // источники строк), поля sessionWindows не несут вовсе.
+  const row = { windows: [
+    { host: 'mac-host', mqttBase: 'home/mac/windows' },
+    { host: 'windows-box', mqttBase: 'home/pc/windows' },
+  ] };
+  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', 'home/pc/windows']);
+});
+
+test('окно без адреса просит отмотку по своей базе, а не пропускается', () => {
+  // windows11-manager поля mqttBase не пишет вовсе, и агрегатор приписывает
+  // такому окну пустую строку. Выбрось её unreadBases — и просьба до этого
+  // трекера не доедет никогда: Rust трактует '' как «спроси свой конфиг»
+  // (resolve_base), а пропуск это переводит в «трекера тут нет».
+  const row = { windows: [
+    { host: 'mac-host', mqttBase: 'home/mac/windows' },
+    { host: 'windows-box' },
+  ] };
+  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', '']);
 });
