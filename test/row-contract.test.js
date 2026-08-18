@@ -2029,3 +2029,18 @@ test('комментарий доезжает с ответа агрегатор
   });
   assert.match(items[1].html, /<div class="comment">чинит окна<\/div>/);
 });
+
+test('счётчики TODO доезжают и до строки сессии, а не только проекта', () => {
+  // Человек читает список сессий, а не проектов, и счёт нужен ему там же, где
+  // он работает. Каталог у сессии свой, файл — тот же самый, что у её проекта.
+  const { items } = renderSessionRows(
+    { ok: true, sessions: [aggregatorSession({ todo: [{ label: 'next', done: 1, todo: 3 }] })] },
+    '', { showPaths: true, showTodo: true });
+  assert.match(items[1].html, /<div class="todo">☑ 1\/4 next<\/div>/);
+});
+
+test('сессия без TODO колонки не получает', () => {
+  const { items } = renderSessionRows(
+    { ok: true, sessions: [aggregatorSession()] }, '', { showPaths: true, showTodo: true });
+  assert.doesNotMatch(items[1].html, /class="todo"/);
+});

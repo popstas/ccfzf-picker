@@ -161,7 +161,8 @@
         // удалённой машине, и без перевода открывать нечего. Рядом человек и
         // увидит, почему поле есть, а пункты не появляются.
         { id: 'editor', label: 'Editor for specs and plans', type: 'text',
-          hint: 'Empty means cursor. The file path is appended as the last argument.' },
+          hint: 'Empty means cursor. On macOS a bare name opens the matching '
+            + 'application; write a full path to run a program directly.' },
       ],
     },
   ];

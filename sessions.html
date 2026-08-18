@@ -1422,6 +1422,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
       hotkeyHtml(session, toggles.showHotkey) +
       usageHtml(session, toggles) +
       promptsHtml(session, toggles.showPrompts) +
+      // Та же колонка и та же функция, что у строки проекта: счёт человек
+      // читает в том списке, где работает, а работает он в списке сессий.
+      // Второй рисовальщик того же числа разошёлся бы с первым.
+      todoHtml(session, toggles.showTodo) +
       ageHtml(session, nowSec) +
       `</div></div>`;
     return { key: rowKey(session), html };
@@ -3106,7 +3110,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
       if (base === null || !rel) return;
       const sep = window.PathMap.separatorFor(base);
       const full = `${base}${base.endsWith(sep) ? '' : sep}${rel.split('/').join(sep)}`;
-      invoke('spawn_detached', { argv: [CONFIG.editor, full] })
+      // Через open_in_editor, а не spawn_detached с готовым argv: как звать
+      // редактор, зависит от системы, а страница её не знает и знать не
+      // должна. На маке голое имя уходит в `open -a` — CLI редактора там может
+      // не быть вовсе, и прямой запуск падает (проверено с cursor).
+      invoke('open_in_editor', { editor: CONFIG.editor, path: full })
         .then(() => invoke('hide_picker'))
         .catch((e) => { error = String(e); render(); });
       return;
