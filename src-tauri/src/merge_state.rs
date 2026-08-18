@@ -12,16 +12,16 @@ const LISTS: [(&str, &str); 5] = [
     ("projects", "path"),
     ("snapshots", "id"),
     ("zellij", "name"),
-    ("hosts", "host"),
+    ("windowHosts", "host"),
 ];
 
-/// Пометить строки источником — все списки, кроме `hosts`.
+/// Пометить строки источником — все списки, кроме `windowHosts`.
 ///
-/// `hosts` — запись машины, а не строка списка: у неё уже есть своё имя, и
-/// вопрос «кто про неё рассказал» к ней не задают.
+/// `windowHosts` — запись машины, а не строка списка: у неё уже есть своё
+/// имя, и вопрос «кто про неё рассказал» к ней не задают.
 fn tag(state: &mut Value, label: &str) {
     let Some(obj) = state.as_object_mut() else { return };
-    for (list, _) in LISTS.iter().filter(|(l, _)| *l != "hosts") {
+    for (list, _) in LISTS.iter().filter(|(l, _)| *l != "windowHosts") {
         let Some(rows) = obj.get_mut(*list).and_then(|v| v.as_array_mut()) else { continue };
         for row in rows {
             if let Some(fields) = row.as_object_mut() {
@@ -81,7 +81,7 @@ fn merge_list(out: &mut Map<String, Value>, incoming: &Value, list: &str, key: &
 /// Слить ответы в документ прежней формы.
 ///
 /// Форма не меняется намеренно: страница живёт полями `lastState`
-/// (`lastState.hosts`, `.snapshots`, `.windowHost`, `openIdsFromState`), и
+/// (`lastState.windowHosts`, `.snapshots`, `.windowHost`, `openIdsFromState`), и
 /// отдай Rust два документа — правок было бы не десять, а сто, и каждая из
 /// них молчаливая.
 ///
@@ -199,6 +199,13 @@ mod tests {
 
     /// Проекты, снимки, зелийные строки и записи машин — те же правила, свои
     /// ключи. Ключ у каждого списка свой, и общего «id» тут нет.
+    ///
+    /// Список машин здесь назван `windowHosts`, а не `hosts`, — потому что
+    /// именно это имя шлёт агрегатор (`vendor/ccfzf/ccfzf`), и только его
+    /// читает страница (`trackerHosts` в session-windows.js). Тест с
+    /// вымышленным именем списка ничего не проверил бы: `LISTS` мог назвать
+    /// список как угодно, а слияние всё равно ни разу не сработало бы на
+    /// настоящем ответе.
     #[test]
     fn every_list_merges_by_its_own_key() {
         let a = serde_json::json!({
@@ -206,20 +213,23 @@ mod tests {
             "projects": [{"path": "/p"}],
             "snapshots": [{"id": "s"}],
             "zellij": [{"name": "z"}],
-            "hosts": [{"host": "host-a"}],
+            "windowHosts": [{"host": "host-a"}],
         });
         let b = serde_json::json!({
             "generated": 1, "sessions": [],
             "projects": [{"path": "/p"}, {"path": "/q"}],
             "snapshots": [{"id": "s"}, {"id": "t"}],
             "zellij": [{"name": "z"}],
-            "hosts": [{"host": "host-b"}],
+            "windowHosts": [{"host": "host-b"}],
         });
         let out = merge_states(&[(remote(), a), (Source::Local, b)]);
         assert_eq!(out["projects"].as_array().unwrap().len(), 2);
         assert_eq!(out["snapshots"].as_array().unwrap().len(), 2);
         assert_eq!(out["zellij"].as_array().unwrap().len(), 1);
-        assert_eq!(out["hosts"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            out["windowHosts"].as_array().unwrap().len(), 2,
+            "имя списка обязано совпадать с тем, что шлёт агрегатор — иначе слияние молчит",
+        );
     }
 
     /// Старый агрегатор не отдаёт ни `projects`, ни `snapshots`, и это не
