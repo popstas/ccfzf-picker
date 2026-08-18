@@ -340,6 +340,24 @@
   }
 
   /**
+   * Комментарий человека к сессии — своей строкой под ответом.
+   *
+   * Три-четыре слова о том, что здесь делается. Отличается от всего
+   * остального в строке тем, что это единственное, чего не сказал ни агент, ни
+   * трекер: человек пишет его сам, и живёт он общим списком на машине
+   * агрегатора — её `--state` читают пикеры всех машин.
+   *
+   * Пустой строки при пустом комментарии не остаётся: она заняла бы высоту у
+   * каждой сессии без него, а таких почти все. То же правило, что у `prompt` и
+   * `answer` рядом.
+   */
+  function commentHtml(session, show = true) {
+    const text = (session || {}).comment;
+    if (!show || typeof text !== 'string' || !text) return '';
+    return `<div class="comment">${escapeHtml(text)}</div>`;
+  }
+
+  /**
    * Размер сессии — сколько раз человек в ней писал.
    *
    * Своя колонка, а не третья величина внутри `usage`: та отвечает на вопрос
@@ -657,6 +675,6 @@
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
     prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, windowNameHtml,
-    docsBadgeHtml, docKindOf, promptsHtml,
+    docsBadgeHtml, docKindOf, promptsHtml, commentHtml,
   };
 });

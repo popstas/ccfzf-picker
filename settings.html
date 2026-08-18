@@ -87,6 +87,9 @@
   // выбрасывается) и подписи, взятые отсюда же.
   const TOGGLE_LABELS = {
     showPrompt: 'prompt', showAnswer: 'answer', showPaths: 'project',
+    // Комментарий человека к сессии — третья строка тела, рядом с prompt и
+    // answer.
+    showComment: 'comment',
     showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
     showCost: 'cost', showContext: 'context', showWindow: 'window',
     showWindowHost: 'window host', showTerminalIcon: 'terminal icon',
@@ -109,6 +112,7 @@
       showPrompt: { list: true, statusline: true },
       showAnswer: { list: true, statusline: true },
       showPaths: { list: true, statusline: true },
+      showComment: { list: true, statusline: false },
       showHotkey: { list: true, statusline: false },
       showEvent: { list: false, statusline: false },
       showId: { list: false, statusline: true },
@@ -340,6 +344,7 @@
     showHotkey: '⌘',
     showEvent: '↯',
     showId: '#',
+    showComment: '✎',
     showCost: '$',
     showContext: '≡',
     // Тот же глиф, каким сам список помечает открытое окно (session-glyph.js,
@@ -366,6 +371,8 @@
     showEvent: "The agent's last event, such as stop, fail, or waiting for input",
     showWindow: 'The glyph marking whether a window is open for this session',
     showWindowHost: 'The name of the machine that owns the open window',
+    showComment: 'Your own note about the session, three or four words. Shared '
+      + 'across machines and searchable; Ctrl+M edits it',
     showPrompts: 'How many times a human wrote in this session. Unlike the context '
       + 'percentage it only grows, and it compares across sessions',
     showTodo: 'Checkbox progress from the project\u2019s docs/TODO.md: the leading '

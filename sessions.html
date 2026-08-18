@@ -524,12 +524,35 @@
            значение», и вторая копия этих правил разъехалась бы с первой на
            первой же правке цвета. С `#actions-menu` роднить их незачем — та
            про действия над строкой, у неё выбор стрелками и запуск. */
-        #info-backdrop, #keys-backdrop {
+        #info-backdrop, #keys-backdrop, #comment-backdrop {
             display: none; position: absolute; inset: 0; z-index: 10;
             background: rgba(0, 0, 0, .45);
             align-items: center; justify-content: center; padding: 24px;
         }
-        #info-backdrop.open, #keys-backdrop.open { display: flex; }
+        #info-backdrop.open, #keys-backdrop.open, #comment-backdrop.open { display: flex; }
+        #comment-card {
+            width: min(420px, 100%);
+            background: #25262a; border: 1px solid #3a3d42; border-radius: 10px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+        }
+        #comment-title {
+            padding: 12px 16px 8px; font-size: 11px; color: #7d838c;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        /* Поле без рамки и на фоне карточки: это единственный элемент внутри
+           неё, и рамка вокруг рамки читалась бы вторым окном. */
+        #comment-input {
+            width: 100%; box-sizing: border-box; padding: 8px 16px 14px;
+            background: none; border: none; outline: none;
+            color: #e6e6e6; font: inherit; font-size: 13px;
+        }
+        /* Комментарий человека — под ответом и той же формы, что prompt и
+           answer: это третья строка тела, а не колонка. Отличается цветом
+           подписи: сказал его не агент, а человек. */
+        .comment {
+            margin-top: 3px; font-size: 11px; color: #8b939c;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
         #info-card, #keys-card {
             width: min(560px, 100%); max-height: 100%; overflow-y: auto;
             background: #25262a; border: 1px solid #3a3d42; border-radius: 10px;
@@ -643,6 +666,13 @@
   <div id="info-card" role="dialog">
     <div id="info-title"></div>
     <div id="info-rows"></div>
+  </div>
+</div>
+<div id="comment-backdrop" aria-hidden="true">
+  <div id="comment-card" role="dialog">
+    <div id="comment-title"></div>
+    <input id="comment-input" type="text" maxlength="200" spellcheck="false"
+      placeholder="Three or four words — Enter saves, Esc cancels">
   </div>
 </div>
 <div id="drop-line"></div>
@@ -837,6 +867,9 @@
     { key: 'showPrompt', label: 'prompt', side: 'left' },
     { key: 'showAnswer', label: 'answer', side: 'left' },
     { key: 'showPaths', label: 'project', side: 'left' },
+    // Третья строка тела, рядом с prompt и answer: это тоже текст под именем,
+    // а не колонка справа.
+    { key: 'showComment', label: 'comment', side: 'left' },
     { key: 'showHotkey', label: 'hotkeys', side: 'right' },
     { key: 'showEvent', label: 'events', side: 'right' },
     { key: 'showId', label: 'id', side: 'right' },
@@ -882,6 +915,8 @@
     showPrompt: { list: true, statusline: true },
     showAnswer: { list: true, statusline: true },
     showPaths: { list: true, statusline: true },
+    // Включён: комментарий пишут ровно затем, чтобы видеть его в списке.
+    showComment: { list: true, statusline: false },
     showHotkey: { list: true, statusline: false },
     showEvent: { list: false, statusline: false },
     showId: { list: false, statusline: true },
@@ -968,6 +1003,11 @@
   // старте и на config-changed, см. loadActionIcons.
   let actionIcons = {};
   let infoOpen = false;
+// Оверлей комментария. `commentRow` держит строку, к которой он открыт: список
+// тикает раз в секунду и к моменту сохранения успевает перерисоваться, а
+// искать строку заново по индексу было бы поиском не той.
+let commentOpen = false;
+let commentRow = null;
   let keysOpen = false;
 
   // Одна таблица «id действия ⇄ клавиша» на всё: подписи в меню Ctrl+K и
@@ -1026,7 +1066,10 @@
   const actionsTitle = document.getElementById('actions-title');
   const actionsList = document.getElementById('actions-list');
   const actionsEmpty = document.getElementById('actions-empty');
-  const infoBackdrop = document.getElementById('info-backdrop');
+  const commentBackdrop = document.getElementById('comment-backdrop');
+const commentTitle = document.getElementById('comment-title');
+const commentInput = document.getElementById('comment-input');
+const infoBackdrop = document.getElementById('info-backdrop');
   const infoTitle = document.getElementById('info-title');
   const infoRows = document.getElementById('info-rows');
   const keysButton = document.getElementById('keys-button');
@@ -1045,7 +1088,7 @@
 
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml, todoHtml,
-    docsBadgeHtml, promptsHtml,
+    docsBadgeHtml, promptsHtml, commentHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
     windowNameHtml,
   } = window.SessionGlyph;
@@ -1363,6 +1406,10 @@
         ? `<div class="prompt">${escapeHtml(session.agentPrompt)}</div>` : '') +
       (toggles.showAnswer && session.agentDescription
         ? `<div class="summary">${escapeHtml(session.agentDescription)}</div>` : '') +
+      // Комментарий — последней строкой тела, под ответом: он про сессию
+      // целиком, а не про текущий ход, и над ответом перебивал бы то, ради
+      // чего в строку и смотрят.
+      commentHtml(session, toggles.showComment) +
       `</div>` +
       // Правые колонки — одной группой: она и прижимает их вправо. Порознь
       // это делала `.state` своим margin-left: auto, и стоило снять с неё
@@ -2373,6 +2420,66 @@
     search.focus();
   }
 
+  /**
+   * Оверлей комментария к сессии.
+   *
+   * Поле сфокусировано и предзаполнено нынешним текстом: комментарий чаще
+   * правят, чем пишут с нуля, а стирать его руками ради правки — работа, за
+   * которую человек ничего не получает.
+   *
+   * Строка запоминается целиком, а не индексом: подача тикает раз в секунду, и
+   * к моменту сохранения список успевает перерисоваться — индекс указывал бы
+   * уже на другую сессию.
+   */
+  function openComment(row) {
+    if (!row || !row.id) return;
+    commentRow = row;
+    commentTitle.textContent = `${sessionName(row)} — comment`;
+    commentInput.value = row.comment || '';
+    commentOpen = true;
+    commentBackdrop.classList.add('open');
+    commentBackdrop.setAttribute('aria-hidden', 'false');
+    commentInput.focus();
+    commentInput.select();
+  }
+
+  function closeComment() {
+    commentOpen = false;
+    commentRow = null;
+    commentBackdrop.classList.remove('open');
+    commentBackdrop.setAttribute('aria-hidden', 'true');
+    search.focus();
+  }
+
+  /**
+   * Отправить комментарий на машину агрегатора.
+   *
+   * Пикер гасить не надо и нельзя: человек остаётся в списке, а не уходит в
+   * терминал, — это правило про «гасить до просьбы» касается веток,
+   * кончающихся чужим окном.
+   *
+   * Строка правится на месте, не дожидаясь ответа агрегатора: такт до минуты
+   * на скрытом окне, а до восьми — на спящем, и человек видел бы свой
+   * комментарий не сразу. Настоящее значение придёт следующим опросом и
+   * заменит это.
+   */
+  async function saveComment() {
+    const row = commentRow;
+    const text = commentInput.value.trim();
+    closeComment();
+    if (!row) return;
+    row.comment = text;
+    render();
+    try {
+      await invoke('set_comment', {
+        sshHost: CONFIG.sshHost, id: row.id, text, from: CONFIG.windowHost || '',
+      });
+    } catch (e) {
+      error = String(e);
+      render();
+    }
+  }
+
   // ── Перетаскивание заголовков секций ───────────────────────────────────
   //
   // Тащат за заголовок, а не за строку: строки заняты кликом, который
@@ -2567,7 +2674,7 @@
   }
 
   list.addEventListener('pointerdown', (e) => {
-    if (menuOpen || infoOpen || keysOpen) return;
+    if (menuOpen || infoOpen || keysOpen || commentOpen) return;
     // Только левой кнопкой: правая открывает меню строки.
     if (e.button !== 0) return;
     const node = e.target.closest('.row.section');
@@ -2981,6 +3088,10 @@
       invoke('hide_picker');
       return;
     }
+    if (id === 'comment') {
+      openComment(row);
+      return;
+    }
     if (id === 'plan' || id === 'spec') {
       // Каталог переводится на эту машину, а имя файла приклеивается тем же
       // разделителем, который выбрал сам pathMap: локальный корень бывает и
@@ -3092,6 +3203,14 @@
         e.preventDefault();
         closeKeys();
       } else if (!(e.ctrlKey || e.metaKey || e.altKey)) { e.preventDefault(); }
+      return;
+    }
+    // Стоит до прочих оверлеев: у этого внутри поле ввода, и все клавиши,
+    // кроме Enter и Esc, обязаны достаться ему, а не списку. Гасить их здесь
+    // нельзя — набрать комментарий стало бы нечем.
+    if (commentOpen) {
+      if (e.key === 'Escape') { e.preventDefault(); closeComment(); }
+      else if (e.key === 'Enter') { e.preventDefault(); saveComment(); }
       return;
     }
     if (infoOpen) {

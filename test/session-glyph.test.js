@@ -4,7 +4,7 @@ const {
   escapeHtml, statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
   sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
   shortPath, rowTitle, titleAttr, windowHostHtml, windowHtml,
-  prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, todoHtml, docsBadgeHtml, promptsHtml,
+  prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, todoHtml, docsBadgeHtml, promptsHtml, commentHtml,
 } = require('../frontend-src/session-glyph');
 
 test('shortPath collapses the agent home directory, and survives a missing path', () => {
@@ -831,4 +831,25 @@ test('promptsHtml не верит нечислу из ответа', () => {
   assert.strictEqual(promptsHtml({ promptCount: 'много' }, true),
     '<div class="prompts">✎0</div>');
   assert.strictEqual(promptsHtml({}, true), '<div class="prompts">✎0</div>');
+});
+
+// --- Комментарий человека к сессии (Task T3) -----------------------------
+
+test('commentHtml рисует строку под ответом', () => {
+  assert.strictEqual(commentHtml({ comment: 'чинит окна' }, true),
+    '<div class="comment">чинит окна</div>');
+});
+
+test('commentHtml молчит без комментария и при выключенной галке', () => {
+  // Пустой строки быть не должно: она заняла бы высоту у каждой сессии без
+  // комментария, а таких почти все.
+  assert.strictEqual(commentHtml({}, true), '');
+  assert.strictEqual(commentHtml({ comment: '' }, true), '');
+  assert.strictEqual(commentHtml({ comment: 'есть' }, false), '');
+});
+
+test('commentHtml экранирует текст', () => {
+  // Пишет его человек, и приезжает он с чужой машины через агрегатор: в
+  // разметку попадает как данные.
+  assert.match(commentHtml({ comment: '<b>жирно' }, true), /&lt;b&gt;жирно/);
 });

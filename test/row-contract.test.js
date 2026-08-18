@@ -1579,6 +1579,7 @@ function renderSessionRows(state, query, toggles, stale) {
     statusDotHtml: Glyph.statusDotHtml,
     prBadgeHtml: Glyph.prBadgeHtml,
     docsBadgeHtml: Glyph.docsBadgeHtml,
+    commentHtml: Glyph.commentHtml,
     windowNameHtml: Glyph.windowNameHtml,
     windowHtml: Glyph.windowHtml,
     windowHostHtml: Glyph.windowHostHtml,
@@ -2016,4 +2017,15 @@ test('число реплик доезжает с ответа агрегато�
     { ok: true, sessions: [aggregatorSession({ prompts: 97 })] },
     '', { showPaths: true, showPrompts: true });
   assert.match(items[1].html, /<div class="prompts">✎97<\/div>/);
+});
+
+test('комментарий доезжает с ответа агрегатора до строки под ответом', () => {
+  // Сквозной сторож дороги целиком: поле `comment` агрегатора → session-list →
+  // разметка. Комментарий приходит из общего файла на машине агрегатора, то
+  // есть его мог написать человек с любой машины, не только с этой.
+  const { items } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({ comment: 'чинит окна' })],
+  });
+  assert.match(items[1].html, /<div class="comment">чинит окна<\/div>/);
 });

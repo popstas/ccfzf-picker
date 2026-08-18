@@ -137,6 +137,10 @@
     // известен: пункт, который ничего не сделает, хуже отсутствующего — то же
     // правило, что и у действий папки выше.
     if (row && row.cwd) actions.push({ id: 'new', label: 'New session' });
+    // Комментарий — у любой строки с настоящим id: он про сессию, а не про её
+    // окно, живость или каталог. Живёт общим списком на машине агрегатора, и
+    // потому же не спрашивает ни pathMap, ни трекера.
+    if (row && row.id) actions.push({ id: 'comment', label: 'Edit comment' });
     actions.push({ id: 'info', label: 'Session info' });
     return actions;
   }
