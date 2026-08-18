@@ -28,6 +28,10 @@
     // одну из двух комбинаций — и окно настроек, сохранившись на другой
     // системе, увезло бы в конфиг чужую клавишу.
     projectsHotkey: '',
+    // Пусто по той же причине, что и у соседа выше: умолчание плитки своё на
+    // каждой системе (`Ctrl+Win+F10` против `Ctrl+Option+Cmd+C`) и живёт в
+    // Rust. Здесь пустое поле значит «взять встроенное», а не «выключить».
+    tileHotkey: '',
     // Прямой запуск бинаря, а не `open -na kitty --args`. Обе формы доводят
     // команду до kitty (проверено), но `open -n` каждый раз поднимает новый
     // экземпляр приложения, а --single-instance отдаёт окно уже запущенному
@@ -278,6 +282,8 @@
       hotkey: typeof src.hotkey === 'string' && src.hotkey ? src.hotkey : DEFAULTS.hotkey,
       projectsHotkey: typeof src.projectsHotkey === 'string'
         ? src.projectsHotkey : DEFAULTS.projectsHotkey,
+      tileHotkey: typeof src.tileHotkey === 'string'
+        ? src.tileHotkey : DEFAULTS.tileHotkey,
       terminal: src.terminal && typeof src.terminal === 'object' && src.terminal.file
         ? { file: src.terminal.file, args: Array.isArray(src.terminal.args) ? src.terminal.args : [] }
         : DEFAULTS.terminal,

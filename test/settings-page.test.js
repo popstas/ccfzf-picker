@@ -37,7 +37,11 @@ function sourceOf(re, what) {
  * что-то ещё.
  */
 function persistCoreSrc() {
-  return sourceOf(/\n {2}let persisting = false;\n {2}let persistPending = false;\n/, 'persisting/persistPending')
+  // Таблица отчёта о хоткеях тоже вычитывается со страницы, а не подставляется
+  // заглушкой: persistOnce ходит по ней, и заглушка молча разошлась бы с
+  // настоящей — тест зеленел бы на списке, которого в окне нет.
+  return sourceOf(/\n {2}const HOTKEY_REPORTS = \[[\s\S]*?\n {2}\];\n/, 'HOTKEY_REPORTS')
+    + sourceOf(/\n {2}let persisting = false;\n {2}let persistPending = false;\n/, 'persisting/persistPending')
     + sourceOf(/\n {2}function overlayDirtyPanels\(fresh\) \{[\s\S]*?\n {2}\}\n/, 'overlayDirtyPanels')
     + sourceOf(/\n {2}function overlayDirtyToggles\(fresh\) \{[\s\S]*?\n {2}\}\n/, 'overlayDirtyToggles')
     + sourceOf(/\n {2}async function persist\(\) \{[\s\S]*?\n {2}\}\n/, 'persist')
@@ -1309,4 +1313,71 @@ test('умолчание dim stale в окне настроек берётся �
     'на включённом stale.enabled умолчание обязано включиться следом');
   assert.strictEqual(dimStaleDefaultFromConfig(undefined), false,
     'у свежей установки (config без секции stale) умолчание — false, как в config-shape.js');
+});
+
+// ── Отчёт о не вставших хоткеях ────────────────────────────────────────────
+//
+// Ключи, по которым окно спрашивает результат регистрации, называет Rust
+// (`save_config` в `src-tauri/src/main.rs`), а ходит по ним `HOTKEY_REPORTS` в
+// settings.html. Разойдись они — `result['tileHotkeyRegistered']` стало бы
+// `undefined`, проверка на `=== false` не сработала бы, и окно печатало бы
+// «saved» про клавишу, которая не встала. Молча: ни ошибки, ни следа.
+//
+// Случай не выдуманный. Комбинацию плитки пикер отбирает у оконного трекера,
+// и «занята» на ней значит «трекер ещё не выкачен» — то есть отказ здесь
+// ожидаем, а не экзотика.
+const MAIN_RS = fs.readFileSync(
+  path.join(__dirname, '..', 'src-tauri', 'src', 'main.rs'),
+  'utf8',
+);
+
+test('окно спрашивает про хоткеи теми же ключами, какими отвечает Rust', () => {
+  const reports = sourceOf(/\n {2}const HOTKEY_REPORTS = \[[\s\S]*?\n {2}\];\n/, 'HOTKEY_REPORTS');
+  const asked = [...reports.matchAll(/\[\s*'[^']*'\s*,\s*'([^']+)'\s*\]/g)].map(m => m[1]);
+  assert.ok(asked.length, 'в HOTKEY_REPORTS не разобрано ни одной записи');
+
+  // Ответ save_config: пары `"<key>Registered"` / `"<key>Accelerator"`.
+  const payload = MAIN_RS.match(/fn save_config\([\s\S]*?Ok\(serde_json::json!\(\{([\s\S]*?)\}\)\)/);
+  assert.ok(payload, 'тело ответа save_config не найдено в main.rs');
+  const answered = [...payload[1].matchAll(/"(\w+)Registered":/g)].map(m => m[1]);
+
+  assert.deepStrictEqual(
+    asked.slice().sort(),
+    answered.slice().sort(),
+    'окно и Rust разошлись в именах хоткеев — отказ регистрации промолчал бы',
+  );
+
+  // Акселератор спрашивается тем же именем: без него подпись сказала бы
+  // «did not take undefined».
+  for (const key of asked) {
+    assert.ok(
+      payload[1].includes(`"${key}Accelerator":`),
+      `${key}: Rust не отдаёт комбинацию — в подписи об отказе её нечем назвать`,
+    );
+  }
+});
+
+test('не вставший хоткей плитки виден человеком, а не только в журнале', async () => {
+  const src = persistCoreSrc();
+  const status = { className: '', textContent: '' };
+  const ctx = {
+    document: { getElementById: () => status },
+    window: {},
+    invoke: async (cmd) => (cmd === 'save_config'
+      ? { hotkeyRegistered: true, projectsHotkeyRegistered: true,
+          tileHotkeyRegistered: false, tileHotkeyAccelerator: 'Ctrl+Win+F10' }
+      : {}),
+    current: 'general',
+    fields: { sshHost: 'host' },
+    config: { sshHost: 'host' },
+    dirtyFields: new Set(),
+    validate: () => [],
+    fieldsToPatch: () => ({}),
+    configToFields: () => ({ sshHost: 'host' }),
+    setTimeout, clearTimeout, console,
+  };
+  vm.createContext(ctx);
+  await vm.runInContext(`${src}\npersist()`, ctx, { filename: 'settings.html' });
+  assert.strictEqual(status.className, 'bad');
+  assert.match(status.textContent, /tile hotkey Ctrl\+Win\+F10 did not take/);
 });
