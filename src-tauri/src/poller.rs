@@ -160,8 +160,12 @@ impl Poller {
                 let idle = sources.is_empty() || (!visible && !background);
                 if sources.is_empty() {
                     let mut cache = thread_cache.lock().unwrap();
+                    // Текст общий на все три места, где он виден человеку
+                    // (здесь, sessions.html и settings-form.js), — намеренно
+                    // дословно один и тот же: разная формулировка одной и той
+                    // же беды читалась бы как две разных.
                     cache.error =
-                        "no sources: set sshHost or turn on localSource in ~/.config/ccfzf-picker/config.yaml"
+                        "no source: set the host with sessions, or turn on sessions from this machine"
                             .to_string();
                     if visible {
                         let body = payload(&cache);

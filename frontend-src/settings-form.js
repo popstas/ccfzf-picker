@@ -375,6 +375,9 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
   function validate(fields) {
     const problems = [];
     if (!String(fields.sshHost || '').trim() && !fields.localSource) {
+      // Текст дословно тот же, что и в poller.rs и sessions.html, —
+      // намеренно: разная формулировка одной и той же беды читалась бы как
+      // две разных.
       problems.push('no source: set the host with sessions, or turn on sessions from this machine');
     }
     const hotkey = String(fields.hotkey || '').trim();

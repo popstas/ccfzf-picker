@@ -841,9 +841,12 @@
   // spawn_detached, и без этой проверки ненастроенный конфиг показал бы
   // сырую ошибку ssh в отдельном окне — там, где её никто не связывает с
   // конфигом пикера.
+  //
+  // Текст дословно тот же, что и в poller.rs и settings-form.js, — намеренно:
+  // разная формулировка одной и той же беды читалась бы как две разных.
   function noSources() {
     if ((CONFIG.sshHost && CONFIG.sshHost.trim()) || CONFIG.localSource) return false;
-    error = 'no source: set the host with sessions, or turn on sessions from this machine in settings';
+    error = 'no source: set the host with sessions, or turn on sessions from this machine';
     render();
     return true;
   }
