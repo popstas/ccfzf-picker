@@ -4,7 +4,7 @@ const {
   escapeHtml, statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
   sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
   shortPath, rowTitle, titleAttr, windowHostHtml, windowHtml,
-  prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, todoHtml,
+  prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, todoHtml, docsBadgeHtml,
 } = require('../frontend-src/session-glyph');
 
 test('shortPath collapses the agent home directory, and survives a missing path', () => {
@@ -772,4 +772,35 @@ test('подсказка строки несёт полную разбивку �
 
 test('подсказка без счёта остаётся прежней', () => {
   assert.strictEqual(rowTitle({ cwd: '/home/user/p' }), rowTitle({ cwd: '/home/user/p', todo: [] }));
+});
+
+// --- Спека и план сессии (Task T5) ---------------------------------------
+
+test('docsBadgeHtml ставит один знак, когда бумаги есть', () => {
+  // Знак один на обе бумаги: их у сессии почти всегда две сразу, и два
+  // одинаковых значка рядом отвечали бы на один и тот же вопрос дважды.
+  assert.strictEqual(docsBadgeHtml({ plan: 'docs/superpowers/plans/a.md' }),
+    '<span class="docs" title="plan">▤</span>');
+  assert.strictEqual(docsBadgeHtml({ spec: 'docs/superpowers/specs/a-design.md' }),
+    '<span class="docs" title="spec">▤</span>');
+});
+
+test('docsBadgeHtml называет план, когда есть обе', () => {
+  // План главнее спеки: спека отвечает «что решили», план — «где сейчас», и
+  // из списка приходят за вторым.
+  assert.strictEqual(
+    docsBadgeHtml({ plan: 'docs/superpowers/plans/a.md', spec: 'docs/superpowers/specs/a.md' }),
+    '<span class="docs" title="plan">▤</span>');
+});
+
+test('docsBadgeHtml молчит без бумаг', () => {
+  // Пустого элемента быть не должно: бумаг нет у трёх сессий из четырёх, и
+  // пустой значок стоял бы почти в каждой строке.
+  assert.strictEqual(docsBadgeHtml({}), '');
+  assert.strictEqual(docsBadgeHtml({ plan: '' }), '');
+  assert.strictEqual(docsBadgeHtml(null), '');
+});
+
+test('docsBadgeHtml не верит нестроке', () => {
+  assert.strictEqual(docsBadgeHtml({ plan: 42 }), '');
 });

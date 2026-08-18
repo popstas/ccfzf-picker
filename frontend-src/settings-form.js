@@ -156,6 +156,12 @@
       fields: [
         { id: 'pathMap.remote', label: 'Directory on the remote host', type: 'text' },
         { id: 'pathMap.local', label: 'The same one here', type: 'text' },
+        // Стоит на этой вкладке, а не на своей: пункты «Open plan» и «Open
+        // spec» работают только вместе с картой путей — файл лежит на
+        // удалённой машине, и без перевода открывать нечего. Рядом человек и
+        // увидит, почему поле есть, а пункты не появляются.
+        { id: 'editor', label: 'Editor for specs and plans', type: 'text',
+          hint: 'Empty means cursor. The file path is appended as the last argument.' },
       ],
     },
   ];

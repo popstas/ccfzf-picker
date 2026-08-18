@@ -409,6 +409,9 @@
             font-size: 11px; color: #7d838c; white-space: nowrap;
         }
         /* Контекст и деньги, между статусом и возрастом. */
+        /* Значок бумаг. Тусклее имени и той же природы, что `.pr`: не
+           колонка, а пометка внутри строки имени. */
+        .docs { margin-left: 6px; font-size: 11px; color: #7d838c; }
         .usage {
             flex: 0 0 auto; padding-left: 10px;
             font-size: 11px; color: #7d838c; white-space: nowrap;
@@ -1026,6 +1029,7 @@
 
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml, todoHtml,
+    docsBadgeHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
     windowNameHtml,
   } = window.SessionGlyph;
@@ -1329,6 +1333,10 @@
       // когда расходится с первым: см. windowNameHtml.
       `${windowNameHtml(session)}` +
       `${prBadgeHtml(session)}` +
+      // Значок «есть спека или план» — рядом с PR и той же природы: оба
+      // говорят, что у сессии есть бумага снаружи транскрипта, и оба ведут в
+      // пункт меню, а не открываются кликом.
+      `${docsBadgeHtml(session)}` +
       `</div>` +
       (sessionCwdLine ? `<div class="cwd">${escapeHtml(sessionCwdLine)}</div>` : '') +
       // Две строки под карточкой: что спросили и чем ответили. Пустой div
@@ -2954,6 +2962,25 @@
       // https://github.com/<owner>/<repo>/pull/<число>.
       invoke('spawn_detached', { argv: ['open', row.pr_url] });
       invoke('hide_picker');
+      return;
+    }
+    if (id === 'plan' || id === 'spec') {
+      // Каталог переводится на эту машину, а имя файла приклеивается тем же
+      // разделителем, который выбрал сам pathMap: локальный корень бывает и
+      // windows-путём. Форму пути уже проверил агрегатор — регулярка DOC_RE
+      // не пускает туда ни пробела, ни кавычки.
+      //
+      // Применимость проверена в availableActions, но проверяется и здесь:
+      // прямые клавиши — второй вход, и правило «что этой строке можно»
+      // обязано быть одно на оба.
+      const base = window.PathMap.mapPath(row.cwd, CONFIG.pathMap);
+      const rel = row[id];
+      if (base === null || !rel) return;
+      const sep = window.PathMap.separatorFor(base);
+      const full = `${base}${base.endsWith(sep) ? '' : sep}${rel.split('/').join(sep)}`;
+      invoke('spawn_detached', { argv: [CONFIG.editor, full] })
+        .then(() => invoke('hide_picker'))
+        .catch((e) => { error = String(e); render(); });
       return;
     }
     if (id === 'unread') {

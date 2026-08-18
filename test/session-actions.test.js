@@ -305,3 +305,36 @@ test('каждый встроенный пункт меню обработан �
     );
   }
 });
+
+// --- Спека и план в меню ^K (Task T5) ------------------------------------
+
+test('план и спека дают пункты меню, план первым', () => {
+  // План главнее спеки — за ним и приходят: спека отвечает «что решили», план
+  // — «где сейчас».
+  const acts = availableActions({
+    kind: 'session',
+    cwd: '/home/user/p',
+    plan: 'docs/superpowers/plans/a.md',
+    spec: 'docs/superpowers/specs/a-design.md',
+  }, { pathMap: { remote: '/home/user', local: '/local' }, actions: [] });
+  const docs = acts.filter(a => a.id === 'plan' || a.id === 'spec').map(a => a.id);
+  assert.deepStrictEqual(docs, ['plan', 'spec']);
+});
+
+test('без pathMap пунктов бумаг нет вовсе', () => {
+  // Файл лежит на машине агрегатора, и открыть его здесь можно только через
+  // переведённый путь. То же правило, что у действий с папкой: пункт меню,
+  // ведущий в никуда, хуже отсутствующего.
+  const acts = availableActions({
+    kind: 'session', cwd: '/home/user/p', plan: 'docs/superpowers/plans/a.md',
+  }, { pathMap: {}, actions: [] });
+  assert.deepStrictEqual(acts.filter(a => a.id === 'plan'), []);
+});
+
+test('есть только спека — только её пункт', () => {
+  const acts = availableActions({
+    kind: 'session', cwd: '/home/user/p', spec: 'docs/superpowers/specs/a-design.md',
+  }, { pathMap: { remote: '/home/user', local: '/local' }, actions: [] });
+  const docs = acts.filter(a => a.id === 'plan' || a.id === 'spec').map(a => a.id);
+  assert.deepStrictEqual(docs, ['spec']);
+});

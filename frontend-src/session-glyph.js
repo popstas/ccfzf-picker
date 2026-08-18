@@ -340,6 +340,35 @@
   }
 
   /**
+   * Значок «у сессии есть спека или план».
+   *
+   * Пути приезжают полями `spec` и `plan` от агрегатора — он находит их в
+   * хвосте транскрипта, потому что хука для этого нет (см. DOC_RE в ccfzf).
+   *
+   * Знак один на обе бумаги, и это решение: у сессии, дошедшей до плана,
+   * почти всегда есть и спека, и два одинаковых значка рядом отвечали бы на
+   * один вопрос дважды. Какая именно бумага за ним стоит, говорит подсказка,
+   * и план в ней главнее спеки: спека отвечает «что решили», план — «где
+   * сейчас», а из списка приходят за вторым.
+   *
+   * Пустого элемента при пустых полях не остаётся: бумаг нет у трёх сессий из
+   * четырёх (22 из 100 на живой машине несут их), и пустой значок стоял бы
+   * почти в каждой строке. То же правило и та же причина, что у prBadgeHtml.
+   */
+  function docsBadgeHtml(session) {
+    const kind = docKindOf(session);
+    return kind ? `<span class="docs" title="${kind}">▤</span>` : '';
+  }
+
+  /** Какая бумага представляет строку: план, спека или никакая. */
+  function docKindOf(session) {
+    const has = (name) => typeof (session || {})[name] === 'string' && session[name];
+    if (has('plan')) return 'plan';
+    if (has('spec')) return 'spec';
+    return '';
+  }
+
+  /**
    * Счётчики docs/TODO.md у строки проекта.
    *
    * Поле `todo` приезжает от агрегатора списком секций по заголовкам первого
@@ -606,5 +635,6 @@
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
     prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, windowNameHtml,
+    docsBadgeHtml, docKindOf,
   };
 });

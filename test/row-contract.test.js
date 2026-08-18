@@ -1578,6 +1578,7 @@ function renderSessionRows(state, query, toggles, stale) {
     titleAttr: Glyph.titleAttr,
     statusDotHtml: Glyph.statusDotHtml,
     prBadgeHtml: Glyph.prBadgeHtml,
+    docsBadgeHtml: Glyph.docsBadgeHtml,
     windowNameHtml: Glyph.windowNameHtml,
     windowHtml: Glyph.windowHtml,
     windowHostHtml: Glyph.windowHostHtml,
@@ -1984,4 +1985,24 @@ test('число колонок написано ровно один раз', ()
   // бы commitDrag дыру в массиве при переносе в четвёртую колонку.
   assert.ok(!/wide: \[\[\], \[\], \[\]\]/.test(SESSIONS_HTML),
     'в sessions.html остался литерал wide: [[], [], []]');
+});
+
+test('спека и план доезжают с ответа агрегатора до значка в строке', () => {
+  // Сквозной сторож: поле агрегатора → session-list → разметка. Половинки по
+  // отдельности уже проверены, а разъехаться они могут ровно здесь — так уже
+  // было с колонкой `hk`, которую довели до строки проекта и не позвали.
+  const { items } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({
+      plan: 'docs/superpowers/plans/2026-08-18-x.md',
+      spec: 'docs/superpowers/specs/2026-08-18-x-design.md',
+    })],
+  });
+  // items[0] — заголовок секции: он тоже строка списка (см. buildSections).
+  assert.match(items[1].html, /<span class="docs" title="plan">▤<\/span>/);
+});
+
+test('сессия без бумаг значка не получает', () => {
+  const { items } = renderSessionRows({ ok: true, sessions: [aggregatorSession()] });
+  assert.doesNotMatch(items[1].html, /class="docs"/);
 });

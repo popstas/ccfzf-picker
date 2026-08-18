@@ -72,6 +72,17 @@
     // папку» принадлежит машине, а не программе — пикер работает и на маке, и
     // на Windows, а конфиг всё равно свой на каждой из них.
     actions: [],
+    // Чем открывать спеку и план сессии. В отличие от `actions`, умолчание
+    // здесь есть и оно осмысленное: пункты меню встроенные, и без рабочего
+    // умолчания значок в строке обещал бы человеку то, чего нет. Пустая
+    // строка и мусор читаются как «взять умолчание», а не «выключить»: то же
+    // правило, что у `projectsHotkey` в Rust.
+    //
+    // Одно слово, а не argv: редактор берёт путь последним аргументом, и все
+    // трое, ради которых это заводилось (cursor, code, subl), устроены
+    // одинаково. Кому нужна форма посложнее — заводит своё действие в
+    // `actions`, там argv свой.
+    editor: 'cursor',
     // Размер окна долями экрана, по стороне на каждую раскладку. Ноль — «взять
     // встроенный размер», и он же умолчание: у большинства ключа нет вовсе.
     //
@@ -279,6 +290,7 @@
       mqtt: { configured: Boolean(nonEmpty((src.mqtt || {}).host) && nonEmpty((src.mqtt || {}).base)) },
       pathMap: normalizePathMap(src.pathMap),
       actions: normalizeActions(src.actions),
+      editor: nonEmpty(src.editor) ? src.editor.trim() : DEFAULTS.editor,
       pickerSize: normalizePickerSize(src.pickerSize),
       stale: normalizeStale(src.stale),
       scrim: normalizeScrim(src.scrim),
