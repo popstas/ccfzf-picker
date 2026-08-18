@@ -1472,11 +1472,31 @@ fn editor_argv(editor: &str, path: &str) -> Vec<String> {
     vec![editor.to_string(), path.to_string()]
 }
 
+/// Пускач ли это — то есть программа, которая сама сразу завершится.
+///
+/// Разница не косметическая: у `open -a` отказ приходит **кодом возврата**, а
+/// не отказом запуска. «Приложение не найдено», «файл не открылся» — всё это
+/// успешно запущенный `open`, который через миг вернёт единицу и напишет
+/// причину в stderr. Не дождавшись его, пикер отвечает Ok на неудачу.
+///
+/// Прямой запуск редактора — противоположный случай: там процесс и есть
+/// редактор, он живёт, пока человек работает, и ждать его значило бы
+/// подвесить пикер до закрытия окна.
+fn editor_is_launcher(argv: &[String]) -> bool {
+    argv.first().map(String::as_str) == Some("open")
+}
+
 /// Открыть спеку или план в редакторе.
 ///
 /// Отдельная команда, а не `spawn_detached` с готовым argv со страницы:
 /// страница системы не знает и знать не должна — то же правило, по которому
 /// умолчание второго хоткея живёт в Rust, а не в `config-shape.js`.
+///
+/// Отказ обязан быть виден. Прежде здесь стоял один `spawn_detached`, и он
+/// отвечал Ok, едва процесс родился: страница по этому Ok гасила окно, а
+/// человек оставался с закрытым пикером и не открывшимся редактором — то
+/// есть с отказом, не сказавшим о себе ничего. Поймано на маке 2026-08-18
+/// живьём.
 #[tauri::command]
 fn open_in_editor(editor: String, path: String) -> Result<(), String> {
     if editor.trim().is_empty() {
@@ -1485,7 +1505,26 @@ fn open_in_editor(editor: String, path: String) -> Result<(), String> {
     if path.trim().is_empty() {
         return Err("nothing to open".into());
     }
-    spawn_detached(editor_argv(&editor, &path))
+    let argv = editor_argv(&editor, &path);
+    if !editor_is_launcher(&argv) {
+        return spawn_detached(argv);
+    }
+    let (file, args) = argv.split_first().expect("argv пускача не бывает пустым");
+    let out = std::process::Command::new(file)
+        .args(args)
+        .output()
+        .map_err(|e| format!("failed to spawn {file}: {e}"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    // Причину называет сам пускач, и она короткая («Unable to find application
+    // named …»). Пустой stderr бывает тоже — тогда остаётся код.
+    let said = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    Err(if said.is_empty() {
+        format!("{file} failed: {}", out.status)
+    } else {
+        said
+    })
 }
 
 /// Утилита, забирающая буфер обмена со стандартного ввода.
@@ -2136,6 +2175,31 @@ mod tests {
         assert_eq!(
             super::editor_argv("/usr/local/bin/cursor", "/x/plan.md"),
             vec!["/usr/local/bin/cursor", "/x/plan.md"]
+        );
+    }
+
+    #[test]
+    fn otkaz_puskacha_dohodit_slovami_a_ne_teryaetsya() {
+        // `open` завершается сразу, и отказ у него — код возврата, а не отказ
+        // запуска. Не дождись его пикер, он ответил бы Ok на неудачу, страница
+        // погасила бы окно, и человек остался бы без редактора и без слова о
+        // причине. Ветка только для пускача: прямой запуск — это сам редактор,
+        // и ждать его значило бы висеть до закрытия окна.
+        assert!(super::editor_is_launcher(&[
+            "open".to_string(),
+            "-a".to_string(),
+            "cursor".to_string(),
+        ]));
+        assert!(!super::editor_is_launcher(&[
+            "/usr/local/bin/cursor".to_string(),
+            "/x/plan.md".to_string(),
+        ]));
+        assert!(!super::editor_is_launcher(&[]));
+        // Тот же вход, каким страница зовёт редактор на маке, — argv обязан
+        // опознаваться пускачом, иначе ветка ожидания не включится вовсе.
+        assert_eq!(
+            super::editor_is_launcher(&super::editor_argv("cursor", "/x/plan.md")),
+            cfg!(target_os = "macos")
         );
     }
 
