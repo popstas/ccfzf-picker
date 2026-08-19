@@ -2054,6 +2054,97 @@ fn version_item_label(version: &str, built: Option<NaiveDateTime>, today: NaiveD
 ///
 /// Слова `Show` в подписях нет намеренно: оно было бы одинаковым у всех пяти
 /// пунктов и потому не различало бы ничего.
+/// Что делает клик по иконке трея: значение конфига и подпись для настроек.
+///
+/// Одна таблица на всё — список в окне настроек, разбор значения из конфига и
+/// развилка нажатия. Второй список разошёлся бы с первым самым тихим отказом
+/// из возможных: клик проходит, ветки себе не находит, ни ошибки, ни следа.
+///
+/// Взять `MODE_MENU` целиком нельзя: `tile` — действие, а не режим, списка
+/// оно не показывает вовсе. Поэтому режимы и действия перечислены здесь
+/// вместе, а не собраны из соседней таблицы.
+///
+/// Жестов два: левая кнопка (умолчание `sessions` — сегодняшнее поведение) и
+/// средняя (умолчание `tile`). Правая занята меню трея, и отдать её нельзя —
+/// это единственная дорога к настройкам, выходу и режимам. Двойного клика
+/// здесь нет намеренно: `TrayIconEvent::DoubleClick` эмитится только на
+/// Windows (`platform_impl/windows/mod.rs` в крейте tray-icon), а на маке
+/// такого события не бывает вовсе — поле в настройках обещало бы жест,
+/// которого там не будет. Долгого нажатия в API нет ни на одной системе.
+const TRAY_CLICK_ACTIONS: [(&str, &str); 3] = [
+    ("sessions", "Show the picker"),
+    ("projects", "Show the picker on projects"),
+    ("tile", "Tile the windows on this machine"),
+];
+
+/// Значение конфига, приведённое к известному действию.
+///
+/// Незнакомое, пустое и отсутствующее читаются как умолчание, а незнакомое
+/// вдобавок пишет строку в журнал: молчать нельзя — мёртвая иконка выглядит
+/// сломанным приложением, а не опечаткой в `config.yaml`.
+fn tray_action(config: &serde_json::Value, key: &str, fallback: &'static str) -> &'static str {
+    let raw = config
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if raw.is_empty() {
+        return fallback;
+    }
+    match TRAY_CLICK_ACTIONS
+        .iter()
+        .find(|(id, _)| id.eq_ignore_ascii_case(&raw))
+    {
+        Some((id, _)) => id,
+        None => {
+            ccfzf_log!("unknown {key} {raw}, falling back to {fallback}");
+            fallback
+        }
+    }
+}
+
+/// Сделать то, что назвал конфиг.
+///
+/// Ветка на каждое значение `TRAY_CLICK_ACTIONS`; сторож —
+/// `every_tray_click_action_is_handled`. Значение без ветки нажатие бы
+/// проглотило: ни ошибки, ни следа.
+fn run_tray_action(app: &tauri::AppHandle, action: &str) {
+    match action {
+        "sessions" => toggle_picker(app),
+        // Переключение, а не показ, — в отличие от пункта меню и по той же
+        // причине, по какой переключает хоткей: клик по иконке делают не
+        // глядя в список, и повторный обязан погасить окно. Сегодняшний клик
+        // тоже переключает, и менять это заодно было бы второй правкой.
+        "projects" => toggle_projects(app),
+        "tile" => tile_press(app),
+        other => {
+            // Сюда не доезжает ничего: `tray_action` уже привела значение к
+            // известному. Ветка всё равно обязана быть — `match` без неё не
+            // собрался бы, а промолчать на клике нельзя.
+            ccfzf_log!("unknown tray action {other}, showing the sessions list");
+            toggle_picker(app);
+        }
+    }
+}
+
+/// Нажали кнопкой по иконке трея.
+///
+/// Конфиг читается на каждом нажатии, а не запоминается на старте: иначе
+/// смена настройки требовала бы перезапуска пикера. Так же поступает и
+/// `tile_press`. Нечитаемый конфиг откатывает на умолчание, а не роняет
+/// нажатие: мёртвый клик по иконке — худший из ответов.
+fn tray_press(app: &tauri::AppHandle, key: &str, fallback: &'static str) {
+    let raw = match load_config() {
+        Ok(v) => v,
+        Err(e) => {
+            ccfzf_log!("cannot read config, using the built-in tray action: {e}");
+            serde_json::Value::Null
+        }
+    };
+    run_tray_action(app, tray_action(&raw, key, fallback));
+}
+
 const MODE_MENU: [(&str, &str, &str); 4] = [
     ("show-projects", "projects", "Projects"),
     ("show-remote", "remote", "Remote"),
@@ -2390,12 +2481,20 @@ fn main() {
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
+                        button,
                         button_state: MouseButtonState::Up,
                         ..
                     } = event
                     {
-                        toggle_picker(tray.app_handle());
+                        // Правой кнопке действия не достаётся: под ней меню
+                        // трея, и это единственная дорога к настройкам,
+                        // выходу и режимам.
+                        let (key, fallback) = match button {
+                            MouseButton::Left => ("trayClickAction", "sessions"),
+                            MouseButton::Middle => ("trayMiddleClickAction", "tile"),
+                            MouseButton::Right => return,
+                        };
+                        tray_press(tray.app_handle(), key, fallback);
                     }
                 })
                 .build(app)?;
@@ -2996,6 +3095,75 @@ mod tests {
                 handler.contains(&format!("\"{id}\"")) || mode_for_menu_id(id).is_some(),
                 "пункт трея {id} не разобран в on_menu_event — нажатие молча не сделает ничего"
             );
+        }
+    }
+
+    /// У каждого значения таблицы есть своя ветка.
+    ///
+    /// Тот же приём и та же причина, что у `every_active_tray_item_is_handled`:
+    /// значение без ветки — самый тихий отказ из возможных. Клик проходит,
+    /// `tray_action` отдаёт его как известное, ветки оно себе не находит и
+    /// уезжает в общую — ни ошибки, ни следа, просто не то действие.
+    ///
+    /// Сторож текстовый, потому что поведением его не поймать: настоящий
+    /// вызов требует `AppHandle`, которого в тестах нет.
+    #[test]
+    fn every_tray_click_action_is_handled() {
+        let src = include_str!("main.rs");
+        let body = src
+            .split_once("fn run_tray_action(app: &tauri::AppHandle, action: &str) {")
+            .expect("развилка действий трея пропала — тест сторожит не то")
+            .1;
+        let (body, _) = body.split_once("\n}\n").expect("развилка не закрыта");
+        for (id, _) in TRAY_CLICK_ACTIONS {
+            assert!(
+                body.contains(&format!("\"{id}\" =>")),
+                "действие трея {id} не разобрано в run_tray_action — клик молча сделает не то"
+            );
+        }
+    }
+
+    /// Незнакомое, пустое и отсутствующее значение — это умолчание жеста, а
+    /// не мёртвая иконка.
+    ///
+    /// Умолчания у жестов разные (левая кнопка показывает список, средняя
+    /// раскладывает окна), и берутся они из места нажатия, а не из таблицы:
+    /// таблица отвечает на вопрос «что бывает», а не «что по умолчанию у
+    /// этой кнопки».
+    #[test]
+    fn unknown_tray_action_falls_back_to_the_gesture_default() {
+        for config in [
+            serde_json::json!({ "trayClickAction": "не действие" }),
+            serde_json::json!({ "trayClickAction": "" }),
+            serde_json::json!({ "trayClickAction": "   " }),
+            serde_json::json!({}),
+            serde_json::Value::Null,
+            // Ключ соседнего жеста этому не указ: перепутай их — и обе
+            // кнопки делали бы одно и то же.
+            serde_json::json!({ "trayMiddleClickAction": "projects" }),
+        ] {
+            assert_eq!(
+                tray_action(&config, "trayClickAction", "sessions"),
+                "sessions",
+                "конфиг {config}"
+            );
+        }
+        assert_eq!(
+            tray_action(&serde_json::json!({}), "trayMiddleClickAction", "tile"),
+            "tile"
+        );
+    }
+
+    /// Названное действие берётся как есть, а регистр значения не важен:
+    /// человек правит `config.yaml` руками, и `Tile` там столь же вероятно,
+    /// сколько `tile`.
+    #[test]
+    fn tray_action_reads_every_value_of_the_table() {
+        for (id, _) in TRAY_CLICK_ACTIONS {
+            let config = serde_json::json!({ "trayClickAction": id });
+            assert_eq!(tray_action(&config, "trayClickAction", "sessions"), id);
+            let config = serde_json::json!({ "trayClickAction": id.to_uppercase() });
+            assert_eq!(tray_action(&config, "trayClickAction", "sessions"), id);
         }
     }
 

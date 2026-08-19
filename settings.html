@@ -301,6 +301,19 @@
         + `<input type="number" min="101" data-px="${esc(field.id)}" value="${pxValue}" `
         + `placeholder="px" title="must be at least 101 px"> px</label></div>${hint}</div>`;
     }
+    if (field.type === 'choice') {
+      // Выпадашка, а не радиокнопки: пунктов больше двух, и подписи у них
+      // длинные — рядом они заняли бы всю ширину поля.
+      //
+      // `data-field` тот же атрибут, что у текстовых полей: выбор сохраняется
+      // через тот же единственный обработчик и `fieldsToPatch`, второго пути
+      // записи здесь нет.
+      const options = field.options
+        .map(o => `<option value="${esc(o.value)}"${o.value === value ? ' selected' : ''}>`
+          + `${esc(o.label)}</option>`).join('');
+      return `<div class="field"><label>${esc(field.label)}</label>`
+        + `<select data-field="${field.id}">${options}</select>${hint}</div>`;
+    }
     if (field.type === 'hotkey') {
       // Кнопка, а не `input`: набирать сюда текст нельзя вовсе — комбинацию
       // ловит `keydown`. Форма записи (`SUPER` объединяет Cmd и Win, слова

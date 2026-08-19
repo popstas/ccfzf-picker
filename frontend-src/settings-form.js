@@ -55,6 +55,23 @@
     { value: 100, label: '100%' },
   ];
 
+  /**
+   * Что умеет клик по иконке трея.
+   *
+   * Вторая половина таблицы `TRAY_CLICK_ACTIONS` из `src-tauri/src/main.rs`:
+   * решает по значению Rust, а показывает список окно настроек, и общего кода
+   * между ними нет. Согласие держит `test/tray-actions.test.js` — тем же
+   * приёмом, что у `MODE_MENU`/`PREFIXES` и у `terminal_name`.
+   *
+   * Разойдись они — окно предложило бы действие, которого Rust не знает, и
+   * клик молча делал бы умолчание. Ни ошибки, ни следа: ответа у нажатия нет.
+   */
+  const TRAY_ACTIONS = [
+    { value: 'sessions', label: 'Show the picker' },
+    { value: 'projects', label: 'Show the picker on projects' },
+    { value: 'tile', label: 'Tile the windows on this machine' },
+  ];
+
   const PAGES = [
     {
       id: 'general',
@@ -143,6 +160,16 @@
           hint: 'Asks the window tracker for the tile layout, in the order of this list. '
             + 'Leave empty for the built-in one: Ctrl+Win+F10 on Windows, '
             + 'Ctrl+Option+Cmd+C on a Mac.' },
+        // Мышь стоит рядом с клавишами намеренно: вкладка отвечает на вопрос
+        // «чем вызвать пикер», и клик по иконке — тот же вопрос. Полями типа
+        // `hotkey` они при этом не являются, и `GLOBAL_HOTKEYS` отбирает
+        // список по типу — иначе форма проверяла бы `tile` на занятую
+        // комбинацию и на совпадение с хоткеем.
+        { id: 'trayClickAction', label: 'Click on the tray icon', type: 'choice',
+          default: 'sessions', options: TRAY_ACTIONS },
+        { id: 'trayMiddleClickAction', label: 'Middle click on the tray icon', type: 'choice',
+          default: 'tile', options: TRAY_ACTIONS,
+          hint: 'Right click opens the tray menu and cannot be reassigned.' },
       ],
     },
     {
@@ -237,6 +264,10 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
     // приписывается только в экспортируемой `configToFields`, см. её
     // комментарий: эта же функция служит базой для `fieldsToPatch`.
     if (field.type === 'size') return 0;
+    // У выпадашки нет состояния «не заполнено»: отсутствующий ключ обязан
+    // показать то самое действие, которое Rust и сделает. Пустая строка не
+    // отметила бы ни одного пункта, и список врал бы про умолчание.
+    if (field.type === 'choice') return field.default;
     return '';
   }
 
