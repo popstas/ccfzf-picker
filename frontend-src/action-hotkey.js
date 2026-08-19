@@ -248,6 +248,83 @@
   }
 
   /**
+   * Клавиши, которые годятся в глобальный хоткей.
+   *
+   * Список сверен с `parse_key` в `global-hotkey` (`src/hotkey.rs`) — тем
+   * самым разбором, через который строка из `config.yaml` проходит в Rust.
+   * Всё, чего там нет (`F13`, `ContextMenu`, `IntlBackslash`), записалось бы
+   * в файл строкой, которую пикер молча откатит на встроенное умолчание: окно
+   * настроек ответило бы «saved», а клавиша не работала бы — ровно тот тихий
+   * отказ, ради ухода от которого контрол записи и заведён.
+   *
+   * `Escape` в список не входит намеренно, хотя разбор его знает: им контрол
+   * записи отменяют, и записать его тем же нажатием было бы нельзя.
+   */
+  const RECORDABLE_CODE = new RegExp('^(?:'
+    + 'Key[A-Z]|Digit[0-9]|F[1-9]|F1[0-2]'
+    + '|Space|Enter|Tab|Backspace|Delete|Insert'
+    + '|Home|End|PageUp|PageDown'
+    + '|Arrow(?:Up|Down|Left|Right)'
+    + '|Backquote|Minus|Equal|BracketLeft|BracketRight|Backslash'
+    + '|Semicolon|Quote|Comma|Period|Slash'
+    + '|Numpad[0-9]|Numpad(?:Add|Subtract|Multiply|Divide|Decimal|Enter|Equal)'
+    + ')$');
+
+  /**
+   * Модификаторы в строку — порядком, которым написаны умолчания в Rust.
+   *
+   * `Control+Alt+Super+Shift` — тот же порядок и те же слова, что у
+   * `DEFAULT_HOTKEY_ACCELERATOR` и соседей в `main.rs`
+   * (`Control+Alt+Super+C`, `Super+Shift+C`, `Control+Super+F10`).
+   * Парсеру порядок безразличен, а человеку, сверяющему поле с `config.yaml`,
+   * — нет: два написания одной комбинации пришлось бы читать по буквам.
+   *
+   * `Super`, а не `Cmd` и не `Win`: слова `Win` разбор в Rust не знает вовсе,
+   * а `Super` работает на обеих системах — им же написаны все умолчания.
+   */
+  const RECORD_MODIFIERS = [
+    ['ctrlKey', 'Control'], ['altKey', 'Alt'], ['metaKey', 'Super'], ['shiftKey', 'Shift'],
+  ];
+
+  /**
+   * Нажатие — в строку для `config.yaml`, либо пустая строка.
+   *
+   * Пустая значит «этим нажатием комбинацию не записать»: голая клавиша без
+   * модификатора (глобальный хоткей на ней отобрал бы букву у всей системы),
+   * один модификатор без клавиши (он приходит сюда сам по себе, пока человек
+   * набирает комбинацию) или клавиша, которой не знает разбор в Rust.
+   *
+   * Имя клавиши — `e.code` без приставки `Key`/`Digit`: `KeyC` → `C`,
+   * `Digit1` → `1`. Разбор принимает обе формы, а короткая — та, которой уже
+   * написаны умолчания и подсказки. Остальные коды уходят как есть: `F10`,
+   * `ArrowUp`, `Comma` — это и есть словарь `parse_key`.
+   *
+   * По `e.code`, а не `e.key`, и по той же причине, что у `matchesHotkey`:
+   * `key` — напечатанный знак, и в русской раскладке та же клавиша пришла бы
+   * буквой «с». Хоткей же регистрируется по физической клавише.
+   */
+  /**
+   * Модификаторы, зажатые в этот миг, — тем же письмом и порядком.
+   *
+   * Нужны показу «по мере набора»: человек держит Ctrl и Super, обычной
+   * клавиши ещё нет, и контрол обязан показать, что нажатие видно. Считается
+   * той же таблицей, что и сама комбинация: второй список разошёлся бы с
+   * первым, и записанное отличалось бы от показанного.
+   */
+  function heldModifiers(event) {
+    if (!event) return [];
+    return RECORD_MODIFIERS.filter(([flag]) => Boolean(event[flag])).map(([, name]) => name);
+  }
+
+  function comboFromEvent(event) {
+    if (!event || !RECORDABLE_CODE.test(String(event.code || ''))) return '';
+    const mods = RECORD_MODIFIERS.filter(([flag]) => Boolean(event[flag])).map(([, name]) => name);
+    if (!mods.length) return '';
+    const key = String(event.code).replace(/^(?:Key|Digit)/, '');
+    return [...mods, key].join('+');
+  }
+
+  /**
    * Сверка события с разобранной комбинацией.
    *
    * По `e.code`, а не `e.key`: key — это напечатанный знак, и в русской
@@ -268,5 +345,6 @@
   return {
     BUILTIN_ACTION_KEYS, BUILTIN_SHORTCUTS, RESERVED_CODES,
     parseHotkey, formatHotkey, builtinGlyph, isReserved, matchesHotkey, menuKeys,
+    comboFromEvent, heldModifiers,
   };
 });

@@ -2748,6 +2748,38 @@ mod tests {
         }
     }
 
+    /// Всё, что записывает контрол хоткея в окне настроек, разбирается здесь.
+    ///
+    /// Вторая половина сторожа над `test/fixtures/hotkey-codes.json`; первая —
+    /// «каждый код фикстуры годится в комбинацию» в `test/action-hotkey.test.js`.
+    /// Приём тот же, что у `terminal-name` и `place-order`, и по той же
+    /// причине: расхождение поведением не поймать вовсе — окно настроек
+    /// ответит «saved», строка ляжет в `config.yaml`, а `tile_hotkey` и
+    /// соседи молча откатятся на встроенное умолчание. То есть записанная
+    /// человеком клавиша просто не сработает, и объяснить это будет нечем.
+    ///
+    /// Имя клавиши идёт без приставки `Key`/`Digit` — ровно так его пишет
+    /// `comboFromEvent`, и ровно так написаны сами `DEFAULT_*_ACCELERATOR`.
+    #[test]
+    fn hotkey_codes_all_parse() {
+        const FIXTURE: &str = include_str!("../../test/fixtures/hotkey-codes.json");
+        let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        let codes = doc["codes"].as_array().expect("в фикстуре нет codes");
+        assert!(codes.len() > 50, "фикстура подозрительно короткая");
+        for code in codes {
+            let code = code.as_str().unwrap();
+            let key = code
+                .strip_prefix("Key")
+                .or_else(|| code.strip_prefix("Digit"))
+                .unwrap_or(code);
+            let combo = format!("Control+Alt+Super+Shift+{key}");
+            assert!(
+                combo.parse::<Shortcut>().is_ok(),
+                "код {code} записался бы строкой {combo}, которую разбор не понимает",
+            );
+        }
+    }
+
     /// Про занятый второй хоткей меню тоже говорит подписью, и подпись эта
     /// своя: «Hotkey is taken» под обоими пунктами не сказало бы, какой из
     /// двух не встал.

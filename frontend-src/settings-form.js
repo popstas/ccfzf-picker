@@ -134,12 +134,12 @@
       id: 'hotkeys',
       title: 'Hotkeys',
       fields: [
-        { id: 'hotkey', label: 'Show the picker', type: 'text',
-          hint: 'SUPER is Cmd on a Mac and Win on Windows.' },
-        { id: 'projectsHotkey', label: 'Show the picker on projects', type: 'text',
+        { id: 'hotkey', label: 'Show the picker', type: 'hotkey',
+          hint: 'Click the field and press the combination.' },
+        { id: 'projectsHotkey', label: 'Show the picker on projects', type: 'hotkey',
           hint: 'Leave empty for the built-in one: Win+Shift+F10 on Windows, '
             + 'Option+Cmd+Shift+C on a Mac.' },
-        { id: 'tileHotkey', label: 'Tile the windows on this machine', type: 'text',
+        { id: 'tileHotkey', label: 'Tile the windows on this machine', type: 'hotkey',
           hint: 'Asks the window tracker for the tile layout, in the order of this list. '
             + 'Leave empty for the built-in one: Ctrl+Win+F10 on Windows, '
             + 'Ctrl+Option+Cmd+C on a Mac.' },
@@ -192,8 +192,12 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
   // занятую комбинацию молча пропустила бы одну из клавиш, а молчащий хоткей
   // читается как сломанный конфиг — здесь за это уже заплачено полднём
   // расследования (`Ctrl+F11` в `project_hotkeys.rs`).
+  //
+  // Отбор по типу, а не «все поля вкладки»: рядом с клавишами на ней стоят
+  // выпадашки действий мыши, и попади они сюда, форма проверяла бы `tile` на
+  // занятую комбинацию и на совпадение с хоткеем.
   const GLOBAL_HOTKEYS = (PAGES.find(page => page.id === 'hotkeys') || { fields: [] })
-    .fields.map(field => field.id);
+    .fields.filter(field => field.type === 'hotkey').map(field => field.id);
 
   function at(source, path) {
     return path.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), source);

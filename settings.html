@@ -57,6 +57,15 @@
   /* Пять радиокнопок и поле пикселей в один ряд, а не столбиком, как
      остальные поля формы, — их и так пять, вертикально они заняли бы
      четверть страницы. */
+  /* Поле хоткея: сама комбинация и «очистить» — в один ряд. Кнопка записи
+     занимает столько, сколько нужно комбинации, и не растягивается на всю
+     ширину: рядом с ней читается вторая. */
+  .hotkey-row { display: flex; gap: 8px; align-items: center; }
+  .hotkey-capture { min-width: 12em; text-align: center; font-family: inherit; }
+  /* Во время записи кнопка обязана отличаться от обычной: иначе «Press keys…»
+     читалось бы как подпись, а не как состояние, и уйти из него человек мог
+     бы, не заметив, что оно вообще было. */
+  .hotkey-capture.recording { outline: 2px solid #4a90d9; outline-offset: 1px; }
   .size-row { display: flex; flex-wrap: wrap; gap: 4px 14px; }
   .size-choice { display: inline-flex; align-items: center; gap: 4px; margin: 0; width: auto; }
   /* Общее правило `.field input[type=number] { width: 100% }` тут неверно:
@@ -291,6 +300,24 @@
         + '<label class="size-choice size-px">'
         + `<input type="number" min="101" data-px="${esc(field.id)}" value="${pxValue}" `
         + `placeholder="px" title="must be at least 101 px"> px</label></div>${hint}</div>`;
+    }
+    if (field.type === 'hotkey') {
+      // Кнопка, а не `input`: набирать сюда текст нельзя вовсе — комбинацию
+      // ловит `keydown`. Форма записи (`SUPER` объединяет Cmd и Win, слова
+      // `Win` разбор в Rust не знает) человеку теперь не нужна ни разу: он
+      // жмёт клавиши и видит результат.
+      //
+      // Показывается строка ровно та, что уходит в `config.yaml`: второй вид
+      // (глифами `^⇧C`) пришлось бы сверять с файлом по буквам.
+      const shown = value ? esc(value) : 'Built-in';
+      return `<div class="field"><label>${esc(field.label)}</label>`
+        + '<div class="hotkey-row">'
+        + `<button type="button" class="hotkey-capture" data-hotkey="${esc(field.id)}">${shown}</button>`
+        // «Очистить» — не украшение: пустое поле значит «взять встроенное
+        // умолчание», своё на каждой системе и живущее только в Rust, и без
+        // этой кнопки записать пустоту стало бы нечем.
+        + `<button type="button" class="hotkey-clear" data-hotkey-clear="${esc(field.id)}">Clear</button>`
+        + `</div>${hint}</div>`;
     }
     if (field.type === 'range') {
       // `data-field` тот же атрибут, что у текстовых и числовых полей: ползунок
@@ -664,6 +691,97 @@
     if (output) output.textContent = `Current: ${input.value}`;
   }
 
+  /**
+   * Записать комбинацию в поле и показать её же на кнопке.
+   *
+   * Через те же `fields`/`dirtyFields`/`scheduleAutosave`, что и обычное поле:
+   * второй путь записи разошёлся бы с первым, и записанное клавишами не
+   * попадало бы в патч.
+   *
+   * `validate` зовётся тут же, а не только при сохранении: занятую окном
+   * пикера комбинацию человек обязан увидеть в тот миг, когда её нажал, — но
+   * правило при этом одно, то самое, что уже стоит на пути конфига. Своей
+   * проверки здесь нет намеренно: разойдясь, она разрешила бы то, что форма
+   * потом отвергнет, либо наоборот.
+   */
+  function setHotkey(id, combo) {
+    fields[id] = combo;
+    dirtyFields.add(id);
+    const button = page.querySelector(`[data-hotkey="${id}"]`);
+    if (button) button.textContent = combo || 'Built-in';
+    const problems = validate(fields);
+    // Через getElementById, а не общей ссылкой: `#status` лежит внутри `#bar`,
+    // который `renderPage` пересобирает на каждой смене вкладки.
+    const status = document.getElementById('status');
+    if (status) status.textContent = problems.length ? problems.join('; ') : '';
+    scheduleAutosave();
+  }
+
+  /**
+   * Кнопка поля хоткея: клик включает запись, нажатие её и заканчивает.
+   *
+   * `preventDefault` на `keydown` обязателен: без него набираемая комбинация
+   * сработала бы как хоткей самого окна — `Cmd+W` закрыл бы настройки прямо
+   * во время записи.
+   *
+   * Комбинация показывается по мере набора и **пишется на `keyup`**: пока
+   * клавиша зажата, человек ещё волен добавить модификатор. Готовую держит
+   * `pending` — на `keyup` уже не сказать, что было нажато.
+   *
+   * `Escape` — отмена, прежнее значение остаётся; уход фокуса — то же самое.
+   * Иначе запись, начатая случайным кликом, кончалась бы неизвестно чем.
+   */
+  function wireHotkeyCapture(button) {
+    const id = button.dataset.hotkey;
+    let recording = false;
+    let pending = '';
+
+    const stop = () => {
+      recording = false;
+      pending = '';
+      button.classList.remove('recording');
+      button.textContent = fields[id] || 'Built-in';
+    };
+
+    button.addEventListener('click', () => {
+      if (recording) { stop(); return; }
+      recording = true;
+      pending = '';
+      button.classList.add('recording');
+      button.textContent = 'Press keys\u2026';
+      button.focus();
+    });
+    button.addEventListener('blur', stop);
+
+    button.addEventListener('keydown', (e) => {
+      if (!recording) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.code === 'Escape') { stop(); return; }
+      const combo = window.ActionHotkey.comboFromEvent(e);
+      if (combo) {
+        pending = combo;
+        button.textContent = combo;
+        return;
+      }
+      // Комбинации ещё нет — показать, что нажатие видно. Пустой список
+      // (одна лишь обычная клавиша без модификаторов) оставляет подсказку:
+      // сама по себе она хоткеем не станет.
+      const held = window.ActionHotkey.heldModifiers(e);
+      pending = '';
+      button.textContent = held.length ? `${held.join('+')}+\u2026` : 'Press keys\u2026';
+    });
+
+    button.addEventListener('keyup', (e) => {
+      if (!recording) return;
+      e.preventDefault();
+      if (!pending) return;
+      const combo = pending;
+      stop();
+      setHotkey(id, combo);
+    });
+  }
+
   function renderPage() {
     const def = PAGES.find(p => p.id === current);
     const body = current === 'columns' ? axesTableHtml()
@@ -708,6 +826,17 @@
           scheduleAutosave();
         });
       }
+    }
+    for (const button of page.querySelectorAll('[data-hotkey]')) {
+      wireHotkeyCapture(button);
+    }
+    for (const button of page.querySelectorAll('[data-hotkey-clear]')) {
+      button.addEventListener('click', () => {
+        // Пустая строка, а не удаление ключа: `merge_patch` умеет только
+        // вставлять, и стереть ключ из config.yaml было бы нечем. Пустое поле
+        // Rust и так читает как «взять встроенное умолчание».
+        setHotkey(button.dataset.hotkeyClear, '');
+      });
     }
     for (const input of page.querySelectorAll('[data-panel]')) {
       input.addEventListener('change', () => {
