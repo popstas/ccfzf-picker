@@ -199,25 +199,30 @@ fn toggle_window(app: &tauri::AppHandle, mode: Option<&str>) {
 /// что открыли первым хоткеем.
 fn show_picker(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("picker") else { return };
-    let _ = window.show();
     // Раскладка на момент показа — та, что запомнена с прошлого раза
-    // (`SizeRequest.fullscreen`); просьба о размере ниже может её сменить, но
-    // подложка не обязана ждать: `apply_scrim` из `set_picker_size` перекроет
-    // это значение, если страница вслед за показом попросит другой режим.
-    apply_scrim(app, current_fullscreen(app));
-    // Отложенный размер применяется здесь и только после `show()`: просьба,
-    // пришедшая по скрытому окну, была отложена именно потому, что экрана у
-    // такого окна нет. См. `SizeRequest`. Отказ стоит строки в stderr, а не
-    // возврата: показ окна дороже размера, и не показать его из-за неудавшейся
-    // центровки было бы хуже, чем показать не той ширины.
-    if let Some(fullscreen) = app
-        .try_state::<PickerSize>()
-        .and_then(|state| state.0.lock().unwrap().shown())
-    {
-        if let Err(e) = apply_picker_size(&window, fullscreen, picker_scale_now(app)) {
-            ccfzf_log!("{e}");
-        }
+    // (`SizeRequest.fullscreen`); просьба о размере со страницы может её
+    // сменить уже после показа, и тогда `set_picker_size` пересчитает и размер,
+    // и подложку сам.
+    let fullscreen = current_fullscreen(app);
+    // Размер и место ставятся **до** `show()` и на каждом показе — не только по
+    // отложенной просьбе, как было раньше. Считать по скрытому окну теперь
+    // можно: монитор называет приложение, а не окно (`target_monitor`), а
+    // невозможность спросить экран у невыведенного окна и была единственной
+    // причиной откладывать. До показа — потому что переезд на соседний экран
+    // после `show()` человек видел бы рывком: окно появилось бы там, где
+    // стояло, и прыгнуло.
+    //
+    // Отказ стоит строки в stderr, а не возврата: показ окна дороже размера, и
+    // не показать его из-за неудавшейся центровки было бы хуже, чем показать не
+    // той ширины.
+    if let Err(e) = apply_picker_size(app, &window, fullscreen, picker_scale_now(app)) {
+        ccfzf_log!("{e}");
     }
+    let _ = window.show();
+    // Подложка — после показа: монитор она берёт у самого окна пикера
+    // (`scrim::monitor_rect`), а у скрытого его нет — та же слепота, из-за
+    // которой геометрия считается выше по монитору приложения.
+    apply_scrim(app, fullscreen);
     let _ = window.set_focus();
     // Список обновляется на показе: между открытиями он устаревает, а
     // опрашивать закрытый пикер незачем.
@@ -412,16 +417,6 @@ fn wanted_size(fullscreen: bool, scale: PickerScale, screen: Option<(f64, f64)>)
     )
 }
 
-/// Монитор, по которому считаются размер и место окна.
-///
-/// `current_monitor` отвечает `Result<Option<_>>` — монитора может не быть
-/// вовсе (дисплей отключили, окно ещё не выведено), и это не ошибка, а
-/// «считать не по чему». Запасной ход на `primary_monitor` оставлен нарочно:
-/// у tao на macOS `current_monitor` — это `ns_window.screen()`, а у
-/// невыведенного окна он `nil`. Спрашивают отсюда теперь только по показанному
-/// окну (`SizeRequest`), так что до запасного хода дело доходить не должно, —
-/// но выйди оно иначе, зажим обязан считаться, а не пропасть: незажатое окно
-/// закрывает маленький мак целиком, и поймать это можно только глазами.
 /// Размер окна настроек, зажатый по экрану.
 ///
 /// Монитор спрашивается у приложения, а не у окна: окна ещё нет вовсе, а у
@@ -442,12 +437,38 @@ fn settings_size(app: &tauri::AppHandle) -> (f64, f64) {
     fit_to_screen(SETTINGS_SIZE, screen)
 }
 
-fn picker_monitor(window: &tauri::WebviewWindow) -> Option<tauri::window::Monitor> {
-    window
-        .current_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| window.primary_monitor().ok().flatten())
+/// Монитор, на котором открывать пикер.
+///
+/// Спрашивается **у приложения**, а не у окна, и это условие всей затеи:
+/// геометрия считается до `show()`, а у скрытого окна экрана нет — на macOS
+/// `current_monitor` это `ns_window.screen()`, и у невыведенного окна он
+/// `nil`. `primary_monitor` и `monitor_from_point` про окно не спрашивают
+/// ничего.
+///
+/// Выключенная галка — главный монитор, и это умолчание: место окна должно
+/// быть одним и тем же, чтобы рука вела глаз туда, где список появится.
+/// Включённая — экран под курсором: хоткей жмут с клавиатуры, но мышь почти
+/// всегда лежит на том экране, куда человек смотрит, а второго признака
+/// «активного» экрана без платформенного кода нет (передним окном пришлось бы
+/// спрашивать `GetForegroundWindow` на Windows и AX на macOS — две ветки под
+/// `cfg`, ни одна из которых не собирается на машине разработки).
+///
+/// Откат на `current_monitor` окна оставлен последним ходом: не назвался ни
+/// курсор, ни главный монитор — считаем по тому экрану, где окно уже стоит.
+/// Это ровно то, как пикер вёл себя до появления галки, и хуже прежнего от
+/// такого отката не станет.
+fn target_monitor(
+    app: &tauri::AppHandle,
+    window: &tauri::WebviewWindow,
+) -> Option<tauri::window::Monitor> {
+    let by_cursor = || {
+        let point = app.cursor_position().ok()?;
+        app.monitor_from_point(point.x, point.y).ok().flatten()
+    };
+    let wanted = if show_on_active_display_now(app) { by_cursor() } else { None };
+    wanted
+        .or_else(|| app.primary_monitor().ok().flatten())
+        .or_else(|| window.current_monitor().ok().flatten())
 }
 
 /// Логический размер монитора.
@@ -514,13 +535,18 @@ fn center_axis(want: f64, scale: f64, area_pos: i32, area_len: u32) -> i32 {
 /// создании окна с `center: true` — расходиться с ним на смене размера
 /// незачем.
 ///
-/// Зовётся только по показанному окну, см. `SizeRequest`.
+/// Зовётся и по скрытому окну — из `show_picker`, до самого показа: монитор
+/// называет приложение (`target_monitor`), а не окно, так что считать есть по
+/// чему. Второе место — `set_picker_size`, и вот оно уже только по показанному:
+/// просьба со страницы приходит и по скрытому, а ставить размер там нечему,
+/// см. `SizeRequest`.
 fn apply_picker_size(
+    app: &tauri::AppHandle,
     window: &tauri::WebviewWindow,
     fullscreen: bool,
     scale: PickerScale,
 ) -> Result<(), String> {
-    let monitor = picker_monitor(window);
+    let monitor = target_monitor(app, window);
     let (w, h) = wanted_size(
         fullscreen,
         scale,
@@ -545,56 +571,44 @@ fn apply_picker_size(
         .map_err(|e| format!("cannot center picker: {e}"))
 }
 
-/// Судьба просьбы о размере: применить сейчас или запомнить до показа.
+/// Раскладка, названная страницей последней, и судьба самой просьбы.
 ///
 /// Скрытому окну размер не ставится вовсе. Окно пикера создаётся скрытым
 /// (`visible: false` в `tauri.conf.json`), а страница просит размер при каждой
-/// своей загрузке — то есть по окну, которого ещё нет на экране. Экрана у
-/// такого окна нет и в буквальном смысле: у tao на macOS `current_monitor` —
-/// это `ns_window.screen()`, а у невыведенного окна он `nil`. И размер, и
-/// место пришлось бы считать по главному монитору наугад — на второй машине с
-/// внешним экраном это и есть «наугад», а посчитанное по чужому экрану окно
-/// заедет за край своего.
+/// своей загрузке — то есть по окну, которого ещё нет на экране. Ставить его
+/// там нечему: `set_size` у tao на macOS считает от левого нижнего угла, и
+/// невыведенное окно осталось бы у прежнего угла, растянувшись вправо и вниз —
+/// именно так это и выглядело живьём, узким окном в углу и широким за правым
+/// краем экрана.
 ///
-/// Отсюда разделение: `set_picker_size` записывает названный режим и применяет
-/// его только по показанному окну, `show_picker` применяет запомненное сразу
-/// после `show()` — считать надо по тому экрану, на котором окно уже стоит.
-/// Решает это Rust, а не страница: у скрытого окна webview умеет усыплять её
-/// целиком, и «страница по событию `picker-shown` перепросит размер» замолчала
-/// бы ровно в том случае, ради которого затевалось.
+/// Отсюда разделение: `set_picker_size` применяет размер только по показанному
+/// окну, а по скрытому лишь запоминает режим — геометрию поставит `show_picker`
+/// перед тем, как окно показать. Решает это Rust, а не страница: у скрытого
+/// окна webview умеет усыплять её целиком, и «страница по событию
+/// `picker-shown` перепросит размер» замолчала бы ровно в том случае, ради
+/// которого затевалось.
 ///
-/// Само по себе это тот баг на маке — узкое окно в углу, широкое за правым
-/// краем — не чинит: там дело в порядке двух вызовов внутри
-/// `apply_picker_size`, разбор там же. Здесь — второе условие правильного
-/// счёта, свой экран.
-///
-/// Применённое перестаёт быть отложенным: второй показ подряд, между которыми
-/// никто размера не просил, окна не трогает — лишний перескок на глазах хуже,
-/// чем ничего.
+/// Пометки «отложено» здесь больше нет, и это не упрощение ради краткости.
+/// `show_picker` ставит геометрию **на каждом** показе, а не только по
+/// отложенной просьбе: монитор ему называет приложение (`target_monitor`), то
+/// есть окно на каждом показе обязано ещё и приехать на нужный экран — с
+/// галкой «Show on active display» тот меняется без всякой просьбы о размере.
+/// Прежний довод против («второй показ подряд — лишний перескок на глазах»)
+/// умер вместе с причиной: считается всё до `show()`, и человек видит уже
+/// вставшее на место окно.
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 struct SizeRequest {
     /// Последний названный страницей режим списка.
     fullscreen: bool,
-    /// Названный, но ещё не применённый: просьба пришла по скрытому окну.
-    pending: bool,
 }
 
 impl SizeRequest {
     /// Страница назвала режим. Отвечает режимом, если ставить размер надо
-    /// сейчас, и `None`, если просьба отложена до показа.
+    /// сейчас, и `None`, если ставить его некуда — окно скрыто, и геометрию
+    /// посчитает ближайший показ.
     fn asked(&mut self, fullscreen: bool, visible: bool) -> Option<bool> {
         self.fullscreen = fullscreen;
-        self.pending = !visible;
         visible.then_some(fullscreen)
-    }
-
-    /// Окно показали. Отвечает отложенным режимом — один раз на просьбу.
-    fn shown(&mut self) -> Option<bool> {
-        if !self.pending {
-            return None;
-        }
-        self.pending = false;
-        Some(self.fullscreen)
     }
 }
 
@@ -646,6 +660,32 @@ fn scrim_flags_now(app: &tauri::AppHandle) -> (bool, bool) {
         .unwrap_or_default()
 }
 
+/// `showOnActiveDisplay` из конфига — ложью по умолчанию.
+///
+/// Ложь значит «всегда на главном мониторе», и умолчание это, а не
+/// отступление: место окна должно быть одним и тем же от открытия к открытию.
+/// Не-булево читается как отсутствие ключа и молча: в отличие от `pickerSize`,
+/// диапазона тут нет вовсе, а «галка стоит не в том положении» человек видит
+/// в окне настроек сразу — объяснять в stderr нечего.
+fn show_on_active_display(config: &serde_json::Value) -> bool {
+    config
+        .get("showOnActiveDisplay")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Галка «на активном экране», действующая прямо сейчас — тем же приёмом и по
+/// той же причине, что `WindowScale` и `ScrimFlags`: конфиг перечитывает
+/// `apply_config`, а монитор выбирают в другом месте и в другое время.
+#[derive(Default)]
+struct ActiveDisplay(Mutex<bool>);
+
+fn show_on_active_display_now(app: &tauri::AppHandle) -> bool {
+    app.try_state::<ActiveDisplay>()
+        .map(|s| *s.0.lock().unwrap())
+        .unwrap_or_default()
+}
+
 /// Режим списка, названный последним, — тот же, по которому `apply_picker_size`
 /// считает размер (`SizeRequest.fullscreen`). Подложка обязана затемнять под
 /// той же раскладкой, какую видит человек, а второй счётчик режима завёл бы
@@ -686,7 +726,7 @@ fn set_picker_size(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String
     };
     match apply {
         Some(fullscreen) => {
-            let result = apply_picker_size(&window, fullscreen, picker_scale_now(&app));
+            let result = apply_picker_size(&app, &window, fullscreen, picker_scale_now(&app));
             // Подложка пересчитывается тут же, а не ждёт следующего показа:
             // `^F` меняет раскладку у уже открытого окна, и без этого вызова
             // затемнение осталось бы от прежнего режима до следующего
@@ -1377,8 +1417,9 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
 
     // Размер — тоже без перезапуска, но применяется он не здесь, а на ближайшем
     // показе окна: пикер в этот момент скрыт (он гасит себя перед открытием
-    // настроек), а скрытому окну размер не ставится вовсе — экрана у него нет,
-    // см. `SizeRequest`. Отсюда пометка `pending`.
+    // настроек), а скрытому окну размер не ставится вовсе, см. `SizeRequest`.
+    // Помечать просьбу отложенной больше не нужно: геометрию `show_picker`
+    // считает на каждом показе, по свежим долям из этого самого состояния.
     //
     // Перепросить размер со страницы по событию `config-changed` нельзя по той
     // же причине, по какой опрос живёт в Rust: у скрытого окна WebView2 умеет
@@ -1386,9 +1427,6 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
     // ради которого затевалась.
     if let Some(state) = app.try_state::<WindowScale>() {
         *state.0.lock().unwrap() = picker_scale(&config);
-        if let Some(size) = app.try_state::<PickerSize>() {
-            size.0.lock().unwrap().pending = true;
-        }
     }
 
     // Подложка — тем же приёмом: флаги переставляются здесь, а видимость
@@ -1397,6 +1435,13 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
     // вместе с окном.
     if let Some(state) = app.try_state::<ScrimFlags>() {
         *state.0.lock().unwrap() = scrim_flags(&config);
+    }
+
+    // Галка «на активном экране» — тем же приёмом: её переставляют здесь, а
+    // читает `target_monitor` на ближайшем показе. Двигать окно сейчас
+    // незачем — оно скрыто, и место ему посчитают перед тем, как показать.
+    if let Some(state) = app.try_state::<ActiveDisplay>() {
+        *state.0.lock().unwrap() = show_on_active_display(&config);
     }
 
     let _ = app.global_shortcut().unregister_all();
@@ -2054,6 +2099,97 @@ fn version_item_label(version: &str, built: Option<NaiveDateTime>, today: NaiveD
 ///
 /// Слова `Show` в подписях нет намеренно: оно было бы одинаковым у всех пяти
 /// пунктов и потому не различало бы ничего.
+/// Что делает клик по иконке трея: значение конфига и подпись для настроек.
+///
+/// Одна таблица на всё — список в окне настроек, разбор значения из конфига и
+/// развилка нажатия. Второй список разошёлся бы с первым самым тихим отказом
+/// из возможных: клик проходит, ветки себе не находит, ни ошибки, ни следа.
+///
+/// Взять `MODE_MENU` целиком нельзя: `tile` — действие, а не режим, списка
+/// оно не показывает вовсе. Поэтому режимы и действия перечислены здесь
+/// вместе, а не собраны из соседней таблицы.
+///
+/// Жестов два: левая кнопка (умолчание `sessions` — сегодняшнее поведение) и
+/// средняя (умолчание `tile`). Правая занята меню трея, и отдать её нельзя —
+/// это единственная дорога к настройкам, выходу и режимам. Двойного клика
+/// здесь нет намеренно: `TrayIconEvent::DoubleClick` эмитится только на
+/// Windows (`platform_impl/windows/mod.rs` в крейте tray-icon), а на маке
+/// такого события не бывает вовсе — поле в настройках обещало бы жест,
+/// которого там не будет. Долгого нажатия в API нет ни на одной системе.
+const TRAY_CLICK_ACTIONS: [(&str, &str); 3] = [
+    ("sessions", "Show the picker"),
+    ("projects", "Show the picker on projects"),
+    ("tile", "Tile the windows on this machine"),
+];
+
+/// Значение конфига, приведённое к известному действию.
+///
+/// Незнакомое, пустое и отсутствующее читаются как умолчание, а незнакомое
+/// вдобавок пишет строку в журнал: молчать нельзя — мёртвая иконка выглядит
+/// сломанным приложением, а не опечаткой в `config.yaml`.
+fn tray_action(config: &serde_json::Value, key: &str, fallback: &'static str) -> &'static str {
+    let raw = config
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if raw.is_empty() {
+        return fallback;
+    }
+    match TRAY_CLICK_ACTIONS
+        .iter()
+        .find(|(id, _)| id.eq_ignore_ascii_case(&raw))
+    {
+        Some((id, _)) => id,
+        None => {
+            ccfzf_log!("unknown {key} {raw}, falling back to {fallback}");
+            fallback
+        }
+    }
+}
+
+/// Сделать то, что назвал конфиг.
+///
+/// Ветка на каждое значение `TRAY_CLICK_ACTIONS`; сторож —
+/// `every_tray_click_action_is_handled`. Значение без ветки нажатие бы
+/// проглотило: ни ошибки, ни следа.
+fn run_tray_action(app: &tauri::AppHandle, action: &str) {
+    match action {
+        "sessions" => toggle_picker(app),
+        // Переключение, а не показ, — в отличие от пункта меню и по той же
+        // причине, по какой переключает хоткей: клик по иконке делают не
+        // глядя в список, и повторный обязан погасить окно. Сегодняшний клик
+        // тоже переключает, и менять это заодно было бы второй правкой.
+        "projects" => toggle_projects(app),
+        "tile" => tile_press(app),
+        other => {
+            // Сюда не доезжает ничего: `tray_action` уже привела значение к
+            // известному. Ветка всё равно обязана быть — `match` без неё не
+            // собрался бы, а промолчать на клике нельзя.
+            ccfzf_log!("unknown tray action {other}, showing the sessions list");
+            toggle_picker(app);
+        }
+    }
+}
+
+/// Нажали кнопкой по иконке трея.
+///
+/// Конфиг читается на каждом нажатии, а не запоминается на старте: иначе
+/// смена настройки требовала бы перезапуска пикера. Так же поступает и
+/// `tile_press`. Нечитаемый конфиг откатывает на умолчание, а не роняет
+/// нажатие: мёртвый клик по иконке — худший из ответов.
+fn tray_press(app: &tauri::AppHandle, key: &str, fallback: &'static str) {
+    let raw = match load_config() {
+        Ok(v) => v,
+        Err(e) => {
+            ccfzf_log!("cannot read config, using the built-in tray action: {e}");
+            serde_json::Value::Null
+        }
+    };
+    run_tray_action(app, tray_action(&raw, key, fallback));
+}
+
 const MODE_MENU: [(&str, &str, &str); 4] = [
     ("show-projects", "projects", "Projects"),
     ("show-remote", "remote", "Remote"),
@@ -2177,6 +2313,9 @@ fn main() {
             // Флаги подложки — тем же приёмом: их переставляет `apply_config`,
             // а читает `apply_scrim`.
             app.manage(ScrimFlags(Mutex::new(scrim_flags(&config))));
+            // Галка «на активном экране» — тем же приёмом: её переставляет
+            // `apply_config`, а читает `target_monitor`.
+            app.manage(ActiveDisplay(Mutex::new(show_on_active_display(&config))));
             // Список хоткеев приезжает ответом агрегатора, а не из конфига:
             // единственный его источник — claudeWt.projects у
             // windows11-manager. До первого ответа висит список прошлого
@@ -2390,12 +2529,20 @@ fn main() {
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
+                        button,
                         button_state: MouseButtonState::Up,
                         ..
                     } = event
                     {
-                        toggle_picker(tray.app_handle());
+                        // Правой кнопке действия не достаётся: под ней меню
+                        // трея, и это единственная дорога к настройкам,
+                        // выходу и режимам.
+                        let (key, fallback) = match button {
+                            MouseButton::Left => ("trayClickAction", "sessions"),
+                            MouseButton::Middle => ("trayMiddleClickAction", "tile"),
+                            MouseButton::Right => return,
+                        };
+                        tray_press(tray.app_handle(), key, fallback);
                     }
                 })
                 .build(app)?;
@@ -2748,6 +2895,38 @@ mod tests {
         }
     }
 
+    /// Всё, что записывает контрол хоткея в окне настроек, разбирается здесь.
+    ///
+    /// Вторая половина сторожа над `test/fixtures/hotkey-codes.json`; первая —
+    /// «каждый код фикстуры годится в комбинацию» в `test/action-hotkey.test.js`.
+    /// Приём тот же, что у `terminal-name` и `place-order`, и по той же
+    /// причине: расхождение поведением не поймать вовсе — окно настроек
+    /// ответит «saved», строка ляжет в `config.yaml`, а `tile_hotkey` и
+    /// соседи молча откатятся на встроенное умолчание. То есть записанная
+    /// человеком клавиша просто не сработает, и объяснить это будет нечем.
+    ///
+    /// Имя клавиши идёт без приставки `Key`/`Digit` — ровно так его пишет
+    /// `comboFromEvent`, и ровно так написаны сами `DEFAULT_*_ACCELERATOR`.
+    #[test]
+    fn hotkey_codes_all_parse() {
+        const FIXTURE: &str = include_str!("../../test/fixtures/hotkey-codes.json");
+        let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        let codes = doc["codes"].as_array().expect("в фикстуре нет codes");
+        assert!(codes.len() > 50, "фикстура подозрительно короткая");
+        for code in codes {
+            let code = code.as_str().unwrap();
+            let key = code
+                .strip_prefix("Key")
+                .or_else(|| code.strip_prefix("Digit"))
+                .unwrap_or(code);
+            let combo = format!("Control+Alt+Super+Shift+{key}");
+            assert!(
+                combo.parse::<Shortcut>().is_ok(),
+                "код {code} записался бы строкой {combo}, которую разбор не понимает",
+            );
+        }
+    }
+
     /// Про занятый второй хоткей меню тоже говорит подписью, и подпись эта
     /// своя: «Hotkey is taken» под обоими пунктами не сказало бы, какой из
     /// двух не встал.
@@ -2964,6 +3143,75 @@ mod tests {
                 handler.contains(&format!("\"{id}\"")) || mode_for_menu_id(id).is_some(),
                 "пункт трея {id} не разобран в on_menu_event — нажатие молча не сделает ничего"
             );
+        }
+    }
+
+    /// У каждого значения таблицы есть своя ветка.
+    ///
+    /// Тот же приём и та же причина, что у `every_active_tray_item_is_handled`:
+    /// значение без ветки — самый тихий отказ из возможных. Клик проходит,
+    /// `tray_action` отдаёт его как известное, ветки оно себе не находит и
+    /// уезжает в общую — ни ошибки, ни следа, просто не то действие.
+    ///
+    /// Сторож текстовый, потому что поведением его не поймать: настоящий
+    /// вызов требует `AppHandle`, которого в тестах нет.
+    #[test]
+    fn every_tray_click_action_is_handled() {
+        let src = include_str!("main.rs");
+        let body = src
+            .split_once("fn run_tray_action(app: &tauri::AppHandle, action: &str) {")
+            .expect("развилка действий трея пропала — тест сторожит не то")
+            .1;
+        let (body, _) = body.split_once("\n}\n").expect("развилка не закрыта");
+        for (id, _) in TRAY_CLICK_ACTIONS {
+            assert!(
+                body.contains(&format!("\"{id}\" =>")),
+                "действие трея {id} не разобрано в run_tray_action — клик молча сделает не то"
+            );
+        }
+    }
+
+    /// Незнакомое, пустое и отсутствующее значение — это умолчание жеста, а
+    /// не мёртвая иконка.
+    ///
+    /// Умолчания у жестов разные (левая кнопка показывает список, средняя
+    /// раскладывает окна), и берутся они из места нажатия, а не из таблицы:
+    /// таблица отвечает на вопрос «что бывает», а не «что по умолчанию у
+    /// этой кнопки».
+    #[test]
+    fn unknown_tray_action_falls_back_to_the_gesture_default() {
+        for config in [
+            serde_json::json!({ "trayClickAction": "не действие" }),
+            serde_json::json!({ "trayClickAction": "" }),
+            serde_json::json!({ "trayClickAction": "   " }),
+            serde_json::json!({}),
+            serde_json::Value::Null,
+            // Ключ соседнего жеста этому не указ: перепутай их — и обе
+            // кнопки делали бы одно и то же.
+            serde_json::json!({ "trayMiddleClickAction": "projects" }),
+        ] {
+            assert_eq!(
+                tray_action(&config, "trayClickAction", "sessions"),
+                "sessions",
+                "конфиг {config}"
+            );
+        }
+        assert_eq!(
+            tray_action(&serde_json::json!({}), "trayMiddleClickAction", "tile"),
+            "tile"
+        );
+    }
+
+    /// Названное действие берётся как есть, а регистр значения не важен:
+    /// человек правит `config.yaml` руками, и `Tile` там столь же вероятно,
+    /// сколько `tile`.
+    #[test]
+    fn tray_action_reads_every_value_of_the_table() {
+        for (id, _) in TRAY_CLICK_ACTIONS {
+            let config = serde_json::json!({ "trayClickAction": id });
+            assert_eq!(tray_action(&config, "trayClickAction", "sessions"), id);
+            let config = serde_json::json!({ "trayClickAction": id.to_uppercase() });
+            assert_eq!(tray_action(&config, "trayClickAction", "sessions"), id);
         }
     }
 
@@ -3396,54 +3644,61 @@ actions:
         assert_eq!(center_axis(900.0, -2.0, 0, 1920), sane);
     }
 
-    /// Показанному окну размер ставится на месте и ничего не откладывает:
-    /// `^F` на открытом пикере обязан сработать тем же нажатием, а не ждать
-    /// следующего показа.
+    /// Умолчание — главный монитор: место окна должно быть одним и тем же от
+    /// открытия к открытию. То же правило, что и у `normalizeConfig` на
+    /// странице (`frontend-src/config-shape.js`): разойдись они, галка в окне
+    /// настроек обещала бы одно, а окно вставало бы по другому.
+    #[test]
+    fn the_picker_opens_on_the_main_display_by_default() {
+        assert!(!show_on_active_display(&serde_json::json!({})));
+        assert!(!show_on_active_display(&serde_json::json!({"showOnActiveDisplay": null})));
+        assert!(!show_on_active_display(&serde_json::json!({"showOnActiveDisplay": "yes"})));
+    }
+
+    #[test]
+    fn the_active_display_flag_is_taken_as_is() {
+        assert!(show_on_active_display(&serde_json::json!({"showOnActiveDisplay": true})));
+        assert!(!show_on_active_display(&serde_json::json!({"showOnActiveDisplay": false})));
+    }
+
+    /// Показанному окну размер ставится на месте: `^F` на открытом пикере
+    /// обязан сработать тем же нажатием, а не ждать следующего показа.
     #[test]
     fn a_shown_window_gets_the_size_at_once() {
         let mut req = SizeRequest::default();
         assert_eq!(req.asked(true, true), Some(true));
-        assert_eq!(req.shown(), None, "применённое не должно применяться дважды");
     }
 
-    /// Скрытому — откладывается: центровать окно, у которого нет экрана,
-    /// нечем, и просьба со страницы при загрузке приходит именно по такому.
+    /// Скрытому — не ставится вовсе: `set_size` по невыведенному окну на macOS
+    /// растягивает его от прежнего угла, а просьба со страницы при загрузке
+    /// приходит именно по такому окну. Режим при этом обязан запомниться —
+    /// геометрию по нему посчитает `show_picker`.
     #[test]
-    fn a_hidden_window_remembers_the_size_until_it_is_shown() {
+    fn a_hidden_window_remembers_the_mode_instead() {
         let mut req = SizeRequest::default();
         assert_eq!(req.asked(true, false), None);
-        assert_eq!(req.shown(), Some(true));
-    }
-
-    /// Второй показ подряд окна не трогает: перескок на глазах у человека
-    /// хуже, чем ничего, а размер с прошлого показа никуда не делся.
-    #[test]
-    fn a_second_show_moves_nothing() {
-        let mut req = SizeRequest::default();
-        req.asked(true, false);
-        assert_eq!(req.shown(), Some(true));
-        assert_eq!(req.shown(), None);
+        assert_eq!(req.fullscreen, true);
     }
 
     /// Просьбы к скрытому окну накапливаются последней: страница может
-    /// перечитать `ui.json` дважды (загрузка и `ui-changed`), и применить на
-    /// показе надо тот режим, который она назвала последним.
+    /// перечитать `ui.json` дважды (загрузка и `ui-changed`), и на показе
+    /// действует тот режим, который она назвала последним.
     #[test]
     fn the_last_request_to_a_hidden_window_wins() {
         let mut req = SizeRequest::default();
         assert_eq!(req.asked(true, false), None);
         assert_eq!(req.asked(false, false), None);
-        assert_eq!(req.shown(), Some(false));
+        assert_eq!(req.fullscreen, false);
     }
 
-    /// Просьба к показанному окну снимает отложенную: размер уже поставлен, и
-    /// применять на следующем показе нечего.
+    /// Показ геометрию ставит всегда, а не по отложенной просьбе, — значит
+    /// запомненный режим её переживает: второе открытие подряд обязано открыть
+    /// пикер той же раскладкой, что и первое.
     #[test]
-    fn a_request_to_a_shown_window_clears_the_pending_one() {
+    fn the_mode_survives_a_show() {
         let mut req = SizeRequest::default();
         req.asked(true, false);
-        assert_eq!(req.asked(false, true), Some(false));
-        assert_eq!(req.shown(), None);
+        assert_eq!(req.fullscreen, true, "показ режима не съедает");
     }
 
     /// Вырожденный экран — это «монитор не назвался», а не «экран нулевой».

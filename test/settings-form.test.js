@@ -158,10 +158,23 @@ test('исправная форма претензий не вызывает', (
 // ── глобальные хоткеи в форме ──────────────────────────────────────────────
 test('все глобальные хоткеи правятся на одной странице', () => {
   const page = PAGES.find(p => p.id === 'hotkeys');
-  const ids = page.fields.map(f => f.id);
-  // Список тот же, по которому validate ходит проверкой на занятую
-  // комбинацию: страница и есть его единственный источник.
+  // По типу поля, а не по всей вкладке: рядом с клавишами на ней стоят
+  // выпадашки действий мыши, и список, по которому validate ходит проверкой
+  // на занятую комбинацию, обязан их не видеть.
+  const ids = page.fields.filter(f => f.type === 'hotkey').map(f => f.id);
   assert.deepStrictEqual(ids, ['hotkey', 'projectsHotkey', 'tileHotkey']);
+});
+
+test('действие мыши не проверяется как хоткей', () => {
+  // Мина настоящая: GLOBAL_HOTKEYS считался как «все поля вкладки», и
+  // выпадашка действия попала бы в проверку на дубли — два жеста, ведущие в
+  // одно действие, форма объявила бы столкновением клавиш. Сообщение при этом
+  // говорило бы про хоткеи, которых человек не трогал.
+  const problems = validate({
+    ...configToFields({ sshHost: 'host' }),
+    trayClickAction: 'tile', trayMiddleClickAction: 'tile',
+  });
+  assert.deepStrictEqual(problems, []);
 });
 
 test('форма не даёт повесить два хоткея на одну комбинацию', () => {
@@ -267,6 +280,18 @@ test('scrim.narrow и scrim.wide — булевы поля на странице
   assert.strictEqual(byId('scrim.wide').type, 'bool');
   assert.strictEqual(byId('scrim.narrow').label, 'Dim the desktop behind the list');
   assert.strictEqual(byId('scrim.wide').label, 'Dim the desktop behind the wide view');
+});
+
+// Выбор монитора — там же и после подложки: вопрос «каким видеть окно» тот же,
+// а «где именно оно появится» — его продолжение.
+test('showOnActiveDisplay — булево поле на странице Window popup, после подложки', () => {
+  const page = PAGES.find(p => p.id === 'window');
+  const ids = page.fields.map(f => f.id);
+  assert.ok(ids.includes('showOnActiveDisplay'));
+  assert.ok(ids.indexOf('scrim.wide') < ids.indexOf('showOnActiveDisplay'));
+  const field = page.fields.find(f => f.id === 'showOnActiveDisplay');
+  assert.strictEqual(field.type, 'bool');
+  assert.strictEqual(field.label, 'Show on active display');
 });
 
 test('scrim без ключа в конфиге показывает выключенным, а патч несёт включённый флаг', () => {

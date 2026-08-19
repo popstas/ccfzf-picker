@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const {
   BUILTIN_ACTION_KEYS, BUILTIN_SHORTCUTS, RESERVED_CODES,
   parseHotkey, isReserved, matchesHotkey, formatHotkey, builtinGlyph, menuKeys,
+  comboFromEvent, heldModifiers,
 } = require('../frontend-src/action-hotkey');
 
 /** Событие клавиатуры в том объёме, в каком его читает matchesHotkey. */
@@ -260,4 +261,82 @@ test('Ctrl+M занята комментарием и настроенному �
   // первым молча.
   assert.ok(isReserved(parseHotkey('Ctrl+M')),
     'Ctrl+M свободна — настроенное действие на ней перестанет работать');
+});
+
+test('нажатие собирается в комбинацию тем же письмом, что и умолчания в Rust', () => {
+  // Порядок и слова — те же, что у DEFAULT_*_ACCELERATOR в main.rs
+  // (`Control+Alt+Super+C`, `Super+Shift+C`): комбинация, записанная тут,
+  // уезжает в config.yaml и разбирается парсером global-hotkey. Разойдись
+  // письмо — пикер молча откатился бы на встроенное умолчание.
+  assert.strictEqual(
+    comboFromEvent(ev('KeyC', { ctrl: true, alt: true, meta: true })),
+    'Control+Alt+Super+C');
+  assert.strictEqual(
+    comboFromEvent(ev('F10', { ctrl: true, meta: true })), 'Control+Super+F10');
+  assert.strictEqual(
+    comboFromEvent(ev('KeyC', { meta: true, shift: true })), 'Super+Shift+C');
+});
+
+test('клавиша без модификатора хоткеем не становится', () => {
+  // Глобальная комбинация на голой букве отобрала бы её у всей системы.
+  assert.strictEqual(comboFromEvent(ev('KeyC')), '');
+  assert.strictEqual(comboFromEvent(ev('F10')), '');
+});
+
+test('нажатие одного модификатора комбинации ещё не даёт', () => {
+  // Запись идёт по мере набора, и Ctrl, нажатый первым, приходит сюда сам по
+  // себе: комбинацией он станет только вместе с обычной клавишей.
+  for (const code of ['ControlLeft', 'ShiftRight', 'AltLeft', 'MetaLeft']) {
+    assert.strictEqual(comboFromEvent(ev(code, { ctrl: true })), '', code);
+  }
+});
+
+test('клавиша, которой не знает разбор в Rust, отвергается на месте', () => {
+  // Список сверен с parse_key в global-hotkey: F13, ContextMenu и
+  // IntlBackslash там отсутствуют, и такая строка в конфиге молча
+  // откатилась бы на умолчание — то есть клавиша перестала бы работать, а
+  // окно настроек отрапортовало бы «saved».
+  for (const code of ['F13', 'ContextMenu', 'IntlBackslash', 'Escape', 'Fn']) {
+    assert.strictEqual(comboFromEvent(ev(code, { ctrl: true, alt: true })), '', code);
+  }
+});
+
+test('в комбинацию годятся буквы, цифры, F-клавиши и знаки', () => {
+  const combo = code => comboFromEvent(ev(code, { ctrl: true }));
+  assert.strictEqual(combo('Digit1'), 'Control+1');
+  assert.strictEqual(combo('F12'), 'Control+F12');
+  assert.strictEqual(combo('ArrowUp'), 'Control+ArrowUp');
+  assert.strictEqual(combo('Space'), 'Control+Space');
+  assert.strictEqual(combo('Comma'), 'Control+Comma');
+  assert.strictEqual(combo('Numpad0'), 'Control+Numpad0');
+});
+
+test('зажатые модификаторы видны до того, как нажата обычная клавиша', () => {
+  // Показ «по мере набора» считается той же таблицей, что и сама комбинация:
+  // второй список разошёлся бы с первым, и записанное отличалось бы от
+  // показанного.
+  assert.deepStrictEqual(
+    heldModifiers(ev('ControlLeft', { ctrl: true, meta: true })), ['Control', 'Super']);
+  assert.deepStrictEqual(heldModifiers(ev('KeyC')), []);
+  assert.deepStrictEqual(heldModifiers(null), []);
+});
+
+// ── Общая фикстура с Rust ───────────────────────────────────────────────────
+//
+// `comboFromEvent` собирает строку, которую разбирает уже не JS, а
+// `Shortcut::from_str` в Rust (через `parse_key` в крейте global-hotkey).
+// Расхождение поведением не поймать вовсе: окно настроек ответит «saved»,
+// строка ляжет в config.yaml, а пикер молча откатится на встроенное
+// умолчание — то есть записанная клавиша просто не сработает.
+//
+// Отсюда тот же приём, что у `terminal-name` и `place-order`: один файл с
+// кодами и два сторожа над ним — этот и `hotkey_codes_all_parse` в main.rs.
+test('каждый код фикстуры годится в комбинацию', () => {
+  const { codes } = require('./fixtures/hotkey-codes.json');
+  assert.ok(codes.length > 50, 'фикстура подозрительно короткая');
+  for (const code of codes) {
+    assert.strictEqual(
+      comboFromEvent(ev(code, { ctrl: true })), `Control+${code.replace(/^(?:Key|Digit)/, '')}`,
+      `код ${code} отвергнут, хотя Rust его понимает`);
+  }
 });
