@@ -118,6 +118,13 @@
     // такое без спроса нельзя. Ставит саму подложку нативное окно (`scrim.rs`
     // в Rust), а не страница — здесь только два флага, решающих, звать ли её.
     scrim: { narrow: false, wide: false },
+    // На каком мониторе открывать пикер. Ложь — всегда на главном, и это
+    // умолчание: место окна должно быть одним и тем же, чтобы рука сама вела
+    // глаз туда, где список появится. Истина — на том экране, где сейчас
+    // курсор. Считает это Rust (`target_monitor` в main.rs), здесь ключ
+    // описан затем же, зачем `pickerSize`, — чтобы форма конфига была в одном
+    // месте и проверялась одним тестом.
+    showOnActiveDisplay: false,
   };
 
   /**
@@ -312,6 +319,9 @@
       pickerSize: normalizePickerSize(src.pickerSize),
       stale: normalizeStale(src.stale),
       scrim: normalizeScrim(src.scrim),
+      showOnActiveDisplay: typeof src.showOnActiveDisplay === 'boolean'
+        ? src.showOnActiveDisplay
+        : DEFAULTS.showOnActiveDisplay,
     };
   }
 

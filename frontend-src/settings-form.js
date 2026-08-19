@@ -140,6 +140,9 @@
         // только, звать ли его, порознь для каждой раскладки.
         { id: 'scrim.narrow', label: 'Dim the desktop behind the list', type: 'bool' },
         { id: 'scrim.wide', label: 'Dim the desktop behind the wide view', type: 'bool' },
+        { id: 'showOnActiveDisplay', label: 'Show on active display', type: 'bool',
+          hint: 'Off — the picker always opens on the main display. '
+            + 'On — on the display where the mouse pointer is.' },
       ],
     },
     { id: 'columns', title: 'Columns', fields: [] },

@@ -399,6 +399,23 @@ test('scrim принимает один флаг, не трогая соседн
     { narrow: true, wide: false });
 });
 
+// ── На каком мониторе открывать пикер ──────────────────────────────────────
+
+// Умолчание — главный монитор: место окна должно быть одним и тем же от
+// открытия к открытию, чтобы рука вела глаз туда, где список появится.
+// Правило то же, по которому судит Rust (`show_on_active_display` в main.rs):
+// разойдись они, окно вставало бы не там, где обещает галка.
+test('showOnActiveDisplay по умолчанию выключен', () => {
+  assert.strictEqual(normalizeConfig({}).showOnActiveDisplay, false);
+  assert.strictEqual(normalizeConfig({ showOnActiveDisplay: null }).showOnActiveDisplay, false);
+  assert.strictEqual(normalizeConfig({ showOnActiveDisplay: 'yes' }).showOnActiveDisplay, false);
+});
+
+test('showOnActiveDisplay принимает булево как есть', () => {
+  assert.strictEqual(normalizeConfig({ showOnActiveDisplay: true }).showOnActiveDisplay, true);
+  assert.strictEqual(normalizeConfig({ showOnActiveDisplay: false }).showOnActiveDisplay, false);
+});
+
 test('editor: умолчание cursor, пустая строка возвращает его же', () => {
   // Ключ нужен ради встроенных пунктов «Open plan» / «Open spec»: они обязаны
   // работать из коробки, иначе значок в строке обещал бы то, чего нет.

@@ -282,6 +282,18 @@ test('scrim.narrow и scrim.wide — булевы поля на странице
   assert.strictEqual(byId('scrim.wide').label, 'Dim the desktop behind the wide view');
 });
 
+// Выбор монитора — там же и после подложки: вопрос «каким видеть окно» тот же,
+// а «где именно оно появится» — его продолжение.
+test('showOnActiveDisplay — булево поле на странице Window popup, после подложки', () => {
+  const page = PAGES.find(p => p.id === 'window');
+  const ids = page.fields.map(f => f.id);
+  assert.ok(ids.includes('showOnActiveDisplay'));
+  assert.ok(ids.indexOf('scrim.wide') < ids.indexOf('showOnActiveDisplay'));
+  const field = page.fields.find(f => f.id === 'showOnActiveDisplay');
+  assert.strictEqual(field.type, 'bool');
+  assert.strictEqual(field.label, 'Show on active display');
+});
+
 test('scrim без ключа в конфиге показывает выключенным, а патч несёт включённый флаг', () => {
   const original = { sshHost: 'host', ...NO_PICKER_SIZE };
   const fields = configToFields(original);
