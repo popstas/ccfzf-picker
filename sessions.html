@@ -356,14 +356,18 @@
            `margin-left: auto`. */
         .row.session .text, .row.zellij .text { flex: 1 1 auto; }
         .name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        /* Строка имени сессии — flex, ради одного: id прижимается вправо своим
-           `margin-left: auto`. Только у сессий и зелийных строк: у проекта,
-           снимка и заголовка секции имя — голый текст, и flex отнял бы у него
-           многоточие (обрезка на безымянном flex-элементе идёт без него). */
-        .row.session .name, .row.zellij .name { display: flex; align-items: baseline; }
+        /* Строка имени — flex у тех строк, у которых в ней есть подписи: у
+           сессии и зелийной так прижимается вправо id, у проекта так встаёт
+           хоткей. У снимка и заголовка секции имя остаётся голым текстом, и
+           flex отнял бы у него многоточие (обрезка на безымянном
+           flex-элементе идёт без него). Отсюда же `span.label` вокруг самого
+           имени у всех трёх видов. */
+        .row.session .name, .row.zellij .name, .row.project .name {
+            display: flex; align-items: baseline;
+        }
         /* Обрезка переехала сюда с самой `.name`: многоточие принадлежит
            имени, а не всей строке с подписями. */
-        .row.session .name .label, .row.zellij .name .label {
+        .row.session .name .label, .row.zellij .name .label, .row.project .name .label {
             min-width: 0; overflow: hidden; text-overflow: ellipsis;
         }
         .cwd { font-size: 11px; color: #868c95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -403,10 +407,12 @@
             font-size: 11px; color: #7d838c; white-space: nowrap;
             font-variant-numeric: tabular-nums;
         }
-        /* Хоткей проекта (`^F12`). Раньше стоял подписью внутри имени сессии,
-           теперь колонка — см. hotkeyHtml в session-glyph.js. */
-        .hk {
-            flex: 0 0 auto; padding-left: 10px;
+        /* Хоткей проекта (`^F12`) — подпись в строке имени, той же тусклостью
+           и того же рода, что `.pr` и `.wname`: не колонка справа, а подсказка
+           рядом с именем. Колонкой он побывал и колонкой быть перестал —
+           разбор в hotkeyHtml (session-glyph.js). */
+        .name .hk {
+            flex: 0 0 auto; margin-left: 6px;
             font-size: 11px; color: #7d838c; white-space: nowrap;
         }
         /* Клавиша, которую забрал сосед по системе: видна, но погашена — по
@@ -478,8 +484,40 @@
                наименее предсказуемы, и без запрета строка переносилась бы. */
             white-space: nowrap;
         }
-        /* Отметка проекта в ccfzf (★ в его собственном списке). */
+        /* Табличная раскладка правой группы у строк проектов.
+
+           Группа прижата вправо (`.meta` с `margin-left: auto`), поэтому левый
+           край колонки задаётся шириной всех колонок правее неё: пока ширина
+           считается по содержимому, «172 · 4●» у одного проекта сдвигает счёт
+           задач у него же, и левые края `todo` стоят лесенкой. Одна ширина на
+           все строки — и края совпадают.
+
+           Числа приезжают из projectColumnWidths (session-glyph.js) — по
+           самому длинному значению среди видимых строк, — и живут в
+           переменных на `#list`. `ch` разрешается по шрифту самой колонки
+           (11px), а `+ 10px` — её собственный `padding-left`: box-sizing
+           здесь border-box, то есть отступ входит в ширину.
+
+           Счёт задач выровнен влево, а не вправо, как соседи: вопрос был
+           именно про его левый край — по нему список читают сверху вниз.
+           Отсутствующего счёта это не касается: пустой строки todoHtml не
+           рисует вовсе, а соседей это не двигает — они держатся правого края
+           своими ширинами. */
+        #list .row.project .todo {
+            width: calc(var(--pcol-todo, 0ch) + 10px); text-align: left;
+        }
+        /* `min-width: 0` у обеих — базовые правила ставят колонкам пол в
+           48px и 34px, и без снятия он держал бы ширину шире посчитанной. */
+        #list .row.project .count {
+            width: calc(var(--pcol-count, 0ch) + 10px); min-width: 0;
+        }
+        #list .row.project .age { width: calc(var(--pcol-age, 0ch) + 10px); min-width: 0; }
+        /* Отметка проекта в ccfzf (★ в его собственном списке). Отступ задан
+           правилом, а не пробелом в разметке: строка имени у проекта стала
+           flex, а пробел между flex-элементами схлопывается — звезда слиплась
+           бы с именем. */
         .mark { color: #d29922; }
+        .row.project .name .mark { flex: 0 0 auto; margin-right: 4px; }
         #message { padding: 24px 18px; color: #868c95; font-size: 13px; flex: 0 0 auto; }
         /* Ctrl+K actions overlay — sits above the session list, same palette. */
         #actions-backdrop {
@@ -531,7 +569,7 @@
             flex: 1 1 auto; min-width: 0; overflow: hidden;
             text-overflow: ellipsis; white-space: nowrap;
         }
-        /* Прямая клавиша действия, тусклым — тем же цветом, что и колонка .hk. */
+        /* Прямая клавиша действия, тусклым — тем же цветом, что и подпись .hk. */
         .action-hotkey {
             flex: 0 0 auto; margin-left: auto; padding-left: 12px;
             font-size: 11px; color: #7d838c;
@@ -894,13 +932,16 @@
     // правая колонка: колонкой id был раньше и вернулся бы в неё молча,
     // разъехавшись с порядком строки.
     { key: 'showId', label: 'id', side: 'left' },
+    // Хоткей — там же, в строке имени, и потому в той же группе: порядок галок
+    // повторяет порядок строки. Правой колонкой он был до правки про
+    // выравнивание столбиков, и группа `right` осталась бы от неё молча.
+    { key: 'showHotkey', label: 'hotkeys', side: 'left' },
     { key: 'showPrompt', label: 'prompt', side: 'left' },
     { key: 'showAnswer', label: 'answer', side: 'left' },
     { key: 'showPaths', label: 'project', side: 'left' },
     // Третья строка тела, рядом с prompt и answer: это тоже текст под именем,
     // а не колонка справа.
     { key: 'showComment', label: 'comment', side: 'left' },
-    { key: 'showHotkey', label: 'hotkeys', side: 'right' },
     { key: 'showEvent', label: 'events', side: 'right' },
     { key: 'showCost', label: 'cost', side: 'right' },
     { key: 'showContext', label: 'context', side: 'right' },
@@ -1115,6 +1156,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
 
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml, todoHtml,
+    projectCountHtml, projectColumnWidths,
     docsBadgeHtml, promptsHtml, commentHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
     windowNameHtml,
@@ -1273,9 +1315,19 @@ const infoBackdrop = document.getElementById('info-backdrop');
     const cwdLine = toggles.showPaths ? projectLine(project.label, project.cwd) : '';
     const html = `<div class="row project${stale}" data-index="${index}"${titleAttr(project)}>` +
       `<div class="${dotClass}"></div>` +
+      // Имя — своим элементом, а не голым текстом, и по той же причине, что у
+      // строки сессии: строка имени здесь flex (ради подписи с хоткеем), а
+      // безымянный flex-элемент обрезается без многоточия.
       `<div class="text"><div class="name">` +
       (project.mark ? '<span class="mark">★</span> ' : '') +
-      `${escapeHtml(project.label)}</div>` +
+      `<span class="label">${escapeHtml(project.label)}</span>` +
+      // Хоткей — подписью рядом с именем, как метка PR и имя окна у сессии:
+      // он отвечает на вопрос «чем открыть эту строку», а не «стоит ли сюда
+      // заходить», и место ему там же, где читают имя. Правой колонкой он был
+      // до этой правки и раздвигал `count` с `age` у всех строк подряд, хотя
+      // клавиша есть у четырёх проектов из сорока пяти.
+      hotkeyHtml(project, toggles.showHotkey) +
+      `</div>` +
       (cwdLine ? `<div class="cwd">${escapeHtml(cwdLine)}</div>` : '') +
       `</div>` +
       `<div class="meta">` +
@@ -1283,18 +1335,13 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // тот же вопрос «сколько в ней всего», только у каталога, и рисует его
       // та же функция. Стоять они обязаны на том же месте, иначе правый край
       // списка разъедется между двумя видами строк.
+      //
+      // Ширины всех трёх колонок задаёт CSS одинаковыми на все строки
+      // проектов (projectColumnWidths, переменные `--pcol-*` ниже): группа
+      // прижата вправо, и левый край каждой колонки держится шириной тех, что
+      // правее неё.
       todoHtml(project, toggles.showTodo) +
-      `<div class="count">${project.sessionCount}` +
-      (project.liveCount ? ` · ${project.liveCount}●` : '') +
-      `</div>` +
-      // Колонка `hk` у проекта — та же самая колонка, что и у сессии, и
-      // рисует её та же hotkeyHtml: второй способ рисовать то же самое
-      // разошёлся бы с первым на первой же правке (ровно то, что уже
-      // произошло — задачи 4 и 7 доводили hotkey/hotkeyTaken до строки
-      // проекта, а на экран это не попадало, потому что здесь функция не
-      // звалась вовсе). Порядок — как у строки сессии: hotkeyHtml перед
-      // ageHtml.
-      hotkeyHtml(project, toggles.showHotkey) +
+      projectCountHtml(project) +
       ageHtml(project, nowSec) +
       `</div></div>`;
     return { key: `p:${project.id}`, html };
@@ -1472,7 +1519,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
       windowHtml(session, toggles.showWindow, toggles.showTerminalIcon) +
       windowHostHtml(session, toggles.showWindowHost) +
       stateHtml(session, toggles.showEvent) +
-      hotkeyHtml(session, toggles.showHotkey) +
+      // hotkeyHtml здесь не зовётся, и это не пропуск: `session.hotkey` не
+      // ставит никто — хоткей есть у каталога, а не у разговора, — и колонка
+      // была рядом пустых `div` у каждой строки списка. У проекта он теперь
+      // подпись в строке имени, а не колонка.
       usageHtml(session, toggles) +
       promptsHtml(session, toggles.showPrompts) +
       ageHtml(session, nowSec) +
@@ -1682,6 +1732,28 @@ const infoBackdrop = document.getElementById('info-backdrop');
     return { mode: 'sessions', query: search.value.trim() };
   }
 
+  /**
+   * Ширины правых колонок у строк проектов — переменными на `#list`.
+   *
+   * Переменные на контейнере, а не в разметке строк: список правится
+   * поэлементно (planListSync), и ширина, вшитая в строку, пересобирала бы
+   * каждую из них при первой же смене самого длинного значения. Здесь же
+   * меняется одно свойство одного узла, и строки этого не замечают вовсе.
+   *
+   * Считается по видимым строкам: свёрнутая секция проектов не рисует ни
+   * одной, и мерить по ней колонку не за чем — она бы стояла шириной того,
+   * чего на экране нет.
+   */
+  function paintProjectColumns(sections, nowSec) {
+    const shown = sections
+      .filter(section => section.kind === 'projects' && !section.collapsed)
+      .flatMap(section => section.rows);
+    const widths = projectColumnWidths(shown, nowSec);
+    for (const [key, cells] of Object.entries(widths)) {
+      list.style.setProperty(`--pcol-${key}`, `${cells}ch`);
+    }
+  }
+
   function render() {
     const nowSec = Math.floor(Date.now() / 1000);
     rows = [];
@@ -1693,6 +1765,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     const { mode, query } = shownModeAndQuery();
     list.classList.toggle('blocks', fullscreen);
     const sections = sectionsFor(mode, query);
+    paintProjectColumns(sections, nowSec);
     if (fullscreen) {
       // Узкое состояние отрисовки сбрасывается: вернувшись, planListSync
       // сравнил бы новые строки со старым снимком чужой раскладки и правил бы
