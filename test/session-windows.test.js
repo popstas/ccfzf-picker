@@ -353,3 +353,92 @@ test('placeIds без имени своей машины отдаёт пусто
   const rows = [{ kind: 'session', id: 'aaa', ...rowOn('desktop-box') }];
   assert.deepStrictEqual(SessionWindows.placeIds(rows, STATE, ''), []);
 });
+
+// ---- minimizedHere и отсев stale из раскладки ------------------------------
+
+const NOW = 2_000_000;
+const STALE = { enabled: true, sessionHours: 2, projectHours: 24, opacity: 0.5 };
+
+test('minimizedHere спрашивает про окно своей машины', () => {
+  // Свёрнутое окно соседней машины к этому экрану не относится вовсе: её
+  // окна эта машина не раскладывает и в списке их не гасит.
+  const mine = { windows: [{ host: 'desktop-box', pid: 1, minimized: true }] };
+  const theirs = { windows: [{ host: 'macbook', pid: 1, minimized: true }] };
+  assert.strictEqual(SessionWindows.minimizedHere(mine, STATE, 'desktop-box'), true);
+  assert.strictEqual(SessionWindows.minimizedHere(theirs, STATE, 'desktop-box'), false);
+});
+
+test('строка с развёрнутым окном здесь свёрнутой не считается', () => {
+  // Сессию открывали на этой машине дважды. Одно окно на экране стоит —
+  // гасить строку не за что.
+  const row = { windows: [
+    { host: 'desktop-box', pid: 1, minimized: true },
+    { host: 'desktop-box', pid: 1, minimized: false },
+  ] };
+  assert.strictEqual(SessionWindows.minimizedHere(row, STATE, 'desktop-box'), false);
+});
+
+test('без своих окон и без признака строка не свёрнута', () => {
+  // Нет окна — раскладывать нечего, но и прятать нечего. А агрегатор прежней
+  // версии поля не пропускает вовсе, и строка обязана вести себя как раньше.
+  assert.strictEqual(SessionWindows.minimizedHere({ windows: [] }, STATE, 'desktop-box'), false);
+  assert.strictEqual(
+    SessionWindows.minimizedHere(rowOn('desktop-box'), STATE, 'desktop-box'),
+    false,
+  );
+});
+
+test('placeIds не зовёт в раскладку то, что пикер погасил', () => {
+  // Клетка сетки, отданная свёрнутому или давно молчащему окну, ужимает те,
+  // на которые человек смотрит.
+  const rows = [
+    { kind: 'session', id: 'fresh', lastActivity: NOW - 10, ...rowOn('desktop-box') },
+    { kind: 'session', id: 'old', lastActivity: NOW - 7200, ...rowOn('desktop-box') },
+    {
+      kind: 'session',
+      id: 'hidden',
+      lastActivity: NOW - 10,
+      ...rowOn('desktop-box', { minimized: true }),
+    },
+  ];
+  assert.deepStrictEqual(
+    SessionWindows.placeIds(rows, STATE, 'desktop-box', { nowSec: NOW, stale: STALE }),
+    ['fresh'],
+  );
+});
+
+test('снятая галка dim stale возвращает в раскладку всех', () => {
+  // Тот же довод, что у затемнения: галка гасит правило целиком, и раскладка,
+  // продолжающая отсеивать вопреки ей, выглядела бы поломкой.
+  const rows = [
+    { kind: 'session', id: 'old', lastActivity: NOW - 7200, ...rowOn('desktop-box') },
+    {
+      kind: 'session',
+      id: 'hidden',
+      lastActivity: NOW - 10,
+      ...rowOn('desktop-box', { minimized: true }),
+    },
+  ];
+  assert.deepStrictEqual(
+    SessionWindows.placeIds(rows, STATE, 'desktop-box', {
+      nowSec: NOW,
+      stale: { ...STALE, enabled: false },
+    }),
+    ['old', 'hidden'],
+  );
+});
+
+test('placeIds без настройки stale отсева не делает', () => {
+  // Так он вёл себя до появления отсева, и зовущий, который про него не
+  // знает, обязан получать прежний порядок.
+  const rows = [
+    { kind: 'session', id: 'old', lastActivity: NOW - 999_999, ...rowOn('desktop-box') },
+    {
+      kind: 'session',
+      id: 'hidden',
+      lastActivity: NOW - 10,
+      ...rowOn('desktop-box', { minimized: true }),
+    },
+  ];
+  assert.deepStrictEqual(SessionWindows.placeIds(rows, STATE, 'desktop-box'), ['old', 'hidden']);
+});

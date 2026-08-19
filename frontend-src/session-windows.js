@@ -3,6 +3,12 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.SessionWindows = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
+  // globalThis, а не `root`: тот виден только внешней функции шима, а внутрь
+  // factory не передаётся. Та же дорога, что у session-list.js.
+  const staleApi = typeof module === 'object' && module.exports
+    ? require('./stale-items')
+    : globalThis.StaleItems;
+
   /**
    * Имя машины из ответа агрегатора — в сравнимый вид.
    *
@@ -110,6 +116,31 @@
   }
 
   /**
+   * Свёрнуто ли окно этой строки на **этой** машине.
+   *
+   * Вопрос про свою машину, а не про строку вообще: окно соседней машины эта
+   * не раскладывает и человеку здесь не показывает, и свёрнутость его к делу
+   * не относится вовсе.
+   *
+   * Своих окон бывает больше одного — сессию открывали здесь дважды, — и
+   * свёрнутой строка считается, когда свёрнуты все: одно развёрнутое окно
+   * стоит на экране, и гасить строку не за что.
+   *
+   * Нет своих окон — `false`, а не «свёрнуто»: раскладывать нечего, но и
+   * прятать нечего тоже.
+   *
+   * Признак приезжает от трекера полем `minimized` записи окна; агрегатор
+   * прежней версии его не пропускает вовсе, и строка тогда ведёт себя как
+   * раньше — то же правило совместимости, что у `mqttBase` и `app`.
+   */
+  function minimizedHere(row, state, configHost) {
+    const mine = normHost(configHost);
+    if (!mine) return false;
+    const own = windowsOf(row, state).filter(w => w && normHost(w.host) === mine);
+    return own.length > 0 && own.every(w => w.minimized === true);
+  }
+
+  /**
    * Порядок сессий для просьбы о раскладке.
    *
    * Список строк — тот, что человек видит сейчас: отфильтровал `/l foo` —
@@ -123,12 +154,31 @@
    *
    * Повторы выброшены: карточка — на окно, и у сессии, открытой дважды на
    * одной машине, их две, а id один. Приёмник посчитал бы такой id за два окна.
+   *
+   * Строки, которые пикер погасил как stale, в раскладку не идут: клетка
+   * сетки, отданная свёрнутому или давно молчащему окну, ужимает те, на
+   * которые человек смотрит. Правило то же, каким строка гасится в списке
+   * (`StaleItems.isStale`), и это не совпадение: «тусклое не раскладываем»
+   * иначе объяснить человеку нечем, а два разных правила разошлись бы молча.
+   *
+   * `opts` не сказан — отсева нет вовсе: так placeIds вёл себя до появления
+   * галки, и зовущий, который про неё не знает, обязан получать прежний
+   * порядок.
    */
-  function placeIds(rows, state, configHost) {
+  function placeIds(rows, state, configHost, opts) {
+    const o = opts || {};
+    const stale = o.stale;
     const out = [];
     for (const row of Array.isArray(rows) ? rows : []) {
       const id = (row || {}).id;
       if (!id || !focusWindowOf(row, state, configHost)) continue;
+      // Вид строки — тот же, каким её рисует страница: зелийная псевдосессия
+      // возраста не имеет, и `isStale` ответит на неё `false` сам.
+      const kind = (row || {}).kind === 'zellij' ? 'zellij' : 'session';
+      if (stale && staleApi
+        && staleApi.isStale(row, o.nowSec, stale, kind, minimizedHere(row, state, configHost))) {
+        continue;
+      }
       if (!out.includes(id)) out.push(id);
     }
     return out;
@@ -210,5 +260,5 @@
     return out;
   }
 
-  return { windowOf, windowsOf, normHost, canFocusRow, focusWindowOf, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager, unreadBases, placeIds };
+  return { windowOf, windowsOf, normHost, canFocusRow, focusWindowOf, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager, unreadBases, placeIds, minimizedHere };
 });

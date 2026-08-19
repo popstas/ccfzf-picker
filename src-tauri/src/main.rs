@@ -2023,7 +2023,45 @@ fn tile_press(app: &tauri::AppHandle) {
         .and_then(|ui| ui.get("sort").and_then(|v| v.as_str()).map(str::to_string))
         .unwrap_or_default();
 
-    let ids = place_order::tile_ids(&state, &host, &sort);
+    // Затемнение строк — то же, каким его видит страница (`staleSettings`):
+    // галка `dim stale` из `ui.json`, а порог — из конфига. Тусклые строки
+    // раскладка пропускает, и правило это обязано совпадать с тем, по
+    // которому человек видит их гашёными: клавиша, раскладывающая не то, что
+    // показано, объяснению не поддаётся.
+    //
+    // Галки в `ui.json` может не быть вовсе — пикер ни разу не сохранял
+    // состояние, — и тогда решает умолчание из конфига, ровно как
+    // `toggleDefaults()` на странице.
+    let stale_config = raw.get("stale").cloned().unwrap_or(serde_json::Value::Null);
+    let stale_default = stale_config
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let dim_stale = load_json("ui.json")
+        .ok()
+        .and_then(|ui| {
+            ui.get("toggles")
+                .and_then(|t| t.get("dimStale"))
+                .and_then(|t| t.get("list"))
+                .and_then(|v| v.as_bool())
+        })
+        .unwrap_or(stale_default);
+    let stale = place_order::Stale {
+        enabled: dim_stale,
+        // Умолчание то же, что в `config-shape.js`: два числа разошлись бы, и
+        // хоткей отсеивал бы не по тому порогу, по которому гаснет список.
+        session_hours: stale_config
+            .get("sessionHours")
+            .and_then(|v| v.as_f64())
+            .filter(|h| h.is_finite() && *h > 0.0)
+            .unwrap_or(2.0),
+        now_s: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as f64)
+            .unwrap_or(0.0),
+    };
+
+    let ids = place_order::tile_ids(&state, &host, &sort, &stale);
     if ids.is_empty() {
         // Пустой `ids` приёмник читает как «все ведомые окна, порядком той
         // машины» — то самое поведение, ради ухода от которого хоткей и

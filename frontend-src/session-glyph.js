@@ -295,22 +295,32 @@
   }
 
   /**
-   * Хоткей проекта (`^F12`) отдельной колонкой.
+   * Хоткей проекта (`^F12`) — подписью в строке имени.
    *
-   * Раньше он висел подписью прямо в имени сессии и рвал её на двух местах: имя
-   * обрезается многоточием, и подпись то уезжала за край, то отталкивала метку
-   * PR. У проекта хоткей один на все его сессии, так что читается он как
-   * признак строки, а не как часть названия, — и колонка ему подходит больше.
+   * Колонкой он был между двумя правками и колонкой быть перестал. Правая
+   * группа отвечает на вопрос «стоит ли сюда заходить» — счёт задач, число
+   * сессий, возраст, — а хоткей отвечает на другой, «чем эту строку открыть»,
+   * и спрашивают его глазами там же, где читают имя. Тот же довод и то же
+   * место, что у короткого id сессии; природа та же, что у метки PR и имени
+   * окна, — подсказка рядом, а не колонка.
    *
-   * Пустой элемент вместо пропуска у сессий без хоткея: колонки справа стоят
-   * друг за другом, и дырка сдвинула бы соседние строки.
+   * Заодно это освободило место справа: колонка стояла между `count` и `age`
+   * и раздвигала их у всех строк подряд, хотя клавиша есть у четырёх проектов
+   * из сорока пяти.
+   *
+   * Пустой строки больше не остаётся вовсе: подписи в строке имени
+   * схлопываются без следа, а сдвигать соседей ей нечего — колонок рядом нет.
+   * У сессии функция не зовётся: `hotkey` ей не ставит никто (хоткей — признак
+   * каталога, а не разговора), и колонка из пустых `div` висела бы у каждой
+   * строки списка.
    */
-  function hotkeyHtml(session, showHotkey = true) {
-    if (!showHotkey) return '';
+  function hotkeyHtml(project, showHotkey = true) {
+    const key = project?.hotkey ?? '';
+    if (!showHotkey || !key) return '';
     // Занятую комбинацию гасим, а не прячем: человеку нужно видеть, какая
     // именно клавиша не сработала, а не только то, что что-то не сработало.
-    const taken = session?.hotkeyTaken ? ' taken' : '';
-    return `<div class="hk${taken}">${escapeHtml(session?.hotkey ?? '')}</div>`;
+    const taken = project?.hotkeyTaken ? ' taken' : '';
+    return `<span class="hk${taken}">${escapeHtml(key)}</span>`;
   }
 
   // Пороги подсветки контекста. До тридцати процентов заполненность ничего не
@@ -455,16 +465,38 @@
    * и `NaN` в колонке читался бы поломкой пикера, а не испорченным входом.
    */
   function todoHtml(row, show = true) {
+    const parts = todoParts(row);
+    if (!show || !parts) return '';
+    const tail = parts.tail ? ` <span class="rest">${escapeHtml(parts.tail)}</span>` : '';
+    return `<div class="todo">${escapeHtml(parts.head)}${tail}</div>`;
+  }
+
+  /**
+   * Счёт задач двумя кусками: ведущая секция и хвост «+N».
+   *
+   * Две части, а не готовая строка, ровно потому, что хвост тусклее ведущего
+   * счёта и живёт в своём `span`. Читателя у этой функции два — разметка
+   * (todoHtml) и мерка ширины колонки (todoText → projectColumnWidths), — и
+   * вторая формула счёта разошлась бы с первой молча: колонка стала бы уже
+   * своего содержимого, а виден был бы только обрезанный хвост.
+   */
+  function todoParts(row) {
     const sections = todoSections(row);
-    if (!show || !sections.length) return '';
+    if (!sections.length) return null;
     const lead = sections[0];
     const total = lead.done + lead.todo;
     // Хвост — сумма открытых, а не всех: сделанное в дальних секциях на
     // вопрос «сколько ещё осталось» не отвечает.
     const rest = sections.slice(1).reduce((n, sec) => n + sec.todo, 0);
-    const label = lead.label ? ` ${escapeHtml(lead.label)}` : '';
-    const tail = rest ? ` <span class="rest">+${rest}</span>` : '';
-    return `<div class="todo">☑ ${lead.done}/${total}${label}${tail}</div>`;
+    const label = lead.label ? ` ${lead.label}` : '';
+    return { head: `☑ ${lead.done}/${total}${label}`, tail: rest ? `+${rest}` : '' };
+  }
+
+  /** Тот же счёт голым текстом — им меряется ширина колонки. */
+  function todoText(row) {
+    const parts = todoParts(row);
+    if (!parts) return '';
+    return parts.tail ? `${parts.head} ${parts.tail}` : parts.head;
   }
 
   /** Секции счётчика, приведённые к числам. Не список — пустота. */
@@ -485,6 +517,59 @@
   }
 
   /**
+   * Сколько у проекта сессий и сколько из них живых: «17 · 1●».
+   *
+   * Разметка и текст рядом, по той же причине, что у todoParts: ширину
+   * колонки меряют этим же текстом, и вторая его формула разошлась бы с
+   * колонкой молча.
+   */
+  function projectCountHtml(project) {
+    return `<div class="count">${escapeHtml(projectCountText(project))}</div>`;
+  }
+
+  function projectCountText(project) {
+    const total = Number.isFinite(project?.sessionCount) ? project.sessionCount : 0;
+    const live = Number.isFinite(project?.liveCount) ? project.liveCount : 0;
+    return live ? `${total} · ${live}●` : `${total}`;
+  }
+
+  // Мерка ширины: сколько знаков «0» занимает строка. Цифры под
+  // `font-variant-numeric: tabular-nums` равны «0» ровно, буквы уже — оценка
+  // выходит с запасом, и это верная сторона ошибки: колонка чуть шире
+  // содержимого никому не мешает, уже — режет счёт. Знаки вне ASCII (☑, ●, ·)
+  // считаются в полтора: метрики у них самые непредсказуемые, а на WebView2
+  // тем более.
+  function textCells(text) {
+    let cells = 0;
+    for (const ch of String(text ?? '')) cells += ch.charCodeAt(0) > 127 ? 1.5 : 1;
+    return cells;
+  }
+
+  /**
+   * Ширины правых колонок строки проекта — в знаках «0» (`ch`).
+   *
+   * Правая группа прижата вправо, поэтому левый край каждой колонки задаётся
+   * шириной всех колонок правее неё: пока ширина считается по содержимому,
+   * «172 · 4●» у одного проекта сдвигает счёт задач у него же, и левые края
+   * `todo` стоят лесенкой. Общая ширина на все строки и есть табличная
+   * раскладка.
+   *
+   * Считается по видимым строкам, а не по всему ответу агрегатора: колонка
+   * должна быть не шире, чем нужно тому, что на экране. И считается здесь, а
+   * не замером DOM: замер живёт только в браузере, а это правило — обычная
+   * функция, и сторож у неё обычный.
+   */
+  function projectColumnWidths(projects, nowSec) {
+    const rows = Array.isArray(projects) ? projects : [];
+    const widest = (textOf) => rows.reduce((max, row) => Math.max(max, textCells(textOf(row))), 0);
+    return {
+      todo: widest(todoText),
+      count: widest(projectCountText),
+      age: widest((row) => ageText(row, nowSec)),
+    };
+  }
+
+  /**
    * Возраст в строке. У работающей сессии — время текущего хода.
    *
    * Колонка отвечает на вопрос «сколько уже», и у работающей сессии прежний
@@ -498,10 +583,14 @@
    * друг за другом и не должны разъезжаться.
    */
   function ageHtml(session, nowSec) {
+    return `<div class="age">${ageText(session, nowSec)}</div>`;
+  }
+
+  /** Тот же возраст голым текстом: им меряется ширина колонки у проектов. */
+  function ageText(session, nowSec) {
     const working = Boolean(session) && session.agentState === 'active';
     const turnAt = working && Number.isFinite(session.agentTurnAt) ? session.agentTurnAt : 0;
-    const age = formatAge(turnAt || (session && session.lastActivity), nowSec);
-    return `<div class="age">${age}</div>`;
+    return formatAge(turnAt || (session && session.lastActivity), nowSec);
   }
 
   // Домашний каталог агента в пути ничего не сообщает: он одинаков у всех
@@ -697,7 +786,7 @@
   return {
     statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
     sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml, windowHostHtml,
-    todoHtml,
+    todoHtml, todoText, projectCountHtml, projectCountText, projectColumnWidths, ageText,
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
     prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, windowNameHtml,

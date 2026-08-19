@@ -5,6 +5,7 @@ const {
   sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
   shortPath, rowTitle, titleAttr, windowHostHtml, windowHtml,
   prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, todoHtml, docsBadgeHtml, promptsHtml, commentHtml,
+  todoText, projectCountHtml, projectCountText, projectColumnWidths,
 } = require('../frontend-src/session-glyph');
 
 test('shortPath collapses the agent home directory, and survives a missing path', () => {
@@ -444,19 +445,23 @@ test('sessionName takes whatever name the caller has', () => {
   assert.strictEqual(sessionName(undefined), '');
 });
 
-// Хоткей проекта переехал из имени сессии в свою колонку: у сессий без проекта
-// элемент остаётся пустым, иначе соседние колонки разъезжались бы по строкам.
-test('hotkeyHtml is a column of its own, empty when the project has no key', () => {
-  assert.strictEqual(hotkeyHtml({ hotkey: '^F12' }, true), '<div class="hk">^F12</div>');
-  assert.strictEqual(hotkeyHtml({}, true), '<div class="hk"></div>');
-  assert.strictEqual(hotkeyHtml({ hotkey: '^F12' }), '<div class="hk">^F12</div>');
+// Хоткей проекта — подпись в строке имени, а не колонка справа: колонкой он
+// побывал между двумя правками, и обратно её ловит именно этот сторож. Пустой
+// подписи не остаётся вовсе: сдвигать ей нечего (колонок рядом нет), а
+// растянуть строку имени лишним отступом она могла бы.
+test('hotkeyHtml is a badge in the name line, nothing at all without a key', () => {
+  assert.strictEqual(hotkeyHtml({ hotkey: '^F12' }, true), '<span class="hk">^F12</span>');
+  assert.strictEqual(hotkeyHtml({}, true), '');
+  assert.strictEqual(hotkeyHtml({ hotkey: '' }, true), '');
+  assert.strictEqual(hotkeyHtml(undefined, true), '');
+  assert.strictEqual(hotkeyHtml({ hotkey: '^F12' }), '<span class="hk">^F12</span>');
   assert.strictEqual(hotkeyHtml({ hotkey: '^F12' }, false), '');
 });
 
 // Занятый хоткей обязан быть виден: до этой правки отказ регистрации стоил
 // строки в stderr, которого у приложения из трея не читает никто, — и клавиша,
 // отобранная соседом по системе, выглядела как сломанный конфиг.
-test('незарегистрированный хоткей помечен в колонке', () => {
+test('незарегистрированный хоткей помечен в подписи', () => {
   const html = hotkeyHtml({ hotkey: 'Ctrl+F11', hotkeyTaken: true });
   assert.match(html, /class="hk taken"/);
   assert.match(html, /Ctrl\+F11/);
@@ -867,4 +872,56 @@ test('commentHtml экранирует текст', () => {
   // Пишет его человек, и приезжает он с чужой машины через агрегатор: в
   // разметку попадает как данные.
   assert.match(commentHtml({ comment: '<b>жирно' }, true), /&lt;b&gt;жирно/);
+});
+
+// ── Ширины колонок строки проекта ────────────────────────────────────────────
+//
+// Правая группа прижата вправо, поэтому левый край колонки задаётся шириной
+// всех колонок правее неё. Пока ширина считалась по содержимому, «172 · 4●» у
+// одного проекта сдвигал счёт задач у него же, и левые края стояли лесенкой.
+
+test('счёт задач голым текстом — та же формула, что и в разметке', () => {
+  const row = { todo: [{ label: 'week', done: 0, todo: 28 }, { label: 'minor', done: 1, todo: 27 }] };
+  assert.strictEqual(todoText(row), '☑ 0/28 week +27');
+  // Разметка складывается из тех же кусков: разойдись они, колонка встала бы
+  // уже своего содержимого, и хвост «+N» срезало бы.
+  assert.strictEqual(todoHtml(row),
+    '<div class="todo">☑ 0/28 week <span class="rest">+27</span></div>');
+  // Хвоста нет — нет и пустого `span`.
+  assert.strictEqual(todoText({ todo: [{ label: 'next', done: 1, todo: 0 }] }), '☑ 1/1 next');
+  assert.strictEqual(todoText({}), '');
+});
+
+test('счёт сессий проекта: живые называются только когда они есть', () => {
+  assert.strictEqual(projectCountText({ sessionCount: 172, liveCount: 4 }), '172 · 4●');
+  assert.strictEqual(projectCountText({ sessionCount: 11, liveCount: 0 }), '11');
+  // Мусор из ответа не должен доезжать до колонки словом «undefined».
+  assert.strictEqual(projectCountText({}), '0');
+  assert.strictEqual(projectCountHtml({ sessionCount: 7 }), '<div class="count">7</div>');
+});
+
+test('ширина колонки считается по самому длинному значению списка', () => {
+  const now = 1786045920;
+  const projects = [
+    { sessionCount: 17, liveCount: 1, lastActivity: now - 14,
+      todo: [{ label: 'next', done: 0, todo: 3 }, { label: 'x', done: 0, todo: 2 }] },
+    { sessionCount: 172, liveCount: 4, lastActivity: now - 3780,
+      todo: [{ label: 'week', done: 0, todo: 28 }] },
+    { sessionCount: 18, liveCount: 0, lastActivity: now - 4 * 3600 },
+  ];
+  const widths = projectColumnWidths(projects, now);
+  // «☑ 0/3 next +2» — 13 знаков, из них ☑ считается за полтора.
+  assert.strictEqual(widths.todo, 13.5);
+  // «172 · 4●» — 8 знаков, два из них вне ASCII.
+  assert.strictEqual(widths.count, 9);
+  // «1h 3m» — самый длинный возраст в списке.
+  assert.strictEqual(widths.age, 5);
+});
+
+test('пустой список колонок не роняет мерку', () => {
+  assert.deepStrictEqual(projectColumnWidths([], 0), { todo: 0, count: 0, age: 0 });
+  assert.deepStrictEqual(projectColumnWidths(undefined, 0), { todo: 0, count: 0, age: 0 });
+  // Ни у одного проекта нет счёта задач — колонки не будет вовсе, и ширина у
+  // неё нулевая, а не пол-строки пустоты.
+  assert.strictEqual(projectColumnWidths([{ sessionCount: 1 }], 0).todo, 0);
 });

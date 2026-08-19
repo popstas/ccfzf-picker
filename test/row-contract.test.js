@@ -170,7 +170,9 @@ test('поля без источника не роняют отрисовку', 
   for (const key of ['hotkey', 'desktop']) {
     assert.ok(!(key in row), `${key} не должен появляться из ниоткуда`);
   }
-  assert.strictEqual(Glyph.hotkeyHtml(row, true), '<div class="hk"></div>');
+  // Пустой подписи у сессии не остаётся вовсе: колонкой хоткей быть перестал,
+  // а строку имени пустой `span` растянул бы отступом.
+  assert.strictEqual(Glyph.hotkeyHtml(row, true), '');
   assert.ok(!Glyph.rowTitle(row).includes('undefined'));
 });
 
@@ -238,12 +240,14 @@ const CONSUMERS = [
 ];
 
 // Читаются с сессии, но источника не имеют. desktop — понятие Windows,
-// которого на этом проекте нет вовсе (см. groupSessions); hotkey — понятие
-// windows11-manager, список claudeWt.projects живёт только в его конфиге.
-// hotkeyTaken — той же природы, что и hotkey: его проставляет не сборка
-// строки, а markHotkeysTaken (project-list.js) поверх уже готовых строк
-// проектов, по ответу Rust о занятых клавишах.
-const NO_SOURCE = new Set(['hotkey', 'desktop', 'hotkeyTaken']);
+// которого на этом проекте нет вовсе (см. groupSessions).
+//
+// Хоткея (`hotkey`, `hotkeyTaken`) в этом списке больше нет, и это не потеря
+// сторожа: hotkeyHtml читает их у строки проекта, а не у сессии, — параметр
+// у неё так и назван, и выборка ниже её больше не видит. Поле это понятие
+// windows11-manager (список claudeWt.projects), у сессии его не ставит никто,
+// и колонки у неё тоже не осталось.
+const NO_SOURCE = new Set(['desktop']);
 
 function readsOfConsumers() {
   const names = new Set();
@@ -409,6 +413,7 @@ function renderProjectRows(projects, query, toggles, taken, stale) {
     ageHtml: Glyph.ageHtml,
     hotkeyHtml: Glyph.hotkeyHtml,
     todoHtml: Glyph.todoHtml,
+    projectCountHtml: Glyph.projectCountHtml,
     titleAttr: Glyph.titleAttr,
     query: query || '',
     nowSec: PROJECTS_NOW,
@@ -532,15 +537,20 @@ test('выключенный чекбокс путей убирает путь �
 // renderProjects hotkeyHtml не звала вовсе — колонка hk у проектов не
 // рисовалась, и обе задачи не давали ничего видимого. Сторожим то, что
 // столкнуло эту дыру: настоящий вызов renderProjects с настоящей hotkeyHtml.
-test('строка проекта несёт колонку hk, и занятая клавиша в ней погашена', () => {
+test('хоткей стоит в строке имени проекта, и занятая клавиша погашена', () => {
   const withHotkeys = [
     { path: '/p/one', name: 'one', sessions: 1, live: 0, mtime: 0, hotkey: 'Ctrl+F11' },
     { path: '/p/two', name: 'two', sessions: 1, live: 0, mtime: 0, hotkey: 'Ctrl+F12' },
   ];
   const taken = [{ cwd: '/p/one', hotkey: 'Ctrl+F11', reason: 'system' }];
   const { items } = renderProjectRows(withHotkeys, '', undefined, taken);
-  assert.ok(items[0].html.includes('<div class="hk taken">Ctrl+F11</div>'), items[0].html);
-  assert.ok(items[1].html.includes('<div class="hk">Ctrl+F12</div>'), items[1].html);
+  assert.ok(items[0].html.includes('<span class="hk taken">Ctrl+F11</span>'), items[0].html);
+  assert.ok(items[1].html.includes('<span class="hk">Ctrl+F12</span>'), items[1].html);
+  // И именно в строке имени, а не в правой группе: место у подписи то же, где
+  // читают имя, — колонкой хоткей быть перестал, и `.meta` его не носит.
+  const name = items[1].html.match(/<div class="name">[\s\S]*?<\/div>/);
+  assert.ok(name && name[0].includes('class="hk"'), items[1].html);
+  assert.ok(!items[1].html.split('<div class="meta">')[1].includes('class="hk'), items[1].html);
 });
 
 // Пометка идёт по каталогу, а не по комбинации: у дважды названной клавиши
@@ -554,8 +564,8 @@ test('дважды названная клавиша гасит проиграв
   ];
   const taken = [{ cwd: '/p/two', hotkey: 'Ctrl+F11', reason: 'duplicate' }];
   const { items } = renderProjectRows(twins, '', undefined, taken);
-  assert.ok(items[0].html.includes('<div class="hk">Ctrl+F11</div>'), items[0].html);
-  assert.ok(items[1].html.includes('<div class="hk taken">Ctrl+F11</div>'), items[1].html);
+  assert.ok(items[0].html.includes('<span class="hk">Ctrl+F11</span>'), items[0].html);
+  assert.ok(items[1].html.includes('<span class="hk taken">Ctrl+F11</span>'), items[1].html);
 });
 
 // Строку статуслайна складывает тот же помощник, что и помечает строки: две
@@ -568,7 +578,7 @@ test('статуслайн складывает жалобу помощнико�
   );
 });
 
-test('выключенный чекбокс hotkeys убирает колонку hk у строки проекта', () => {
+test('выключенный чекбокс hotkeys убирает подпись hk у строки проекта', () => {
   const { items } = renderProjectRows(
     [{ path: '/p/one', name: 'one', sessions: 0, live: 0, mtime: 0, hotkey: 'Ctrl+F11' }],
     '', { showPaths: true, showHotkey: false },
@@ -1688,6 +1698,31 @@ test('id прижат вправо, и правый край у всех стр�
     'id перестал прижиматься вправо — встанет вплотную к подписям');
   assert.match(style, /\.row\.session \.text[^{]*\{[^}]*flex: 1 1 auto/,
     'текст строки перестал растягиваться — id встанет лесенкой, по ширине содержимого');
+});
+
+// Табличная раскладка правой группы у проектов держится на трёх местах, и
+// каждое ломается молча: без общей ширины левый край счёта задач стоит
+// лесенкой, без снятого `min-width` колонка шире посчитанной, без вызова из
+// render() переменные не ставит никто и ширины схлопываются в ноль.
+test('колонки строки проекта одной ширины на все строки', () => {
+  const style = SESSIONS_HTML.match(/<style>[\s\S]*?<\/style>/)[0];
+  for (const column of ['todo', 'count', 'age']) {
+    assert.match(style, new RegExp(`#list \\.row\\.project \\.${column}[^{]*\\{[^}]*width: calc\\(var\\(--pcol-${column}`),
+      `колонка ${column} перестала брать общую ширину — левые края разъедутся`);
+  }
+  // Пол базовых правил снят у обеих числовых колонок: 48px и 34px держали бы
+  // ширину шире посчитанной, и счёт задач снова встал бы лесенкой.
+  assert.match(style, /#list \.row\.project \.count \{[^}]*min-width: 0/);
+  assert.match(style, /#list \.row\.project \.age \{[^}]*min-width: 0/);
+  // Счёт задач выровнен влево: вопрос был именно про его левый край.
+  assert.match(style, /#list \.row\.project \.todo \{[^}]*text-align: left/);
+  assert.ok(SESSIONS_HTML.includes('paintProjectColumns(sections, nowSec)'),
+    'render() перестал считать ширины — переменные --pcol-* некому ставить');
+  // Отступ звезды — правилом, а не пробелом в разметке: строка имени у проекта
+  // стала flex, и пробел между flex-элементами схлопывается. Поймано глазами
+  // на снимке — «★windows11-manager» слитно.
+  assert.match(style, /\.row\.project \.name \.mark \{[^}]*margin-right/,
+    'звезда снова слипнется с именем — пробел между flex-элементами схлопывается');
 });
 
 test('выключенная галка id не оставляет в строке имени ничего', () => {
