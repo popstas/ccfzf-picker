@@ -41,3 +41,26 @@ test('лишние пробелы в занятых не создают ложн
   // Заголовок окна приезжает с той стороны и мог быть записан с пробелом.
   assert.strictEqual(uniqueSessionName('api', [' api ']), 'api-2');
 });
+
+// Ниже — сторож над общей с Rust фикстурой. Имя новой сессии считается теперь
+// в двух местах: страница зовёт `newSessionName` (`open-strategy.js`), а Rust —
+// `session_name::new_session_name`, потому что проектный хоткей жмут при
+// скрытом пикере, где webview усыплён целиком и спросить страницу нечего.
+// Расхождение поведением не поймать вовсе: просьба уходит, менеджер открывает
+// окно, брокер подтверждает — просто имя у сессии другое, а ответа у
+// публикации нет.
+const fs = require('node:fs');
+const path = require('node:path');
+const { newSessionName } = require('../frontend-src/open-strategy');
+
+const FIXTURE = JSON.parse(fs.readFileSync(
+  path.join(__dirname, 'fixtures', 'session-name.json'),
+  'utf8',
+));
+
+test('общая с Rust фикстура даёт те же имена, что даёт страница', () => {
+  assert.ok(FIXTURE.cases.length, 'в фикстуре не задано ни одного случая');
+  for (const c of FIXTURE.cases) {
+    assert.strictEqual(newSessionName(c.cwd, c.taken), c.expected, c.why);
+  }
+});

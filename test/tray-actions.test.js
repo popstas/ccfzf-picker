@@ -29,10 +29,17 @@ function trayActions() {
   return rows.map(([, value, label]) => ({ value, label }));
 }
 
-/** Поля выбора действия трея на вкладке хоткеев. */
+/**
+ * Поля выбора действия трея на вкладке хоткеев.
+ *
+ * Отбор по имени ключа, а не по одному типу поля: рядом на той же вкладке
+ * стоит выпадашка действия проектных клавиш, и её список свой
+ * (`PROJECT_OPEN_ACTIONS`, сторож — `test/project-open-actions.test.js`).
+ * Забирай этот тест все `choice` подряд — он требовал бы от неё действий трея.
+ */
 function choiceFields() {
   const page = PAGES.find(p => p.id === 'hotkeys');
-  const fields = page.fields.filter(f => f.type === 'choice');
+  const fields = page.fields.filter(f => f.type === 'choice' && f.id.startsWith('tray'));
   assert.ok(fields.length, 'выпадашек действий трея на вкладке не нашлось');
   return fields;
 }

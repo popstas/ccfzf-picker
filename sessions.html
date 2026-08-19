@@ -3175,6 +3175,57 @@ const infoBackdrop = document.getElementById('info-backdrop');
   }
 
   /**
+   * «Open terminal» — шелл в каталоге строки, без агента.
+   *
+   * Терминал берётся выбранный в настройках, и берётся он единственной
+   * дорогой — `terminalArgv`: у неё три развилки (хвост argv, `{command}`
+   * одной строкой, `{helper}` с base64), и собранный здесь руками
+   * `[file, ...args, 'ssh', …]` был бы верен для kitty и молча неверен для
+   * iTerm2. На этой мине уже подорвался `newSession`, и сторож
+   * «страница не собирает argv терминала мимо terminalArgv» стоит с тех пор.
+   *
+   * Менеджера здесь не просят вовсе, в отличие от `newSessionHere`: все его
+   * просьбы (`terminal`, `terminal-new`) кончаются агентом, а голого шелла он
+   * открывать не умеет. Цена известна: на машине с менеджером теряется профиль
+   * Windows Terminal по каталогу — его соответствие живёт в `claudeWt.projects`
+   * и знает о нём только он.
+   *
+   * Гашение — после удачного запуска, как у `newSession`, а не до: окно
+   * поднимает сам пикер, и права на передний план у него никто не отбирает.
+   */
+  async function openTerminalHere(row) {
+    const cwd = (row || {}).cwd;
+    if (!cwd || noSources()) return;
+    // Пустая команда — отказ OpenStrategy, а не поломка: путь с `;` Windows
+    // Terminal порежет на панели ещё до шелла. Сказать об этом обязательно —
+    // иначе пункт меню молча ничего не делает.
+    const remote = window.OpenStrategy.terminalCommand(cwd);
+    if (!remote) {
+      error = `The path contains ";", there is nothing to open such a directory with: ${cwd}`;
+      render();
+      return;
+    }
+    const argv = window.OpenStrategy.terminalArgv(
+      CONFIG.terminal,
+      window.OpenStrategy.commandParts(remote, row.source || CONFIG.sshHost),
+      { helperPath: await helperPath() },
+    );
+    if (!argv) {
+      error = helperError || 'terminal helper is not available';
+      render();
+      return;
+    }
+    try {
+      await invoke('spawn_detached', { argv });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    invoke('hide_picker');
+  }
+
+  /**
    * Enter на строке проекта: попросить менеджера открыть проект.
    *
    * Развилку «поднять окно этого каталога или завести сессию» принимает он:
@@ -3194,6 +3245,14 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * подъёма окна эта цена уплачена давно.
    */
   async function openProjectRow(row) {
+    // Развилка «завести новую сессию или поднять открытое окно каталога» —
+    // настройка, а не поведение по месту: `projectOpenAction` в `config.yaml`,
+    // умолчание `new`. Стоит она **до** выбора транспорта: у ветки `new` вся
+    // работа уже написана в `newSessionHere` — имя, занятие имени, гашение,
+    // откат на местную дорогу, — и второй её экземпляр здесь разошёлся бы с
+    // первым. У проектного хоткея свой ключ и своё умолчание, и читает его
+    // Rust: клавишу жмут при скрытом пикере, где webview усыплён целиком.
+    if (CONFIG.projectOpenAction === 'new') return newSessionHere(row);
     const dir = window.OpenTransport.rowProjectDir(row);
     const action = window.OpenTransport.chooseProjectOpenAction(
       row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
@@ -3292,6 +3351,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
     }
     if (id === 'new') {
       newSessionHere(row);
+      return;
+    }
+    if (id === 'terminal') {
+      openTerminalHere(row);
       return;
     }
     if (id === 'pr') {

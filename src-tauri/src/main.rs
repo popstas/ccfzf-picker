@@ -26,6 +26,7 @@ mod poller;
 mod proc;
 mod project_hotkeys;
 mod scrim;
+mod session_name;
 mod state_source;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
@@ -2233,12 +2234,45 @@ const TRAY_CLICK_ACTIONS: [(&str, &str); 3] = [
     ("tile", "Tile the windows on this machine"),
 ];
 
-/// Значение конфига, приведённое к известному действию.
+/// Что делает выбор проекта: значение конфига и подпись для настроек.
+///
+/// Таблица одна на всё, ровно как `TRAY_CLICK_ACTIONS`: список в окне
+/// настроек, разбор значения из конфига и обе развилки — Enter на строке
+/// проекта (страница) и проектный хоткей (Rust). Вторая половина живёт в
+/// `frontend-src/settings-form.js`, а согласие держит
+/// `test/project-open-actions.test.js`: общего кода между двумя языками нет.
+///
+/// Ключей два — `projectOpenAction` и `projectHotkeyAction`, — и умолчания у
+/// них разные (`new` и `focus`). Разные потому, что поводы разные: строку
+/// проекта выбирают глазами, уже открыв пикер, и просят ею начать работу;
+/// хоткей жмут вслепую, чтобы вернуться туда, где работа идёт. Умолчания
+/// названы у самих нажатий, а не здесь: таблица отвечает на вопрос «что
+/// бывает», а не «что по умолчанию у этого входа».
+///
+/// Ветку `focus` держит на той стороне `openClaudeProject` у
+/// windows11-manager: он ищет открытое окно каталога и заводит новую сессию,
+/// только если не нашёл. То есть `focus` — не «подними и всё», а «подними,
+/// если есть».
+const PROJECT_OPEN_ACTIONS: [(&str, &str); 2] = [
+    ("new", "Always start a new session"),
+    ("focus", "Raise the last session of the project if it is open"),
+];
+
+/// Значение конфига, приведённое к известному действию из таблицы.
 ///
 /// Незнакомое, пустое и отсутствующее читаются как умолчание, а незнакомое
 /// вдобавок пишет строку в журнал: молчать нельзя — мёртвая иконка выглядит
 /// сломанным приложением, а не опечаткой в `config.yaml`.
-fn tray_action(config: &serde_json::Value, key: &str, fallback: &'static str) -> &'static str {
+///
+/// Одна функция на две таблицы, а не по разбору на каждую: правило тут ровно
+/// одно, и второй его экземпляр разошёлся бы с первым — например, перестав
+/// прощать регистр, который человек правит руками.
+fn config_choice(
+    config: &serde_json::Value,
+    key: &str,
+    fallback: &'static str,
+    table: &[(&'static str, &str)],
+) -> &'static str {
     let raw = config
         .get(key)
         .and_then(|v| v.as_str())
@@ -2248,16 +2282,32 @@ fn tray_action(config: &serde_json::Value, key: &str, fallback: &'static str) ->
     if raw.is_empty() {
         return fallback;
     }
-    match TRAY_CLICK_ACTIONS
-        .iter()
-        .find(|(id, _)| id.eq_ignore_ascii_case(&raw))
-    {
+    match table.iter().find(|(id, _)| id.eq_ignore_ascii_case(&raw)) {
         Some((id, _)) => id,
         None => {
             ccfzf_log!("unknown {key} {raw}, falling back to {fallback}");
             fallback
         }
     }
+}
+
+fn tray_action(config: &serde_json::Value, key: &str, fallback: &'static str) -> &'static str {
+    config_choice(config, key, fallback, &TRAY_CLICK_ACTIONS)
+}
+
+/// Что делать с выбранным проектом: `new` | `focus`.
+///
+/// Зовётся из двух мест с разными ключами и разными умолчаниями — со страницы
+/// её не спрашивают вовсе: `projectOpenAction` разбирает `config-shape.js`,
+/// потому что Enter нажимают при показанном окне. Здесь ключ один,
+/// `projectHotkeyAction`, и читается он на каждом нажатии — как и всё
+/// остальное в этой дороге, чтобы смена настройки не требовала перезапуска.
+pub fn project_open_action(
+    config: &serde_json::Value,
+    key: &str,
+    fallback: &'static str,
+) -> &'static str {
+    config_choice(config, key, fallback, &PROJECT_OPEN_ACTIONS)
 }
 
 /// Сделать то, что назвал конфиг.
@@ -3280,6 +3330,68 @@ mod tests {
                 "действие трея {id} не разобрано в run_tray_action — клик молча сделает не то"
             );
         }
+    }
+
+    /// Проектный хоткей знает оба действия поимённо.
+    ///
+    /// Значение без ветки — самый тихий отказ из возможных: конфиг прочитан,
+    /// нажатие прошло, `match` свалился в общую ветку, и клавиша сделала не
+    /// то, что выбрано. Ни ошибки, ни следа: ответа у публикации нет.
+    ///
+    /// Сторож текстовый по той же причине, что и соседний: настоящий вызов
+    /// требует `AppHandle`, которого в тестах нет.
+    #[test]
+    fn every_project_open_action_is_handled() {
+        let src = include_str!("project_hotkeys.rs");
+        let body = src
+            .split_once("let name = match action {")
+            .expect("развилка действия проектного хоткея пропала — тест сторожит не то")
+            .1;
+        let (body, _) = body.split_once("\n    };\n").expect("развилка не закрыта");
+        for (id, _) in PROJECT_OPEN_ACTIONS {
+            assert!(
+                body.contains(&format!("\"{id}\" =>")),
+                "действие {id} не разобрано в project_hotkeys::press — клавиша молча сделает не то"
+            );
+        }
+    }
+
+    /// Незнакомое, пустое и отсутствующее значение — это умолчание входа, а не
+    /// мёртвая клавиша.
+    ///
+    /// Умолчания у входов разные (строка списка заводит новую сессию, хоткей
+    /// поднимает открытое окно), и берутся они из места нажатия, а не из
+    /// таблицы: та отвечает на вопрос «что бывает», а не «что по умолчанию у
+    /// этого входа».
+    #[test]
+    fn unknown_project_open_action_falls_back_to_the_default() {
+        for config in [
+            serde_json::json!({ "projectHotkeyAction": "не действие" }),
+            serde_json::json!({ "projectHotkeyAction": "" }),
+            serde_json::json!({ "projectHotkeyAction": "   " }),
+            serde_json::json!({}),
+            serde_json::Value::Null,
+            // Ключ соседнего входа этому не указ: перепутай их — и хоткей
+            // делал бы то, что выбрано для строки списка.
+            serde_json::json!({ "projectOpenAction": "new" }),
+        ] {
+            assert_eq!(
+                project_open_action(&config, "projectHotkeyAction", "focus"),
+                "focus",
+                "конфиг {config} увёл хоткей с умолчания"
+            );
+        }
+        // Названное действие берётся как есть, а регистр не важен: человек
+        // правит `config.yaml` руками, и `New` там столь же вероятно, сколько
+        // `new`.
+        assert_eq!(
+            project_open_action(
+                &serde_json::json!({ "projectHotkeyAction": " New " }),
+                "projectHotkeyAction",
+                "focus"
+            ),
+            "new"
+        );
     }
 
     /// Незнакомое, пустое и отсутствующее значение — это умолчание жеста, а

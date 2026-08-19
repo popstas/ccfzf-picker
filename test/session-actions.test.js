@@ -26,19 +26,19 @@ test('без конфига список действий прежний', () =>
   // Второй аргумент необязателен: вызов остаётся годным там, где конфига под
   // рукой нет.
   const row = { id: 'a', cwd: '/home/user/x' };
-  assert.deepStrictEqual(availableActions(row).map(a => a.id), ['new', 'comment', 'info']);
-  assert.deepStrictEqual(availableActions(row, {}).map(a => a.id), ['new', 'comment', 'info']);
+  assert.deepStrictEqual(availableActions(row).map(a => a.id), ['new', 'terminal', 'comment', 'info']);
+  assert.deepStrictEqual(availableActions(row, {}).map(a => a.id), ['new', 'terminal', 'comment', 'info']);
 });
 
 test('настроенные действия идут первыми, когда путь переводится', () => {
   const ids = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED).map(a => a.id);
-  assert.deepStrictEqual(ids, ['explorer', 'new', 'comment', 'info']);
+  assert.deepStrictEqual(ids, ['explorer', 'new', 'terminal', 'comment', 'info']);
 });
 
 test('сессия вне общего дерева настроенных действий не получает', () => {
   // Пункт, открывающий несуществующую папку, хуже отсутствующего.
   const ids = availableActions({ id: 'a', cwd: '/etc/nginx' }, CONFIGURED).map(a => a.id);
-  assert.deepStrictEqual(ids, ['new', 'comment', 'info']);
+  assert.deepStrictEqual(ids, ['new', 'terminal', 'comment', 'info']);
 });
 
 test('настроенное действие доносит до меню свою подпись и клавишу', () => {
@@ -152,7 +152,7 @@ test('новая сессия предлагается и сессии, и пр�
 
   const forProject = availableActions({ kind: 'project', id: '/p', cwd: '/p' })
     .map(a => a.id);
-  assert.deepStrictEqual(forProject, ['new']);
+  assert.deepStrictEqual(forProject, ['new', 'terminal']);
 });
 
 test('строке проекта не предлагают того, чему нужна сессия', () => {
@@ -163,7 +163,7 @@ test('строке проекта не предлагают того, чему �
     pr_url: 'https://github.com/o/r/pull/3', live: true, pid: 42,
     lastActivity: 1, agentSeen: true,
   }).map(a => a.id);
-  assert.deepStrictEqual(ids, ['new']);
+  assert.deepStrictEqual(ids, ['new', 'terminal']);
 });
 
 test('у проекта есть действия папки, когда путь переводится', () => {
@@ -172,7 +172,7 @@ test('у проекта есть действия папки, когда пут�
     { pathMap: { remote: '/remote', local: '/local' },
       actions: [{ id: 'explorer', label: 'Open in Explorer', hotkey: 'Ctrl+Shift+E' }] },
   ).map(a => a.id);
-  assert.deepStrictEqual(ids, ['new', 'explorer']);
+  assert.deepStrictEqual(ids, ['new', 'terminal', 'explorer']);
 });
 
 test('строке зелийной сессии предлагается только информация', () => {
@@ -213,8 +213,8 @@ test('строке внутри снимка предлагают каталог
     kind: 'snapshot-session', id: 'abc123', snapshotId: 'snap-1',
     cwd: '/home/user/x', label: 'x', open: false,
   };
-  assert.deepStrictEqual(availableActions(row, CONFIGURED).map(a => a.id), ['explorer', 'new']);
-  assert.deepStrictEqual(availableActions(row).map(a => a.id), ['new']);
+  assert.deepStrictEqual(availableActions(row, CONFIGURED).map(a => a.id), ['explorer', 'new', 'terminal']);
+  assert.deepStrictEqual(availableActions(row).map(a => a.id), ['new', 'terminal']);
 });
 
 test('строке внутри снимка не предлагают того, чему нужна сессия', () => {
@@ -223,7 +223,7 @@ test('строке внутри снимка не предлагают того,
     pr_url: 'https://github.com/o/r/pull/3', live: true, pid: 42,
     lastActivity: 1, agentSeen: true,
   }).map(a => a.id);
-  assert.deepStrictEqual(ids, ['new']);
+  assert.deepStrictEqual(ids, ['new', 'terminal']);
 });
 
 test('строка внутри снимка без каталога меню не набирает', () => {
@@ -251,17 +251,17 @@ test('меню решено для каждого вида строки, а не
     zellij: 'home', snapshotId: 'snap-1',
   };
   const decided = {
-    interactive: ['explorer', 'pr', 'unread', 'attach', 'new', 'comment', 'info'],
+    interactive: ['explorer', 'pr', 'unread', 'attach', 'new', 'terminal', 'comment', 'info'],
     // Комментария у зелийной строки нет намеренно: настоящего id сессии у
     // неё не бывает, а комментарий ключуется именно им — общий список на
     // машине агрегатора хранится по id.
     zellij: ['info'],
-    project: ['new', 'explorer'],
+    project: ['new', 'terminal', 'explorer'],
     snapshot: ['restore'],
     // Пусто, и это решение, а не пропуск: под днём снимков несколько, и
     // «восстанови их все» никто не просил. Такое меню openMenu не открывает.
     'snapshot-day': [],
-    'snapshot-session': ['explorer', 'new'],
+    'snapshot-session': ['explorer', 'new', 'terminal'],
   };
   for (const [kind, ids] of Object.entries(decided)) {
     assert.deepStrictEqual(

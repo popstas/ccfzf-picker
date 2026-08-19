@@ -471,11 +471,73 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
     // ли это машина, здесь не спрашивают: хоткеи вешаются только когда
     // `windowHost` трекера совпал с конфигом, то есть на своей же.
     let cursor = crate::cursor_hint(app, &raw);
+    // Что делает нажатие: поднять открытое окно проекта (умолчание) или всегда
+    // заводить новую сессию. Умолчания у двух входов разные — у строки списка
+    // `new`, здесь `focus`, — и названы они у самих нажатий, а не в таблице:
+    // выбор строки просит начать работу, хоткей — вернуться туда, где она уже
+    // идёт. Читается на каждом нажатии, как терминал и курсор рядом.
+    let action = crate::project_open_action(&raw, "projectHotkeyAction", "focus");
+    // Ветка на каждое значение `PROJECT_OPEN_ACTIONS`; сторож —
+    // `every_project_open_action_is_handled` в main.rs. Значение без ветки
+    // нажатие бы проглотило: ни ошибки, ни следа.
+    let name = match action {
+        // Имя обязано считаться здесь: менеджер списка занятых не ведёт и взял
+        // бы basename каталога — то самое имя, которое уже носит открытая
+        // сессия, — а два окна с одним заголовком трекер привяжет к одному
+        // слоту. Ради этого `session_name` и продублирован в Rust.
+        "new" => new_session_name(app, &cwd),
+        "focus" => String::new(),
+        other => {
+            // Сюда не доезжает ничего: `project_open_action` уже привела
+            // значение к известному. Ветка всё равно обязана быть, и молчать в
+            // ней нельзя — иначе клавиша сделала бы не то, что выбрано.
+            ccfzf_log!("unknown projectHotkeyAction {other}, raising the open window");
+            String::new()
+        }
+    };
     tauri::async_runtime::spawn_blocking(move || {
-        if let Err(e) = crate::mqtt::open_project(&broker, &base, &cwd, &terminal, cursor) {
+        // Пустое имя — это ветка `focus` либо отказ считать имя (путь с `;`,
+        // пустой каталог): в обоих случаях уходит прежняя просьба, и открытое
+        // окно поднимет менеджер. Про отказ уже сказано в журнал.
+        let sent = if name.is_empty() {
+            crate::mqtt::open_project(&broker, &base, &cwd, &terminal, cursor)
+        } else {
+            crate::mqtt::open_new(&broker, &base, &cwd, &name, &terminal, cursor)
+        };
+        if let Err(e) = sent {
             ccfzf_log!("cannot ask to open {cwd}: {e}");
         }
     });
+}
+
+/// Свободное имя для сессии, которую заведёт это нажатие.
+///
+/// Занятые — заголовки живых сессий из последнего ответа поллера плюс имена,
+/// выданные прошлыми нажатиями. Ответ берётся у поллера, а не спрашивается
+/// заново: у скрытого окна он отстаёт до восьми минут (бэкофф в `poller.rs`),
+/// и ровно поэтому одного его мало — за это отставание успевают открыться
+/// сессии, о которых он ещё не знает. Дыру закрывает `session_name::issued`.
+///
+/// Пустая строка значит «имени нет»: путь с `;` (Windows Terminal режет по
+/// нему командную строку до всякого шелла) или каталог без basename. Вызывающий
+/// на неё откатывается к прежней просьбе, а не молчит.
+fn new_session_name(app: &tauri::AppHandle, cwd: &str) -> String {
+    let state = app
+        .try_state::<crate::poller::Poller>()
+        .map(|p| p.snapshot())
+        .and_then(|s| s.get("state").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    let mut taken = crate::session_name::live_names(&state);
+    taken.extend(crate::session_name::issued(Instant::now()));
+    let name = crate::session_name::new_session_name(cwd, &taken);
+    if name.is_empty() {
+        ccfzf_log!("cannot name a session for {cwd}, asking to raise the open window instead");
+        return name;
+    }
+    // Занимается до отправки, а не после: публикация ждёт брокера до пяти
+    // секунд, и второе нажатие за это время увидело бы то же самое.
+    crate::session_name::issue(&name);
+    name
 }
 
 /// Повесить список, сняв прежний.
