@@ -713,8 +713,10 @@
 </div>
 <script src="state-shape.js"></script>
 <script src="session-agent.js"></script>
-<!-- session-windows до session-list: тот берёт оттуда windowOf в момент
-     загрузки, чтобы приписать строке машину её окна. -->
+<!-- stale-items до session-windows, session-windows до session-list: каждый
+     берёт соседа из globalThis в момент загрузки — раскладка спрашивает у
+     StaleItems, тускла ли строка, а строке приписывается машина её окна. -->
+<script src="stale-items.js"></script>
 <script src="session-windows.js"></script>
 <script src="session-list.js"></script>
 <script src="zellij-list.js"></script>
@@ -743,7 +745,6 @@
 <script src="key-reference.js"></script>
 <script src="session-actions.js"></script>
 <script src="config-shape.js"></script>
-<script src="stale-items.js"></script>
 <script src="picker-filter.js"></script>
 <script src="picker-snapshots.js"></script>
 <script src="picker-mode.js"></script>
@@ -1406,7 +1407,21 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // выросла бы на строку — поэтому её вид назван своим классом `zellij`, а
     // не `session`.
     const rowKind = session.kind === 'zellij' ? 'zellij' : 'session';
-    const stale = window.StaleItems.staleClass(session, nowSec, staleSettings(), rowKind);
+    // Свёрнутое окно этой машины гасит строку наравне с возрастом: сессия,
+    // убранная в Dock, на экране не стоит, сколько бы секунд назад она ни
+    // отвечала. Про машину знает SessionWindows, а не StaleItems, поэтому
+    // ответ считается здесь и передаётся доводом.
+    const stale = window.StaleItems.staleClass(
+      session,
+      nowSec,
+      staleSettings(),
+      rowKind,
+      // Ответ агрегатора здесь не нужен: строка уже несёт своё окно вместе с
+      // машиной (`windows` в session-list.js), а запасная ветка `windowsOf`
+      // берётся из него только у совсем старого агрегатора — такой `minimized`
+      // не пропускает вовсе, и ответом там честный `false`.
+      window.SessionWindows.minimizedHere(session, null, CONFIG.windowHost),
+    );
     // Basename каталога, а не сокращённый путь — и вовсе без строки, когда
     // имя сессии уже назвало тот же проект (projectLine, Task 11). Полный
     // путь остаётся в titleAttr ниже, через shortPath — подсказка не меняется.
@@ -2169,7 +2184,13 @@ const infoBackdrop = document.getElementById('info-backdrop');
     try {
       await invoke('place_windows_mqtt', {
         mode,
-        ids: window.SessionWindows.placeIds(rows, lastState, CONFIG.windowHost),
+        // Тусклые строки в раскладку не идут — то же правило, каким они
+        // гаснут в списке: клетка, отданная свёрнутому или давно молчащему
+        // окну, ужимает те, на которые человек смотрит.
+        ids: window.SessionWindows.placeIds(rows, lastState, CONFIG.windowHost, {
+          nowSec: Math.floor(Date.now() / 1000),
+          stale: staleSettings(),
+        }),
         base: focusBase(row),
       });
     } catch (e) {

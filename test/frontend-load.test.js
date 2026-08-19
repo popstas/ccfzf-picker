@@ -44,6 +44,28 @@ test('порядок тегов таков, что каждый модуль н�
     1,
   );
   assert.strictEqual(ctx.ConfigShape.normalizeConfig(null).onlyLive, true);
+  // Раскладка спрашивает у StaleItems, тускла ли строка. Сосед взят на
+  // загрузке, и тегом ниже он был бы `undefined`: тесты, грузящие модули через
+  // require, этого не увидели бы вовсе — там зависимость приезжает в момент
+  // вызова.
+  assert.deepStrictEqual(
+    [...ctx.SessionWindows.placeIds(
+      [
+        { kind: 'session', id: 'fresh', lastActivity: 7200, window: { host: 'pc', pid: 1 } },
+        { kind: 'session', id: 'old', lastActivity: 1, window: { host: 'pc', pid: 1 } },
+        {
+          kind: 'session',
+          id: 'hidden',
+          lastActivity: 7200,
+          window: { host: 'pc', pid: 1, minimized: true },
+        },
+      ],
+      { windowHost: 'pc', windowPid: 1 },
+      'pc',
+      { nowSec: 7201, stale: { enabled: true, sessionHours: 2, projectHours: 24, opacity: 0.5 } },
+    )],
+    ['fresh'],
+  );
   assert.strictEqual(
     ctx.StaleItems.isStale(
       { lastActivity: 1 }, 7201,

@@ -34,16 +34,35 @@ const PLACE_ORDER_RS = fs.readFileSync(
  * Отсевы (`onlyLive`, `onlyWindow`) не передаются намеренно: у хоткея их нет и
  * быть не может — строки поиска на скрытом пикере не существует.
  */
-function pageOrder(mode) {
+function pageOrder(mode, opts) {
   const res = { ok: true, ...FIXTURE.state, seen: {} };
   const built = groups.buildSessionsPayload(res, mode, { configHost: FIXTURE.configHost });
   const rows = built.groups.flatMap(g => g.sessions);
-  return windowsApi.placeIds(rows, FIXTURE.state, FIXTURE.configHost);
+  return windowsApi.placeIds(rows, FIXTURE.state, FIXTURE.configHost, opts);
 }
 
 test('страница даёт по фикстуре ровно тот порядок, что записан в ней', () => {
   for (const [mode, expected] of Object.entries(FIXTURE.expected)) {
     assert.deepStrictEqual(pageOrder(mode), expected, `сортировка ${mode}`);
+  }
+});
+
+test('страница отсеивает тусклые строки из раскладки по фикстуре', () => {
+  // Свёрнутое окно и молчание дольше порога — два повода, и оба обязаны
+  // работать в обеих реализациях одинаково: разошедшийся отсев так же тих,
+  // как разошедшийся порядок, — публикация проходит, окна встают, только не
+  // те, что человек видит в списке.
+  const opts = { nowSec: FIXTURE.nowSec, stale: FIXTURE.stale };
+  for (const [mode, expected] of Object.entries(FIXTURE.expectedStale)) {
+    assert.deepStrictEqual(pageOrder(mode, opts), expected, `сортировка ${mode}`);
+  }
+});
+
+test('снятая галка dim stale возвращает в раскладку весь порядок', () => {
+  // Галка гасит правило целиком — и в списке, и здесь.
+  const opts = { nowSec: FIXTURE.nowSec, stale: { ...FIXTURE.stale, enabled: false } };
+  for (const [mode, expected] of Object.entries(FIXTURE.expected)) {
+    assert.deepStrictEqual(pageOrder(mode, opts), expected, `сортировка ${mode}`);
   }
 });
 

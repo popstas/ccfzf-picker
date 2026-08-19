@@ -256,11 +256,65 @@ fn number_at(src: &Value, key: &str) -> f64 {
     src.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0)
 }
 
+/// Затемнение строк, каким его видит раскладка.
+///
+/// Порт `staleSettings()` со страницы: `enabled` — галка `dim stale` из
+/// `ui.json`, а не ключ конфига, потому что конфиг решает только умолчание
+/// галки; `session_hours` — порог возраста из конфига. `now_s` передаётся, а
+/// не спрашивается у часов внутри: иначе тест про порог зависел бы от минуты,
+/// в которую его запустили.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Stale {
+    pub enabled: bool,
+    pub session_hours: f64,
+    pub now_s: f64,
+}
+
+impl Stale {
+    /// Тускла ли строка: свёрнута здесь или молчит дольше порога.
+    ///
+    /// Порт `StaleItems.isStale`, и порядок проверок тот же: свёрнутость —
+    /// факт, а не догадка по времени, и возраст у свёрнутой строки не
+    /// спрашивается вовсе. Выключенная галка гасит оба правила: строка,
+    /// выпадающая из раскладки вопреки снятой галке, выглядела бы поломкой
+    /// хоткея.
+    fn hides(&self, minimized: bool, last_activity: f64) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        if minimized {
+            return true;
+        }
+        let threshold = self.session_hours * 3600.0;
+        threshold.is_finite()
+            && threshold > 0.0
+            && last_activity > 0.0
+            && self.now_s >= last_activity
+            && self.now_s - last_activity >= threshold
+    }
+}
+
+/// Свёрнуто ли окно строки на **этой** машине — порт `minimizedHere`.
+///
+/// Своих окон бывает больше одного (сессию открывали здесь дважды), и
+/// свёрнутой строка считается, когда свёрнуты все: одно развёрнутое окно
+/// стоит на экране, и прятать строку не за что. Нет своих окон — `false`:
+/// раскладывать нечего, но и прятать нечего тоже.
+fn minimized_here(windows: &[Value], mine: &str) -> bool {
+    let mut own = windows.iter().filter(|w| norm_host(w.get("host")) == mine).peekable();
+    own.peek().is_some() && own.all(|w| w.get("minimized") == Some(&Value::Bool(true)))
+}
+
 /// Сессии, чьи окна стоят на этой машине, в порядке выбранной сортировки.
 ///
 /// Пустое имя машины значит «фокуса не бывает» — то же умолчание, что у
 /// `canFocus`: пустой `windowHost` в конфиге, и просить раскладку не о чем.
-pub fn tile_ids(state: &Value, config_host: &str, sort: &str) -> Vec<String> {
+///
+/// Тусклые строки в раскладку не идут — тем же правилом, каким пикер гасит их
+/// в списке (`stale-items.js`): клетка сетки, отданная свёрнутому или давно
+/// молчащему окну, ужимает те, на которые человек смотрит. Согласие двух
+/// реализаций держит общая фикстура — см. `test/place-order.test.js`.
+pub fn tile_ids(state: &Value, config_host: &str, sort: &str, stale: &Stale) -> Vec<String> {
     let mine = config_host.trim().to_lowercase();
     if mine.is_empty() {
         return Vec::new();
@@ -304,6 +358,9 @@ pub fn tile_ids(state: &Value, config_host: &str, sort: &str) -> Vec<String> {
             own
         };
         if !has_own_window(&windows, &mine) {
+            continue;
+        }
+        if stale.hides(minimized_here(&windows, &mine), agent_updated(&active.agent)) {
             continue;
         }
         rows.push(Row {
@@ -387,6 +444,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// Затемнение выключено: так пикер открывается по умолчанию, и так вёл
+    /// себя порядок до появления отсева.
+    const OFF: Stale = Stale { enabled: false, session_hours: 0.0, now_s: 0.0 };
+
     /// Сессия с окном на нашей машине — с полями, которых просит сортировка.
     fn session(id: &str, host: &str, pid: i64, updated: i64) -> Value {
         json!({
@@ -427,7 +488,7 @@ mod tests {
                 .iter()
                 .map(|v| v.as_str().unwrap().to_string())
                 .collect();
-            assert_eq!(tile_ids(state, host, mode), want, "сортировка {mode}");
+            assert_eq!(tile_ids(state, host, mode, &OFF), want, "сортировка {mode}");
         }
         // Адрес просьбы — из той же фикстуры: топик называет трекер своей
         // машины, а не конфиг пикера.
@@ -435,6 +496,95 @@ mod tests {
             tracker_base(state, host),
             f["expectedBase"].as_str().unwrap()
         );
+    }
+
+    #[test]
+    fn minimized_asks_about_windows_of_this_machine_only() {
+        // Свёрнутое окно соседней машины к этому экрану не относится: её окна
+        // эта машина не раскладывает вовсе.
+        let mine = json!([{ "host": "pc", "pid": 1, "minimized": true }]);
+        let theirs = json!([{ "host": "laptop", "pid": 1, "minimized": true }]);
+        assert!(minimized_here(mine.as_array().unwrap(), "pc"));
+        assert!(!minimized_here(theirs.as_array().unwrap(), "pc"));
+    }
+
+    #[test]
+    fn one_open_window_here_keeps_the_row_visible() {
+        // Сессию открывали на этой машине дважды: одно окно на экране стоит.
+        let both = json!([
+            { "host": "pc", "pid": 1, "minimized": true },
+            { "host": "pc", "pid": 1, "minimized": false },
+        ]);
+        assert!(!minimized_here(both.as_array().unwrap(), "pc"));
+        // Ни окон здесь, ни признака вовсе — прятать нечего. Второе — это
+        // агрегатор прежней версии: поля он не пропускает.
+        assert!(!minimized_here(&[], "pc"));
+        let silent = json!([{ "host": "pc", "pid": 1 }]);
+        assert!(!minimized_here(silent.as_array().unwrap(), "pc"));
+    }
+
+    #[test]
+    fn the_age_threshold_matches_the_page() {
+        // Порог — не «больше», а «не меньше»: страница считает так же
+        // (`now - lastActivity >= sessionHours * 3600`), и разойдись они,
+        // строка на самой границе гасла бы в списке и раскладывалась бы
+        // клавишей.
+        let stale = Stale { enabled: true, session_hours: 2.0, now_s: 10_000.0 };
+        assert!(!stale.hides(false, 10_000.0 - 7_199.0));
+        assert!(stale.hides(false, 10_000.0 - 7_200.0));
+        // Ноль — «времени нет», а не «бесконечно старая»: то же правило, что
+        // на странице.
+        assert!(!stale.hides(false, 0.0));
+        // Будущее время — тоже неизвестное.
+        assert!(!stale.hides(false, 20_000.0));
+        // Свёрнутость возраста не спрашивает вовсе.
+        assert!(stale.hides(true, 10_000.0));
+        // Выключенная галка гасит оба правила.
+        let off = Stale { enabled: false, ..stale };
+        assert!(!off.hides(true, 0.0));
+    }
+
+    /// Тот же отсев тусклых строк, что делает страница, — на том же входе.
+    ///
+    /// Развилки фикстуры здесь две: у `ccc` окно свёрнуто (факт от трекера, и
+    /// возраст у неё свежайший), а `aaa` молчит дольше порога. Обе обязаны
+    /// выпасть, и обе — в обеих реализациях: разошедшийся отсев так же тих,
+    /// как разошедшийся порядок.
+    #[test]
+    fn the_shared_fixture_hides_the_same_rows_the_page_hides() {
+        let f: Value = serde_json::from_str(FIXTURE).expect("фикстура не разобралась");
+        let state = &f["state"];
+        let host = f["configHost"].as_str().unwrap();
+        let stale = Stale {
+            enabled: f["stale"]["enabled"].as_bool().expect("в фикстуре нет stale.enabled"),
+            session_hours: f["stale"]["sessionHours"]
+                .as_f64()
+                .expect("в фикстуре нет stale.sessionHours"),
+            now_s: f["nowSec"].as_f64().expect("в фикстуре нет nowSec"),
+        };
+        let expected = f["expectedStale"].as_object().expect("в фикстуре нет expectedStale");
+        assert!(!expected.is_empty(), "в фикстуре не задано ни одной сортировки");
+        for (mode, ids) in expected {
+            let want: Vec<String> = ids
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect();
+            assert_eq!(tile_ids(state, host, mode, &stale), want, "сортировка {mode}");
+        }
+        // Снятая галка возвращает всех: правило гасится целиком, как и
+        // затемнение в списке.
+        let off = Stale { enabled: false, ..stale };
+        for (mode, ids) in f["expected"].as_object().unwrap() {
+            let want: Vec<String> = ids
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect();
+            assert_eq!(tile_ids(state, host, mode, &off), want, "сортировка {mode} без галки");
+        }
     }
 
     /// Окна соседней машины трекер этой всё равно не ведёт, а порядок сдвинули
@@ -445,7 +595,7 @@ mod tests {
             session("mine", "pc", 10, 100),
             session("theirs", "mac", 10, 200),
         ]);
-        assert_eq!(tile_ids(&s, "pc", "recent"), vec!["mine".to_string()]);
+        assert_eq!(tile_ids(&s, "pc", "recent", &OFF), vec!["mine".to_string()]);
     }
 
     /// Регистр и пробелы в имени машины не значат ничего — одну сторону
@@ -453,7 +603,7 @@ mod tests {
     #[test]
     fn host_comparison_ignores_case_and_spaces() {
         let s = state(vec![session("a", "POPSTAS-PC", 10, 100)]);
-        assert_eq!(tile_ids(&s, "  popstas-pc ", "recent"), vec!["a".to_string()]);
+        assert_eq!(tile_ids(&s, "  popstas-pc ", "recent", &OFF), vec!["a".to_string()]);
     }
 
     /// Пустой `windowHost` в конфиге значит «фокуса не бывает»: просить
@@ -461,7 +611,7 @@ mod tests {
     #[test]
     fn an_empty_config_host_asks_for_nothing() {
         let s = state(vec![session("a", "pc", 10, 100)]);
-        assert!(tile_ids(&s, "", "recent").is_empty());
+        assert!(tile_ids(&s, "", "recent", &OFF).is_empty());
     }
 
     /// Трекер, не умеющий поднимать, и нулевой pid — признаки мёртвой или
@@ -476,7 +626,7 @@ mod tests {
             "id": "b", "title": "b",
             "windows": [{ "host": "pc", "pid": 0 }],
         });
-        assert!(tile_ids(&state(vec![no_focus, no_pid]), "pc", "recent").is_empty());
+        assert!(tile_ids(&state(vec![no_focus, no_pid]), "pc", "recent", &OFF).is_empty());
     }
 
     /// Свежайшее первым, а строка без активности — в конце, а не в начале:
@@ -489,7 +639,7 @@ mod tests {
             session("fresh", "pc", 10, 6000),
         ]);
         assert_eq!(
-            tile_ids(&s, "pc", "recent"),
+            tile_ids(&s, "pc", "recent", &OFF),
             vec!["fresh".to_string(), "old".to_string(), "silent".to_string()]
         );
     }
@@ -503,7 +653,7 @@ mod tests {
             session("aaa", "pc", 10, 6000),
         ]);
         assert_eq!(
-            tile_ids(&s, "pc", "recent"),
+            tile_ids(&s, "pc", "recent", &OFF),
             vec!["aaa".to_string(), "bbb".to_string()]
         );
     }
@@ -517,7 +667,7 @@ mod tests {
             session("young", "pc", 10, 30),
         ]);
         assert_eq!(
-            tile_ids(&s, "pc", "recent"),
+            tile_ids(&s, "pc", "recent", &OFF),
             vec!["young".to_string(), "silent".to_string()]
         );
     }
@@ -538,23 +688,23 @@ mod tests {
         });
         let s = state(vec![cheap, pricey]);
         assert_eq!(
-            tile_ids(&s, "pc", "cost"),
+            tile_ids(&s, "pc", "cost", &OFF),
             vec!["pricey".to_string(), "cheap".to_string()]
         );
         assert_eq!(
-            tile_ids(&s, "pc", "oldest"),
+            tile_ids(&s, "pc", "oldest", &OFF),
             vec!["pricey".to_string(), "cheap".to_string()]
         );
         assert_eq!(
-            tile_ids(&s, "pc", "newest"),
+            tile_ids(&s, "pc", "newest", &OFF),
             vec!["cheap".to_string(), "pricey".to_string()]
         );
         assert_eq!(
-            tile_ids(&s, "pc", "name"),
+            tile_ids(&s, "pc", "name", &OFF),
             vec!["cheap".to_string(), "pricey".to_string()]
         );
         // Незнакомое имя — тот же ответ, что и у `recent`.
-        assert_eq!(tile_ids(&s, "pc", "mosaic"), tile_ids(&s, "pc", "recent"));
+        assert_eq!(tile_ids(&s, "pc", "mosaic", &OFF), tile_ids(&s, "pc", "recent", &OFF));
     }
 
     /// У фонового форка бывает окно, и достаётся оно строке родителя: сам
@@ -569,7 +719,7 @@ mod tests {
             "agent": { "updated": 500 },
         });
         assert_eq!(
-            tile_ids(&state(vec![parent, fork]), "pc", "recent"),
+            tile_ids(&state(vec![parent, fork]), "pc", "recent", &OFF),
             vec!["parent".to_string()]
         );
     }
@@ -589,7 +739,7 @@ mod tests {
             "agent": { "updated": 500 },
         });
         assert_eq!(
-            tile_ids(&state(vec![parent, fork]), "pc", "recent"),
+            tile_ids(&state(vec![parent, fork]), "pc", "recent", &OFF),
             vec!["parent".to_string()]
         );
     }
@@ -604,7 +754,7 @@ mod tests {
             "windowPid": 42,
             "sessions": [{ "id": "a", "title": "a", "window": { "slot": 1 }, "agent": { "updated": 1 } }],
         });
-        assert_eq!(tile_ids(&s, "pc", "recent"), vec!["a".to_string()]);
+        assert_eq!(tile_ids(&s, "pc", "recent", &OFF), vec!["a".to_string()]);
     }
 
     /// Адрес просьбы называет трекер своей машины, а не конфиг пикера:

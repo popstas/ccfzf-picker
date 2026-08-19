@@ -74,3 +74,36 @@ test('испорченный порог не роняет isStale — прове
     );
   }
 });
+
+test('свёрнутое окно старит строку независимо от её свежести', () => {
+  // Свёрнутость — факт, а не догадка по времени: сессия, отвечавшая секунду
+  // назад, но убранная в Dock, на экране не стоит.
+  const fresh = { lastActivity: NOW - 1 };
+  assert.strictEqual(isStale(fresh, NOW, STALE, 'session', true), true);
+  assert.strictEqual(staleClass(fresh, NOW, STALE, 'session', true), ' stale');
+  assert.strictEqual(isStale(fresh, NOW, STALE, 'session', false), false);
+});
+
+test('свёрнутость подчиняется галке dim stale', () => {
+  // Иначе снятая галка не гасила бы затемнение целиком, и строка, тускнеющая
+  // вопреки ей, читалась бы как поломка.
+  assert.strictEqual(
+    isStale({ lastActivity: NOW - 1 }, NOW, { ...STALE, enabled: false }, 'session', true),
+    false,
+  );
+});
+
+test('свёрнутость не старит строки, у которых нет возраста', () => {
+  // Снимки и Zellij затемнением не заведуют вовсе — то же правило, что у
+  // возраста: у них другой смысл строки.
+  assert.strictEqual(isStale({ lastActivity: NOW - 1 }, NOW, STALE, 'zellij', true), false);
+  assert.strictEqual(isStale({ lastActivity: NOW - 1 }, NOW, STALE, 'snapshot', true), false);
+});
+
+test('несказанная свёрнутость ничего не меняет', () => {
+  // Зовущий из старого кода передаёт четыре довода, и строка обязана
+  // оставаться такой же, какой была до появления пятого.
+  assert.strictEqual(isStale({ lastActivity: NOW - 7200 }, NOW, STALE, 'session'), true);
+  assert.strictEqual(isStale({ lastActivity: NOW - 1 }, NOW, STALE, 'session'), false);
+  assert.strictEqual(isStale({ lastActivity: NOW - 1 }, NOW, STALE, 'session', 'да'), false);
+});

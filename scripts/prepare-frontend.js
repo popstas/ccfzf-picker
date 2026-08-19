@@ -13,6 +13,8 @@ const FILES = [
   'frontend-src/state-shape.js',
   'frontend-src/session-agent.js',
   'frontend-src/session-list.js',
+  // Перед session-windows: тот берёт StaleItems из globalThis на загрузке.
+  'frontend-src/stale-items.js',
   'frontend-src/session-windows.js',
   'frontend-src/open-transport.js',
   'frontend-src/session-groups.js',
@@ -24,7 +26,6 @@ const FILES = [
   'frontend-src/key-reference.js',
   'frontend-src/session-actions.js',
   'frontend-src/config-shape.js',
-  'frontend-src/stale-items.js',
   'frontend-src/picker-filter.js',
   'frontend-src/picker-snapshots.js',
   'frontend-src/picker-mode.js',

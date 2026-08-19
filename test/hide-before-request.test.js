@@ -44,6 +44,10 @@ function callsOf(name, extra = {}) {
       OpenStrategy: { newSessionName: () => 'x-2' },
       SessionWindows: { placeIds: () => ['ffff-1111'] },
     },
+    // Отсев тусклых строк из раскладки — не предмет этого сторожа: он про
+    // порядок вызовов. Настройка нужна placeWindows снаружи себя, как и
+    // `focusBase` рядом.
+    staleSettings: () => ({ enabled: false }),
     rows: [ROW],
     issuedNames: new Map(),
     takenSessionNames: () => [],

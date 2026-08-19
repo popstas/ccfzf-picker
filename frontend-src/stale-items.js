@@ -13,9 +13,20 @@
    *
    * Нулевое и будущее время — неизвестное, а не старое. Неизвестный вид строки
    * тоже не затемняется: снимки и Zellij имеют другой смысл возраста.
+   *
+   * `minimized` — второй повод, кроме возраста: окно сессии свёрнуто на этой
+   * машине. Считает его зовущий (`SessionWindows.minimizedHere`), потому что
+   * знание про машину живёт там, а не здесь. Возраст при этом не спрашивается
+   * вовсе: свёрнутое окно — не догадка по времени, а факт, и свежая сессия со
+   * свёрнутым окном гасится наравне со старой.
+   *
+   * Выключателю `stale.enabled` свёрнутость подчиняется так же, как возраст:
+   * галка «dim stale» — единственное, чем человек гасит затемнение целиком, и
+   * строка, тускнеющая вопреки снятой галке, читалась бы как поломка.
    */
-  function isStale(row, nowSec, stale, kind) {
+  function isStale(row, nowSec, stale, kind, minimized) {
     if (!stale || stale.enabled !== true || !AGE_KINDS.has(kind)) return false;
+    if (minimized === true) return true;
     const rawLastActivity = row && row.lastActivity;
     if (typeof rawLastActivity !== 'number' || !Number.isFinite(rawLastActivity)) return false;
     const lastActivity = rawLastActivity;
@@ -34,8 +45,8 @@
       && now - lastActivity >= threshold;
   }
 
-  function staleClass(row, nowSec, stale, kind) {
-    return isStale(row, nowSec, stale, kind) ? ' stale' : '';
+  function staleClass(row, nowSec, stale, kind, minimized) {
+    return isStale(row, nowSec, stale, kind, minimized) ? ' stale' : '';
   }
 
   return { isStale, staleClass };
