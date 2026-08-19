@@ -66,6 +66,23 @@
    * Разойдись они — окно предложило бы действие, которого Rust не знает, и
    * клик молча делал бы умолчание. Ни ошибки, ни следа: ответа у нажатия нет.
    */
+  /**
+   * Что делает выбор проекта — список для двух выпадашек.
+   *
+   * Вторая половина таблицы `PROJECT_OPEN_ACTIONS` из `src-tauri/src/main.rs`:
+   * там она же решает по значению, здесь — показывает человеку. Согласие
+   * держит `test/project-open-actions.test.js`, тем же приёмом, что и у
+   * действий трея: общего кода между двумя языками нет.
+   *
+   * Умолчания у двух полей разные и живут у самих полей, а не здесь: строку
+   * проекта выбирают глазами и просят ею начать работу (`new`), хоткей жмут
+   * вслепую, чтобы вернуться туда, где работа идёт (`focus`).
+   */
+  const PROJECT_OPEN_ACTIONS = [
+    { value: 'new', label: 'Always start a new session' },
+    { value: 'focus', label: 'Raise the last session of the project if it is open' },
+  ];
+
   const TRAY_ACTIONS = [
     { value: 'sessions', label: 'Show the picker' },
     { value: 'projects', label: 'Show the picker on projects' },
@@ -93,6 +110,10 @@
         { id: 'terminal.file', label: 'Terminal', type: 'text' },
         { id: 'terminal.args', label: 'Terminal arguments', type: 'lines',
           hint: 'One per line — a comma occurs inside the arguments themselves.' },
+        { id: 'projectOpenAction', label: 'Enter on a project', type: 'choice',
+          default: 'new', options: PROJECT_OPEN_ACTIONS,
+          hint: 'Raising needs the window manager on this machine: '
+            + 'without it the picker always starts a new session.' },
         { id: 'onlyLive', label: 'Only running sessions', type: 'bool', default: true },
         { id: 'hideOnBlur', label: 'Hide the window when it loses focus', type: 'bool', default: true },
         { id: 'backgroundRefresh', label: 'Keep polling while the window is closed', type: 'bool',
@@ -170,6 +191,14 @@
           hint: 'Asks the window tracker for the tile layout, in the order of this list. '
             + 'Leave empty for the built-in one: Ctrl+Win+F10 on Windows, '
             + 'Ctrl+Option+Cmd+C on a Mac.' },
+        // Действие проектных клавиш стоит здесь, а не рядом с «Enter on a
+        // project» на General, по тому же правилу, по какому здесь же живут
+        // жесты мыши: действие принадлежит тому, чем его вызывают. Сами
+        // клавиши задаются не тут — их называет `claudeWt.projects` у
+        // windows11-manager, и пикер только вешает присланный список.
+        { id: 'projectHotkeyAction', label: 'Per-project hotkey', type: 'choice',
+          default: 'focus', options: PROJECT_OPEN_ACTIONS,
+          hint: 'The keys themselves come from the window manager config.' },
         // Мышь стоит рядом с клавишами намеренно: вкладка отвечает на вопрос
         // «чем вызвать пикер», и клик по иконке — тот же вопрос. Полями типа
         // `hotkey` они при этом не являются, и `GLOBAL_HOTKEYS` отбирает

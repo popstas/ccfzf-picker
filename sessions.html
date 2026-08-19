@@ -3194,6 +3194,14 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * подъёма окна эта цена уплачена давно.
    */
   async function openProjectRow(row) {
+    // Развилка «завести новую сессию или поднять открытое окно каталога» —
+    // настройка, а не поведение по месту: `projectOpenAction` в `config.yaml`,
+    // умолчание `new`. Стоит она **до** выбора транспорта: у ветки `new` вся
+    // работа уже написана в `newSessionHere` — имя, занятие имени, гашение,
+    // откат на местную дорогу, — и второй её экземпляр здесь разошёлся бы с
+    // первым. У проектного хоткея свой ключ и своё умолчание, и читает его
+    // Rust: клавишу жмут при скрытом пикере, где webview усыплён целиком.
+    if (CONFIG.projectOpenAction === 'new') return newSessionHere(row);
     const dir = window.OpenTransport.rowProjectDir(row);
     const action = window.OpenTransport.chooseProjectOpenAction(
       row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,

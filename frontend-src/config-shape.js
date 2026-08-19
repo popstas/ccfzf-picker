@@ -136,7 +136,34 @@
     // Rust (`cursor_hint` в main.rs) — ту же просьбу шлёт проектный хоткей,
     // а у скрытого пикера webview усыплён.
     openOnActiveDisplay: false,
+    // Что делает выбор проекта в списке: `new` — всегда заводить новую
+    // сессию, `focus` — сперва искать открытое окно этого каталога и поднимать
+    // его (так пикер вёл себя раньше). Умолчание `new`: строку проекта
+    // выбирают глазами, уже открыв пикер, и просят ею начать работу — вернуться
+    // же в идущую есть чем и без того, у неё своя строка в списке.
+    //
+    // У проектного хоткея своё умолчание (`focus`) и свой ключ
+    // (`projectHotkeyAction`), который читает Rust: клавишу жмут вслепую и при
+    // скрытом пикере, а у скрытого окна webview усыплён целиком. Здесь его нет
+    // намеренно — страница про него не спрашивает никогда.
+    projectOpenAction: 'new',
   };
+
+  /**
+   * Значение из известного списка — или умолчание.
+   *
+   * Регистр и пробелы по краям прощаются: человек правит `config.yaml` руками,
+   * и `New` там столь же вероятно, сколько `new`. То же самое и теми же
+   * словами делает `config_choice` в `src-tauri/src/main.rs` — второй разбор
+   * тут неизбежен (одно значение читает страница, другое Rust), и сторож
+   * `test/project-open-actions.test.js` держит их вместе.
+   */
+  function choice(raw, allowed, fallback) {
+    const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+    return allowed.includes(value) ? value : fallback;
+  }
+
+  const PROJECT_OPEN_ACTIONS = ['new', 'focus'];
 
   /**
    * Конфиг с проставленными умолчаниями.
@@ -336,6 +363,9 @@
       openOnActiveDisplay: typeof src.openOnActiveDisplay === 'boolean'
         ? src.openOnActiveDisplay
         : DEFAULTS.openOnActiveDisplay,
+      projectOpenAction: choice(
+        src.projectOpenAction, PROJECT_OPEN_ACTIONS, DEFAULTS.projectOpenAction,
+      ),
     };
   }
 
