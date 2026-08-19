@@ -2456,6 +2456,13 @@ const infoBackdrop = document.getElementById('info-backdrop');
     try {
       await invoke('open_session_mqtt', {
         id: row.id, cwd: window.OpenTransport.rowProjectDir(row), base: managerBase(),
+        // Своя ли это машина. Единственное, чем два повода одного входа
+        // различаются: точку курсора Rust приложит к просьбе только здесь, а с
+        // пункта «Open on <host>» она уехала бы координатой чужого стола.
+        // Считает та же `chooseOpenTransport`, что выбирает транспорт.
+        sameMachine: window.OpenTransport.chooseOpenTransport(
+          openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
+        ) === 'manager',
       });
     } catch (e) {
       error = String(e);

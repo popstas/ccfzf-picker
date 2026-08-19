@@ -466,8 +466,13 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
     // хоткей нажимают ровно тогда, когда пикер скрыт. Ради этого имя и живёт в
     // Rust, а не в `settings-form.js`.
     let terminal = crate::mqtt::terminal_name(&raw);
+    // Точка курсора — оттуда же и по той же причине, что имя терминала: галка
+    // `openOnActiveDisplay` живёт в конфиге, а спросить страницу нельзя. Своя
+    // ли это машина, здесь не спрашивают: хоткеи вешаются только когда
+    // `windowHost` трекера совпал с конфигом, то есть на своей же.
+    let cursor = crate::cursor_hint(app, &raw);
     tauri::async_runtime::spawn_blocking(move || {
-        if let Err(e) = crate::mqtt::open_project(&broker, &base, &cwd, &terminal) {
+        if let Err(e) = crate::mqtt::open_project(&broker, &base, &cwd, &terminal, cursor) {
             ccfzf_log!("cannot ask to open {cwd}: {e}");
         }
     });

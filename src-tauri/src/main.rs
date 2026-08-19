@@ -674,6 +674,42 @@ fn show_on_active_display(config: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
+/// `openOnActiveDisplay` из конфига — ложью по умолчанию.
+///
+/// Галка соседняя с `showOnActiveDisplay`, но не её половинка: та про окно
+/// списка, эта про окно терминала, и связывать их нельзя — вопросы разные.
+/// Умолчание ложь по той же причине, по какой оно ложь у соседки: пока человек
+/// не попросил, окна ставит тот, кто их всегда ставил.
+fn open_on_active_display(config: &serde_json::Value) -> bool {
+    config
+        .get("openOnActiveDisplay")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Точка курсора для просьбы об открытии сессии — или `None`.
+///
+/// `None` значит «ключа в теле не будет», и это ровно то, чего мы хотим от
+/// выключенной галки: приёмник поставит окно так, как ставил всегда.
+///
+/// Курсор спрашивается **у приложения**, тем же ходом, что и в
+/// `target_monitor`, — и по той же причине, по какой имя терминала и порядок
+/// плитки считает Rust, а не страница: ту же просьбу шлёт проектный хоткей, а
+/// его жмут ровно тогда, когда пикер скрыт и webview усыплён.
+///
+/// На главный поток при этом не переходим намеренно. `run_on_main_thread`
+/// отсюда звали бы и из потока поллера (`project_hotkeys::press`), а это тот
+/// самый ход, на котором уже стояли: плагин хоткеев блокируется на ответе
+/// главного потока, и приложение вставало насмерть. `cursor_position` у
+/// приложения такого перехода не требует.
+pub(crate) fn cursor_hint(app: &tauri::AppHandle, config: &serde_json::Value) -> Option<(f64, f64)> {
+    if !open_on_active_display(config) {
+        return None;
+    }
+    let point = app.cursor_position().ok()?;
+    Some((point.x, point.y))
+}
+
 /// Галка «на активном экране», действующая прямо сейчас — тем же приёмом и по
 /// той же причине, что `WindowScale` и `ScrimFlags`: конфиг перечитывает
 /// `apply_config`, а монитор выбирают в другом месте и в другое время.
@@ -832,14 +868,18 @@ fn configured_broker() -> Result<mqtt::Broker, String> {
 /// а зовут это на каждое нажатие Enter. Имя нужно только тем трём просьбам, что
 /// кончаются терминалом, — остальным (фокус, отметка, восстановление) хватает
 /// брокера, и грузить их лишним полем незачем.
-fn configured_broker_and_terminal() -> Result<(mqtt::Broker, String), String> {
+fn configured_broker_and_terminal() -> Result<(mqtt::Broker, String, serde_json::Value), String> {
     let raw = load_config()?;
     let broker = mqtt::broker_from_config(&raw);
     if !broker.is_configured() {
         return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
     }
     let terminal = mqtt::terminal_name(&raw);
-    Ok((broker, terminal))
+    // Сырой конфиг отдаётся третьим, а не читается вторым разом: кроме брокера
+    // и терминала из него же спрашивается `openOnActiveDisplay` (`cursor_hint`),
+    // и два чтения одного файла на одно нажатие разошлись бы ровно тогда, когда
+    // человек правит настройки при открытом пикере.
+    Ok((broker, terminal, raw))
 }
 
 /// Поднять окно сессии через MQTT.
@@ -980,21 +1020,39 @@ async fn place_windows_mqtt(
 /// Windows не открывали ни разу. `Option` — чтобы непереданный ключ значил
 /// «каталога нет», а не рушил вызов на мосту: у `String` его отсутствие стало
 /// бы ошибкой разбора, и Enter отчитался бы человеку про аргументы команды.
+/// `sameMachine` — та ли это машина, на которой стоит пикер. Единственный из
+/// аргументов, который команда не пересылает, а которым решает: точку курсора
+/// прикладывать можно только к просьбе, адресованной своей же машине. У этого
+/// входа два повода (Enter здесь и пункт «Open on <host>» оттуда), и во втором
+/// курсор мака уехал бы Windows-менеджеру координатой чужого стола. Считает
+/// признак та же `chooseOpenTransport`, что выбирает транспорт, — второе
+/// правило про то же самое разошлось бы с первым молча. Отсутствие ключа
+/// читается как «не своя»: забытый аргумент обязан выключать оговорку, а не
+/// включать её.
 #[tauri::command]
 async fn open_session_mqtt(
+    app: tauri::AppHandle,
     id: String,
     cwd: Option<String>,
     base: Option<String>,
+    same_machine: Option<bool>,
 ) -> Result<(), String> {
     allow_any_foreground();
-    let (broker, terminal) = configured_broker_and_terminal()?;
+    let (broker, terminal, raw) = configured_broker_and_terminal()?;
     let cwd = cwd.unwrap_or_default().trim().to_string();
+    let cursor = if same_machine.unwrap_or(false) {
+        cursor_hint(&app, &raw)
+    } else {
+        None
+    };
     // Адрес называет трекер той машины, где стоит окно; свой из конфига —
     // запасной ход для трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || mqtt::open(&broker, &base, &id, &cwd, &terminal))
-        .await
-        .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        mqtt::open(&broker, &base, &id, &cwd, &terminal, cursor)
+    })
+    .await
+    .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
 }
 
 /// Попросить менеджера открыть проект по каталогу.
@@ -1008,15 +1066,22 @@ async fn open_session_mqtt(
 /// Грамота — как у хоткея, и по той же причине: оба исхода просьбы кончаются
 /// окном, которому нужен передний план.
 #[tauri::command]
-async fn open_project_mqtt(cwd: String, base: Option<String>) -> Result<(), String> {
+async fn open_project_mqtt(
+    app: tauri::AppHandle,
+    cwd: String,
+    base: Option<String>,
+) -> Result<(), String> {
     allow_any_foreground();
-    let (broker, terminal) = configured_broker_and_terminal()?;
+    let (broker, terminal, raw) = configured_broker_and_terminal()?;
+    // Оговорки «своя ли машина» здесь нет и не нужно: `chooseProjectOpenAction`
+    // отдаёт ветку менеджера только на машине самого менеджера.
+    let cursor = cursor_hint(&app, &raw);
     // У строки проекта окна нет вовсе: адрес называет трекер машины
     // менеджера, а не машины окна. Свой из конфига — запасной ход для
     // трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
     tauri::async_runtime::spawn_blocking(move || {
-        mqtt::open_project(&broker, &base, &cwd, &terminal)
+        mqtt::open_project(&broker, &base, &cwd, &terminal, cursor)
     })
     .await
     .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
@@ -1029,15 +1094,23 @@ async fn open_project_mqtt(cwd: String, base: Option<String>) -> Result<(), Stri
 /// разными телами. Имя считает пикер и присылает готовым — менеджер списка
 /// занятых имён не ведёт.
 #[tauri::command]
-async fn new_session_mqtt(cwd: String, name: String, base: Option<String>) -> Result<(), String> {
+async fn new_session_mqtt(
+    app: tauri::AppHandle,
+    cwd: String,
+    name: String,
+    base: Option<String>,
+) -> Result<(), String> {
     allow_any_foreground();
-    let (broker, terminal) = configured_broker_and_terminal()?;
+    let (broker, terminal, raw) = configured_broker_and_terminal()?;
+    // Как и у `open_project_mqtt`: до этой команды доходят только со своей
+    // машины — ветку выбирает `chooseProjectOpenAction`.
+    let cursor = cursor_hint(&app, &raw);
     // Окна ещё нет — сессия только заводится: адрес называет трекер машины
     // менеджера, а не машины окна. Свой из конфига — запасной ход для
     // трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
     tauri::async_runtime::spawn_blocking(move || {
-        mqtt::open_new(&broker, &base, &cwd, &name, &terminal)
+        mqtt::open_new(&broker, &base, &cwd, &name, &terminal, cursor)
     })
     .await
     .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
@@ -3697,6 +3770,31 @@ actions:
     fn the_active_display_flag_is_taken_as_is() {
         assert!(show_on_active_display(&serde_json::json!({"showOnActiveDisplay": true})));
         assert!(!show_on_active_display(&serde_json::json!({"showOnActiveDisplay": false})));
+    }
+
+    /// Вторая галка живёт своим ключом и умолчание у неё то же — «ставит окна
+    /// тот, кто ставил всегда».
+    #[test]
+    fn sessions_open_where_they_opened_by_default() {
+        assert!(!open_on_active_display(&serde_json::json!({})));
+        assert!(!open_on_active_display(&serde_json::json!({"openOnActiveDisplay": null})));
+        assert!(!open_on_active_display(&serde_json::json!({"openOnActiveDisplay": "yes"})));
+        assert!(open_on_active_display(&serde_json::json!({"openOnActiveDisplay": true})));
+    }
+
+    /// Галки независимы, и это проверяется прямо: они стоят рядом в окне
+    /// настроек и отвечают на похожие вопросы, но одна про окно списка, другая
+    /// про окно терминала. Свяжи их кто-нибудь потом — ошибку было бы видно
+    /// только глазами и только на машине с двумя мониторами.
+    #[test]
+    fn the_two_display_flags_do_not_touch_each_other() {
+        let shown_only = serde_json::json!({"showOnActiveDisplay": true});
+        assert!(show_on_active_display(&shown_only));
+        assert!(!open_on_active_display(&shown_only));
+
+        let opened_only = serde_json::json!({"openOnActiveDisplay": true});
+        assert!(!show_on_active_display(&opened_only));
+        assert!(open_on_active_display(&opened_only));
     }
 
     /// Показанному окну размер ставится на месте: `^F` на открытом пикере

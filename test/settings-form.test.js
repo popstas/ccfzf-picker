@@ -294,6 +294,19 @@ test('showOnActiveDisplay — булево поле на странице Window
   assert.strictEqual(field.label, 'Show on active display');
 });
 
+// Порядок галок повторяет порядок вопросов: сперва где появится сам список,
+// потом где появится окно сессии. Соседство тут и есть подсказка о том, что
+// это две разные галки, а не одна.
+test('openOnActiveDisplay — булево поле там же, сразу за галкой про пикер', () => {
+  const page = PAGES.find(p => p.id === 'window');
+  const ids = page.fields.map(f => f.id);
+  assert.ok(ids.includes('openOnActiveDisplay'));
+  assert.strictEqual(ids.indexOf('openOnActiveDisplay'), ids.indexOf('showOnActiveDisplay') + 1);
+  const field = page.fields.find(f => f.id === 'openOnActiveDisplay');
+  assert.strictEqual(field.type, 'bool');
+  assert.strictEqual(field.label, 'Open sessions on active display');
+});
+
 test('scrim без ключа в конфиге показывает выключенным, а патч несёт включённый флаг', () => {
   const original = { sshHost: 'host', ...NO_PICKER_SIZE };
   const fields = configToFields(original);

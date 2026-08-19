@@ -7,7 +7,8 @@
 //! `<база машины>/claude-snapshot-restore` с телом `{"id": …}` и
 //! необязательным `sessionIds`, и `<база машины>/claude-session-open` с телом
 //! `{"action": "terminal"}`, где необязательны оба опознавателя — `id`
-//! известной сессии и `cwd` проекта), и придумывать
+//! известной сессии и `cwd` проекта, а необязательный `cursor` с точкой
+//! `{x, y}` просит поставить новое окно на тот экран, где эта точка), и придумывать
 //! рядом свои значило бы заводить приёмник, которого нет. Пятая просьба,
 //! `<база машины>/claude-place` с телом `{"mode": …, "ids": [...]}`, говорит
 //! не о сессии, а обо всём экране: её слушают обе машины — каждая на своей базе,
@@ -181,8 +182,15 @@ pub fn unread(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
 /// режет такой запрос как cross-origin ещё до отправки. Поддержано одно
 /// действие, `terminal`: остальные (cursor, explorer, pr) осмысленны только
 /// там, где стоит человек, а не там, где висит окно.
-pub fn open(broker: &Broker, base: &str, id: &str, cwd: &str, terminal: &str) -> Result<(), String> {
-    publish(broker, base, OPEN_TOPIC, &open_payload(id, cwd, terminal))
+pub fn open(
+    broker: &Broker,
+    base: &str,
+    id: &str,
+    cwd: &str,
+    terminal: &str,
+    cursor: Option<(f64, f64)>,
+) -> Result<(), String> {
+    publish(broker, base, OPEN_TOPIC, &open_payload(id, cwd, terminal, cursor))
 }
 
 /// Необязательный ключ: пустое значение в тело не кладётся вовсе.
@@ -194,6 +202,32 @@ fn put_if_set(body: &mut serde_json::Map<String, serde_json::Value>, key: &str, 
     if !value.is_empty() {
         body.insert(key.to_string(), serde_json::Value::String(value.to_string()));
     }
+}
+
+/// Точка курсора в теле просьбы — «новое окно поставь на этот экран».
+///
+/// Точка, а не номер монитора, и это решение. У приёмника нумераций экранов
+/// три сразу — своя в конфиге, hMonitor и FancyZones, — и договориться о
+/// какой-то одной значило бы завести общий словарь на два репозитория, где
+/// расхождение видно не было бы вовсе: окно встало бы не на тот экран, а
+/// ответа у публикации нет. Точку же он переводит в монитор сам
+/// (`findMonitorByPoint`), тем же кодом, каким делает это для своих раскладок.
+///
+/// Округляется до целого: точка приезжает в физических пикселях, и доля
+/// пикселя не значит ничего ни для одного читателя.
+///
+/// Отсутствие ключа значит «ставь как ставил» — то же правило, что у
+/// `put_if_set`: приёмник прежней версии поля не знает вовсе, и просьба обязана
+/// сработать у него по-старому.
+fn put_cursor(
+    body: &mut serde_json::Map<String, serde_json::Value>,
+    cursor: Option<(f64, f64)>,
+) {
+    let Some((x, y)) = cursor else { return };
+    let mut point = serde_json::Map::new();
+    point.insert("x".to_string(), serde_json::json!(x.round() as i64));
+    point.insert("y".to_string(), serde_json::json!(y.round() as i64));
+    body.insert("cursor".to_string(), serde_json::Value::Object(point));
 }
 
 /// Тело просьбы об открытии.
@@ -213,7 +247,7 @@ fn put_if_set(body: &mut serde_json::Map<String, serde_json::Value>, key: &str, 
 /// Пустого ключа в теле нет вовсе: приёмник читает пустую строку как «каталога
 /// не знаем», а отсутствие ключа говорит то же самое честнее — то же правило,
 /// что у `restore_payload`.
-fn open_payload(id: &str, cwd: &str, terminal: &str) -> String {
+fn open_payload(id: &str, cwd: &str, terminal: &str, cursor: Option<(f64, f64)>) -> String {
     let mut body = serde_json::Map::new();
     body.insert("id".to_string(), serde_json::Value::String(id.to_string()));
     body.insert(
@@ -222,6 +256,7 @@ fn open_payload(id: &str, cwd: &str, terminal: &str) -> String {
     );
     put_if_set(&mut body, "cwd", cwd);
     put_if_set(&mut body, "terminal", terminal);
+    put_cursor(&mut body, cursor);
     serde_json::Value::Object(body).to_string()
 }
 
@@ -232,8 +267,14 @@ fn open_payload(id: &str, cwd: &str, terminal: &str) -> String {
 /// Windows, и отвечает на него `openClaudeProject` у менеджера, а не список
 /// пикера: у скрытого окна тот отстаёт до восьми минут (бэкофф в `poller.rs`),
 /// а при выключенном фоновом опросе не обновляется вовсе.
-pub fn open_project(broker: &Broker, base: &str, cwd: &str, terminal: &str) -> Result<(), String> {
-    publish(broker, base, OPEN_TOPIC, &open_project_payload(cwd, terminal))
+pub fn open_project(
+    broker: &Broker,
+    base: &str,
+    cwd: &str,
+    terminal: &str,
+    cursor: Option<(f64, f64)>,
+) -> Result<(), String> {
+    publish(broker, base, OPEN_TOPIC, &open_project_payload(cwd, terminal, cursor))
 }
 
 /// Тело просьбы об открытии проекта: действие и каталог, без `id`.
@@ -241,7 +282,7 @@ pub fn open_project(broker: &Broker, base: &str, cwd: &str, terminal: &str) -> R
 /// Пустой `id` сюда класть не надо, хотя приёмник его и переживёт: ключ без
 /// значения — это тело, которое врёт о том, что знает. Ровно по этому правилу
 /// здесь же выброшен пустой `cwd` в `open_payload`.
-fn open_project_payload(cwd: &str, terminal: &str) -> String {
+fn open_project_payload(cwd: &str, terminal: &str, cursor: Option<(f64, f64)>) -> String {
     let mut body = serde_json::Map::new();
     body.insert(
         "action".to_string(),
@@ -249,6 +290,7 @@ fn open_project_payload(cwd: &str, terminal: &str) -> String {
     );
     body.insert("cwd".to_string(), serde_json::Value::String(cwd.to_string()));
     put_if_set(&mut body, "terminal", terminal);
+    put_cursor(&mut body, cursor);
     serde_json::Value::Object(body).to_string()
 }
 
@@ -270,8 +312,9 @@ pub fn open_new(
     cwd: &str,
     name: &str,
     terminal: &str,
+    cursor: Option<(f64, f64)>,
 ) -> Result<(), String> {
-    publish(broker, base, OPEN_TOPIC, &open_new_payload(cwd, name, terminal))
+    publish(broker, base, OPEN_TOPIC, &open_new_payload(cwd, name, terminal, cursor))
 }
 
 /// Тело просьбы о новой сессии: действие, каталог и имя.
@@ -280,7 +323,12 @@ pub fn open_new(
 /// каталога — то самое имя, которое уже занято открытой сессией. Пустую строку
 /// сюда класть нельзя по тому же правилу, по которому её нет в `open_payload`:
 /// ключ без значения — это тело, которое врёт о том, что знает.
-fn open_new_payload(cwd: &str, name: &str, terminal: &str) -> String {
+fn open_new_payload(
+    cwd: &str,
+    name: &str,
+    terminal: &str,
+    cursor: Option<(f64, f64)>,
+) -> String {
     let mut body = serde_json::Map::new();
     body.insert(
         "action".to_string(),
@@ -289,6 +337,7 @@ fn open_new_payload(cwd: &str, name: &str, terminal: &str) -> String {
     body.insert("cwd".to_string(), serde_json::Value::String(cwd.to_string()));
     body.insert("name".to_string(), serde_json::Value::String(name.to_string()));
     put_if_set(&mut body, "terminal", terminal);
+    put_cursor(&mut body, cursor);
     serde_json::Value::Object(body).to_string()
 }
 
@@ -589,7 +638,7 @@ mod tests {
     #[test]
     fn open_body_carries_the_project_dir() {
         assert_eq!(
-            open_payload("s1", "/p/site", ""),
+            open_payload("s1", "/p/site", "", None),
             r#"{"action":"terminal","cwd":"/p/site","id":"s1"}"#
         );
     }
@@ -601,7 +650,7 @@ mod tests {
     #[test]
     fn open_body_names_the_terminal() {
         assert_eq!(
-            open_payload("s1", "/p/site", "wezterm"),
+            open_payload("s1", "/p/site", "wezterm", None),
             r#"{"action":"terminal","cwd":"/p/site","id":"s1","terminal":"wezterm"}"#
         );
     }
@@ -613,15 +662,15 @@ mod tests {
     #[test]
     fn a_nameless_terminal_carries_no_key() {
         assert_eq!(
-            open_payload("s1", "", ""),
+            open_payload("s1", "", "", None),
             r#"{"action":"terminal","id":"s1"}"#
         );
         assert_eq!(
-            open_project_payload("/p/site", ""),
+            open_project_payload("/p/site", "", None),
             r#"{"action":"terminal","cwd":"/p/site"}"#
         );
         assert_eq!(
-            open_new_payload("/p/site", "site-2", ""),
+            open_new_payload("/p/site", "site-2", "", None),
             r#"{"action":"terminal-new","cwd":"/p/site","name":"site-2"}"#
         );
     }
@@ -632,9 +681,60 @@ mod tests {
     // это человеку было бы нечем.
     #[test]
     fn every_terminal_request_names_it() {
-        assert!(open_payload("s1", "/p/site", "wt").contains(r#""terminal":"wt""#));
-        assert!(open_project_payload("/p/site", "wt").contains(r#""terminal":"wt""#));
-        assert!(open_new_payload("/p/site", "site-2", "wt").contains(r#""terminal":"wt""#));
+        assert!(open_payload("s1", "/p/site", "wt", None).contains(r#""terminal":"wt""#));
+        assert!(open_project_payload("/p/site", "wt", None).contains(r#""terminal":"wt""#));
+        assert!(open_new_payload("/p/site", "site-2", "wt", None).contains(r#""terminal":"wt""#));
+    }
+
+    // Точка курсора — просьба «поставь новое окно на этот экран». Ключ
+    // необязательный: выключенная галка и приёмник прежней версии обязаны
+    // вести себя как раньше, и различает эти два случая только отсутствие
+    // ключа целиком.
+    #[test]
+    fn the_cursor_point_rides_along_when_asked() {
+        assert_eq!(
+            open_payload("s1", "", "", Some((2560.0, 300.0))),
+            r#"{"action":"terminal","cursor":{"x":2560,"y":300},"id":"s1"}"#
+        );
+        assert_eq!(
+            open_project_payload("/p/site", "", Some((-1920.0, 12.0))),
+            r#"{"action":"terminal","cursor":{"x":-1920,"y":12},"cwd":"/p/site"}"#
+        );
+        assert_eq!(
+            open_new_payload("/p/site", "site-2", "", Some((0.0, 0.0))),
+            r#"{"action":"terminal-new","cursor":{"x":0,"y":0},"cwd":"/p/site","name":"site-2"}"#
+        );
+    }
+
+    // Доля пикселя не значит ничего ни для одного читателя, а в JSON выглядела
+    // бы `2559.6` — числом, которое приёмник сравнивает с целыми границами
+    // мониторов. Округление, а не усечение: экран слева от главного даёт
+    // отрицательную точку, и усечение уводило бы её от края наружу.
+    #[test]
+    fn the_cursor_point_is_whole_pixels() {
+        assert!(open_payload("s1", "", "", Some((2559.6, -0.4)))
+            .contains(r#""cursor":{"x":2560,"y":0}"#));
+    }
+
+    // Все три просьбы, кончающиеся терминалом, обязаны уметь нести точку — по
+    // той же причине, по какой все три несут имя терминала: забудь любую, и
+    // галка работала бы через раз, а поймать это нечем — ответа у публикации
+    // нет.
+    #[test]
+    fn every_terminal_request_can_carry_the_cursor() {
+        let point = Some((10.0, 20.0));
+        assert!(open_payload("s1", "/p/site", "wt", point).contains(r#""cursor""#));
+        assert!(open_project_payload("/p/site", "wt", point).contains(r#""cursor""#));
+        assert!(open_new_payload("/p/site", "site-2", "wt", point).contains(r#""cursor""#));
+    }
+
+    // Выключенная галка не должна отличаться от пикера прежней версии ни одним
+    // знаком: приёмник читает отсутствие ключа как «ставь как ставил».
+    #[test]
+    fn no_cursor_means_no_key() {
+        assert!(!open_payload("s1", "/p/site", "wt", None).contains("cursor"));
+        assert!(!open_project_payload("/p/site", "wt", None).contains("cursor"));
+        assert!(!open_new_payload("/p/site", "s-2", "wt", None).contains("cursor"));
     }
 
     // Имя считается от `terminal.file` в конфиге — по имени файла без каталога:
@@ -676,7 +776,7 @@ mod tests {
     // отсутствие каталога отличает от «каталог — пустая строка».
     #[test]
     fn open_body_without_a_dir_carries_no_key() {
-        assert_eq!(open_payload("s1", "", ""), r#"{"action":"terminal","id":"s1"}"#);
+        assert_eq!(open_payload("s1", "", "", None), r#"{"action":"terminal","id":"s1"}"#);
     }
 
     // Тело просьбы проектного хоткея: каталог есть, `id` нет вовсе. Пустую
@@ -687,7 +787,7 @@ mod tests {
     #[test]
     fn open_project_body_carries_no_id() {
         assert_eq!(
-            open_project_payload("/p/site", ""),
+            open_project_payload("/p/site", "", None),
             r#"{"action":"terminal","cwd":"/p/site"}"#
         );
     }
@@ -703,7 +803,7 @@ mod tests {
     #[test]
     fn open_new_body_names_the_session() {
         assert_eq!(
-            open_new_payload("/p/site", "site-2", ""),
+            open_new_payload("/p/site", "site-2", "", None),
             r#"{"action":"terminal-new","cwd":"/p/site","name":"site-2"}"#
         );
     }
