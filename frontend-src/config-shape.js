@@ -125,6 +125,17 @@
     // описан затем же, зачем `pickerSize`, — чтобы форма конфига была в одном
     // месте и проверялась одним тестом.
     showOnActiveDisplay: false,
+    // На каком мониторе открывать окно **сессии**. Галка соседняя, но не
+    // связанная: место списка и место терминала — два разных вопроса, и
+    // человек волен хотеть постоянное одно и подвижное другое.
+    //
+    // Само окно ставит не пикер: терминал открывает менеджер той машины
+    // (`claude-session-open`), а пикер лишь прикладывает к просьбе точку
+    // курсора. Точку, а не номер экрана: у менеджера три разные нумерации
+    // мониторов, а `findMonitorByPoint` у него уже написан. Читает курсор
+    // Rust (`cursor_hint` в main.rs) — ту же просьбу шлёт проектный хоткей,
+    // а у скрытого пикера webview усыплён.
+    openOnActiveDisplay: false,
   };
 
   /**
@@ -322,6 +333,9 @@
       showOnActiveDisplay: typeof src.showOnActiveDisplay === 'boolean'
         ? src.showOnActiveDisplay
         : DEFAULTS.showOnActiveDisplay,
+      openOnActiveDisplay: typeof src.openOnActiveDisplay === 'boolean'
+        ? src.openOnActiveDisplay
+        : DEFAULTS.openOnActiveDisplay,
     };
   }
 

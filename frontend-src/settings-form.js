@@ -143,6 +143,13 @@
         { id: 'showOnActiveDisplay', label: 'Show on active display', type: 'bool',
           hint: 'Off — the picker always opens on the main display. '
             + 'On — on the display where the mouse pointer is.' },
+        // Соседняя галка, но не половинка предыдущей: та про окно списка, эта
+        // про окно терминала. Независимы намеренно — вопросы разные.
+        { id: 'openOnActiveDisplay', label: 'Open sessions on active display', type: 'bool',
+          hint: 'On — a session opened from the list lands on the display where '
+            + 'the mouse pointer is. The window manager on that machine places it, '
+            + 'so this needs one: on a Mac the picker opens the terminal itself '
+            + 'and cannot move its window.' },
       ],
     },
     { id: 'columns', title: 'Columns', fields: [] },

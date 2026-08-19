@@ -379,3 +379,21 @@ test('пункт «Open on <host>» предлагается только при
   assert.equal(OpenTransport.canOpenRemote(row, null, 'mac-host', true), false);
   assert.equal(OpenTransport.canOpenRemote(row, { host: 'windows-box' }, 'mac-host', false), false);
 });
+
+// Точку курсора Rust прикладывает только к просьбе, адресованной своей же
+// машине, а решает это признак `sameMachine` в теле вызова. Забудь его страница
+// — и галка «Open sessions on active display» перестала бы работать молча:
+// отсутствующий ключ Rust читает как «не своя машина», просьба уходит, окно
+// открывается, просто не там. Поймать это поведением нечем — ответа у
+// публикации нет, — отсюда сторож по тексту страницы.
+test('страница называет своей машину, у которой спрашивает курсор', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const page = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+  const call = page.slice(page.indexOf("invoke('open_session_mqtt'"));
+  const body = call.slice(0, call.indexOf('});'));
+  assert.match(body, /sameMachine:/);
+  // Тем же правилом, а не своим: второе разошлось бы с первым, и пункт «Open
+  // on <host>» уехал бы к соседу с координатами нашего стола.
+  assert.match(body, /chooseOpenTransport\(/);
+});

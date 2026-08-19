@@ -416,6 +416,22 @@ test('showOnActiveDisplay принимает булево как есть', () =
   assert.strictEqual(normalizeConfig({ showOnActiveDisplay: false }).showOnActiveDisplay, false);
 });
 
+// Галка соседняя, но не половинка предыдущей: та про окно списка, эта про окно
+// терминала. Независимость проверяется прямо — связав их когда-нибудь, ошибку
+// увидели бы только глазами, на второй машине.
+test('openOnActiveDisplay по умолчанию выключен и не связан с соседкой', () => {
+  assert.strictEqual(normalizeConfig({}).openOnActiveDisplay, false);
+  assert.strictEqual(normalizeConfig({ openOnActiveDisplay: null }).openOnActiveDisplay, false);
+  assert.strictEqual(normalizeConfig({ openOnActiveDisplay: 'yes' }).openOnActiveDisplay, false);
+  assert.strictEqual(normalizeConfig({ showOnActiveDisplay: true }).openOnActiveDisplay, false);
+  assert.strictEqual(normalizeConfig({ openOnActiveDisplay: true }).showOnActiveDisplay, false);
+});
+
+test('openOnActiveDisplay принимает булево как есть', () => {
+  assert.strictEqual(normalizeConfig({ openOnActiveDisplay: true }).openOnActiveDisplay, true);
+  assert.strictEqual(normalizeConfig({ openOnActiveDisplay: false }).openOnActiveDisplay, false);
+});
+
 test('editor: умолчание cursor, пустая строка возвращает его же', () => {
   // Ключ нужен ради встроенных пунктов «Open plan» / «Open spec»: они обязаны
   // работать из коробки, иначе значок в строке обещал бы то, чего нет.

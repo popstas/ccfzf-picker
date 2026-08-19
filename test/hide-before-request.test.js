@@ -40,7 +40,14 @@ function callsOf(name, extra = {}) {
     CONFIG: { windowHost: 'pc-win', mqtt: { configured: true } },
     lastState: { windowHost: 'pc-win', windowPid: 4242, sessions: [] },
     window: {
-      OpenTransport: { rowProjectDir: (row) => row.cwd, chooseProjectOpenAction: () => 'manager' },
+      OpenTransport: {
+        rowProjectDir: (row) => row.cwd,
+        chooseProjectOpenAction: () => 'manager',
+        // openViaManager спрашивает её про «свою машину» — признак едет в теле
+        // просьбы (`sameMachine`). Без заглушки функция падала бы в свой же
+        // catch, и сторож ловил бы не порядок вызовов, а отсутствие мока.
+        chooseOpenTransport: () => 'manager',
+      },
       OpenStrategy: { newSessionName: () => 'x-2' },
       SessionWindows: { placeIds: () => ['ffff-1111'] },
     },
