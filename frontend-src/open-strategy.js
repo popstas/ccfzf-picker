@@ -177,6 +177,29 @@
   }
 
   /**
+   * Просто шелл в каталоге строки — без агента.
+   *
+   * Через ту же `inDir`, что и все остальные запуски: пункт «Open terminal»
+   * ведёт человека туда, где он продолжит руками, и хук `chpwd` там нужен
+   * ровно затем же — иначе всё, что он ставит в окружение (`project=` в
+   * `OTEL_RESOURCE_ATTRIBUTES`), в этом окне не появится.
+   *
+   * Хвост `exec $SHELL -i` обязателен: без него шелл, поднятый `-c`, кончится
+   * вместе с `cd`, и окно закроется мгновенно. Тот же случай, ради которого у
+   * kitty стоит `--hold`, только здесь это делает сама команда — она одна на
+   * все терминалы, а флага такого есть не у всех.
+   *
+   * Отказ (пустая строка) — на пустом пути и на пути с `;`: правило то же, что
+   * у `newSessionCommand`, и причина та же — Windows Terminal режет свою
+   * командную строку по `;` до всякого шелла, и кавычки ему не указ.
+   */
+  function terminalCommand(cwd) {
+    const path = String(cwd == null ? '' : cwd).replace(/\/+$/, '');
+    if (!path || path.includes(';')) return '';
+    return inDir(path, 'exec $SHELL -i');
+  }
+
+  /**
    * Поднять в каталоге нового агента, названного по каталогу.
    *
    * Имя ставится сразу, а не оставляется на `/rename`: по заголовку окна
@@ -363,7 +386,8 @@
   // рано или поздно разойдётся с первым.
   return {
     q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
-    newSessionCommand, newSessionName, terminalArgv, toBase64, commandParts, LOCAL_SOURCE,
+    newSessionCommand, newSessionName, terminalCommand, terminalArgv, toBase64,
+    commandParts, LOCAL_SOURCE,
     HELPER_PLACEHOLDER, COMMAND_B64_PLACEHOLDER,
   };
 });

@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand, newSessionCommand,
-  newSessionName, commandParts, LOCAL_SOURCE,
+  newSessionName, terminalCommand, commandParts, LOCAL_SOURCE,
 } = require('../frontend-src/open-strategy');
 
 const ATTACH_42 = `reptyr -T 42 || reptyr "$(pgrep -x -f 'reptyr -T 42' | head -1)"`;
@@ -417,6 +417,38 @@ test('строка зелийной сессии присоединяется с
   assert.strictEqual(chooseOpenStrategy(row, {}, {}), 'attach');
   const cmd = buildOpenCommand(row, 'attach', { sshHost: 'user@example-host', terminal: { file: 'wt', args: [] } });
   assert.ok(cmd.argv.includes("zellij attach 'home'"), cmd.argv);
+});
+
+test('терминал в каталоге открывается тем же интерактивным шеллом', () => {
+  // Через `inDir`, как и запуск агента: без него не отработает хук `chpwd`,
+  // ставящий `project=` в OTEL_RESOURCE_ATTRIBUTES, и окно окажется в
+  // каталоге, но без окружения, которое человек в нём ждёт.
+  assert.strictEqual(
+    terminalCommand('/home/user/projects/ccfzf'),
+    `exec $SHELL -ic 'cd -- '\\''/home/user/projects/ccfzf'\\'' && exec $SHELL -i'`,
+  );
+  // Хвостовая косая пути не меняет: каталог тот же самый.
+  assert.strictEqual(
+    terminalCommand('/home/user/projects/ccfzf/'),
+    terminalCommand('/home/user/projects/ccfzf'),
+  );
+});
+
+test('шелл в каталоге переживает конец команды, а не закрывается с ней', () => {
+  // `exec $SHELL -i` в хвосте — то же, ради чего у kitty стоит `--hold`:
+  // без него шелл, поднятый `-c`, кончится вместе с `cd`, и окно закроется
+  // мгновенно. Флага такого есть не у всех терминалов, поэтому платит команда.
+  assert.match(terminalCommand('/p'), /&& exec \$SHELL -i'$/);
+});
+
+test('терминал без каталога и с `;` в пути — отказ, а не команда', () => {
+  // Тот же барьер, что у новой сессии: Windows Terminal режет свою командную
+  // строку по `;` до всякого шелла, и кавычки ему не указ. Пустой путь — не
+  // ошибка вызывающего, а строка без каталога: пункта у неё быть не должно, но
+  // молчаливой команды в никуда — тем более.
+  assert.strictEqual(terminalCommand('/home/user/pro;ject'), '');
+  assert.strictEqual(terminalCommand(''), '');
+  assert.strictEqual(terminalCommand(null), '');
 });
 
 test('страница не собирает argv терминала мимо terminalArgv', () => {

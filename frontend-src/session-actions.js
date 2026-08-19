@@ -48,7 +48,13 @@
     // подходит: у неё нет ни записи агента, ни pid, ни истории. Ветка стоит
     // до всего остального, чтобы это правило было видно одним куском.
     if ((row || {}).kind === 'project') {
-      const forProject = [{ id: 'new', label: 'New session' }];
+      const forProject = [
+        { id: 'new', label: 'New session' },
+        // Шелл в том же каталоге, без агента: «зайти руками» — обычный ход
+        // рядом с «начать сессию». Каталог у строки проекта есть всегда, так
+        // что условия ему, в отличие от общей ветки, не нужно.
+        { id: 'terminal', label: 'Open terminal' },
+      ];
       if (pathApi.mapPath(row.cwd, cfg.pathMap) !== null) {
         for (const a of cfg.actions || []) {
           forProject.push({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey });
@@ -100,7 +106,10 @@
           forSnapshot.push({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey });
         }
       }
-      if (row.cwd) forSnapshot.push({ id: 'new', label: 'New session' });
+      if (row.cwd) {
+        forSnapshot.push({ id: 'new', label: 'New session' });
+        forSnapshot.push({ id: 'terminal', label: 'Open terminal' });
+      }
       return forSnapshot;
     }
     if (pathApi.mapPath((row || {}).cwd, cfg.pathMap) !== null) {
@@ -137,6 +146,11 @@
     // известен: пункт, который ничего не сделает, хуже отсутствующего — то же
     // правило, что и у действий папки выше.
     if (row && row.cwd) actions.push({ id: 'new', label: 'New session' });
+    // Тот же каталог, но без агента. Условие то же, что у соседа выше:
+    // терминал открывают в каталоге, и пункт, которому каталога не назвали,
+    // ничего бы не сделал. pathMap здесь ни при чём — терминал уходит на
+    // машину источника через ssh, а не открывает путь на этой.
+    if (row && row.cwd) actions.push({ id: 'terminal', label: 'Open terminal' });
     // Комментарий — у любой строки с настоящим id: он про сессию, а не про её
     // окно, живость или каталог. Живёт общим списком на машине агрегатора, и
     // потому же не спрашивает ни pathMap, ни трекера.
