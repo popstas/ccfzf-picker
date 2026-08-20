@@ -13,6 +13,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod config_file;
+mod desktop_store;
 mod icons;
 mod local_ccfzf;
 // `#[macro_use]`, а не `use` по файлам: `ccfzf_log!` зовут четыре модуля из
@@ -1734,7 +1735,15 @@ fn desktop_session_url(id: &str) -> Result<String, String> {
     if !state_source::looks_like_session_id(id) {
         return Err(format!("not a session id: {id}"));
     }
-    Ok(format!("claude://resume?session={id}"))
+    // Маршрута два, и берётся тот, что не плодит двойников: `cowork` открывает
+    // сессию, которую приложение уже завело, а `resume` **импортирует**
+    // транскрипт — то есть для сессии самого приложения заводит рядом вторую,
+    // безымянную. Своё имя сессии приложение держит у себя, и связь с нашим id
+    // записана там же полем `cliSessionId` (см. desktop_store).
+    let records = desktop_store::store_root()
+        .map(|root| desktop_store::read_store(&root))
+        .unwrap_or_default();
+    Ok(desktop_store::session_url(id, desktop_store::pick_session(&records, id)))
 }
 
 /// Чем система открывает ссылку.
@@ -2866,13 +2875,19 @@ mod tests {
 
     #[test]
     fn ssylka_na_sessiyu_sobiraetsya_marshrutom_prilozheniya() {
-        // Форма снята с самого приложения: в его маршрутизаторе ветка
-        // `Resume` читает `searchParams.get("session")` и проверяет id
-        // формой UUID. Проверено живьём на маке — окно поднялось на нужной
-        // сессии, в логе `Resume deep link: importing CLI session <id>`.
+        // Форма обоих маршрутов снята с самого приложения: ветка `Resume`
+        // читает `searchParams.get("session")` и проверяет id формой UUID, а
+        // `Cowork` уходит путём `/cowork/<id>` в само окно. Проверено живьём
+        // на маке — окно поднялось на нужной сессии.
+        //
+        // Здесь проверяется только то, что не зависит от машины: какой из двух
+        // маршрутов чему соответствует. Выбор записи и чтение хранилища — в
+        // `desktop_store`, там же и их тесты: на машине разработки приложения
+        // нет вовсе, и `desktop_session_url` целиком отвечала бы тем, что
+        // хранилища не нашлось.
         assert_eq!(
-            super::desktop_session_url("8b84d15e-fce9-4847-b3d0-39b37a3c48c1"),
-            Ok("claude://resume?session=8b84d15e-fce9-4847-b3d0-39b37a3c48c1".to_string()),
+            super::desktop_store::session_url("8b84d15e-fce9-4847-b3d0-39b37a3c48c1", None),
+            "claude://resume?session=8b84d15e-fce9-4847-b3d0-39b37a3c48c1".to_string(),
         );
     }
 
