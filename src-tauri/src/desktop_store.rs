@@ -13,7 +13,7 @@
 //! двенадцати `sessionId` не выводится из `cliSessionId` вовсе, и ровно одна
 //! двенадцатая — тот самый двойник, заведённый прежней версией этой ветки.
 //!
-//! Открывает уже заведённую сессию другой маршрут — `claude://claude.ai/cowork/<id>`,
+//! Открывает уже заведённую сессию другой маршрут — `claude://claude.ai/epitaxy/<id>`,
 //! и ему нужно имя приложения, а не наше.
 
 use std::path::PathBuf;
@@ -58,17 +58,20 @@ pub fn pick_session<'a>(records: &'a [DesktopSession], cli_id: &str) -> Option<&
 ///
 /// **Хост у них разный, и это не описка.** У приложения хост — первая ступень
 /// разбора: `claude://resume` разбирается веткой `resume` целиком, а страницы
-/// самого окна живут под хостом `claude.ai`, где первый сегмент пути называет
-/// маршрут (`/cowork/<id>`, рядом с `/task/<id>` и `/open-conversation/<id>`).
-/// Хост `cowork` тоже существует, но принимает ровно два пути — `/new` и
-/// `/shared-artifact`, — а всё прочее отвергает: `claude://cowork/<id>` писал
-/// в журнал приложения `unrecognized cowork path`, и человек видел, как окно
-/// выходит вперёд, не сменив сессии. Снято с живой машины: отвергнутые
-/// нажатия и удавшийся переход стоят в одном журнале в трёх минутах друг от
-/// друга.
+/// самого окна живут под хостом `claude.ai`, где маршрут называет первый
+/// сегмент пути.
+///
+/// Сегмент этот — `epitaxy`, внутреннее имя поверхности локальных сессий, и
+/// взято оно не догадкой: ровно туда уходит само приложение, закончив импорт
+/// (`vN(e) = "/epitaxy/" + e` в его коде, и `CP(vN(n), …)` следом за
+/// `importCliSession`). Две соседние догадки проверены живьём на маке и
+/// отвергнуты: `claude://cowork/<id>` приложение пишет в журнал как
+/// `unrecognized cowork path` — окно выходит вперёд, не сменив сессии, — а
+/// `claude://claude.ai/cowork/<id>` уводит в чужую поверхность, открывая чат и
+/// окно новой задачи. С `epitaxy` обе сессии из списка открылись верно.
 pub fn session_url(cli_id: &str, found: Option<&DesktopSession>) -> String {
     match found {
-        Some(rec) => format!("claude://claude.ai/cowork/{}", rec.id),
+        Some(rec) => format!("claude://claude.ai/epitaxy/{}", rec.id),
         None => format!("claude://resume?session={cli_id}"),
     }
 }
@@ -184,13 +187,13 @@ mod tests {
     /// Два маршрута, и разница между ними — вся суть модуля: `cowork`
     /// открывает заведённую сессию, `resume` заводит новую поверх транскрипта.
     ///
-    /// Хост у страницы сессии — `claude.ai`, а не `cowork`: под вторым живут
-    /// только `/new` и `/shared-artifact`, и путь с id он отвергает, поднимая
-    /// окно и не меняя в нём ничего.
+    /// Маршрут — `/epitaxy/<id>` под хостом `claude.ai`: ровно туда уходит
+    /// само приложение, закончив импорт. Обе соседние формы проверены живьём
+    /// и отвергнуты — см. `session_url`.
     #[test]
     fn a_known_session_is_opened_and_an_unknown_one_is_imported() {
         let found = rec("local_real", "dup");
-        assert_eq!(session_url("dup", Some(&found)), "claude://claude.ai/cowork/local_real");
+        assert_eq!(session_url("dup", Some(&found)), "claude://claude.ai/epitaxy/local_real");
         assert_eq!(session_url("dup", None), "claude://resume?session=dup");
     }
 
