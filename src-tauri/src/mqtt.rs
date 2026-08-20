@@ -188,9 +188,9 @@ pub fn open(
     id: &str,
     cwd: &str,
     terminal: &str,
-    cursor: Option<(f64, f64)>,
+    place: Placement,
 ) -> Result<(), String> {
-    publish(broker, base, OPEN_TOPIC, &open_payload(id, cwd, terminal, cursor))
+    publish(broker, base, OPEN_TOPIC, &open_payload(id, cwd, terminal, place))
 }
 
 /// Необязательный ключ: пустое значение в тело не кладётся вовсе.
@@ -230,6 +230,35 @@ fn put_cursor(
     body.insert("cursor".to_string(), serde_json::Value::Object(point));
 }
 
+/// Как ставить новое окно: куда и кто им потом распоряжается.
+///
+/// Два поля вместе, а не два аргумента подряд у пяти функций: вопрос у них
+/// один, и приезжают они всегда из одного места — `cursor_hint` рядом с
+/// признаком Ctrl. Пустая `Placement` значит «ставь как ставил»: ни одного
+/// ключа в теле, и приёмник прежней версии ведёт себя как раньше.
+#[derive(Clone, Copy, Default)]
+pub struct Placement {
+    pub cursor: Option<(f64, f64)>,
+    pub no_autoplace: bool,
+}
+
+/// Точка курсора и просьба не расставлять окно — в тело просьбы.
+///
+/// `noAutoplace` кладётся только истинным: ложь и отсутствие ключа значат для
+/// приёмника одно и то же — «расставляй как обычно», — а лишний ключ в теле
+/// обещал бы, что о нём спрашивали.
+///
+/// Без курсора флага не бывает вовсе, и следит за этим вызывающий
+/// (`open_session_mqtt` и соседи): пометку приёмник ставит на той же дороге,
+/// какой ставит окно по курсору, и просьба «не двигай» без «поставь сюда»
+/// молча не сделала бы ничего.
+fn put_placement(body: &mut serde_json::Map<String, serde_json::Value>, place: Placement) {
+    put_cursor(body, place.cursor);
+    if place.no_autoplace {
+        body.insert("noAutoplace".to_string(), serde_json::Value::Bool(true));
+    }
+}
+
 /// Тело просьбы об открытии.
 ///
 /// `cwd` — каталог проекта, и он тут не украшение: id менеджер ищет среди
@@ -247,7 +276,7 @@ fn put_cursor(
 /// Пустого ключа в теле нет вовсе: приёмник читает пустую строку как «каталога
 /// не знаем», а отсутствие ключа говорит то же самое честнее — то же правило,
 /// что у `restore_payload`.
-fn open_payload(id: &str, cwd: &str, terminal: &str, cursor: Option<(f64, f64)>) -> String {
+fn open_payload(id: &str, cwd: &str, terminal: &str, place: Placement) -> String {
     let mut body = serde_json::Map::new();
     body.insert("id".to_string(), serde_json::Value::String(id.to_string()));
     body.insert(
@@ -256,7 +285,7 @@ fn open_payload(id: &str, cwd: &str, terminal: &str, cursor: Option<(f64, f64)>)
     );
     put_if_set(&mut body, "cwd", cwd);
     put_if_set(&mut body, "terminal", terminal);
-    put_cursor(&mut body, cursor);
+    put_placement(&mut body, place);
     serde_json::Value::Object(body).to_string()
 }
 
@@ -272,9 +301,9 @@ pub fn open_project(
     base: &str,
     cwd: &str,
     terminal: &str,
-    cursor: Option<(f64, f64)>,
+    place: Placement,
 ) -> Result<(), String> {
-    publish(broker, base, OPEN_TOPIC, &open_project_payload(cwd, terminal, cursor))
+    publish(broker, base, OPEN_TOPIC, &open_project_payload(cwd, terminal, place))
 }
 
 /// Тело просьбы об открытии проекта: действие и каталог, без `id`.
@@ -282,7 +311,7 @@ pub fn open_project(
 /// Пустой `id` сюда класть не надо, хотя приёмник его и переживёт: ключ без
 /// значения — это тело, которое врёт о том, что знает. Ровно по этому правилу
 /// здесь же выброшен пустой `cwd` в `open_payload`.
-fn open_project_payload(cwd: &str, terminal: &str, cursor: Option<(f64, f64)>) -> String {
+fn open_project_payload(cwd: &str, terminal: &str, place: Placement) -> String {
     let mut body = serde_json::Map::new();
     body.insert(
         "action".to_string(),
@@ -290,7 +319,7 @@ fn open_project_payload(cwd: &str, terminal: &str, cursor: Option<(f64, f64)>) -
     );
     body.insert("cwd".to_string(), serde_json::Value::String(cwd.to_string()));
     put_if_set(&mut body, "terminal", terminal);
-    put_cursor(&mut body, cursor);
+    put_placement(&mut body, place);
     serde_json::Value::Object(body).to_string()
 }
 
@@ -312,9 +341,9 @@ pub fn open_new(
     cwd: &str,
     name: &str,
     terminal: &str,
-    cursor: Option<(f64, f64)>,
+    place: Placement,
 ) -> Result<(), String> {
-    publish(broker, base, OPEN_TOPIC, &open_new_payload(cwd, name, terminal, cursor))
+    publish(broker, base, OPEN_TOPIC, &open_new_payload(cwd, name, terminal, place))
 }
 
 /// Тело просьбы о новой сессии: действие, каталог и имя.
@@ -323,12 +352,7 @@ pub fn open_new(
 /// каталога — то самое имя, которое уже занято открытой сессией. Пустую строку
 /// сюда класть нельзя по тому же правилу, по которому её нет в `open_payload`:
 /// ключ без значения — это тело, которое врёт о том, что знает.
-fn open_new_payload(
-    cwd: &str,
-    name: &str,
-    terminal: &str,
-    cursor: Option<(f64, f64)>,
-) -> String {
+fn open_new_payload(cwd: &str, name: &str, terminal: &str, place: Placement) -> String {
     let mut body = serde_json::Map::new();
     body.insert(
         "action".to_string(),
@@ -337,7 +361,7 @@ fn open_new_payload(
     body.insert("cwd".to_string(), serde_json::Value::String(cwd.to_string()));
     body.insert("name".to_string(), serde_json::Value::String(name.to_string()));
     put_if_set(&mut body, "terminal", terminal);
-    put_cursor(&mut body, cursor);
+    put_placement(&mut body, place);
     serde_json::Value::Object(body).to_string()
 }
 
@@ -520,7 +544,8 @@ fn publish(broker: &Broker, base: &str, tail: &str, payload: &str) -> Result<(),
 mod tests {
     use super::{
         broker_from_config, open_new_payload, open_payload, open_project_payload, place_payload,
-        resolve_base, restore_payload, terminal_name, topic_of, unread_bases, FOCUS_TOPIC,
+        resolve_base, restore_payload, terminal_name, topic_of, unread_bases, Placement,
+        FOCUS_TOPIC,
         OPEN_TOPIC, PLACE_TOPIC, RESTORE_TOPIC, UNREAD_TOPIC,
     };
 
@@ -638,7 +663,7 @@ mod tests {
     #[test]
     fn open_body_carries_the_project_dir() {
         assert_eq!(
-            open_payload("s1", "/p/site", "", None),
+            open_payload("s1", "/p/site", "", NOWHERE),
             r#"{"action":"terminal","cwd":"/p/site","id":"s1"}"#
         );
     }
@@ -650,7 +675,7 @@ mod tests {
     #[test]
     fn open_body_names_the_terminal() {
         assert_eq!(
-            open_payload("s1", "/p/site", "wezterm", None),
+            open_payload("s1", "/p/site", "wezterm", NOWHERE),
             r#"{"action":"terminal","cwd":"/p/site","id":"s1","terminal":"wezterm"}"#
         );
     }
@@ -662,15 +687,15 @@ mod tests {
     #[test]
     fn a_nameless_terminal_carries_no_key() {
         assert_eq!(
-            open_payload("s1", "", "", None),
+            open_payload("s1", "", "", NOWHERE),
             r#"{"action":"terminal","id":"s1"}"#
         );
         assert_eq!(
-            open_project_payload("/p/site", "", None),
+            open_project_payload("/p/site", "", NOWHERE),
             r#"{"action":"terminal","cwd":"/p/site"}"#
         );
         assert_eq!(
-            open_new_payload("/p/site", "site-2", "", None),
+            open_new_payload("/p/site", "site-2", "", NOWHERE),
             r#"{"action":"terminal-new","cwd":"/p/site","name":"site-2"}"#
         );
     }
@@ -681,9 +706,31 @@ mod tests {
     // это человеку было бы нечем.
     #[test]
     fn every_terminal_request_names_it() {
-        assert!(open_payload("s1", "/p/site", "wt", None).contains(r#""terminal":"wt""#));
-        assert!(open_project_payload("/p/site", "wt", None).contains(r#""terminal":"wt""#));
-        assert!(open_new_payload("/p/site", "site-2", "wt", None).contains(r#""terminal":"wt""#));
+        assert!(open_payload("s1", "/p/site", "wt", NOWHERE).contains(r#""terminal":"wt""#));
+        assert!(open_project_payload("/p/site", "wt", NOWHERE).contains(r#""terminal":"wt""#));
+        assert!(open_new_payload("/p/site", "site-2", "wt", NOWHERE).contains(r#""terminal":"wt""#));
+    }
+
+    /// Просьба без единой оговорки про место: как ставили, так и ставьте.
+    const NOWHERE: Placement = Placement {
+        cursor: None,
+        no_autoplace: false,
+    };
+
+    /// «Поставь на этот экран» — то, что даёт галка `openOnActiveDisplay`.
+    fn at(x: f64, y: f64) -> Placement {
+        Placement {
+            cursor: Some((x, y)),
+            no_autoplace: false,
+        }
+    }
+
+    /// Ctrl на строке списка: «поставь сюда и больше не двигай».
+    fn pinned(x: f64, y: f64) -> Placement {
+        Placement {
+            cursor: Some((x, y)),
+            no_autoplace: true,
+        }
     }
 
     // Точка курсора — просьба «поставь новое окно на этот экран». Ключ
@@ -693,15 +740,15 @@ mod tests {
     #[test]
     fn the_cursor_point_rides_along_when_asked() {
         assert_eq!(
-            open_payload("s1", "", "", Some((2560.0, 300.0))),
+            open_payload("s1", "", "", at(2560.0, 300.0)),
             r#"{"action":"terminal","cursor":{"x":2560,"y":300},"id":"s1"}"#
         );
         assert_eq!(
-            open_project_payload("/p/site", "", Some((-1920.0, 12.0))),
+            open_project_payload("/p/site", "", at(-1920.0, 12.0)),
             r#"{"action":"terminal","cursor":{"x":-1920,"y":12},"cwd":"/p/site"}"#
         );
         assert_eq!(
-            open_new_payload("/p/site", "site-2", "", Some((0.0, 0.0))),
+            open_new_payload("/p/site", "site-2", "", at(0.0, 0.0)),
             r#"{"action":"terminal-new","cursor":{"x":0,"y":0},"cwd":"/p/site","name":"site-2"}"#
         );
     }
@@ -712,7 +759,7 @@ mod tests {
     // отрицательную точку, и усечение уводило бы её от края наружу.
     #[test]
     fn the_cursor_point_is_whole_pixels() {
-        assert!(open_payload("s1", "", "", Some((2559.6, -0.4)))
+        assert!(open_payload("s1", "", "", at(2559.6, -0.4))
             .contains(r#""cursor":{"x":2560,"y":0}"#));
     }
 
@@ -722,7 +769,7 @@ mod tests {
     // нет.
     #[test]
     fn every_terminal_request_can_carry_the_cursor() {
-        let point = Some((10.0, 20.0));
+        let point = at(10.0, 20.0);
         assert!(open_payload("s1", "/p/site", "wt", point).contains(r#""cursor""#));
         assert!(open_project_payload("/p/site", "wt", point).contains(r#""cursor""#));
         assert!(open_new_payload("/p/site", "site-2", "wt", point).contains(r#""cursor""#));
@@ -732,9 +779,37 @@ mod tests {
     // знаком: приёмник читает отсутствие ключа как «ставь как ставил».
     #[test]
     fn no_cursor_means_no_key() {
-        assert!(!open_payload("s1", "/p/site", "wt", None).contains("cursor"));
-        assert!(!open_project_payload("/p/site", "wt", None).contains("cursor"));
-        assert!(!open_new_payload("/p/site", "s-2", "wt", None).contains("cursor"));
+        assert!(!open_payload("s1", "/p/site", "wt", NOWHERE).contains("cursor"));
+        assert!(!open_project_payload("/p/site", "wt", NOWHERE).contains("cursor"));
+        assert!(!open_new_payload("/p/site", "s-2", "wt", NOWHERE).contains("cursor"));
+    }
+
+    // Ctrl на строке списка: окно встаёт под курсором и остаётся там. Ключ
+    // едет всеми тремя просьбами, кончающимися терминалом, — забудь любую, и
+    // модификатор работал бы через раз, а поймать это нечем: ответа у
+    // публикации нет.
+    #[test]
+    fn every_terminal_request_can_ask_to_skip_autoplacement() {
+        assert_eq!(
+            open_payload("s1", "", "", pinned(2560.0, 300.0)),
+            r#"{"action":"terminal","cursor":{"x":2560,"y":300},"id":"s1","noAutoplace":true}"#
+        );
+        assert!(open_project_payload("/p/site", "wt", pinned(10.0, 20.0)).contains(r#""noAutoplace":true"#));
+        assert!(
+            open_new_payload("/p/site", "site-2", "wt", pinned(10.0, 20.0))
+                .contains(r#""noAutoplace":true"#)
+        );
+    }
+
+    // Ложь и отсутствие ключа значат для приёмника одно и то же, а лишний ключ
+    // обещал бы, что о нём спрашивали. Обычное открытие обязано выглядеть
+    // ровно так же, как у пикера прежней версии.
+    #[test]
+    fn no_mark_means_no_key() {
+        assert!(!open_payload("s1", "/p/site", "wt", NOWHERE).contains("noAutoplace"));
+        assert!(!open_payload("s1", "/p/site", "wt", at(10.0, 20.0)).contains("noAutoplace"));
+        assert!(!open_project_payload("/p/site", "wt", at(10.0, 20.0)).contains("noAutoplace"));
+        assert!(!open_new_payload("/p/site", "s-2", "wt", at(10.0, 20.0)).contains("noAutoplace"));
     }
 
     // Имя считается от `terminal.file` в конфиге — по имени файла без каталога:
@@ -776,7 +851,7 @@ mod tests {
     // отсутствие каталога отличает от «каталог — пустая строка».
     #[test]
     fn open_body_without_a_dir_carries_no_key() {
-        assert_eq!(open_payload("s1", "", "", None), r#"{"action":"terminal","id":"s1"}"#);
+        assert_eq!(open_payload("s1", "", "", NOWHERE), r#"{"action":"terminal","id":"s1"}"#);
     }
 
     // Тело просьбы проектного хоткея: каталог есть, `id` нет вовсе. Пустую
@@ -787,7 +862,7 @@ mod tests {
     #[test]
     fn open_project_body_carries_no_id() {
         assert_eq!(
-            open_project_payload("/p/site", "", None),
+            open_project_payload("/p/site", "", NOWHERE),
             r#"{"action":"terminal","cwd":"/p/site"}"#
         );
     }
@@ -803,7 +878,7 @@ mod tests {
     #[test]
     fn open_new_body_names_the_session() {
         assert_eq!(
-            open_new_payload("/p/site", "site-2", "", None),
+            open_new_payload("/p/site", "site-2", "", NOWHERE),
             r#"{"action":"terminal-new","cwd":"/p/site","name":"site-2"}"#
         );
     }

@@ -194,8 +194,32 @@
     return chooseOpenTransport(manager, configHost, mqttConfigured);
   }
 
+  /**
+   * Просят ли открыть окно там, куда смотрят, и больше его не двигать.
+   *
+   * Ctrl или Cmd без Shift и Alt — та же мерка, по которой окно разбирает свои
+   * встроенные клавиши (`plainCtrl` в sessions.html). Shift занят
+   * переключением отметки «просмотрено», и промах по нему не должен молча
+   * становиться просьбой о другом открытии; Alt не занят ничем, но и не
+   * спрашивался — модификатор, о котором не просили, обязан значить «как
+   * обычно».
+   *
+   * Признак этот кончается ключом `noAutoplace` в теле просьбы, поэтому «не
+   * знаю» здесь обязано читаться как «обычное открытие»: на чём угодно, кроме
+   * события, ответ — ложь. То же правило, что у отсутствующего ключа `cursor`.
+   *
+   * На macOS ветка эта живёт только на Cmd: Ctrl+клик там система превращает в
+   * `contextmenu`, и до клика дело не доходит вовсе — откроется меню `^K`.
+   * Терять нечего: менеджера на маке нет, а без него и расставлять окна
+   * некому.
+   */
+  function noAutoplaceWanted(e) {
+    if (!e || typeof e !== 'object') return false;
+    return Boolean(e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
+  }
+
   return {
     chooseOpenTransport, canOpenRemote, chooseEnterAction, rowProjectDir,
-    chooseProjectOpenAction,
+    chooseProjectOpenAction, noAutoplaceWanted,
   };
 });

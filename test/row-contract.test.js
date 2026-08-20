@@ -878,7 +878,7 @@ test('подсветка восстанавливается после кажд�
 // Поэтому строки берутся настоящие — из renderSnapshots выше, — а сам choose
 // вычитывается из страницы и выполняется в vm.
 function chooseWith(rows, active) {
-  const source = SESSIONS_HTML.match(/\n {2}function choose\(\) \{[\s\S]*?\n {2}\}\n/);
+  const source = SESSIONS_HTML.match(/\n {2}function choose\(opts = \{\}\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'choose не найден в sessions.html — тест сторожит не то');
   const calls = [];
   const ctx = {
