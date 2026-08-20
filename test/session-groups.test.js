@@ -431,6 +431,26 @@ test('onlyWindow считает окном и окно на соседней м�
   );
 });
 
+test('onlyWindow считает окном и само приложение Claude Desktop', () => {
+  // Иначе фильтр спорил бы с тем, что нарисовано: в колонке окна у такой
+  // строки стоит `c`, а «покажи то, что сейчас на экране» её выбрасывало —
+  // пометка окна есть, а строки нет.
+  const raw = {
+    ok: true,
+    seen: {},
+    sessions: [
+      { id: 'app-1', title: 'В приложении', cwd: '/home/user/a', live: true,
+        entrypoint: 'claude-desktop' },
+      { id: 'cli-1', title: 'В терминале', cwd: '/home/user/b', live: true,
+        entrypoint: 'cli' },
+    ],
+  };
+  assert.deepStrictEqual(
+    idsOf(buildSessionsPayload(raw, 'name', { onlyWindow: true })),
+    ['app-1'],
+  );
+});
+
 test('onlyWindow историю не трогает: окна у неё не бывает по определению', () => {
   // Отсев спрашивает «покажи то, что сейчас на экране», и живой сессии без
   // окна отвечает честно. История же вычищалась им целиком — не потому, что

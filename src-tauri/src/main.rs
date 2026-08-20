@@ -1712,6 +1712,49 @@ fn spawn_detached(argv: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("failed to spawn {file}: {e}"))
 }
 
+/// Ссылка, поднимающая сессию в приложении Claude Desktop.
+///
+/// Маршрут у приложения свой и единственный: `claude://resume?session=<id>`
+/// — оно импортирует по нему транскрипт с **этой** машины и показывает
+/// сессию у себя. Оговорку «с этой машины» держит страница (`isDesktopRow` в
+/// open-transport.js): строка, приехавшая от `sshHost`, увела бы приложение в
+/// ошибку «transcript is not on disk», о которой пикеру не узнать — ответа у
+/// ссылки нет.
+///
+/// Форма id проверяется той же `looks_like_session_id`, что стоит на пути
+/// ssh-команды, а не второй копией: строка уходит наружу, и разошедшиеся
+/// проверки разошлись бы ровно там, где это дороже всего.
+fn desktop_session_url(id: &str) -> Result<String, String> {
+    if !state_source::looks_like_session_id(id) {
+        return Err(format!("not a session id: {id}"));
+    }
+    Ok(format!("claude://resume?session={id}"))
+}
+
+/// Чем система открывает ссылку.
+///
+/// Развилка по системе, а не `cfg`: веток три, а собирается на машине
+/// разработки одна — под `cfg` две остальные не проверил бы даже компилятор.
+/// На Windows это `cmd /c start ""` — единственная форма, которой там
+/// открывают и папки (см. `{localPathSlash}` в правилах проекта); пустая
+/// кавычка обязательна, иначе `start` примет ссылку за заголовок окна.
+fn url_opener(url: &str) -> Vec<String> {
+    if cfg!(target_os = "macos") {
+        vec!["open".into(), url.into()]
+    } else if cfg!(target_os = "windows") {
+        vec!["cmd".into(), "/c".into(), "start".into(), String::new(), url.into()]
+    } else {
+        vec!["xdg-open".into(), url.into()]
+    }
+}
+
+/// Открыть сессию в приложении Claude Desktop.
+#[tauri::command]
+fn open_desktop_session(id: String) -> Result<(), String> {
+    let url = desktop_session_url(&id)?;
+    spawn_detached(url_opener(&url))
+}
+
 /// Как звать редактор, чтобы он открыл файл.
 ///
 /// На macOS голое имя уходит в `open -a`, и это не удобство, а единственная
@@ -2516,7 +2559,7 @@ fn main() {
             restore_snapshot_mqtt, place_windows_mqtt, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
-            set_comment, open_in_editor, read_log
+            set_comment, open_in_editor, read_log, open_desktop_session
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
@@ -2801,6 +2844,42 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn ssylka_na_sessiyu_sobiraetsya_marshrutom_prilozheniya() {
+        // Форма снята с самого приложения: в его маршрутизаторе ветка
+        // `Resume` читает `searchParams.get("session")` и проверяет id
+        // формой UUID. Проверено живьём на маке — окно поднялось на нужной
+        // сессии, в логе `Resume deep link: importing CLI session <id>`.
+        assert_eq!(
+            super::desktop_session_url("8b84d15e-fce9-4847-b3d0-39b37a3c48c1"),
+            Ok("claude://resume?session=8b84d15e-fce9-4847-b3d0-39b37a3c48c1".to_string()),
+        );
+    }
+
+    #[test]
+    fn ssylka_ne_sobiraetsya_iz_chego_popalo() {
+        // Строка уходит наружу аргументом процесса, и на Windows её ещё и
+        // разбирает `cmd`. Отказ — с сообщением: молчащий Enter человек
+        // принял бы за поломку пикера.
+        for bad in ["", "../../etc/passwd", "8b84d15e-fce9-4847-b3d0-39b37a3c48c1 x"] {
+            assert!(super::desktop_session_url(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn ssylku_otkryvaet_ta_programma_kotoruyu_znaet_sistema() {
+        let argv = super::url_opener("claude://resume?session=x");
+        if cfg!(target_os = "macos") {
+            assert_eq!(argv, vec!["open", "claude://resume?session=x"]);
+        } else if cfg!(target_os = "windows") {
+            // Пустая кавычка перед ссылкой обязательна: без неё `start`
+            // примет её за заголовок окна и не откроет ничего.
+            assert_eq!(argv, vec!["cmd", "/c", "start", "", "claude://resume?session=x"]);
+        } else {
+            assert_eq!(argv, vec!["xdg-open", "claude://resume?session=x"]);
+        }
+    }
 
     #[test]
     fn redaktor_na_make_zovetsya_cherez_open_a() {

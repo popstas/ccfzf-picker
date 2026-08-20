@@ -31,6 +31,21 @@ test('строка собирается из сессии и её записи �
   assert.strictEqual(rows[0].lastActivity, 500);
 });
 
+test('клиент сессии доезжает до строки', () => {
+  const rows = buildSessionList({
+    sessions: [state({ entrypoint: 'claude-desktop' })],
+    seen: {},
+  });
+  assert.strictEqual(rows[0].entrypoint, 'claude-desktop');
+});
+
+test('сессия без клиента получает пустую строку, а не undefined', () => {
+  // Поля нет у прежних версий агрегатора, и `undefined` уехал бы в стог
+  // поиска словом — тем же правилом живёт windowTitle рядом.
+  const rows = buildSessionList({ sessions: [state({})], seen: {} });
+  assert.strictEqual(rows[0].entrypoint, '');
+});
+
 test('фоновые агенты не занимают своей строки', () => {
   const rows = buildSessionList({
     sessions: [

@@ -86,6 +86,11 @@ const BRANCHES = [
   // (macos-windows-manager v0.4.0), то есть кончается она окном — и правило
   // про гашение до просьбы у неё то же.
   ['placeWindows', 'place_windows_mqtt'],
+  // Шестая: сессию Claude Desktop открывает само приложение по ссылке
+  // `claude://resume`, то есть ветка тоже кончается чужим окном. На маке
+  // пикер вдобавок `alwaysOnTop` — погасив себя после, он накрыл бы окно,
+  // которое только что попросил поднять.
+  ['openInDesktopApp', 'open_desktop_session'],
 ];
 
 for (const [fn, command] of BRANCHES) {

@@ -159,6 +159,48 @@ test('окно открыто, но трекер на чужой машине �
   );
 });
 
+// Сессия Claude Desktop: её открывал не терминал, и возвращать человека надо
+// туда, откуда он ушёл. Признак — `entrypoint` из транскрипта, другого нет.
+const DESKTOP = { kind: 'interactive', id: 's1', cwd: '/p/site',
+                  entrypoint: 'claude-desktop', source: 'local' };
+
+test('сессию приложения Enter возвращает в приложение', () => {
+  assert.equal(
+    chooseEnterAction(DESKTOP, 'resume', THIS_HOST_MANAGER, CONFIG_HOST, true),
+    'desktop',
+  );
+});
+
+test('сессия приложения с чужой машины открывается по-прежнему', () => {
+  // Ссылка `claude://resume` импортирует транскрипт **этой** машины: строка,
+  // приехавшая по ssh, увела бы приложение в ошибку «transcript is not on
+  // disk», и человек не узнал бы почему — ответа у ссылки нет.
+  assert.equal(
+    chooseEnterAction({ ...DESKTOP, source: 'build-host' }, 'resume',
+                      THIS_HOST_MANAGER, CONFIG_HOST, true),
+    'manager',
+  );
+});
+
+test('открытое окно главнее приложения', () => {
+  // Сессию приложения продолжают и в терминале: тогда окно есть, и подъём
+  // окна — это подъём, а не открытие. То же правило, по которому фокус стоит
+  // первым и для всех остальных строк.
+  assert.equal(
+    chooseEnterAction({ ...DESKTOP, window: { title: 'proj' } }, 'focus',
+                      THIS_HOST_MANAGER, CONFIG_HOST, true),
+    'focus',
+  );
+});
+
+test('терминальная сессия ветки приложения не получает', () => {
+  assert.equal(
+    chooseEnterAction({ ...DESKTOP, entrypoint: 'cli' }, 'resume',
+                      THIS_HOST_MANAGER, CONFIG_HOST, true),
+    'manager',
+  );
+});
+
 // Fix 2: список пикера — надмножество того, что знает трекер: ccfzf отдаёт все
 // сессии ssh-хоста, а менеджер ищет их среди своих слотов. Просить его можно
 // по одному из двух признаков: id, который он найдёт (о нём говорит `window`),
