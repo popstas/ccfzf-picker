@@ -49,7 +49,7 @@
 - Consumes: `UUID_RE` (line ~1193), `json`, `os` — all already imported at the top of the block.
 - Produces: `WINDOWS` (bool), `SESSIONS_DIR` (str), `registry_records(path=SESSIONS_DIR) -> list[dict]` where each dict is `{"sid": str, "pid": int, "cwd": str, "procStart": str}`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_windows_registry.py`:
 
@@ -140,7 +140,7 @@ if __name__ == "__main__":
     print("ok")
 ```
 
-- [ ] **Step 2: Run the test and watch it fail**
+- [x] **Step 2: Run the test and watch it fail**
 
 ```bash
 cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_windows_registry.py -q
@@ -148,7 +148,7 @@ cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_windows_regis
 
 Expected: every test fails with `KeyError: 'registry_records'`.
 
-- [ ] **Step 3: Write the reader**
+- [x] **Step 3: Write the reader**
 
 Insert into `ccfzf` right after `ps_field` (line ~1275):
 
@@ -216,7 +216,7 @@ def registry_records(path=SESSIONS_DIR):
     return out
 ```
 
-- [ ] **Step 4: Run the test and watch it pass**
+- [x] **Step 4: Run the test and watch it pass**
 
 ```bash
 cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_windows_registry.py -q
@@ -224,7 +224,7 @@ cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_windows_regis
 
 Expected: `5 passed`.
 
-- [ ] **Step 5: Run the whole suite**
+- [x] **Step 5: Run the whole suite**
 
 ```bash
 cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/ -q
@@ -232,7 +232,7 @@ cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/ -q
 
 Expected: all green (262 + 5).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd ~/projects/shell/ccfzf
@@ -253,7 +253,7 @@ git commit -m "feat(windows): агрегатор читает реестр се�
 - Consumes: `registry_records()` from Task 1.
 - Produces: `process_start(pid) -> str` (creation FILETIME as a decimal string, `""` when the process is gone) and `windows_sessions(records=None, started_of=None) -> (set, dict)` where the dict is `{sid: {"pid": int, "tty": "", "tmux": None, "zellij": None, "cwd": str}}`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_windows_registry.py`, before the `__main__` block:
 
@@ -288,7 +288,7 @@ def test_a_reused_pid_does_not_revive_yesterdays_session():
     assert live == set(), live
 ```
 
-- [ ] **Step 2: Run the test and watch it fail**
+- [x] **Step 2: Run the test and watch it fail**
 
 ```bash
 cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_windows_registry.py -q
@@ -296,7 +296,7 @@ cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_windows_regis
 
 Expected: three failures with `KeyError: 'windows_sessions'`.
 
-- [ ] **Step 3: Write the live rule**
+- [x] **Step 3: Write the live rule**
 
 Append to `ccfzf` right after `registry_records`:
 
@@ -360,7 +360,7 @@ def windows_sessions(records=None, started_of=None):
     return live, procs
 ```
 
-- [ ] **Step 4: Run the test and watch it pass**
+- [x] **Step 4: Run the test and watch it pass**
 
 ```bash
 cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_windows_registry.py -q
@@ -368,7 +368,7 @@ cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_windows_regis
 
 Expected: `8 passed`.
 
-- [ ] **Step 5: Wire the branch into `running_sessions`**
+- [x] **Step 5: Wire the branch into `running_sessions`**
 
 In `running_sessions()`, immediately after its docstring and before
 `live, fresh, agents, procs = set(), [], {}, {}`:
@@ -384,7 +384,7 @@ In `running_sessions()`, immediately after its docstring and before
         return live, {}, procs, []
 ```
 
-- [ ] **Step 6: Run the whole suite**
+- [x] **Step 6: Run the whole suite**
 
 ```bash
 cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/ -q
@@ -400,7 +400,7 @@ that exists only for tests — the very thing `_PS_TABLE` avoids by seaming the
 data instead. The rule itself is covered by the three tests above, and the
 wiring is covered live in Task 7, Step 4.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ~/projects/shell/ccfzf
@@ -420,7 +420,7 @@ git commit -m "feat(windows): живость сессии — по pid и вре
 - Consumes: nothing from earlier tasks.
 - Produces: `state_defaults(limit="") -> list[str]` — the six positional arguments the `state` mode expects, in order: marks, windows file, sessions file, limit, windows dir, comments file.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_state_mode.py`:
 
@@ -448,7 +448,7 @@ def test_the_state_alias_needs_no_paths():
 
 Add `import harness` and the `sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))` line above it at the top of the file — `test_state_mode.py` runs the script through `subprocess` today and does not import the harness yet. `harness.run(argv)` executes the block in-process with `sys.argv = ["ccfzf"] + argv` and returns `(stdout, stderr)`; the environment is patched around the call because the block reads `HOME` and the `CCFZF_*` variables at that moment.
 
-- [ ] **Step 2: Run the test and watch it fail**
+- [x] **Step 2: Run the test and watch it fail**
 
 ```bash
 cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_state_mode.py -q
@@ -456,7 +456,7 @@ cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_state_mode.py
 
 Expected: failure — the block exits without printing anything, because `mode` is `--state` and no branch matches.
 
-- [ ] **Step 3: Write the alias**
+- [x] **Step 3: Write the alias**
 
 Insert into `ccfzf` immediately before `mode = sys.argv[1] if len(sys.argv) > 1 else ""` (line ~2504):
 
@@ -497,7 +497,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "--state":
     sys.argv = [sys.argv[0], "state"] + state_defaults(_limit)
 ```
 
-- [ ] **Step 4: Run the test and watch it pass**
+- [x] **Step 4: Run the test and watch it pass**
 
 ```bash
 cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_state_mode.py -q
@@ -505,7 +505,7 @@ cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/test_state_mode.py
 
 Expected: all tests in the file pass.
 
-- [ ] **Step 5: Confirm the wrapper is untouched**
+- [x] **Step 5: Confirm the wrapper is untouched**
 
 ```bash
 cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/ -q
@@ -513,7 +513,7 @@ cd ~/projects/shell/ccfzf && .venv/bin/python -m pytest tests/ -q
 
 Expected: all green — the bash prologue still passes its six arguments, and the alias never fires for it.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 cd ~/projects/shell/ccfzf
@@ -534,7 +534,7 @@ git push -u origin feat/windows-local-source
 - Consumes: the vendored `vendor/ccfzf/ccfzf` with its `<<'PYEOF'` … `\nPYEOF` markers.
 - Produces: `python_block(vendored: &str) -> Result<&str, String>`, and `choose` gaining a Windows shape: `("python", vec![<path to ccfzf.py>])`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to the `mod tests` block of `local_ccfzf.rs`:
 
@@ -572,7 +572,7 @@ Add to the `mod tests` block of `local_ccfzf.rs`:
     }
 ```
 
-- [ ] **Step 2: Run the tests and watch them fail**
+- [x] **Step 2: Run the tests and watch them fail**
 
 ```bash
 cd ~/projects/js/ccfzf-picker/src-tauri && cargo test local_ccfzf 2>&1 | tail -20
@@ -580,7 +580,7 @@ cd ~/projects/js/ccfzf-picker/src-tauri && cargo test local_ccfzf 2>&1 | tail -2
 
 Expected: compile error — `python_block` and `choose_python` do not exist.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 In `local_ccfzf.rs`, add beside `choose`:
 
@@ -664,7 +664,7 @@ pub fn resolve() -> Result<(String, Vec<String>), String> {
 }
 ```
 
-- [ ] **Step 4: Run the tests and watch them pass**
+- [x] **Step 4: Run the tests and watch them pass**
 
 ```bash
 cd ~/projects/js/ccfzf-picker/src-tauri && cargo test 2>&1 | tail -5
@@ -672,7 +672,7 @@ cd ~/projects/js/ccfzf-picker/src-tauri && cargo test 2>&1 | tail -5
 
 Expected: `222 passed` plus the four new tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd ~/projects/js/ccfzf-picker
@@ -694,7 +694,7 @@ git commit -m "feat(windows): пикер зовёт python-блок напрям
 - Consumes: `mapPath(cwd, pathMap)` — unchanged.
 - Produces: `mapRowPath(row, pathMap) -> string | null`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `test/path-map.test.js`:
 
@@ -725,7 +725,7 @@ test('местная строка без каталога — по-прежне�
 
 Add `mapRowPath` to the `require` at the top of the file.
 
-- [ ] **Step 2: Run the tests and watch them fail**
+- [x] **Step 2: Run the tests and watch them fail**
 
 ```bash
 cd ~/projects/js/ccfzf-picker && node --test test/path-map.test.js
@@ -733,7 +733,7 @@ cd ~/projects/js/ccfzf-picker && node --test test/path-map.test.js
 
 Expected: `TypeError: mapRowPath is not a function`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Add to `frontend-src/path-map.js`, beside `mapPath`, and add `mapRowPath` to the returned object:
 
@@ -760,7 +760,7 @@ Add to `frontend-src/path-map.js`, beside `mapPath`, and add `mapRowPath` to the
   }
 ```
 
-- [ ] **Step 4: Run the tests and watch them pass**
+- [x] **Step 4: Run the tests and watch them pass**
 
 ```bash
 cd ~/projects/js/ccfzf-picker && node --test test/path-map.test.js
@@ -768,7 +768,7 @@ cd ~/projects/js/ccfzf-picker && node --test test/path-map.test.js
 
 Expected: all pass.
 
-- [ ] **Step 5: Move the call sites**
+- [x] **Step 5: Move the call sites**
 
 In `frontend-src/session-actions.js` replace all four occurrences:
 
@@ -799,7 +799,7 @@ and line ~3438:
       const base = window.PathMap.mapRowPath(row, CONFIG.pathMap);
 ```
 
-- [ ] **Step 6: Write the guard that keeps new call sites honest**
+- [x] **Step 6: Write the guard that keeps new call sites honest**
 
 Append to `test/path-map.test.js`:
 
@@ -823,7 +823,7 @@ test('каталог строки никто не переводит мимо ma
 
 Add `const fs = require('node:fs');` and `const path = require('node:path');` at the top if absent.
 
-- [ ] **Step 7: Run the whole suite**
+- [x] **Step 7: Run the whole suite**
 
 ```bash
 cd ~/projects/js/ccfzf-picker && npm test 2>&1 | grep -E "^# (tests|pass|fail)"
@@ -831,7 +831,7 @@ cd ~/projects/js/ccfzf-picker && npm test 2>&1 | grep -E "^# (tests|pass|fail)"
 
 Expected: `# fail 0`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 cd ~/projects/js/ccfzf-picker
@@ -853,7 +853,7 @@ git commit -m "fix(paths): каталог местной строки не пе�
 - Consumes: `terminalArgv(terminal, parts, opts)` — unchanged.
 - Produces: `buildOpenCommand` returning `{ argv, destructive, cwd }` where `cwd` is a string only on the Windows local branch and `undefined` otherwise; `spawn_detached(argv, cwd)` on the Rust side.
 
-- [ ] **Step 1: Write the failing JS test**
+- [x] **Step 1: Write the failing JS test**
 
 Append to `test/open-strategy.test.js`:
 
@@ -893,7 +893,7 @@ test('строка с чужой машины на Windows по-прежнему
 });
 ```
 
-- [ ] **Step 2: Run the tests and watch them fail**
+- [x] **Step 2: Run the tests and watch them fail**
 
 ```bash
 cd ~/projects/js/ccfzf-picker && node --test test/open-strategy.test.js
@@ -901,7 +901,7 @@ cd ~/projects/js/ccfzf-picker && node --test test/open-strategy.test.js
 
 Expected: the first test fails — `argv` still starts a `/bin/sh` command.
 
-- [ ] **Step 3: Write the branch**
+- [x] **Step 3: Write the branch**
 
 In `frontend-src/open-strategy.js`, inside `buildOpenCommand`, right after
 `if (remote === null) return null;`:
@@ -924,7 +924,7 @@ In `frontend-src/open-strategy.js`, inside `buildOpenCommand`, right after
 
 and delete the now-duplicated `const source = …` line below it.
 
-- [ ] **Step 4: Run the tests and watch them pass**
+- [x] **Step 4: Run the tests and watch them pass**
 
 ```bash
 cd ~/projects/js/ccfzf-picker && node --test test/open-strategy.test.js
@@ -932,7 +932,7 @@ cd ~/projects/js/ccfzf-picker && node --test test/open-strategy.test.js
 
 Expected: all pass.
 
-- [ ] **Step 5: Write the failing Rust test**
+- [x] **Step 5: Write the failing Rust test**
 
 Add to `mod tests` in `src-tauri/src/main.rs`:
 
@@ -951,7 +951,7 @@ Add to `mod tests` in `src-tauri/src/main.rs`:
     }
 ```
 
-- [ ] **Step 6: Run it and watch it fail**
+- [x] **Step 6: Run it and watch it fail**
 
 ```bash
 cd ~/projects/js/ccfzf-picker/src-tauri && cargo test spawn_takes 2>&1 | tail -10
@@ -959,7 +959,7 @@ cd ~/projects/js/ccfzf-picker/src-tauri && cargo test spawn_takes 2>&1 | tail -1
 
 Expected: compile error — `spawn_detached` takes one argument.
 
-- [ ] **Step 7: Add the parameter**
+- [x] **Step 7: Add the parameter**
 
 In `src-tauri/src/main.rs` replace the signature and body head:
 
@@ -990,7 +990,7 @@ Update the two internal callers to pass `None`: line ~1755 becomes
 `spawn_detached(url_opener(&url), None)` and line ~1821 becomes
 `return spawn_detached(argv, None);`.
 
-- [ ] **Step 8: Run the Rust tests**
+- [x] **Step 8: Run the Rust tests**
 
 ```bash
 cd ~/projects/js/ccfzf-picker/src-tauri && cargo test 2>&1 | tail -5
@@ -998,7 +998,7 @@ cd ~/projects/js/ccfzf-picker/src-tauri && cargo test 2>&1 | tail -5
 
 Expected: all pass.
 
-- [ ] **Step 9: Pass the platform and the directory from the page**
+- [x] **Step 9: Pass the platform and the directory from the page**
 
 In `sessions.html`, add the script tag before `open-strategy.js` (line ~774):
 
@@ -1022,7 +1022,7 @@ into the spawn:
       await invoke('spawn_detached', { argv: cmd.argv, cwd: cmd.cwd });
 ```
 
-- [ ] **Step 10: Run the whole picker suite**
+- [x] **Step 10: Run the whole picker suite**
 
 ```bash
 cd ~/projects/js/ccfzf-picker && npm test 2>&1 | grep -E "^# (tests|pass|fail)"
@@ -1030,7 +1030,7 @@ cd ~/projects/js/ccfzf-picker && npm test 2>&1 | grep -E "^# (tests|pass|fail)"
 
 Expected: `# fail 0`. `test/frontend-load.test.js` covers that every script tag has a file behind it.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 cd ~/projects/js/ccfzf-picker
@@ -1050,7 +1050,7 @@ git commit -m "feat(windows): местная сессия открывается
 - Consumes: the pushed `feat/windows-local-source` branch of the aggregator (Task 3).
 - Produces: a deployed picker on all three machines.
 
-- [ ] **Step 1: Point the submodule at the new aggregator commit**
+- [x] **Step 1: Point the submodule at the new aggregator commit**
 
 ```bash
 cd ~/projects/js/ccfzf-picker/vendor/ccfzf
@@ -1059,7 +1059,7 @@ cd ~/projects/js/ccfzf-picker
 git add vendor/ccfzf && git commit -m "chore(vendor): ccfzf с местным источником на Windows"
 ```
 
-- [ ] **Step 2: Rebuild and re-run both suites**
+- [x] **Step 2: Rebuild and re-run both suites**
 
 ```bash
 cd ~/projects/js/ccfzf-picker && npm test 2>&1 | grep -E "^# fail"
@@ -1070,7 +1070,7 @@ Expected: `# fail 0` and all Rust tests green. The Rust guard
 `the_vendored_copy_still_carries_the_markers` now cuts the new copy and must
 still find `def registry_records(`.
 
-- [ ] **Step 3: Push and deploy**
+- [x] **Step 3: Push and deploy**
 
 ```bash
 cd ~/projects/js/ccfzf-picker && git push -u origin feat/windows-local-source
@@ -1081,7 +1081,7 @@ BRANCH=feat/windows-local-source ./data/scripts/deploy-mac.sh --all
 Run the two deploys in parallel and in the background; Windows takes about
 three and a half minutes, the macs about one each.
 
-- [ ] **Step 4: Verify the aggregator live on Windows**
+- [x] **Step 4: Verify the aggregator live on Windows**
 
 ```bash
 ssh popstas-pc 'python "%USERPROFILE%\.config\ccfzf-picker\ccfzf.py" --state'
@@ -1091,7 +1091,7 @@ Expected: valid JSON whose `sessions` include a session with
 `entrypoint: "claude-desktop"` and `live: true` while Claude Desktop holds it
 open, with a `pid` that is not zero.
 
-- [ ] **Step 5: Verify in the picker**
+- [x] **Step 5: Verify in the picker**
 
 By eye, on the Windows machine: the session appears in the list with the `c`
 glyph, Enter on it raises the Claude Desktop window, and the statusline no
@@ -1104,7 +1104,7 @@ relying on the inherited one, keeping `;` out of it. Add the flag to the
 preset's args rather than to `buildOpenCommand` if a per-preset flag turns out
 to be needed.
 
-- [ ] **Step 6: Write the rule down**
+- [x] **Step 6: Write the rule down**
 
 Add a rule to `CLAUDE.md` beside the Claude Desktop one: the local source on
 Windows reads the session registry rather than processes, `Win32_Process` has no
@@ -1113,7 +1113,7 @@ against reused pids, and there is no agent state on that machine because there
 are no hooks. Remove the `# future` task about the Windows tracker's local
 sessions if this closes it, or narrow it to the hooks half.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ~/projects/js/ccfzf-picker
