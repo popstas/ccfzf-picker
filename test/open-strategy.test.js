@@ -478,3 +478,39 @@ test('страница не собирает ssh-хвост мимо commandPart
   const hits = page.match(/'ssh',\s*'-t'/g) || [];
   assert.deepStrictEqual(hits, [], 'ssh-хвост собран на странице, а не в commandParts');
 });
+
+// ── Windows: у местной строки шелла нет ────────────────────────────────────
+
+test('местная строка на Windows открывается без шелла', () => {
+  // `/bin/sh` там нет вовсе, а `$SHELL -ic` существует ради интерактивного
+  // rc, которого там тоже нет. Каталог ставит не команда, а сам запуск.
+  const r = { kind: 'interactive', id: 'b5a54ce3-a022-4c9a-aa91-e306d75bdc76',
+              cwd: '<drive>:\\projects\\some-project', source: 'local' };
+  const got = buildOpenCommand(r, 'resume', {
+    terminal: { file: 'wt.exe', args: [] }, os: 'windows',
+  });
+  assert.deepStrictEqual(got.argv, ['wt.exe', 'claude', '--resume', r.id]);
+  assert.strictEqual(got.cwd, '<drive>:\\projects\\some-project');
+  assert.ok(!JSON.stringify(got.argv).includes('/bin/sh'));
+  assert.ok(!JSON.stringify(got.argv).includes('$SHELL'));
+});
+
+test('местная строка на маке и Linux открывается как раньше', () => {
+  const r = { kind: 'interactive', id: 'b5a54ce3-a022-4c9a-aa91-e306d75bdc76',
+              cwd: '/home/user/x', source: 'local' };
+  const got = buildOpenCommand(r, 'resume', {
+    terminal: { file: 'kitty', args: [] }, os: 'macos',
+  });
+  assert.strictEqual(got.cwd, undefined);
+  assert.ok(JSON.stringify(got.argv).includes('/bin/sh'));
+});
+
+test('строка с чужой машины на Windows по-прежнему едет через ssh', () => {
+  const r = { kind: 'interactive', id: 'b5a54ce3-a022-4c9a-aa91-e306d75bdc76',
+              cwd: '/home/user/x', source: 'build-host' };
+  const got = buildOpenCommand(r, 'resume', {
+    terminal: { file: 'wt.exe', args: [] }, os: 'windows',
+  });
+  assert.ok(got.argv.includes('ssh'), got.argv.join(' '));
+  assert.strictEqual(got.cwd, undefined);
+});

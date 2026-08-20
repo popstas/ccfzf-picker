@@ -64,7 +64,7 @@
         // что условия ему, в отличие от общей ветки, не нужно.
         { id: 'terminal', label: 'Open terminal' },
       ];
-      if (pathApi.mapPath(row.cwd, cfg.pathMap) !== null) {
+      if (pathApi.mapRowPath(row, cfg.pathMap) !== null) {
         for (const a of cfg.actions || []) {
           forProject.push({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey });
         }
@@ -110,7 +110,7 @@
     // найдёт сессию по нему.
     if ((row || {}).kind === 'snapshot-session') {
       const forSnapshot = [];
-      if (pathApi.mapPath(row.cwd, cfg.pathMap) !== null) {
+      if (pathApi.mapRowPath(row, cfg.pathMap) !== null) {
         for (const a of cfg.actions || []) {
           forSnapshot.push({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey });
         }
@@ -121,7 +121,7 @@
       }
       return forSnapshot;
     }
-    if (pathApi.mapPath((row || {}).cwd, cfg.pathMap) !== null) {
+    if (pathApi.mapRowPath(row, cfg.pathMap) !== null) {
       for (const a of cfg.actions || []) actions.push({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey });
     }
     const num = prNumber((row || {}).pr_url);
@@ -133,7 +133,7 @@
     // План первым: спека отвечает «что решили», план — «где сейчас», и из
     // списка приходят за вторым. Тот же порядок, что и у значка в строке
     // (docKindOf в session-glyph.js).
-    if (pathApi.mapPath((row || {}).cwd, cfg.pathMap) !== null) {
+    if (pathApi.mapRowPath(row, cfg.pathMap) !== null) {
       for (const [id, label] of [['plan', 'Open plan'], ['spec', 'Open spec']]) {
         const rel = (row || {})[id];
         if (typeof rel === 'string' && rel) actions.push({ id, label });

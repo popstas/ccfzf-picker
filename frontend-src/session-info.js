@@ -4,13 +4,13 @@
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     // В Node: требуем зависимость из соседнего модуля.
-    module.exports = factory(require('./session-glyph'));
+    module.exports = factory(require('./session-glyph'), require('./session-list'));
   } else {
     // В браузере: получаем зависимость из глобального объекта SessionGlyph,
     // который был загружен раньше как <script>.
-    root.SessionInfo = factory(root.SessionGlyph);
+    root.SessionInfo = factory(root.SessionGlyph, root.SessionList);
   }
-})(typeof self !== 'undefined' ? self : this, function (SessionGlyph) {
+})(typeof self !== 'undefined' ? self : this, function (SessionGlyph, desktopApi) {
   /**
    * Отметка времени — часы плюс возраст: «14:32 · 5m» или «14:32 · 31s».
    *
@@ -49,7 +49,12 @@
       // Ноль печатается, как и в строке списка (usageHtml в session-glyph.js):
       // пустая клетка там читалась как поломка, а не как «данных нет».
       ['cost', `$${s.agentCostUsd || 0}`],
-      ['context', `${s.agentContextPct || 0}%`],
+      // Доли контекста у сессии приложения не бывает вовсе — считает её
+      // перехват статуслайна, а статуслайна у Claude Desktop нет. Пустая
+      // клетка здесь выпадает из карточки целиком (см. фильтр ниже), и это то
+      // же решение, что и в строке списка: показанный ноль был бы
+      // единственным числом карточки, которое врёт.
+      ['context', desktopApi.inDesktopApp(s) ? '' : `${s.agentContextPct || 0}%`],
       ['branch', s.branch ?? ''],
       ['pr_url', s.pr_url ?? ''],
       ['agent', s.agentBackground && s.agentSessionId ? `background · ${s.agentSessionId}` : ''],

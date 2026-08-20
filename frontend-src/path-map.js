@@ -54,6 +54,27 @@
   }
 
   /**
+   * Путь строки на этой машине.
+   *
+   * У строки местного источника он уже местный: переводить нечего, а перевод
+   * отдал бы `null` — путь не начинается с удалённого префикса, — и вместе с
+   * ним из меню пропали бы все действия с папкой, `Open plan` и `Open spec`.
+   * Видно это стало на Windows, где местная строка несёт путь с буквой диска,
+   * но правило общее: на Linux местная строка сегодня переводится через тот же
+   * префикс, и это так же неверно.
+   *
+   * Метка источника — та же строка `local`, что стоит в `LOCAL_LABEL`
+   * (state_source.rs) и в `LOCAL_SOURCE` (open-strategy.js). Импортировать её
+   * сюда неоткуда: у этого модуля зависимостей нет вовсе.
+   */
+  function mapRowPath(row, pathMap) {
+    const cwd = (row || {}).cwd;
+    if (typeof cwd !== 'string' || !cwd) return null;
+    if (String((row || {}).source || '') === 'local') return cwd;
+    return mapPath(cwd, pathMap);
+  }
+
+  /**
    * argv действия с подставленными плейсхолдерами.
    *
    * Подстановка идёт внутри каждого элемента, а не заменяет элемент целиком:
@@ -83,5 +104,5 @@
     });
   }
 
-  return { separatorFor, mapPath, buildActionArgv };
+  return { separatorFor, mapPath, mapRowPath, buildActionArgv };
 });

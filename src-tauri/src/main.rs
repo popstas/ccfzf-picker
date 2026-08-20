@@ -13,6 +13,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod config_file;
+mod desktop_store;
 mod icons;
 mod local_ccfzf;
 // `#[macro_use]`, а не `use` по файлам: `ccfzf_log!` зовут четыре модуля из
@@ -1698,12 +1699,18 @@ async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
 /// здесь окно и есть цель. Спрятать его значило бы открыть сессию, которую
 /// человек не увидит.
 #[tauri::command]
-fn spawn_detached(argv: Vec<String>) -> Result<(), String> {
+fn spawn_detached(argv: Vec<String>, cwd: Option<String>) -> Result<(), String> {
     let Some((file, args)) = argv.split_first() else {
         return Err("empty argv".into());
     };
-    std::process::Command::new(file)
-        .args(args)
+    let mut command = std::process::Command::new(file);
+    command.args(args);
+    // Каталог ставится процессу, а не собирается в команду: у местной строки
+    // на Windows шелла нет, и `cd` было бы негде выполнить.
+    if let Some(dir) = cwd.as_deref().filter(|d| !d.is_empty()) {
+        command.current_dir(dir);
+    }
+    command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -1728,7 +1735,15 @@ fn desktop_session_url(id: &str) -> Result<String, String> {
     if !state_source::looks_like_session_id(id) {
         return Err(format!("not a session id: {id}"));
     }
-    Ok(format!("claude://resume?session={id}"))
+    // Маршрута два, и берётся тот, что не плодит двойников: `cowork` открывает
+    // сессию, которую приложение уже завело, а `resume` **импортирует**
+    // транскрипт — то есть для сессии самого приложения заводит рядом вторую,
+    // безымянную. Своё имя сессии приложение держит у себя, и связь с нашим id
+    // записана там же полем `cliSessionId` (см. desktop_store).
+    let records = desktop_store::store_root()
+        .map(|root| desktop_store::read_store(&root))
+        .unwrap_or_default();
+    Ok(desktop_store::session_url(id, desktop_store::pick_session(&records, id)))
 }
 
 /// Чем система открывает ссылку.
@@ -1752,7 +1767,30 @@ fn url_opener(url: &str) -> Vec<String> {
 #[tauri::command]
 fn open_desktop_session(id: String) -> Result<(), String> {
     let url = desktop_session_url(&id)?;
-    spawn_detached(url_opener(&url))
+    spawn_url(url_opener(&url))
+}
+
+/// Запуск открывашки ссылки — **без своего окна**.
+///
+/// Мимо `spawn_detached`, и это не дублирование: та сознательно идёт мимо
+/// `hidden_command`, потому что у неё окно и есть цель (она открывает
+/// терминал). Здесь окно нужно чужое — приложения Claude Desktop, — а своё
+/// вредно: на Windows ссылку открывает `cmd /c start`, и его консоль
+/// вспыхивала на экране на долю секунды при каждом переходе в сессию. Поймано
+/// глазами на живой машине; на маке и Linux ветка `hidden_command` пуста, то
+/// есть поведение там прежнее.
+fn spawn_url(argv: Vec<String>) -> Result<(), String> {
+    let Some((file, args)) = argv.split_first() else {
+        return Err("empty argv".into());
+    };
+    proc::hidden_command(file)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("failed to spawn {file}: {e}"))
 }
 
 /// Как звать редактор, чтобы он открыл файл.
@@ -1818,7 +1856,7 @@ fn open_in_editor(editor: String, path: String) -> Result<(), String> {
     }
     let argv = editor_argv(&editor, &path);
     if !editor_is_launcher(&argv) {
-        return spawn_detached(argv);
+        return spawn_detached(argv, None);
     }
     let (file, args) = argv.split_first().expect("argv пускача не бывает пустым");
     let out = std::process::Command::new(file)
@@ -2845,15 +2883,34 @@ fn main() {
 #[cfg(test)]
 mod tests {
 
+    /// Каталог запуска — аргумент команды, а не `cd` внутри неё: у местной
+    /// строки на Windows шелла нет вовсе, и склеивать команду было бы нечем.
+    #[test]
+    fn spawn_takes_a_working_directory() {
+        let dir = std::env::temp_dir();
+        let argv = if cfg!(target_os = "windows") {
+            vec!["cmd".to_string(), "/c".to_string(), "cd".to_string()]
+        } else {
+            vec!["pwd".to_string()]
+        };
+        assert!(super::spawn_detached(argv, Some(dir.to_string_lossy().into_owned())).is_ok());
+    }
+
     #[test]
     fn ssylka_na_sessiyu_sobiraetsya_marshrutom_prilozheniya() {
-        // Форма снята с самого приложения: в его маршрутизаторе ветка
-        // `Resume` читает `searchParams.get("session")` и проверяет id
-        // формой UUID. Проверено живьём на маке — окно поднялось на нужной
-        // сессии, в логе `Resume deep link: importing CLI session <id>`.
+        // Форма обоих маршрутов снята с самого приложения: ветка `Resume`
+        // читает `searchParams.get("session")` и проверяет id формой UUID, а
+        // `Cowork` уходит путём `/cowork/<id>` в само окно. Проверено живьём
+        // на маке — окно поднялось на нужной сессии.
+        //
+        // Здесь проверяется только то, что не зависит от машины: какой из двух
+        // маршрутов чему соответствует. Выбор записи и чтение хранилища — в
+        // `desktop_store`, там же и их тесты: на машине разработки приложения
+        // нет вовсе, и `desktop_session_url` целиком отвечала бы тем, что
+        // хранилища не нашлось.
         assert_eq!(
-            super::desktop_session_url("8b84d15e-fce9-4847-b3d0-39b37a3c48c1"),
-            Ok("claude://resume?session=8b84d15e-fce9-4847-b3d0-39b37a3c48c1".to_string()),
+            super::desktop_store::session_url("8b84d15e-fce9-4847-b3d0-39b37a3c48c1", None),
+            "claude://resume?session=8b84d15e-fce9-4847-b3d0-39b37a3c48c1".to_string(),
         );
     }
 

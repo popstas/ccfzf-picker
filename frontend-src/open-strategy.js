@@ -284,6 +284,18 @@
     // Источник — у строки; sshHost остаётся откатом для строк, которым
     // источник не проставлен (старый ответ, тесты соседних функций).
     const source = String((row || {}).source || '') || String(sshHost || '');
+    // На Windows у местной строки шелла нет: `/bin/sh` там не существует, а
+    // `$SHELL -ic` написан ради интерактивного rc, которого там тоже нет.
+    // Команда уходит голым хвостом argv, а каталог ставит запуск процесса
+    // (`spawn_detached` с `cwd`) — так не приходится ни собирать `cd`, ни
+    // кавычить путь, ни бояться `;`, который Windows Terminal делит на панели.
+    //
+    // Только `resume`: `attach`, `reptyr` и `takeover` — про POSIX-машину, и
+    // на Windows у строки нет ни tmux, ни pid чужого шелла.
+    if ((opts || {}).os === 'windows' && source === LOCAL_SOURCE && strategy === 'resume') {
+      const bare = terminalArgv(terminal, ['claude', '--resume', row.id], opts);
+      return bare === null ? null : { argv: bare, destructive: false, cwd: row.cwd };
+    }
     const argv = terminalArgv(terminal, commandParts(remote, source), opts);
     return argv === null ? null : { argv, destructive };
   }
