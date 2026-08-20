@@ -445,11 +445,12 @@ test('editor: названный редактор доезжает подрез�
   assert.strictEqual(normalizeConfig({ editor: '  code  ' }).editor, 'code');
 });
 
-test('localSource — булев флаг с умолчанием false', () => {
-  // Умолчание не «удобное», а единственно честное: включённый по умолчанию
-  // местный источник на машине без ccfzf и python3 добавил бы всем
-  // существующим установкам строку об отказе там, где сегодня всё работает.
-  assert.strictEqual(normalizeConfig({}).localSource, false);
-  assert.strictEqual(normalizeConfig({ localSource: true }).localSource, true);
-  assert.strictEqual(normalizeConfig({ localSource: 'да' }).localSource, false);
+test('localSource — булев флаг с умолчанием true', () => {
+  // Умолчание включено: свои сессии человек ждёт в списке, ничего не
+  // настраивая, а забытая галка выглядит пропажей сессий, а не настройкой.
+  // Выключается только явным false — на Windows, где местного ccfzf нет.
+  assert.strictEqual(normalizeConfig({}).localSource, true);
+  assert.strictEqual(normalizeConfig({ localSource: false }).localSource, false);
+  // Не булево — то же, что отсутствие ключа, то есть умолчание.
+  assert.strictEqual(normalizeConfig({ localSource: 'да' }).localSource, true);
 });

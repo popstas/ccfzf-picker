@@ -125,8 +125,9 @@ test('число, отданное строкой из DOM, не считает�
 
 test('пустой хост — отказ, а не пустой список', () => {
   // Без sshHost или localSource список брать неоткуда, и сохранить такое молча значит отдать
-  // человеку пикер, который не работает и не говорит почему.
-  const problems = validate({ ...configToFields({}), sshHost: '  ' });
+  // человеку пикер, который не работает и не говорит почему. Местный источник
+  // гасится явно: с умолчанием он включён, и без этого источник был бы.
+  const problems = validate({ ...configToFields({ localSource: false }), sshHost: '  ' });
   assert.ok(problems.some(p => p.includes('source')), problems.join('; '));
 });
 
@@ -139,9 +140,17 @@ test('пустой sshHost при включённом localSource — не ош
 });
 
 test('ни sshHost, ни localSource — спрашивать некого', () => {
-  const fields = { ...configToFields({}), ...NO_PICKER_SIZE, sshHost: '' };
+  const fields = { ...configToFields({ localSource: false }), ...NO_PICKER_SIZE, sshHost: '' };
   const problems = validate(fields);
   assert.ok(problems.some(p => p.includes('source')), problems.join('; '));
+});
+
+test('пустой sshHost без ключа localSource — источник всё-таки есть', () => {
+  // Умолчание включено, и форма обязана считать его так же, как пикер: иначе
+  // свежая установка на маке отказывалась бы сохраниться, показывая беду там,
+  // где её нет.
+  const fields = { ...configToFields({}), ...NO_PICKER_SIZE, sshHost: '' };
+  assert.deepStrictEqual(validate(fields), []);
 });
 
 test('комбинация, занятая самим окном пикера, не проходит', () => {
