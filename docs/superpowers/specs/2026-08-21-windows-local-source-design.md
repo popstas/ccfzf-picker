@@ -15,7 +15,7 @@ eats the backslashes of a Windows path, and the statusline shows
 local: exited with exit code: 127: /bin/bash: C:Users<user>.config/ccfzf-pickerccfzf
 ```
 
-(the backslashes of `C:\Users\<user>\.config\ccfzf-picker\ccfzf` are gone)
+(the backslashes of `<drive>:\Users\<user>\.config\ccfzf-picker\ccfzf` are gone)
 
 Fixing the path would not help: WSL has its own `$HOME` and its own
 `~/.claude/projects`, so it would list WSL sessions, not Windows ones.
@@ -45,7 +45,7 @@ reads the session registry that Claude Code itself maintains:
 
 ```
 ~/.claude/sessions/<pid>.json
-{"pid":10980,"sessionId":"059dd425-…","cwd":"D:\\projects\\some-project",
+{"pid":10980,"sessionId":"059dd425-…","cwd":"<drive>:\\projects\\some-project",
  "startedAt":1787255069839,"procStart":"134317286687059374",
  "kind":"interactive","entrypoint":"claude-desktop","name":"some-project-1b"}
 ```
@@ -118,7 +118,7 @@ letting the source fail with a spawn error.
 
 `mapPath` translates a remote path into a local one and returns `null` when the
 path does not start with the configured `remote` prefix. A row that came from
-the local source is already local: on Windows its `cwd` is `D:\…`, and
+the local source is already local: on Windows its `cwd` is `<drive>:\…`, and
 `mapPath` returns `null`, which silently removes every folder action, `Open
 plan` and `Open spec` from its menu.
 
