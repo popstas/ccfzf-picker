@@ -5,6 +5,13 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.SessionGlyph = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
+  // Признак «сессия живёт в приложении» — общий с фильтром `only windowed`
+  // (см. докблок `inDesktopApp`). Загрузка это выдерживает: session-list.js
+  // стоит раньше и в sessions.html, и в prepare-frontend.js.
+  const listApi = typeof module === 'object' && module.exports
+    ? require('./session-list')
+    : globalThis.SessionList;
+
   // Состояние агента приходит в поле `agent` ответа `ccfzf --state`: агрегатор
   // читает его из <id>.state.json, куда пишет хук на стороне сессии. Ключи
   // здесь — ровно те строки, что пишет хук.
@@ -248,7 +255,7 @@
     // продолжают и в терминале, и тогда она есть в обоих местах сразу.
     // Слушается той же галки, что и имена терминалов: вопрос у обоих один —
     // «чем эта сессия открыта».
-    const app = showTerminalIcon && session?.entrypoint === 'claude-desktop'
+    const app = showTerminalIcon && listApi.inDesktopApp(session)
       ? '<div class="win open" title="Claude Desktop">c</div>'
       : '';
     if (!wins.length) return app || '<div class="win"></div>';

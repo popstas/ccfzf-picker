@@ -71,6 +71,25 @@
     return label;
   }
 
+  /**
+   * Живёт ли сессия в приложении Claude Desktop.
+   *
+   * Общая на двоих: по ней рисуется глиф `c` в колонке окна
+   * (`windowHtml` в session-glyph.js) и по ней же фильтр «only windowed»
+   * считает такую строку оконной (`buildSessionsPayload` в
+   * session-groups.js). Два правила про одно разошлись бы молча — и уже
+   * разошлись: пометка окна в строке стояла, а отсев «покажи то, что сейчас
+   * на экране» строку выбрасывал.
+   *
+   * Своей машины предикат не спрашивает, в отличие от `isDesktopRow`
+   * (open-transport.js): та решает, куда вести Enter, и ссылка работает
+   * только у себя, — а пометка честна и у чужой строки. Сессия в приложении
+   * соседней машины на экране всё-таки открыта.
+   */
+  function inDesktopApp(row) {
+    return (row || {}).entrypoint === 'claude-desktop';
+  }
+
   function buildSessionList({ sessions, seen, state, configHost } = {}) {
     const list = Array.isArray(sessions) ? sessions : [];
     const byId = {};
@@ -262,5 +281,5 @@
     return rows;
   }
 
-  return { buildSessionList };
+  return { buildSessionList, inDesktopApp };
 });
