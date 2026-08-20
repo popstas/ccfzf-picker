@@ -1698,12 +1698,18 @@ async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
 /// здесь окно и есть цель. Спрятать его значило бы открыть сессию, которую
 /// человек не увидит.
 #[tauri::command]
-fn spawn_detached(argv: Vec<String>) -> Result<(), String> {
+fn spawn_detached(argv: Vec<String>, cwd: Option<String>) -> Result<(), String> {
     let Some((file, args)) = argv.split_first() else {
         return Err("empty argv".into());
     };
-    std::process::Command::new(file)
-        .args(args)
+    let mut command = std::process::Command::new(file);
+    command.args(args);
+    // Каталог ставится процессу, а не собирается в команду: у местной строки
+    // на Windows шелла нет, и `cd` было бы негде выполнить.
+    if let Some(dir) = cwd.as_deref().filter(|d| !d.is_empty()) {
+        command.current_dir(dir);
+    }
+    command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -1752,7 +1758,7 @@ fn url_opener(url: &str) -> Vec<String> {
 #[tauri::command]
 fn open_desktop_session(id: String) -> Result<(), String> {
     let url = desktop_session_url(&id)?;
-    spawn_detached(url_opener(&url))
+    spawn_detached(url_opener(&url), None)
 }
 
 /// Как звать редактор, чтобы он открыл файл.
@@ -1818,7 +1824,7 @@ fn open_in_editor(editor: String, path: String) -> Result<(), String> {
     }
     let argv = editor_argv(&editor, &path);
     if !editor_is_launcher(&argv) {
-        return spawn_detached(argv);
+        return spawn_detached(argv, None);
     }
     let (file, args) = argv.split_first().expect("argv пускача не бывает пустым");
     let out = std::process::Command::new(file)
@@ -2844,6 +2850,19 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+
+    /// Каталог запуска — аргумент команды, а не `cd` внутри неё: у местной
+    /// строки на Windows шелла нет вовсе, и склеивать команду было бы нечем.
+    #[test]
+    fn spawn_takes_a_working_directory() {
+        let dir = std::env::temp_dir();
+        let argv = if cfg!(target_os = "windows") {
+            vec!["cmd".to_string(), "/c".to_string(), "cd".to_string()]
+        } else {
+            vec!["pwd".to_string()]
+        };
+        assert!(super::spawn_detached(argv, Some(dir.to_string_lossy().into_owned())).is_ok());
+    }
 
     #[test]
     fn ssylka_na_sessiyu_sobiraetsya_marshrutom_prilozheniya() {

@@ -768,6 +768,10 @@
 <!-- session-name до open-strategy: тот берёт из него uniqueSessionName в
      момент загрузки, и в обратном порядке ему достался бы undefined. -->
 <script src="session-name.js"></script>
+<!-- terminal-presets: страница берёт отсюда osOf — ту же мерку системы,
+     какой выбирает пресет окно настроек. Второй разбор navigator.platform
+     разошёлся бы с первым. -->
+<script src="terminal-presets.js"></script>
 <!-- open-strategy до session-actions: тот берёт из него buildAttachCommand в
      момент загрузки, и в обратном порядке ему достался бы undefined. Тесты
      этого не поймают — там require, а он от порядка тегов не зависит. -->
@@ -2443,6 +2447,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (noSources()) return;
     const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, {
       sshHost: CONFIG.sshHost, terminal: CONFIG.terminal, helperPath: await helperPath(),
+      // Система — той же меркой, что и выбор пресета терминала в окне
+      // настроек: второй разбор `navigator.platform` разошёлся бы с первым.
+      os: window.TerminalPresets.osOf(navigator.platform || navigator.userAgent || ''),
     });
     if (!cmd) {
       // Пустая команда у терминала с помощником значит, что путь не приехал:
@@ -2459,7 +2466,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       if (!ok) return;
     }
     try {
-      await invoke('spawn_detached', { argv: cmd.argv });
+      await invoke('spawn_detached', { argv: cmd.argv, cwd: cmd.cwd });
     } catch (e) {
       error = String(e);
       render();
