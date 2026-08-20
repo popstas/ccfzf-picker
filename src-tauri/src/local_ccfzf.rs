@@ -41,6 +41,39 @@ pub fn choose(in_path: bool, vendored: Option<&str>) -> Result<(String, Vec<Stri
     }
 }
 
+/// Метки heredoc, которыми bash отделяет python-программу от обёртки.
+const PY_BEGIN: &str = "<<'PYEOF'";
+const PY_END: &str = "\nPYEOF";
+
+/// Python-программа, вырезанная из вшитой копии.
+///
+/// На Windows bash-обёртку исполнить нечем: единственный `bash` там — пускач
+/// WSL, у которого свой `$HOME` и свой `~/.claude`. Зато сама программа —
+/// обычный python, и запустить её можно напрямую.
+///
+/// Метки те же, по которым блок читает и сам bash, и `tests/harness.py` в
+/// репозитории агрегатора. Открывающая ищется без перевода строки, а хвост её
+/// строки отбрасывается отдельно: в скрипте она записана как
+/// `read -r -d '' PY <<'PYEOF' || true`.
+pub fn python_block(vendored: &str) -> Result<&str, String> {
+    let (_, rest) = vendored
+        .split_once(PY_BEGIN)
+        .ok_or_else(|| "vendored ccfzf has no PYEOF marker".to_string())?;
+    let (_, body) = rest
+        .split_once('\n')
+        .ok_or_else(|| "vendored ccfzf ends at its PYEOF marker".to_string())?;
+    body.split_once(PY_END)
+        .map(|(block, _)| block)
+        .ok_or_else(|| "vendored ccfzf has no closing PYEOF marker".to_string())
+}
+
+/// Программа и её аргументы на Windows: интерпретатор и путь к вырезанному
+/// блоку. Отдельной функцией, а не веткой внутри `choose`: ту проверяют на
+/// Linux, и обе формы должны быть видны тестам одинаково.
+pub fn choose_python(py_path: &str, interpreter: &str) -> (String, Vec<String>) {
+    (interpreter.to_string(), vec![py_path.to_string()])
+}
+
 /// Есть ли программа в PATH. Своим перебором, а не крейтом `which`: дерево
 /// зависимостей у пикера и так 323 крейта, а вопрос здесь на десять строк.
 ///
@@ -86,6 +119,12 @@ fn unpack() -> Result<String, String> {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
             .map_err(|e| format!("cannot chmod {}: {e}", path.display()))?;
     }
+    // Вторым файлом — сама python-программа: на Windows обёртку исполнить
+    // нечем. Пишется и там, где не нужна: разница в один `fs::write` раз за
+    // запуск процесса, а ветка `cfg` здесь стоила бы непроверяемого кода.
+    let py = crate::state_path("ccfzf.py")?;
+    std::fs::write(&py, python_block(VENDORED)?)
+        .map_err(|e| format!("cannot write {}: {e}", py.display()))?;
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -101,6 +140,16 @@ fn unpack() -> Result<String, String> {
 /// `choose(false, None)` эту причину стирала бы — человек читал бы про
 /// отсутствие программы там, где программа есть, но её некуда записать.
 pub fn resolve() -> Result<(String, Vec<String>), String> {
+    if cfg!(target_os = "windows") {
+        // Ветка PATH пропускается: `ccfzf`, найденный там, — тот же bash-скрипт.
+        let interpreter = ["python", "python3"]
+            .into_iter()
+            .find(|name| on_path(name))
+            .ok_or_else(|| "neither python nor python3 is on PATH".to_string())?;
+        UNPACKED.get_or_init(unpack).as_ref().map_err(|e| e.clone())?;
+        let py = crate::state_path("ccfzf.py")?;
+        return Ok(choose_python(&py.to_string_lossy(), interpreter));
+    }
     if on_path("ccfzf") {
         return choose(true, None);
     }
@@ -113,6 +162,38 @@ pub fn resolve() -> Result<(String, Vec<String>), String> {
 #[cfg(test)]
 mod tests {
     use super::choose;
+    /// Блок вырезается по тем же меткам, по которым его читает и bash, и
+    /// tests/harness.py в репозитории агрегатора. Третьего разбора заводить
+    /// нельзя — он разошёлся бы молча, а отказ читался бы как
+    /// «python: can't open file».
+    #[test]
+    fn python_block_is_cut_by_the_shell_heredoc_markers() {
+        let vendored = "#!/usr/bin/env bash\nread -r -d '' PY <<'PYEOF' || true\nimport os\nPYEOF\necho done\n";
+        assert_eq!(super::python_block(vendored).unwrap(), "import os");
+    }
+
+    #[test]
+    fn a_copy_without_markers_is_a_named_failure() {
+        assert!(super::python_block("#!/usr/bin/env bash\necho hi\n").is_err());
+    }
+
+    /// Настоящая вшитая копия обязана резаться — иначе местный источник на
+    /// Windows молчал бы, а поймать это можно только здесь: на машине
+    /// разработки эта ветка не исполняется.
+    #[test]
+    fn the_vendored_copy_still_carries_the_markers() {
+        let block = super::python_block(super::VENDORED).expect("маркеры PYEOF");
+        assert!(block.contains("def registry_records("), "блок вырезан не тот");
+    }
+
+    #[test]
+    fn on_windows_the_block_runs_through_python() {
+        assert_eq!(
+            super::choose_python("/x/ccfzf.py", "python"),
+            ("python".to_string(), vec!["/x/ccfzf.py".to_string()]),
+        );
+    }
+
     #[cfg(unix)]
     use super::is_executable;
 
