@@ -13,8 +13,8 @@
 //! двенадцати `sessionId` не выводится из `cliSessionId` вовсе, и ровно одна
 //! двенадцатая — тот самый двойник, заведённый прежней версией этой ветки.
 //!
-//! Открывает уже заведённую сессию другой маршрут — `claude://cowork/<id>`, и
-//! ему нужно имя приложения, а не наше.
+//! Открывает уже заведённую сессию другой маршрут — `claude://claude.ai/cowork/<id>`,
+//! и ему нужно имя приложения, а не наше.
 
 use std::path::PathBuf;
 
@@ -55,9 +55,20 @@ pub fn pick_session<'a>(records: &'a [DesktopSession], cli_id: &str) -> Option<&
 ///
 /// Два маршрута, и разница между ними — вся суть этого модуля: `cowork`
 /// открывает уже заведённую сессию, `resume` заводит новую поверх транскрипта.
+///
+/// **Хост у них разный, и это не описка.** У приложения хост — первая ступень
+/// разбора: `claude://resume` разбирается веткой `resume` целиком, а страницы
+/// самого окна живут под хостом `claude.ai`, где первый сегмент пути называет
+/// маршрут (`/cowork/<id>`, рядом с `/task/<id>` и `/open-conversation/<id>`).
+/// Хост `cowork` тоже существует, но принимает ровно два пути — `/new` и
+/// `/shared-artifact`, — а всё прочее отвергает: `claude://cowork/<id>` писал
+/// в журнал приложения `unrecognized cowork path`, и человек видел, как окно
+/// выходит вперёд, не сменив сессии. Снято с живой машины: отвергнутые
+/// нажатия и удавшийся переход стоят в одном журнале в трёх минутах друг от
+/// друга.
 pub fn session_url(cli_id: &str, found: Option<&DesktopSession>) -> String {
     match found {
-        Some(rec) => format!("claude://cowork/{}", rec.id),
+        Some(rec) => format!("claude://claude.ai/cowork/{}", rec.id),
         None => format!("claude://resume?session={cli_id}"),
     }
 }
@@ -172,10 +183,14 @@ mod tests {
 
     /// Два маршрута, и разница между ними — вся суть модуля: `cowork`
     /// открывает заведённую сессию, `resume` заводит новую поверх транскрипта.
+    ///
+    /// Хост у страницы сессии — `claude.ai`, а не `cowork`: под вторым живут
+    /// только `/new` и `/shared-artifact`, и путь с id он отвергает, поднимая
+    /// окно и не меняя в нём ничего.
     #[test]
     fn a_known_session_is_opened_and_an_unknown_one_is_imported() {
         let found = rec("local_real", "dup");
-        assert_eq!(session_url("dup", Some(&found)), "claude://cowork/local_real");
+        assert_eq!(session_url("dup", Some(&found)), "claude://claude.ai/cowork/local_real");
         assert_eq!(session_url("dup", None), "claude://resume?session=dup");
     }
 
