@@ -86,7 +86,31 @@ pub fn on_path(name: &str) -> bool {
     let Some(paths) = std::env::var_os("PATH") else {
         return false;
     };
-    std::env::split_paths(&paths).any(|dir| is_executable(&dir.join(name)))
+    let names = executable_names(name, cfg!(target_os = "windows"));
+    std::env::split_paths(&paths)
+        .any(|dir| names.iter().any(|n| is_executable(&dir.join(n))))
+}
+
+/// Под какими именами программа лежит в каталоге PATH.
+///
+/// На Windows исполняемость — это расширение, а не бит: файла `python` там
+/// нет вовсе, есть `python.exe`. Поиск по голому имени не находил ничего, и
+/// `resolve` отказывал словами «neither python nor python3 is on PATH» на
+/// машине, где обе программы стоят. Поймано живьём: `ccfzf.py` не появлялся в
+/// конфигурационном каталоге, потому что до распаковки дело не доходило.
+///
+/// Расширение одно, а не весь `PATHEXT`: спрашивают этим перебором ровно две
+/// программы, интерпретатор и сам `ccfzf`, и обе бывают только `.exe`. Имя с
+/// уже дописанным расширением не удваивается — человек мог назвать в конфиге
+/// и его.
+///
+/// Флаг аргументом, а не `cfg!` внутри: ветка Windows на машине разработки не
+/// исполняется, и проверить её иначе нечем.
+pub fn executable_names(name: &str, windows: bool) -> Vec<String> {
+    if !windows || name.to_ascii_lowercase().ends_with(".exe") {
+        return vec![name.to_string()];
+    }
+    vec![name.to_string(), format!("{name}.exe")]
 }
 
 fn is_executable(candidate: &std::path::Path) -> bool {
@@ -162,6 +186,21 @@ pub fn resolve() -> Result<(String, Vec<String>), String> {
 #[cfg(test)]
 mod tests {
     use super::choose;
+    /// На Windows исполняемость — расширение, а не бит: файла `python` там нет
+    /// вовсе. Голое имя не находило ничего, и `resolve` отказывал словами про
+    /// отсутствие python на машине, где он стоит.
+    #[test]
+    fn on_windows_a_name_is_also_looked_up_with_exe() {
+        assert_eq!(super::executable_names("python", true), vec!["python", "python.exe"]);
+        assert_eq!(super::executable_names("python.exe", true), vec!["python.exe"]);
+        assert_eq!(super::executable_names("PYTHON.EXE", true), vec!["PYTHON.EXE"]);
+    }
+
+    #[test]
+    fn elsewhere_the_name_stays_as_it_is() {
+        assert_eq!(super::executable_names("python", false), vec!["python"]);
+    }
+
     /// Блок вырезается по тем же меткам, по которым его читает и bash, и
     /// tests/harness.py в репозитории агрегатора. Третьего разбора заводить
     /// нельзя — он разошёлся бы молча, а отказ читался бы как
