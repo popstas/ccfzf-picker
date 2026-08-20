@@ -981,6 +981,17 @@ test('у терминальной строки доля контекста ос�
   );
 });
 
+test('у строки с машины без хуков доля контекста не показывается', () => {
+  // Второй случай того же правила: состояние такой строке собирает агрегатор
+  // из хвоста транскрипта (`agent.source`), а перехвата статуслайна на той
+  // машине нет — значит и доли контекста там не бывает вовсе.
+  const tail = { entrypoint: 'cli', agentSource: 'transcript', agentCostUsd: 0, agentContextPct: 0 };
+  assert.strictEqual(
+    usageHtml(tail, { showCost: true, showContext: true }),
+    '<div class="usage"><span class="cost">$0</span></div>',
+  );
+});
+
 test('у сессии приложения без цены колонка остаётся пустым элементом', () => {
   // Колонки справа стоят друг за другом, и пропуск сдвинул бы соседей.
   const desktop = { entrypoint: 'claude-desktop', agentContextPct: 0 };

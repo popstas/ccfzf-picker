@@ -140,6 +140,14 @@ test('в карточке сессии приложения строки кон�
   assert.ok(!rows.some(r => r.label === 'context'), JSON.stringify(rows));
 });
 
+test('в карточке строки с машины без хуков строки контекста нет', () => {
+  // Правило одно на строку и карточку и живёт в session-list.js — здесь
+  // проверяется, что карточка ходит именно в него, а не носит своё.
+  const rows = buildSessionInfoRows(
+    { entrypoint: 'cli', agentSource: 'transcript', agentContextPct: 0 }, 1785870000);
+  assert.ok(!rows.some(r => r.label === 'context'), JSON.stringify(rows));
+});
+
 test('в карточке терминальной сессии контекст остаётся', () => {
   const rows = buildSessionInfoRows({ entrypoint: 'cli', agentContextPct: 0 }, 1785870000);
   assert.deepStrictEqual(rows.find(r => r.label === 'context'), { label: 'context', value: '0%' });
