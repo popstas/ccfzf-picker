@@ -834,6 +834,14 @@
   // файла пикер должен работать целиком, поэтому здесь не пусто, а
   // нормализованный конфиг по умолчанию. См. start().
   let CONFIG = window.ConfigShape.normalizeConfig(null);
+  // Система, на которой запущен сам пикер, — одной меркой на всю страницу.
+  //
+  // Спрашивают её двое и по разным поводам: `buildOpenCommand` (местная
+  // команда на Windows уходит без шелла) и `availableActions` (пункты,
+  // которые на своей строке под Windows не сработают). Второй разбор
+  // `navigator.platform` разошёлся бы с первым — то же правило, по которому
+  // окно настроек берёт `osOf` отсюда же, а не пишет свою мерку.
+  const PICKER_OS = window.TerminalPresets.osOf(navigator.platform || navigator.userAgent || '');
   // Последний ответ агрегатора. Смена сортировки и чекбоксов перекладывает эти
   // же сессии, а не ждёт следующего опроса: ждать пришлось бы до секунды, и
   // клик выглядел бы не сработавшим.
@@ -2198,6 +2206,12 @@ const infoBackdrop = document.getElementById('info-backdrop');
   }
 
   function markToggleId(row) {
+    // Вопрос укороченный — без конфига и без системы, — и это верно ровно
+    // потому, что оба пункта, о которых он спрашивает, ни от того, ни от
+    // другого не зависят: `unread` и `seen` держатся на `agentUpdated` и
+    // `agentSeen` самой строки. Зависимость у них появись — ответ отсюда
+    // разошёлся бы со списком, которым `runAction` проверяет применимость, и
+    // Shift молча не делал бы ничего.
     const ids = window.SessionActions.availableActions(row).map(a => a.id);
     if (ids.includes('unread')) return 'unread';
     if (ids.includes('seen')) return 'seen';
@@ -2449,7 +2463,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       sshHost: CONFIG.sshHost, terminal: CONFIG.terminal, helperPath: await helperPath(),
       // Система — той же меркой, что и выбор пресета терминала в окне
       // настроек: второй разбор `navigator.platform` разошёлся бы с первым.
-      os: window.TerminalPresets.osOf(navigator.platform || navigator.userAgent || ''),
+      os: PICKER_OS,
     });
     if (!cmd) {
       // Пустая команда у терминала с помощником значит, что путь не приехал:
@@ -3095,7 +3109,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * вовсе.
    */
   function actionsFor(row) {
-    const actions = window.SessionActions.availableActions(row, CONFIG);
+    const actions = window.SessionActions.availableActions(row, CONFIG, { os: PICKER_OS });
     if (window.OpenTransport.canOpenRemote(row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured)) {
       actions.push({
         id: 'open-remote',
@@ -3298,6 +3312,38 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * подъёма окна эта цена уплачена давно.
    */
   async function openProjectRow(row, opts = {}) {
+    // Под Windows у своей строки дело у Enter другое, и настройка
+    // `projectOpenAction` здесь ничего не решает — это осознанная плата.
+    // Обе дороги, между которыми она выбирает, кончаются местной
+    // `newSession`, а та собирает `/bin/sh -c`, которого на этой машине нет:
+    // терминал отвечает разбором своей командной строки, то есть человек
+    // видит чужую ошибку вместо окна. Пункты `New session` и `Open terminal`
+    // у такой строки по той же причине убраны из меню (`availableActions`).
+    //
+    // Вместо них — то, что на этой машине работает: поднять уже открытое окно
+    // каталога, а не найдя его, открыть папку. Окно ищется той же
+    // `focusWindowOf`, какой Enter решает про строку сессии (`projectFocusRow`
+    // в project-list.js), и поднимается той же `focusSession` — второй копии
+    // подъёма здесь быть не должно, в ней уже написаны и гашение пикера до
+    // публикации, и отметка «просмотрено».
+    if (window.OpenTransport.isWindowsLocalRow(row, PICKER_OS)) {
+      const open = window.ProjectList.projectFocusRow(
+        row, lastSessions, lastState, CONFIG.windowHost,
+      );
+      if (open) return focusSession(open);
+      // Пикер гасится до просьбы, как и на соседних ветках, кончающихся чужим
+      // окном: окно проводника выходит вперёд само.
+      await invoke('hide_picker');
+      try {
+        await invoke('open_folder', { path: row.cwd });
+      } catch (e) {
+        error = String(e);
+        render();
+        return;
+      }
+      error = '';
+      return;
+    }
     // Развилка «завести новую сессию или поднять открытое окно каталога» —
     // настройка, а не поведение по месту: `projectOpenAction` в `config.yaml`,
     // умолчание `new`. Стоит она **до** выбора транспорта: у ветки `new` вся

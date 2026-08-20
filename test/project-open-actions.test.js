@@ -104,10 +104,14 @@ function openProjectRow(projectOpenAction) {
   const ctx = {
     invoke: (cmd) => { calls.push(cmd); return Promise.resolve(); },
     CONFIG: { windowHost: 'pc-win', mqtt: { configured: true }, projectOpenAction },
+    // Под Windows у своей строки настройка не решает ничего — там своя ветка
+    // (поднять окно каталога либо открыть папку). Этот сторож про настройку.
+    PICKER_OS: 'linux',
     window: {
       OpenTransport: {
         rowProjectDir: (row) => row.cwd,
         chooseProjectOpenAction: () => 'manager',
+        isWindowsLocalRow: () => false,
       },
       OpenStrategy: { newSessionName: () => 'x-2' },
     },

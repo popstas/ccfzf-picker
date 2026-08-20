@@ -439,3 +439,29 @@ test('страница называет своей машину, у которо
   // on <host>» уехал бы к соседу с координатами нашего стола.
   assert.match(body, /chooseOpenTransport\(/);
 });
+
+// --- Своя строка на пикере под Windows -------------------------------------
+
+// Мерка называет факт («строка своей машины, а пикер под Windows»), а не
+// последствие: последствий у факта два разных — местная команда пошла бы через
+// `/bin/sh -c`, которого там нет, и комментарий писать некому, потому что
+// ветку `--comment` разбирает bash-обёртка. Читатель один, `availableActions`,
+// и каждое место называет свою причину само.
+test('своя строка под Windows опознаётся, чужая — нет', () => {
+  const row = { kind: 'interactive', id: 'a', source: 'local' };
+  assert.equal(OpenTransport.isWindowsLocalRow(row, 'windows'), true);
+  // На Windows-пикере рядом стоят строки с ssh-источника, и у них те же
+  // пункты честно работают через `ssh -t host`.
+  assert.equal(OpenTransport.isWindowsLocalRow({ ...row, source: 'build-host' }, 'windows'), false);
+});
+
+test('на других системах мерка не срабатывает никогда', () => {
+  const row = { kind: 'interactive', id: 'a', source: 'local' };
+  for (const os of ['macos', 'linux', '']) {
+    assert.equal(OpenTransport.isWindowsLocalRow(row, os), false, os);
+  }
+  // Незнание системы обязано читаться как «не Windows»: пункт, спрятанный по
+  // догадке, хуже показанного.
+  assert.equal(OpenTransport.isWindowsLocalRow(row, undefined), false);
+  assert.equal(OpenTransport.isWindowsLocalRow(undefined, 'windows'), false);
+});

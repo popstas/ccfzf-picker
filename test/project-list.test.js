@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const {
-  buildProjectList, markHotkeysTaken, hotkeysTakenMessage,
+  buildProjectList, markHotkeysTaken, hotkeysTakenMessage, projectFocusRow,
 } = require('../frontend-src/project-list');
 
 const STATE = {
@@ -227,4 +227,54 @@ test('счётчики docs/TODO.md доезжают до строки прое�
   assert.deepStrictEqual(withTodo.todo, sections);
   assert.deepStrictEqual(without.todo, []);
   assert.deepStrictEqual(broken.todo, []);
+});
+
+// --- Окно проекта, которое можно поднять здесь ------------------------------
+
+// Повод один: Enter на строке проекта под Windows, где заводить сессию нечем —
+// местная дорога кончается `/bin/sh -c`. Вместо неё сперва ищется уже открытое
+// окно каталога, и только не найдя его, пикер открывает папку.
+const HERE = 'pc-win';
+const WINDOW_HERE = { host: HERE, pid: 4242, canFocus: true };
+
+function sessionRow(extra) {
+  return {
+    kind: 'interactive', id: 'a', cwd: '/home/user/projects/x', live: true,
+    windows: [WINDOW_HERE], lastActivity: 100, ...extra,
+  };
+}
+
+test('поднимается окно сессии этого каталога', () => {
+  const row = sessionRow();
+  const found = projectFocusRow({ cwd: '/home/user/projects/x' }, [row], {}, HERE);
+  assert.strictEqual(found, row);
+});
+
+test('чужой каталог и чужая машина не годятся', () => {
+  const other = sessionRow({ id: 'b', cwd: '/home/user/projects/y' });
+  // Пометка ▣ у строки соседней машины стоит, а поднимать там нечего: вопрос
+  // тот же, что у Enter на строке сессии, и решает его та же focusWindowOf.
+  const elsewhere = sessionRow({ id: 'c', windows: [{ host: 'mac-host', pid: 7, canFocus: true }] });
+  assert.strictEqual(projectFocusRow({ cwd: '/home/user/projects/x' }, [other, elsewhere], {}, HERE), null);
+});
+
+test('закончившаяся сессия окна не отдаёт', () => {
+  // Слот переживает закрытие окна, и без проверки живости Enter уходил бы
+  // поднимать окно вчерашней сессии.
+  const dead = sessionRow({ live: false });
+  assert.strictEqual(projectFocusRow({ cwd: '/home/user/projects/x' }, [dead], {}, HERE), null);
+});
+
+test('из нескольких берётся свежайшая', () => {
+  // Той же compareSessions(…, 'recent'), какой список сортирует сам себя:
+  // округление до минуты и устойчивое разведение равных — одно правило.
+  const old = sessionRow({ id: 'old', lastActivity: 1_000 });
+  const fresh = sessionRow({ id: 'fresh', lastActivity: 2_000_000 });
+  const found = projectFocusRow({ cwd: '/home/user/projects/x' }, [old, fresh], {}, HERE);
+  assert.strictEqual(found.id, 'fresh');
+});
+
+test('без каталога и без списка — пусто, а не отказ', () => {
+  assert.strictEqual(projectFocusRow({ cwd: '' }, [sessionRow()], {}, HERE), null);
+  assert.strictEqual(projectFocusRow({ cwd: '/home/user/projects/x' }, undefined, {}, HERE), null);
 });
