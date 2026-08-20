@@ -860,7 +860,7 @@ test('docsBadgeHtml не верит нестроке', () => {
 
 test('promptsHtml показывает число реплик своей колонкой', () => {
   assert.strictEqual(promptsHtml({ promptCount: 97 }, true),
-    '<div class="prompts">✎97</div>');
+    '<div class="prompts">🗨︎97</div>');
 });
 
 test('promptsHtml печатает ноль, а не пустоту', () => {
@@ -869,7 +869,7 @@ test('promptsHtml печатает ноль, а не пустоту', () => {
   // «данных нет», а различать эти два случая нечем. То же решение и та же
   // причина, что у usageHtml с нулевой ценой.
   assert.strictEqual(promptsHtml({ promptCount: 0 }, true),
-    '<div class="prompts">✎0</div>');
+    '<div class="prompts">🗨︎0</div>');
 });
 
 test('promptsHtml молчит при выключенной галке', () => {
@@ -880,8 +880,8 @@ test('promptsHtml молчит при выключенной галке', () => 
 
 test('promptsHtml не верит нечислу из ответа', () => {
   assert.strictEqual(promptsHtml({ promptCount: 'много' }, true),
-    '<div class="prompts">✎0</div>');
-  assert.strictEqual(promptsHtml({}, true), '<div class="prompts">✎0</div>');
+    '<div class="prompts">🗨︎0</div>');
+  assert.strictEqual(promptsHtml({}, true), '<div class="prompts">🗨︎0</div>');
 });
 
 // --- Комментарий человека к сессии (Task T3) -----------------------------

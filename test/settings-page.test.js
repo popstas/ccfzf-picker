@@ -97,6 +97,36 @@ function defaultsFromPage() {
   return ctx.out;
 }
 
+// ── значок колонки в настройках и знак в строке — один и тот же ────────────
+
+// Ключи вроде `showPrompts` стоят на странице в нескольких таблицах сразу
+// (имя класса, умолчания осей, подсказка), поэтому значок берётся из
+// COLUMN_ICONS целиком, а не первым совпадением по ключу.
+function columnIcon(key) {
+  const table = sourceOf(/\n {2}const COLUMN_ICONS = \{[\s\S]*?\n {2}\};\n/, 'COLUMN_ICONS');
+  const found = table.match(new RegExp(`${key}: '([^']+)'`));
+  assert.ok(found, `${key} нет в COLUMN_ICONS — тест сторожит не то`);
+  return found[1];
+}
+
+test('счёт сообщений подписан в настройках тем же знаком, каким рисует строка', () => {
+  // Два места об одном факте: подпись галки на вкладке UI и сама колонка
+  // списка. Разойдись они — окно настроек обещало бы человеку не тот значок,
+  // который он ищет глазами в строке, и заметить это можно было бы только
+  // сверив две страницы. Поведением не поймать вовсе: обе половинки по
+  // отдельности рисуются верно.
+  const { promptsHtml } = require('../frontend-src/session-glyph');
+  const inRow = promptsHtml({ promptCount: 7 }).replace(/^.*"prompts">/, '').replace(/7<\/div>$/, '');
+  assert.strictEqual(columnIcon('showPrompts'), inRow);
+});
+
+test('карандаш остался за комментарием и счётом сообщений не занят', () => {
+  // Прежде `✎` подписывал обе колонки сразу — «человек оставил заметку» и
+  // «сколько раз он писал агенту», — то есть не различал ничего.
+  assert.strictEqual(columnIcon('showComment'), '✎');
+  assert.notStrictEqual(columnIcon('showPrompts'), columnIcon('showComment'));
+});
+
 // ── таблица осей объясняет себя и отделена от таблицы колонок ───────────────
 //
 // Тем же приёмом, что и save(): настоящий axesTableHtml вычитывается из
