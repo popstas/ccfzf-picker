@@ -688,10 +688,26 @@ fn open_on_active_display(config: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
+/// Спрашивать ли курсор вообще: галка либо нажатый модификатор.
+///
+/// Чистой и отдельно от `cursor_hint` — ту не проверить вовсе, у неё в
+/// аргументах живое приложение, а правило «Ctrl главнее выключенной галки»
+/// сломать легко и молча: курсора не будет, окно уедет в запомненный слот, и
+/// выглядеть это будет не отказом, а обычным открытием.
+fn wants_cursor(config: &serde_json::Value, forced: bool) -> bool {
+    forced || open_on_active_display(config)
+}
+
 /// Точка курсора для просьбы об открытии сессии — или `None`.
 ///
 /// `None` значит «ключа в теле не будет», и это ровно то, чего мы хотим от
 /// выключенной галки: приёмник поставит окно так, как ставил всегда.
+///
+/// `forced` — Ctrl на строке списка: «открой там, куда я смотрю, и не двигай
+/// дальше». Галку он не спрашивает, и это не оплошность: она отвечает на
+/// вопрос «как открывать всегда», а нажатый модификатор — на вопрос «как
+/// открыть вот эту». Второй развилки по месту заводить нельзя — курсор
+/// спрашивают четыре входа, и разошлись бы они молча.
 ///
 /// Курсор спрашивается **у приложения**, тем же ходом, что и в
 /// `target_monitor`, — и по той же причине, по какой имя терминала и порядок
@@ -703,12 +719,39 @@ fn open_on_active_display(config: &serde_json::Value) -> bool {
 /// самый ход, на котором уже стояли: плагин хоткеев блокируется на ответе
 /// главного потока, и приложение вставало насмерть. `cursor_position` у
 /// приложения такого перехода не требует.
-pub(crate) fn cursor_hint(app: &tauri::AppHandle, config: &serde_json::Value) -> Option<(f64, f64)> {
-    if !open_on_active_display(config) {
+pub(crate) fn cursor_hint(
+    app: &tauri::AppHandle,
+    config: &serde_json::Value,
+    forced: bool,
+) -> Option<(f64, f64)> {
+    if !wants_cursor(config, forced) {
         return None;
     }
     let point = app.cursor_position().ok()?;
     Some((point.x, point.y))
+}
+
+/// Куда ставить новое окно и кто им потом распоряжается — одним ответом.
+///
+/// `no_autoplace` приходит от Ctrl на строке списка, и без курсора он не
+/// уезжает: пометку приёмник ставит на той же дороге, какой ставит окно по
+/// курсору (`placeByCursor` в windows11-manager), и просьба «не двигай» без
+/// «поставь сюда» молча не сделала бы ничего. Отказ курсора при этом
+/// называется в журнале: ответа у публикации нет, и промолчав, мы отдали бы
+/// человеку просьбу, выглядящую сработавшей.
+pub(crate) fn placement(
+    app: &tauri::AppHandle,
+    config: &serde_json::Value,
+    no_autoplace: bool,
+) -> mqtt::Placement {
+    let cursor = cursor_hint(app, config, no_autoplace);
+    if no_autoplace && cursor.is_none() {
+        ccfzf_log!("no cursor position: asking to open without the noAutoplace mark");
+    }
+    mqtt::Placement {
+        cursor,
+        no_autoplace: no_autoplace && cursor.is_some(),
+    }
 }
 
 /// Галка «на активном экране», действующая прямо сейчас — тем же приёмом и по
@@ -1030,6 +1073,10 @@ async fn place_windows_mqtt(
 /// правило про то же самое разошлось бы с первым молча. Отсутствие ключа
 /// читается как «не своя»: забытый аргумент обязан выключать оговорку, а не
 /// включать её.
+/// `noAutoplace` — Ctrl на строке: «открой там, куда я смотрю, и не двигай
+/// дальше». Едет он той же оговоркой, что и курсор, и по той же причине:
+/// просьба к чужой машине не знает ни нашего стола, ни того, куда там
+/// смотрят.
 #[tauri::command]
 async fn open_session_mqtt(
     app: tauri::AppHandle,
@@ -1037,20 +1084,21 @@ async fn open_session_mqtt(
     cwd: Option<String>,
     base: Option<String>,
     same_machine: Option<bool>,
+    no_autoplace: Option<bool>,
 ) -> Result<(), String> {
     allow_any_foreground();
     let (broker, terminal, raw) = configured_broker_and_terminal()?;
     let cwd = cwd.unwrap_or_default().trim().to_string();
-    let cursor = if same_machine.unwrap_or(false) {
-        cursor_hint(&app, &raw)
+    let place = if same_machine.unwrap_or(false) {
+        placement(&app, &raw, no_autoplace.unwrap_or(false))
     } else {
-        None
+        mqtt::Placement::default()
     };
     // Адрес называет трекер той машины, где стоит окно; свой из конфига —
     // запасной ход для трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
     tauri::async_runtime::spawn_blocking(move || {
-        mqtt::open(&broker, &base, &id, &cwd, &terminal, cursor)
+        mqtt::open(&broker, &base, &id, &cwd, &terminal, place)
     })
     .await
     .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
@@ -1071,18 +1119,19 @@ async fn open_project_mqtt(
     app: tauri::AppHandle,
     cwd: String,
     base: Option<String>,
+    no_autoplace: Option<bool>,
 ) -> Result<(), String> {
     allow_any_foreground();
     let (broker, terminal, raw) = configured_broker_and_terminal()?;
     // Оговорки «своя ли машина» здесь нет и не нужно: `chooseProjectOpenAction`
     // отдаёт ветку менеджера только на машине самого менеджера.
-    let cursor = cursor_hint(&app, &raw);
+    let place = placement(&app, &raw, no_autoplace.unwrap_or(false));
     // У строки проекта окна нет вовсе: адрес называет трекер машины
     // менеджера, а не машины окна. Свой из конфига — запасной ход для
     // трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
     tauri::async_runtime::spawn_blocking(move || {
-        mqtt::open_project(&broker, &base, &cwd, &terminal, cursor)
+        mqtt::open_project(&broker, &base, &cwd, &terminal, place)
     })
     .await
     .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
@@ -1100,18 +1149,19 @@ async fn new_session_mqtt(
     cwd: String,
     name: String,
     base: Option<String>,
+    no_autoplace: Option<bool>,
 ) -> Result<(), String> {
     allow_any_foreground();
     let (broker, terminal, raw) = configured_broker_and_terminal()?;
     // Как и у `open_project_mqtt`: до этой команды доходят только со своей
     // машины — ветку выбирает `chooseProjectOpenAction`.
-    let cursor = cursor_hint(&app, &raw);
+    let place = placement(&app, &raw, no_autoplace.unwrap_or(false));
     // Окна ещё нет — сессия только заводится: адрес называет трекер машины
     // менеджера, а не машины окна. Свой из конфига — запасной ход для
     // трекера прежней версии.
     let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
     tauri::async_runtime::spawn_blocking(move || {
-        mqtt::open_new(&broker, &base, &cwd, &name, &terminal, cursor)
+        mqtt::open_new(&broker, &base, &cwd, &name, &terminal, place)
     })
     .await
     .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
@@ -3907,6 +3957,20 @@ actions:
         let opened_only = serde_json::json!({"openOnActiveDisplay": true});
         assert!(!show_on_active_display(&opened_only));
         assert!(open_on_active_display(&opened_only));
+    }
+
+    // Ctrl на строке списка главнее выключенной галки: она отвечает на вопрос
+    // «как открывать всегда», а модификатор — «как открыть вот эту». Без
+    // курсора просьба уехала бы обычной, и окно встало бы в запомненный слот —
+    // ровно то, о чём человек попросил не делать.
+    #[test]
+    fn ctrl_asks_for_the_cursor_with_the_checkbox_off() {
+        let off = serde_json::json!({});
+        assert!(!wants_cursor(&off, false));
+        assert!(wants_cursor(&off, true));
+        let on = serde_json::json!({"openOnActiveDisplay": true});
+        assert!(wants_cursor(&on, false));
+        assert!(wants_cursor(&on, true));
     }
 
     /// Показанному окну размер ставится на месте: `^F` на открытом пикере

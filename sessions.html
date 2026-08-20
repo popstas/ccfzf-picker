@@ -2381,7 +2381,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * уходит. Расхождение стоит недорого: tmux-панель, которой уже нет, даст
    * ошибку в самом kitty, а не тихо откроет не то.
    */
-  async function openSession(row) {
+  async function openSession(row, opts = {}) {
     if (!row) return;
     const strategy = window.OpenStrategy.chooseOpenStrategy(
       row, CONFIG.caps, { canFocus: rowCanFocus(row) },
@@ -2399,7 +2399,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (action === 'focus') return focusSession(row);
     // Менеджер знает профиль Windows Terminal для этого проекта; собранная
     // здесь команда его теряет.
-    if (action === 'manager') return openViaManager(row);
+    if (action === 'manager') return openViaManager(row, opts);
     if (noSources()) return;
     const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, {
       sshHost: CONFIG.sshHost, terminal: CONFIG.terminal, helperPath: await helperPath(),
@@ -2451,11 +2451,17 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * `claudeWt.projects` — ровно то, чего собранная здесь команда `wt.exe` не
    * умеет.
    */
-  async function openViaManager(row) {
+  async function openViaManager(row, opts = {}) {
     await invoke('hide_picker');
     try {
       await invoke('open_session_mqtt', {
         id: row.id, cwd: window.OpenTransport.rowProjectDir(row), base: managerBase(),
+        // Ctrl на строке: «поставь окно там, куда я смотрю, и не двигай
+        // дальше». Признак едет ключом в тело просьбы, а решение — за
+        // менеджером: расставляет окна он, и вторая пометка на нашей стороне
+        // ничего бы не значила. Пункт «Open on <host>» сюда же приходит без
+        // модификатора и потому просит как всегда.
+        noAutoplace: opts.noAutoplace === true,
         // Своя ли это машина. Единственное, чем два повода одного входа
         // различаются: точку курсора Rust приложит к просьбе только здесь, а с
         // пункта «Open on <host>» она уехала бы координатой чужого стола.
@@ -2475,7 +2481,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     await markSeen(row.id, Math.floor(Date.now() / 1000));
   }
 
-  function choose() {
+  function choose(opts = {}) {
     const row = rows[active];
     if (!row) return;
     // Заголовок секции: Enter на нём не открывает ничего, а сворачивает или
@@ -2511,8 +2517,8 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // делать, решает менеджер: поднять окно этого проекта или завести сессию с
     // его профилем. Enter здесь значит «покажи мне проект», а не «дай ещё один
     // терминал» — вторая просьба живёт под `^N`.
-    if (row.kind === 'project') return openProjectRow(row);
-    return openSession(row);
+    if (row.kind === 'project') return openProjectRow(row, opts);
+    return openSession(row, opts);
   }
 
   /**
@@ -3244,7 +3250,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * публикации человек увидит не сразу, а когда откроет пикер снова; у ветки
    * подъёма окна эта цена уплачена давно.
    */
-  async function openProjectRow(row) {
+  async function openProjectRow(row, opts = {}) {
     // Развилка «завести новую сессию или поднять открытое окно каталога» —
     // настройка, а не поведение по месту: `projectOpenAction` в `config.yaml`,
     // умолчание `new`. Стоит она **до** выбора транспорта: у ветки `new` вся
@@ -3252,7 +3258,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // откат на местную дорогу, — и второй её экземпляр здесь разошёлся бы с
     // первым. У проектного хоткея свой ключ и своё умолчание, и читает его
     // Rust: клавишу жмут при скрытом пикере, где webview усыплён целиком.
-    if (CONFIG.projectOpenAction === 'new') return newSessionHere(row);
+    if (CONFIG.projectOpenAction === 'new') return newSessionHere(row, opts);
     const dir = window.OpenTransport.rowProjectDir(row);
     const action = window.OpenTransport.chooseProjectOpenAction(
       row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
@@ -3260,7 +3266,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (action !== 'manager') return newSession(row.cwd, row.source);
     await invoke('hide_picker');
     try {
-      await invoke('open_project_mqtt', { cwd: dir, base: managerBase() });
+      await invoke('open_project_mqtt', {
+        cwd: dir, base: managerBase(), noAutoplace: opts.noAutoplace === true,
+      });
     } catch (e) {
       error = String(e);
       render();
@@ -3294,7 +3302,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
    *
    * Гасится до просьбы — то же правило и та же цена, что у `openProjectRow`.
    */
-  async function newSessionHere(row) {
+  async function newSessionHere(row, opts = {}) {
     const dir = window.OpenTransport.rowProjectDir(row);
     const action = window.OpenTransport.chooseProjectOpenAction(
       row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
@@ -3312,7 +3320,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
     issuedNames.set(name, Date.now());
     await invoke('hide_picker');
     try {
-      await invoke('new_session_mqtt', { cwd: dir, name, base: managerBase() });
+      await invoke('new_session_mqtt', {
+        cwd: dir, name, base: managerBase(), noAutoplace: opts.noAutoplace === true,
+      });
     } catch (e) {
       // Отказ — имя не занято: сессия не поднялась, и следующая попытка
       // вправе получить то же самое.
@@ -3642,7 +3652,13 @@ const infoBackdrop = document.getElementById('info-backdrop');
       e.preventDefault();
       moveBlock(e.key === 'ArrowRight' ? 1 : -1);
     }
-    else if (e.key === 'Enter') { e.preventDefault(); choose(); }
+    // Ctrl+Enter — то же открытие, но без расстановки окна на той стороне.
+    // Признак считает OpenTransport, а не проверка по месту: тем же правилом
+    // живёт Ctrl+клик, и второе разошлось бы с первым молча.
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      choose({ noAutoplace: window.OpenTransport.noAutoplaceWanted(e) });
+    }
     else if (e.key === 'Escape') { e.preventDefault(); onEscape(); }
   });
 
@@ -3684,7 +3700,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       runAction(rows[active], markToggleId(rows[active]));
       return;
     }
-    choose();
+    choose({ noAutoplace: window.OpenTransport.noAutoplaceWanted(e) });
   });
 
   // Правая кнопка по строке — тот же `^K`: меню действий у мыши другого входа

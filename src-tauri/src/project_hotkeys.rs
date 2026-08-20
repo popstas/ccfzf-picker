@@ -470,7 +470,10 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
     // `openOnActiveDisplay` живёт в конфиге, а спросить страницу нельзя. Своя
     // ли это машина, здесь не спрашивают: хоткеи вешаются только когда
     // `windowHost` трекера совпал с конфигом, то есть на своей же.
-    let cursor = crate::cursor_hint(app, &raw);
+    // Ctrl у клавиши нет: нажимают её вслепую, при скрытом пикере, — то есть
+    // «открой там, куда я смотрю» здесь спросить не у кого. Отсюда `false`, и
+    // просьба уходит с одной лишь галкой, как уходила всегда.
+    let place = crate::placement(app, &raw, false);
     // Что делает нажатие: поднять открытое окно проекта (умолчание) или всегда
     // заводить новую сессию. Умолчания у двух входов разные — у строки списка
     // `new`, здесь `focus`, — и названы они у самих нажатий, а не в таблице:
@@ -500,9 +503,9 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
         // пустой каталог): в обоих случаях уходит прежняя просьба, и открытое
         // окно поднимет менеджер. Про отказ уже сказано в журнал.
         let sent = if name.is_empty() {
-            crate::mqtt::open_project(&broker, &base, &cwd, &terminal, cursor)
+            crate::mqtt::open_project(&broker, &base, &cwd, &terminal, place)
         } else {
-            crate::mqtt::open_new(&broker, &base, &cwd, &name, &terminal, cursor)
+            crate::mqtt::open_new(&broker, &base, &cwd, &name, &terminal, place)
         };
         if let Err(e) = sent {
             ccfzf_log!("cannot ask to open {cwd}: {e}");
