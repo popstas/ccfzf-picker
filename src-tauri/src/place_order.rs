@@ -147,6 +147,25 @@ fn agent_updated(agent: &Value) -> f64 {
     agent.get("updated").and_then(|v| v.as_f64()).unwrap_or(0.0)
 }
 
+/// Когда сессия последний раз подавала признаки жизни — порт того же отката,
+/// что делает `buildSessionList`.
+///
+/// Записи агента мало: её пишет хук, а хуков не бывает ни на Windows, ни у
+/// сессии приложения. Без отката такая строка получала ноль, `missing_last`
+/// топил её в конец под сортировкой `recent`, а отсев тусклых не трогал вовсе
+/// — при том что время известно, `mtime` транскрипта агрегатор отдаёт каждой
+/// сессии.
+///
+/// `mtime` берётся у самой строки, а не у форка, который её на время увёл:
+/// файл принадлежит сессии. Так же и на странице.
+fn last_activity_of(session: &Value, agent: &Value) -> f64 {
+    let updated = agent_updated(agent);
+    if updated != 0.0 {
+        return updated;
+    }
+    session.get("mtime").and_then(|v| v.as_f64()).unwrap_or(0.0)
+}
+
 fn active_agent(session: &Value, by_id: &HashMap<&str, &Value>) -> Active {
     let own_id = session
         .get("id")
@@ -360,7 +379,7 @@ pub fn tile_ids(state: &Value, config_host: &str, sort: &str, stale: &Stale) -> 
         if !has_own_window(&windows, &mine) {
             continue;
         }
-        if stale.hides(minimized_here(&windows, &mine), agent_updated(&active.agent)) {
+        if stale.hides(minimized_here(&windows, &mine), last_activity_of(s, &active.agent)) {
             continue;
         }
         rows.push(Row {
@@ -384,7 +403,7 @@ pub fn tile_ids(state: &Value, config_host: &str, sort: &str, stale: &Stale) -> 
                 s.get("agent").unwrap_or(&Value::Null),
                 "started",
             ),
-            last_activity: agent_updated(&active.agent),
+            last_activity: last_activity_of(s, &active.agent),
         });
     }
 

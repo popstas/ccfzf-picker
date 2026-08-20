@@ -121,28 +121,34 @@ test('мусор вместо ссылки на PR пункта не даёт', 
 
 // «Читали» на маке — это agentSeen: отметку ставит открытие сессии, и она же
 // гасит кружок. Возврат в непрочитанное бессмыслен и без записи агента
-// (lastActivity === 0: нечего отматывать), и у строки, которая и так непрочитана.
+// (agentUpdated === 0: нечего отматывать), и у строки, которая и так
+// непрочитана. Спрашивается именно agentUpdated: у lastActivity появился откат
+// на время транскрипта, и ненулевой он теперь у всякой сессии — в том числе у
+// той, про которую хук не писал ни разу.
 test('вернуть в непрочитанное можно только то, что читали', () => {
   const unread = row => availableActions(row).some(x => x.id === 'unread');
-  assert.ok(unread({ id: 'a', agentSeen: true, lastActivity: 5 }));
-  assert.ok(!unread({ id: 'a', agentSeen: false, lastActivity: 5 }));
-  assert.ok(!unread({ id: 'a', agentSeen: true, lastActivity: 0 }));
+  assert.ok(unread({ id: 'a', agentSeen: true, agentUpdated: 5 }));
+  assert.ok(!unread({ id: 'a', agentSeen: false, agentUpdated: 5 }));
+  assert.ok(!unread({ id: 'a', agentSeen: true, agentUpdated: 0 }));
+  // Время транскрипта записи агента не заменяет: пункт был бы обещанием.
+  assert.ok(!unread({ id: 'a', agentSeen: true, agentUpdated: 0, lastActivity: 5 }));
 });
 
 // Зеркало предыдущего: пометить просмотренным есть смысл ровно там, где
 // непрочитанное — то есть у строки с записью агента, которую ещё не читали.
 test('пометить просмотренным можно только непрочитанное', () => {
   const seen = row => availableActions(row).some(x => x.id === 'seen');
-  assert.ok(seen({ id: 'a', agentSeen: false, lastActivity: 5 }));
-  assert.ok(!seen({ id: 'a', agentSeen: true, lastActivity: 5 }));
-  assert.ok(!seen({ id: 'a', agentSeen: false, lastActivity: 0 }));
+  assert.ok(seen({ id: 'a', agentSeen: false, agentUpdated: 5 }));
+  assert.ok(!seen({ id: 'a', agentSeen: true, agentUpdated: 5 }));
+  assert.ok(!seen({ id: 'a', agentSeen: false, agentUpdated: 0 }));
+  assert.ok(!seen({ id: 'a', agentSeen: false, agentUpdated: 0, lastActivity: 5 }));
 });
 
 // Два пункта об одном и том же и обязаны исключать друг друга: строка, где
 // предлагают оба сразу, значила бы, что условия разошлись.
 test('«просмотрено» и «непрочитано» не предлагаются вместе', () => {
   for (const agentSeen of [true, false]) {
-    const ids = availableActions({ id: 'a', agentSeen, lastActivity: 5 }).map(a => a.id);
+    const ids = availableActions({ id: 'a', agentSeen, agentUpdated: 5 }).map(a => a.id);
     assert.strictEqual(
       Number(ids.includes('seen')) + Number(ids.includes('unread')), 1,
       `agentSeen=${agentSeen}: ровно один из пары`,
@@ -186,7 +192,7 @@ test('строке проекта не предлагают того, чему �
   const ids = availableActions({
     kind: 'project', id: '/p', cwd: '/p',
     pr_url: 'https://github.com/o/r/pull/3', live: true, pid: 42,
-    lastActivity: 1, agentSeen: true,
+    lastActivity: 1, agentUpdated: 1, agentSeen: true,
   }).map(a => a.id);
   assert.deepStrictEqual(ids, ['new', 'terminal']);
 });
@@ -224,7 +230,7 @@ test('заголовку снимка не предлагают того, чем
   const ids = availableActions({
     kind: 'snapshot', id: 'snap-1', cwd: '/home/user/x',
     pr_url: 'https://github.com/o/r/pull/3', live: true, pid: 42,
-    lastActivity: 1, agentSeen: true,
+    lastActivity: 1, agentUpdated: 1, agentSeen: true,
   }, CONFIGURED).map(a => a.id);
   assert.deepStrictEqual(ids, ['restore']);
 });
@@ -246,7 +252,7 @@ test('строке внутри снимка не предлагают того,
   const ids = availableActions({
     kind: 'snapshot-session', id: 'abc123', snapshotId: 'snap-1', cwd: '/home/user/x',
     pr_url: 'https://github.com/o/r/pull/3', live: true, pid: 42,
-    lastActivity: 1, agentSeen: true,
+    lastActivity: 1, agentUpdated: 1, agentSeen: true,
   }).map(a => a.id);
   assert.deepStrictEqual(ids, ['new', 'terminal']);
 });
@@ -272,7 +278,7 @@ test('строка внутри снимка без каталога меню н
 test('меню решено для каждого вида строки, а не досталось ему по умолчанию', () => {
   const everything = {
     id: 'abc123', cwd: '/home/user/x', live: true, pid: 42,
-    pr_url: 'https://github.com/o/r/pull/3', lastActivity: 1, agentSeen: true,
+    pr_url: 'https://github.com/o/r/pull/3', lastActivity: 1, agentUpdated: 1, agentSeen: true,
     zellij: 'home', snapshotId: 'snap-1',
   };
   const decided = {
@@ -316,7 +322,7 @@ test('каждый встроенный пункт меню обработан �
 
   const rich = {
     id: 'abc123', cwd: '/home/user/x', live: true, pid: 42,
-    pr_url: 'https://github.com/o/r/pull/3', lastActivity: 1, agentSeen: true,
+    pr_url: 'https://github.com/o/r/pull/3', lastActivity: 1, agentUpdated: 1, agentSeen: true,
   };
   const ids = new Set([
     ...availableActions(rich),

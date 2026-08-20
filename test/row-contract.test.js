@@ -152,12 +152,33 @@ test('сессия без записи агента рисуется пусто,
   assert.strictEqual(Glyph.stateHtml(row, true), '<div class="state"></div>');
   assert.strictEqual(Glyph.usageHtml(row, { showCost: true, showContext: true }),
     '<div class="usage"><span class="cost">$0</span> · <span class="ctx">0%</span></div>');
-  assert.strictEqual(Glyph.ageHtml(row, NOW), '<div class="age"></div>');
+  // А вот возраст пустым быть не обязан, и это единственное отличие от
+  // остальных колонок: деньги и состояние знает только хук, а время последней
+  // записи стоит в самом транскрипте — им строка и датируется. Пустая колонка
+  // здесь была бы молчанием о том, что известно.
+  assert.strictEqual(Glyph.ageHtml(row, NOW), '<div class="age">1m</div>');
   assert.strictEqual(Glyph.prBadgeHtml(row), '');
   assert.strictEqual(Glyph.rowTitle(row), '~/projects/expertizeme/cup-dashboard');
   for (const r of buildSessionInfoRows(row, NOW)) {
     assert.ok(!r.value.includes('undefined'), `${r.label}: ${r.value}`);
   }
+});
+
+test('строка без записи агента датируется транскриптом, а не нулём', () => {
+  // Хуков не бывает ни на Windows, ни у сессии приложения, и такая строка
+  // получала lastActivity = 0: missingLast топил её в конец под сортировкой
+  // `recent`, затемнение старых её не видело, а карточка молчала — при том что
+  // mtime транскрипта агрегатор отдаёт каждой сессии.
+  const hookless = firstRow([aggregatorSession({ agent: null })]);
+  assert.strictEqual(hookless.lastActivity, 1785870223.67);
+  // Запись агента главнее: она про событие агента, а не про всякую запись в
+  // файле, — откат включается только там, где записи нет.
+  const hooked = firstRow([aggregatorSession()]);
+  assert.strictEqual(hooked.lastActivity, hooked.agentUpdated);
+  assert.notStrictEqual(hooked.lastActivity, 1785870223.67);
+  // Признак «хук про сессию писал» уехал в своё поле: на нём висят пункты
+  // «Mark seen»/«Mark unread», и ненулевой lastActivity их больше не включает.
+  assert.strictEqual(hookless.agentUpdated, 0);
 });
 
 test('поля без источника не роняют отрисовку', () => {
@@ -1623,11 +1644,13 @@ test('Shift выбирает отметку по состоянию строки
   vm.createContext(ctx);
   vm.runInContext(`${src[0]}\nvar pick = markToggleId;`, ctx, { filename: 'sessions.html' });
 
-  assert.strictEqual(ctx.pick({ id: 'a', lastActivity: 5, agentSeen: true }), 'unread');
-  assert.strictEqual(ctx.pick({ id: 'a', lastActivity: 5, agentSeen: false }), 'seen');
+  assert.strictEqual(ctx.pick({ id: 'a', agentUpdated: 5, agentSeen: true }), 'unread');
+  assert.strictEqual(ctx.pick({ id: 'a', agentUpdated: 5, agentSeen: false }), 'seen');
   // Сессия без записи агента: отматывать нечего и отмечать нечего, а промах по
-  // Shift не должен превращаться в открытие сессии.
-  assert.strictEqual(ctx.pick({ id: 'a', lastActivity: 0, agentSeen: false }), null);
+  // Shift не должен превращаться в открытие сессии. Время транскрипта её
+  // записью агента не делает — у lastActivity на него есть откат.
+  assert.strictEqual(ctx.pick({ id: 'a', agentUpdated: 0, agentSeen: false }), null);
+  assert.strictEqual(ctx.pick({ id: 'a', agentUpdated: 0, lastActivity: 5, agentSeen: false }), null);
 });
 
 test('строка зелийной сессии доезжает до отрисовки и не пустует', () => {
@@ -1982,7 +2005,8 @@ test('старые обычные сессии и проекты получаю�
     sessions: [aggregatorSession({
       live: false,
       window: null,
-      // buildSessionList берёт lastActivity из agent.updated, не из mtime.
+      // У сессии с записью агента lastActivity — это agent.updated; откат на
+      // mtime включается только там, где записи нет вовсе.
       agent: { updated: NOW - 7200 },
     })],
   }, '', undefined, stale);
