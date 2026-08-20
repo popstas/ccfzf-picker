@@ -43,7 +43,8 @@ impl Source {
 /// Источники по конфигу. Пустой список — «спрашивать некого», и это
 /// единственная проверка ненастроенности: раньше их было две (`check_ssh_host`
 /// в Rust и `sshHostMissing()` на странице), и второе правило про то же самое
-/// молчало бы, разойдись с первым.
+/// молчало бы, разойдись с первым. Пустым он остался достижим и после того,
+/// как местный источник стал умолчанием: его выключают явным `false`.
 pub fn sources_from(config: &serde_json::Value) -> Vec<Source> {
     let mut out = Vec::new();
     let host = config
@@ -54,7 +55,13 @@ pub fn sources_from(config: &serde_json::Value) -> Vec<Source> {
     if !host.is_empty() {
         out.push(Source::Ssh(host.to_string()));
     }
-    if config.get("localSource").and_then(|v| v.as_bool()) == Some(true) {
+    // Умолчание — «спрашивать»: местный источник выключает только явный
+    // `false`. Развилки по системе здесь нет намеренно, хотя на нативном
+    // Windows местного `ccfzf` не бывает: тот же ключ читает страница —
+    // проверка ненастроенности и галка в настройках, — и умолчание, разное у
+    // Rust и у неё, окно настроек молча увезло бы в `config.yaml` обратной
+    // записью. Windows-машине ключ пишется явным `false`.
+    if config.get("localSource").and_then(|v| v.as_bool()) != Some(false) {
         out.push(Source::Local);
     }
     out
@@ -222,14 +229,14 @@ mod tests {
     }
 
     /// Список источников — это весь ответ на вопрос «кого спрашивать».
-    /// Пустой `sshHost` не источник, а ненастроенное поле; выключенный
-    /// `localSource` не добавляет ничего.
+    /// Пустой `sshHost` не источник, а ненастроенное поле; местный источник
+    /// спрашивается по умолчанию и выключается явным `false`.
     #[test]
     fn sources_come_from_the_config() {
-        let cfg = serde_json::json!({"sshHost": "remote-host"});
+        let cfg = serde_json::json!({"sshHost": "remote-host", "localSource": false});
         assert_eq!(sources_from(&cfg), vec![Source::Ssh("remote-host".into())]);
 
-        let cfg = serde_json::json!({"sshHost": "remote-host", "localSource": true});
+        let cfg = serde_json::json!({"sshHost": "remote-host"});
         assert_eq!(
             sources_from(&cfg),
             vec![Source::Ssh("remote-host".into()), Source::Local],
@@ -239,13 +246,19 @@ mod tests {
         let cfg = serde_json::json!({"localSource": true});
         assert_eq!(sources_from(&cfg), vec![Source::Local], "один местный — тоже рабочая настройка");
 
-        assert_eq!(sources_from(&serde_json::json!({})), Vec::<Source>::new());
+        // Умолчание, а не только явная `true`: конфиг без ключа — это и есть
+        // свежая установка, ради которой умолчание менялось.
+        assert_eq!(sources_from(&serde_json::json!({})), vec![Source::Local]);
         assert_eq!(
             sources_from(&serde_json::json!({"sshHost": "  ", "localSource": false})),
             Vec::<Source>::new(),
             "пробелы — тот же пустой хост"
         );
-        assert_eq!(sources_from(&serde_json::Value::Null), Vec::<Source>::new());
+        assert_eq!(
+            sources_from(&serde_json::Value::Null),
+            vec![Source::Local],
+            "испорченный конфиг читается как отсутствующий, а у того местный источник есть"
+        );
     }
 
     /// Метка источника уезжает в поле `source` каждой строки и возвращается

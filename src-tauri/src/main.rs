@@ -898,6 +898,34 @@ fn allow_any_foreground() {
 #[cfg(not(target_os = "windows"))]
 fn allow_any_foreground() {}
 
+/// Вывести вперёд себя — маковская половина того же вопроса, который на
+/// Windows решает `allow_any_foreground`.
+///
+/// Пикер живёт в трее и объявлен `ActivationPolicy::Accessory`: у такого
+/// приложения нет ни значка в доке, ни очереди на передний план, и показанное
+/// им окно остаётся за тем, из которого человек полез в трей, — за терминалом.
+/// `set_focus` тут не помогает: он двигает окно внутри приложения, а какое
+/// приложение впереди, решает AppKit. Отсюда явная активация.
+///
+/// Набор параметров пустой: `NSApplicationActivationOptions::ActivateIgnoringOtherApps`
+/// с macOS 14 объявлен ничего не делающим. Тем же приёмом и по той же причине
+/// поднимает себя `ax::activate_self` у соседнего macos-windows-manager.
+///
+/// Отказ не фатален и в `Result` не уезжает: окно к этому моменту уже создано
+/// и показано, и отвечать на это ошибкой значило бы пугать человека тем, что
+/// он и так видит. Но и молчать нельзя — строка в журнал.
+#[cfg(target_os = "macos")]
+fn activate_self() {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+    let app = NSRunningApplication::currentApplication();
+    if !app.activateWithOptions(NSApplicationActivationOptions::empty()) {
+        ccfzf_log!("cannot bring the application forward");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_self() {}
+
 /// Брокер из конфига или внятный отказ.
 ///
 /// Общий для всех команд, публикующих просьбы: шесть копий одной проверки
@@ -1640,20 +1668,26 @@ async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
-        return Ok(());
+    } else {
+        let (width, height) = settings_size(&app);
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            "settings",
+            tauri::WebviewUrl::App("settings.html".into()),
+        )
+        .title("ccfzf-picker Settings")
+        .inner_size(width, height)
+        .center()
+        .resizable(true)
+        .build()
+        .map_err(|e| format!("cannot open settings window: {e}"))?;
     }
-    let (width, height) = settings_size(&app);
-    tauri::WebviewWindowBuilder::new(
-        &app,
-        "settings",
-        tauri::WebviewUrl::App("settings.html".into()),
-    )
-    .title("ccfzf-picker Settings")
-    .inner_size(width, height)
-    .center()
-    .resizable(true)
-    .build()
-    .map_err(|e| format!("cannot open settings window: {e}"))?;
+    // Обе ветки проходят через активацию, и ветки объединены ради неё: с
+    // прежним ранним `return` одна из двух дорог рано или поздно её потеряла
+    // бы. На Windows это пустой вызов — там передний план пикер уже отдал себе
+    // сам, погасив список; чинится маковская сторона, где показанное окно
+    // Accessory-приложения остаётся за терминалом.
+    activate_self();
     Ok(())
 }
 
@@ -3329,6 +3363,30 @@ mod tests {
         assert!(
             handler.contains("async_runtime::spawn"),
             "открытие настроек из трея должно уходить в пул, а не в цикл событий"
+        );
+    }
+
+    /// Открытие настроек выводит вперёд само приложение.
+    ///
+    /// У `Accessory`-приложения показанное окно остаётся за тем, из которого
+    /// человек полез в трей: `set_focus` двигает окно внутри приложения, а
+    /// какое приложение впереди, решает AppKit. Веток у открытия две — окно
+    /// уже есть и окна ещё нет, — и потерять активацию могла бы любая, поэтому
+    /// сторож смотрит на всю команду целиком.
+    ///
+    /// Сторож текстовый: вызов уходит в AppKit, на машине разработки этой
+    /// ветки нет вовсе, а `build()` отвечает `Ok` и с активацией, и без неё.
+    #[test]
+    fn opening_the_settings_window_brings_the_application_forward() {
+        let src = include_str!("main.rs");
+        let open = src
+            .split_once("async fn open_settings(app: tauri::AppHandle)")
+            .expect("команда открытия настроек пропала — тест сторожит не то")
+            .1;
+        let (open, _) = open.split_once("\n}\n").expect("команда не закрыта");
+        assert!(
+            open.contains("activate_self()"),
+            "открытие настроек обязано выводить приложение вперёд"
         );
     }
 

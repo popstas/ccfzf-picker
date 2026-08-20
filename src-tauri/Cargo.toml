@@ -83,6 +83,11 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSView",
     "NSResponder",
     "NSEvent",
+    # Окно настроек выводится вперёд активацией самого приложения
+    # (`activate_self` в `main.rs`): у Accessory-приложения показанное окно
+    # остаётся за чужим. Под этой feature лежат и `NSRunningApplication`, и
+    # набор параметров `NSApplicationActivationOptions`.
+    "NSRunningApplication",
 ] }
 
 # Профиль собран под выкатку, а не под витрину: `deploy-*.sh` зовёт

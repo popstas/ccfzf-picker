@@ -97,8 +97,8 @@
         { id: 'sshHost', label: 'Host with sessions', type: 'text',
           hint: 'Any form ssh understands. Without it there is nowhere to get the list from.' },
         { id: 'localSource', label: 'Also show sessions from this machine', type: 'bool',
-          default: false,
-          hint: 'Runs ccfzf here, without ssh. Linux and macOS only.' },
+          default: true,
+          hint: 'Runs ccfzf here, without ssh. On by default. Linux and macOS only: turn it off on Windows.' },
         // Не поле конфига, а помощник к двум следующим: подставляет в них
         // путь и аргументы разом. Своего ключа у него нет намеренно — второй
         // источник правды разошёлся бы с полями, которые правят руками, и
