@@ -607,6 +607,37 @@ test('windowHtml меняет глиф, когда трекер назвал з�
   );
 });
 
+test('сессия Claude Desktop помечена своим глифом, даже без окна', () => {
+  // Окна у неё не бывает: трекер привязывает окно к сессии по заголовку, а
+  // заголовок окна приложения — просто «Claude». Значит `c` — единственный
+  // знак того, что строка живёт в приложении, и он же объясняет, почему
+  // Enter ведёт себя иначе.
+  assert.strictEqual(
+    windowHtml({ entrypoint: 'claude-desktop' }, true, true),
+    '<div class="win open" title="Claude Desktop">c</div>',
+  );
+});
+
+test('глиф приложения не отменяет глифов окон, а встаёт перед ними', () => {
+  // Сессию приложения продолжают и в терминале: она бывает и там, и там.
+  assert.strictEqual(
+    windowHtml({ entrypoint: 'claude-desktop', window: { app: 'kitty' } }, true, true),
+    '<div class="win open" title="Claude Desktop">c</div>'
+    + '<div class="win open" title="kitty">k</div>',
+  );
+});
+
+test('глиф приложения слушается той же галки, что и глифы терминалов', () => {
+  assert.strictEqual(
+    windowHtml({ entrypoint: 'claude-desktop' }, true, false),
+    '<div class="win"></div>',
+  );
+});
+
+test('терминальная сессия глифа приложения не получает', () => {
+  assert.strictEqual(windowHtml({ entrypoint: 'cli' }, true, true), '<div class="win"></div>');
+});
+
 test('терминалы Windows различаются между собой — wt не читается как wezterm', () => {
   // Ради этого правило и заведено поимённым: на popstas-pc рядом живут оба, и
   // общий знак ⌨ на них двоих не отвечал бы на единственный вопрос к пометке.

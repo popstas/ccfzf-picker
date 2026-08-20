@@ -2234,6 +2234,40 @@ const infoBackdrop = document.getElementById('info-backdrop');
   }
 
   /**
+   * Открыть сессию в самом приложении Claude Desktop.
+   *
+   * Ссылка `claude://resume?session=<id>` — единственная дорога: приложение
+   * импортирует по ней транскрипт и показывает сессию у себя. Собирает её
+   * Rust (`open_desktop_session`), а не страница: id там просеивается формой
+   * UUID перед подстановкой, и он же выбирает, чем ссылку открывать на этой
+   * системе.
+   *
+   * Транскрипт берётся **с той машины, где ссылку открыли**, поэтому строка
+   * сюда доходит только своя — оговорку про `source` держит `isDesktopRow`
+   * (open-transport.js). Строка с чужой машины ушла бы в ошибку «transcript
+   * is not on disk», о которой пикеру не узнать: ответа у ссылки нет.
+   *
+   * Пикер гасится до просьбы, как и на пяти соседних ветках, кончающихся
+   * окном: приложение выходит на передний план само, а пикер на маке ещё и
+   * `alwaysOnTop` — погасив себя после, он накрыл бы то самое окно.
+   *
+   * Отметка «посмотрел» ставится: сессию человек увидел — то же, что у
+   * подъёма окна и у местного открытия.
+   */
+  async function openInDesktopApp(row) {
+    await invoke('hide_picker');
+    try {
+      await invoke('open_desktop_session', { id: row.id });
+    } catch (e) {
+      error = String(e);
+      render();
+      return;
+    }
+    error = '';
+    await markSeen(row.id, Math.floor(Date.now() / 1000));
+  }
+
+  /**
    * Попросить трекер разложить окна — плиткой или каскадом.
    *
    * Расставляет их сам трекер той машины, где они стоят; пикер называет
@@ -2397,6 +2431,12 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // Окно уже открыто, и поднять его умеет только эта дорога: она гасит пикер
     // до публикации и выдаёт трекеру право на передний план.
     if (action === 'focus') return focusSession(row);
+    // Сессию завело приложение Claude Desktop — туда её и возвращаем. Флаг
+    // `viaTerminal` ставит пункт меню «Resume in terminal»: он и существует
+    // затем, чтобы у такой строки осталась прежняя дорога. Пропущенная ветка
+    // не уводит в сторону — `action` здесь не `manager`, и дальше всё идёт
+    // местным открытием, тем самым, каким Enter ходил до этой правки.
+    if (action === 'desktop' && !opts.viaTerminal) return openInDesktopApp(row);
     // Менеджер знает профиль Windows Terminal для этого проекта; собранная
     // здесь команда его теряет.
     if (action === 'manager') return openViaManager(row, opts);
@@ -3365,6 +3405,14 @@ const infoBackdrop = document.getElementById('info-backdrop');
     }
     if (id === 'terminal') {
       openTerminalHere(row);
+      return;
+    }
+    // «Resume in terminal» — прежняя дорога Enter у сессии приложения. Зовётся
+    // тот же openSession, а не собственная копия его хвоста: там уже написаны
+    // выбор стратегии, подтверждение перехвата, отметка «посмотрел» и откат
+    // на ошибку, и второй экземпляр этого разошёлся бы с первым.
+    if (id === 'resume') {
+      openSession(row, { viaTerminal: true });
       return;
     }
     if (id === 'pr') {

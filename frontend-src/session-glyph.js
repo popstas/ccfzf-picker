@@ -237,8 +237,22 @@
     const wins = Array.isArray(session?.windows) && session.windows.length
       ? session.windows
       : (session?.window ? [session.window] : []);
-    if (!wins.length) return '<div class="win"></div>';
-    return wins.map((win) => {
+    // Глиф приложения — не запись окна, и приезжает он не от трекера, а из
+    // транскрипта (`entrypoint`). Окна у такой сессии не бывает вовсе:
+    // трекер привязывает окно к сессии по заголовку, а заголовок окна
+    // Claude Desktop — просто «Claude», и совпасть ему не с чем. Значит `c`
+    // здесь единственный знак того, что строка живёт в приложении, — и он же
+    // объясняет, почему Enter на ней ведёт себя иначе.
+    //
+    // Глифы окон он не отменяет, а встаёт перед ними: сессию приложения
+    // продолжают и в терминале, и тогда она есть в обоих местах сразу.
+    // Слушается той же галки, что и имена терминалов: вопрос у обоих один —
+    // «чем эта сессия открыта».
+    const app = showTerminalIcon && session?.entrypoint === 'claude-desktop'
+      ? '<div class="win open" title="Claude Desktop">c</div>'
+      : '';
+    if (!wins.length) return app || '<div class="win"></div>';
+    return app + wins.map((win) => {
       const terminal = showTerminalIcon ? terminalOf(win) : null;
       const parts = [];
       if (Number.isFinite(win.desktop)) parts.push(`Desktop ${win.desktop}`);

@@ -198,7 +198,11 @@ pub fn set_comment(source: &Source, id: &str, text: &str, from: &str) -> Result<
 /// Проверяется здесь, а не только на той стороне, потому что строка уезжает
 /// аргументом в чужой шелл: пропусти мы сюда пробел или `;`, и разбирать это
 /// стал бы он.
-fn looks_like_session_id(id: &str) -> bool {
+///
+/// Видна и соседям: та же проверка стоит на пути ссылки `claude://resume`
+/// (`desktop_session_url` в main.rs). Второй такой разбор разошёлся бы с этим
+/// молча — и разошёлся бы ровно там, где цена ошибки наибольшая.
+pub fn looks_like_session_id(id: &str) -> bool {
     let parts: Vec<&str> = id.split('-').collect();
     if parts.len() != 5 {
         return false;

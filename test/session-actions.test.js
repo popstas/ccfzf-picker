@@ -14,6 +14,31 @@ const CONFIGURED = {
   actions: [{ id: 'explorer', label: 'Open in Explorer', hotkey: 'Ctrl+Shift+E', argv: ['x'] }],
 };
 
+// Сессия Claude Desktop: Enter у неё уводит в приложение, и дорога в терминал
+// остаётся только здесь. Правило «открытие висит на Enter, в меню его нет»
+// этим не нарушено: в меню стоит не то, что делает Enter, а ровно то, чего он
+// больше не делает.
+const DESKTOP_ROW = {
+  kind: 'interactive', id: 's1', cwd: '/p/site',
+  entrypoint: 'claude-desktop', source: 'local',
+};
+
+test('у сессии приложения есть пункт «Resume in terminal»', () => {
+  const ids = availableActions(DESKTOP_ROW).map(a => a.id);
+  assert.ok(ids.includes('resume'), ids.join(','));
+});
+
+test('у терминальной сессии такого пункта нет — это дубль Enter', () => {
+  const ids = availableActions({ ...DESKTOP_ROW, entrypoint: 'cli' }).map(a => a.id);
+  assert.ok(!ids.includes('resume'), ids.join(','));
+});
+
+test('у сессии приложения с чужой машины пункта тоже нет', () => {
+  // Enter там открывает терминал сам — пункт был бы дублем.
+  const ids = availableActions({ ...DESKTOP_ROW, source: 'build-host' }).map(a => a.id);
+  assert.ok(!ids.includes('resume'), ids.join(','));
+});
+
 test('информация о сессии есть всегда', () => {
   // Комментарий — рядом с ней и по той же причине: оба про сессию как
   // таковую, а не про её окно, живость или каталог, и потому есть у любой
@@ -298,6 +323,8 @@ test('каждый встроенный пункт меню обработан �
     ...availableActions({ ...rich, agentSeen: false }),
     ...availableActions({ kind: 'snapshot', id: 'snap-1' }),
     ...availableActions({ kind: 'project', id: '/p', cwd: '/p' }),
+    // Сессия приложения: у неё свой пункт, и он тоже обязан быть разобран.
+    ...availableActions(DESKTOP_ROW),
     // Этот пункт availableActions не отдаёт вовсе — его добавляет страница
     // (`actionsFor`), когда окно можно открыть на машине трекера.
     { id: 'open-remote' },

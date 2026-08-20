@@ -165,12 +165,45 @@
    * `local` — так Enter вёл себя до появления этой ветки.
    *
    * И только потом — сам транспорт.
+   *
+   * Между фокусом и списком видов стоит ветка приложения. Сессию Claude
+   * Desktop открывал не терминал, и возвращать человека надо туда, откуда он
+   * ушёл: ссылка `claude://resume?session=<id>` поднимает её в самом
+   * приложении. Признак — `entrypoint` из транскрипта; больше этой разницы не
+   * видно нигде, файл и каталог у обеих сессий одинаковые.
+   *
+   * Второе условие ветки — `source === 'local'`, и оно обязательно: ссылка
+   * импортирует транскрипт **той машины, где её открыли**. Строка, приехавшая
+   * от `sshHost`, увела бы приложение в ошибку «transcript is not on disk», а
+   * человек не узнал бы почему — ответа у ссылки нет, как и у публикации в
+   * MQTT. Такая строка уходит прежней дорогой.
+   *
+   * Ниже фокуса, а не выше: сессию приложения продолжают и в терминале, и
+   * тогда у неё есть настоящее открытое окно. Поднять его — это подъём, а не
+   * открытие, и правило это общее для всех строк.
    */
   function chooseEnterAction(row, strategy, manager, configHost, mqttConfigured) {
     if (strategy === 'focus') return 'focus';
+    if (isDesktopRow(row)) return 'desktop';
     if (!row || !SESSION_ID_ROW_KINDS.has(row.kind)) return 'local';
     if (!trackerKnowsSession(row) && !rowProjectDir(row)) return 'local';
     return chooseOpenTransport(manager, configHost, mqttConfigured);
+  }
+
+  /**
+   * Строка сессии, которую открывали приложением Claude Desktop, и открывали
+   * здесь же.
+   *
+   * Отдельной функцией, а не условием по месту: спрашивают об этом двое —
+   * развилка Enter и меню `^K`, где у такой строки появляется пункт «Resume
+   * in terminal». Разойдись эти два правила, в меню стоял бы пункт про
+   * дорогу, которой Enter не ходит, или наоборот.
+   */
+  function isDesktopRow(row) {
+    return Boolean(row)
+      && SESSION_ID_ROW_KINDS.has(row.kind)
+      && row.entrypoint === 'claude-desktop'
+      && row.source === 'local';
   }
 
   /**
@@ -220,6 +253,6 @@
 
   return {
     chooseOpenTransport, canOpenRemote, chooseEnterAction, rowProjectDir,
-    chooseProjectOpenAction, noAutoplaceWanted,
+    chooseProjectOpenAction, noAutoplaceWanted, isDesktopRow,
   };
 });

@@ -14,6 +14,15 @@
   const pathApi = typeof module === 'object' && module.exports
     ? require('./path-map')
     : globalThis.PathMap;
+  // Признак сессии Claude Desktop берётся у развилки Enter, а не пишется
+  // здесь вторым условием: пункт «Resume in terminal» существует ровно
+  // потому, что Enter у такой строки уводит в приложение. Разойдись правила —
+  // в меню стоял бы пункт про дорогу, которой Enter не ходит, или наоборот.
+  // Загрузка это выдерживает: open-transport.js стоит раньше и в
+  // sessions.html, и в prepare-frontend.js.
+  const transportApi = typeof module === 'object' && module.exports
+    ? require('./open-transport')
+    : globalThis.OpenTransport;
 
   // Номер PR берётся у отрисовщика строки, а не разбирается здесь вторым
   // регэкспом. Два разбора одной ссылки разъезжаются молча: строка показала бы
@@ -140,6 +149,19 @@
     // см. buildAttachCommand.
     if (row && row.live && openApi.buildAttachCommand(row)) {
       actions.push({ id: 'attach', label: 'Copy reptyr command' });
+    }
+    // Сессию приложения Enter возвращает в приложение (`chooseEnterAction`),
+    // и дорога в терминал остаётся только здесь. Правило «открытие висит на
+    // Enter, в меню его нет» этим не нарушено: в меню стоит не то, что делает
+    // Enter, а ровно то, чего он у этой строки больше не делает.
+    //
+    // Буква своя (`menuKey`), а не запись в BUILTIN_ACTION_KEYS: та даёт не
+    // только букву в меню, но и глобальный Ctrl-хоткей, а `Ctrl+E` у человека
+    // уже занят настроенным действием — встроенная ветка съедала бы у него
+    // событие молча. Совпади буква с чужой, `menuKeys` оставит пункт без неё,
+    // и это правильный отказ: пункт остаётся, клавиша нет.
+    if (transportApi.isDesktopRow(row)) {
+      actions.push({ id: 'resume', label: 'Resume in terminal', menuKey: 'e' });
     }
     // Новая сессия в том же каталоге: «начать заново рядом» — обычный ход,
     // когда в текущей сессии кончился контекст. Только там, где каталог
