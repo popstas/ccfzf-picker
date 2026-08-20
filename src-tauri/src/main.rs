@@ -1767,7 +1767,30 @@ fn url_opener(url: &str) -> Vec<String> {
 #[tauri::command]
 fn open_desktop_session(id: String) -> Result<(), String> {
     let url = desktop_session_url(&id)?;
-    spawn_detached(url_opener(&url), None)
+    spawn_url(url_opener(&url))
+}
+
+/// Запуск открывашки ссылки — **без своего окна**.
+///
+/// Мимо `spawn_detached`, и это не дублирование: та сознательно идёт мимо
+/// `hidden_command`, потому что у неё окно и есть цель (она открывает
+/// терминал). Здесь окно нужно чужое — приложения Claude Desktop, — а своё
+/// вредно: на Windows ссылку открывает `cmd /c start`, и его консоль
+/// вспыхивала на экране на долю секунды при каждом переходе в сессию. Поймано
+/// глазами на живой машине; на маке и Linux ветка `hidden_command` пуста, то
+/// есть поведение там прежнее.
+fn spawn_url(argv: Vec<String>) -> Result<(), String> {
+    let Some((file, args)) = argv.split_first() else {
+        return Err("empty argv".into());
+    };
+    proc::hidden_command(file)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("failed to spawn {file}: {e}"))
 }
 
 /// Как звать редактор, чтобы он открыл файл.
