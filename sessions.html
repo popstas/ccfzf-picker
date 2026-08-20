@@ -3391,7 +3391,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     const configured = CONFIG.actions.find(a => a.id === id);
     if (configured) {
       const argv = window.PathMap.buildActionArgv(configured, {
-        localPath: window.PathMap.mapPath(row.cwd, CONFIG.pathMap),
+        localPath: window.PathMap.mapRowPath(row, CONFIG.pathMap),
         remotePath: row.cwd,
       });
       invoke('spawn_detached', { argv })
@@ -3435,7 +3435,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // Применимость проверена в availableActions, но проверяется и здесь:
       // прямые клавиши — второй вход, и правило «что этой строке можно»
       // обязано быть одно на оба.
-      const base = window.PathMap.mapPath(row.cwd, CONFIG.pathMap);
+      const base = window.PathMap.mapRowPath(row, CONFIG.pathMap);
       const rel = row[id];
       if (base === null || !rel) return;
       const sep = window.PathMap.separatorFor(base);

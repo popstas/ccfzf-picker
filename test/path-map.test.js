@@ -1,6 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { separatorFor, mapPath, buildActionArgv } = require('../frontend-src/path-map');
+const fs = require('node:fs');
+const path = require('node:path');
+const { separatorFor, mapPath, mapRowPath, buildActionArgv } = require('../frontend-src/path-map');
 
 // Корни сетевых дисков Windows пишутся здесь формой UNC, а не буквой диска:
 // буква вместе с разделителем — шаблон из no-private-data.test.js, и фикстура с
@@ -89,4 +91,47 @@ test('плейсхолдер подставляется внутри аргум�
 test('argv без плейсхолдеров и пустое действие не ломают сборку', () => {
   assert.deepStrictEqual(buildActionArgv({ argv: ['open'] }, {}), ['open']);
   assert.deepStrictEqual(buildActionArgv(null, null), []);
+});
+
+
+// ── Строка списка и её каталог ─────────────────────────────────────────────
+//
+// Корень тот же UNC, что и выше: буква диска с разделителем — шаблон стража
+// приватных данных, а проверяемое свойство от формы корня не зависит.
+const LOCAL_ROW = { cwd: '<drive>:\\projects\\some-project', source: 'local' };
+const REMOTE_ROW = { cwd: '/home/user/projects/x', source: 'build-host' };
+
+test('строка местного источника переводу не подлежит', () => {
+  // Её путь уже местный. Перевод отдавал бы null, и вместе с ним из меню
+  // пропадали бы все действия с папкой, Open plan и Open spec.
+  assert.strictEqual(mapRowPath(LOCAL_ROW, WIN), '<drive>:\\projects\\some-project');
+});
+
+test('строка с чужой машины переводится как прежде', () => {
+  assert.strictEqual(mapRowPath(REMOTE_ROW, WIN), '\\\\nas\\home\\projects\\x');
+});
+
+test('строка без источника переводится как прежде', () => {
+  // Старый ответ агрегатора источника не проставляет вовсе.
+  assert.strictEqual(mapRowPath({ cwd: '/home/user/projects/x' }, WIN), '\\\\nas\\home\\projects\\x');
+});
+
+test('местная строка без каталога — по-прежнему null', () => {
+  assert.strictEqual(mapRowPath({ source: 'local' }, WIN), null);
+});
+
+test('каталог строки никто не переводит мимо mapRowPath', () => {
+  // Правило «местная строка уже местная» живёт в одном месте, и вызов
+  // напрямую его обходит молча: действия просто исчезают из меню.
+  const files = ['sessions.html', 'frontend-src/session-actions.js'];
+  const offenders = [];
+  for (const rel of files) {
+    const text = fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
+    text.split('\n').forEach((line, i) => {
+      if (/mapPath\(\s*(row|\(row \|\| \{\}\))\./.test(line)) {
+        offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepStrictEqual(offenders, []);
 });
