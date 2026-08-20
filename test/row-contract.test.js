@@ -2124,7 +2124,7 @@ test('число реплик доезжает с ответа агрегато�
   const { items } = renderSessionRows(
     { ok: true, sessions: [aggregatorSession({ prompts: 97 })] },
     '', { showPaths: true, showPrompts: true });
-  assert.match(items[1].html, /<div class="prompts">✎97<\/div>/);
+  assert.match(items[1].html, /<div class="prompts">🗨︎97<\/div>/);
 });
 
 test('комментарий доезжает с ответа агрегатора до строки под ответом', () => {

@@ -31,6 +31,68 @@ test('строка собирается из сессии и её записи �
   assert.strictEqual(rows[0].lastActivity, 500);
 });
 
+// ── Запись, собранная агрегатором из хвоста транскрипта ────────────────────
+//
+// На машине без хуков — ни на Windows, ни на маке — записи агента раньше не
+// было вовсе, и строка вечно показывала серый кружок. Теперь запись есть, но
+// написал её не хук, и отличается она полем `source`.
+
+test('состояние из хвоста доезжает до кружка', () => {
+  const rows = buildSessionList({
+    sessions: [state({ agent: {
+      state: 'question', question: 'Merge strategy?', updated: 500,
+      source: 'transcript',
+    } })],
+    seen: {},
+  });
+  assert.strictEqual(rows[0].agentState, 'question');
+  assert.strictEqual(rows[0].agentDescription, 'Merge strategy?');
+  assert.strictEqual(rows[0].agentSource, 'transcript');
+});
+
+test('запись из хвоста не считается отметкой хука', () => {
+  // agentUpdated отвечает ровно на один вопрос — «есть ли что отматывать
+  // пунктами Mark seen/Mark unread». У записи из хвоста `updated` непустой, но
+  // это время файла, а не отметка агента: отматывать по-прежнему нечего.
+  // Прежде вопрос решало отсутствие записи целиком, и с её появлением пункты
+  // включились бы там, где не работают.
+  const tail = buildSessionList({
+    sessions: [state({ agent: { state: 'review', updated: 500, source: 'transcript' } })],
+    seen: {},
+  });
+  assert.strictEqual(tail[0].agentUpdated, 0);
+  const hook = buildSessionList({
+    sessions: [state({ agent: { state: 'review', updated: 500 } })],
+    seen: {},
+  });
+  assert.strictEqual(hook[0].agentUpdated, 500);
+});
+
+test('кружок записи из хвоста гаснет по отметке взгляда', () => {
+  // Гашение держится на `updated`, и ноль оставил бы жёлтый вопрос гореть
+  // после захода в сессию навсегда. Поэтому ноль подставляется только в
+  // agentUpdated, а сама запись время сохраняет.
+  const sessions = [state({ agent: {
+    state: 'question', updated: 500, source: 'transcript',
+  } })];
+  assert.strictEqual(buildSessionList({ sessions, seen: {} })[0].agentSeen, false);
+  assert.strictEqual(buildSessionList({ sessions, seen: { a: 499 } })[0].agentSeen, false);
+  assert.strictEqual(buildSessionList({ sessions, seen: { a: 500 } })[0].agentSeen, true);
+});
+
+test('запись из хвоста датирует строку так же, как датировал её файл', () => {
+  // `updated` собранной записи — тот же mtime транскрипта, на который строка
+  // откатывалась и до её появления. Значит число в колонке возраста не
+  // изменилось: правка чинит кружок, а не время.
+  const rows = buildSessionList({
+    sessions: [state({ mtime: 500, agent: {
+      state: 'review', updated: 500, source: 'transcript',
+    } })],
+    seen: {},
+  });
+  assert.strictEqual(rows[0].lastActivity, 500);
+});
+
 test('клиент сессии доезжает до строки', () => {
   const rows = buildSessionList({
     sessions: [state({ entrypoint: 'claude-desktop' })],

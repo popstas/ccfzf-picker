@@ -54,7 +54,7 @@
       // клетка здесь выпадает из карточки целиком (см. фильтр ниже), и это то
       // же решение, что и в строке списка: показанный ноль был бы
       // единственным числом карточки, которое врёт.
-      ['context', desktopApi.inDesktopApp(s) ? '' : `${s.agentContextPct || 0}%`],
+      ['context', desktopApi.knowsContext(s) ? `${s.agentContextPct || 0}%` : ''],
       ['branch', s.branch ?? ''],
       ['pr_url', s.pr_url ?? ''],
       ['agent', s.agentBackground && s.agentSessionId ? `background · ${s.agentSessionId}` : ''],
