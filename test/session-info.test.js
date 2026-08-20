@@ -131,3 +131,16 @@ test('buildSessionInfoRows omits agent field when background is true but session
   const labels = rows.map(r => r.label);
   assert.ok(!labels.includes('agent'));
 });
+
+test('в карточке сессии приложения строки контекста нет', () => {
+  // Та же оговорка, что и в строке списка: доли контекста у Claude Desktop не
+  // бывает вовсе, и показанный ноль был бы единственным числом карточки,
+  // которое врёт. Два места об одном факте расходиться не должны.
+  const rows = buildSessionInfoRows({ entrypoint: 'claude-desktop', agentContextPct: 0 }, 1785870000);
+  assert.ok(!rows.some(r => r.label === 'context'), JSON.stringify(rows));
+});
+
+test('в карточке терминальной сессии контекст остаётся', () => {
+  const rows = buildSessionInfoRows({ entrypoint: 'cli', agentContextPct: 0 }, 1785870000);
+  assert.deepStrictEqual(rows.find(r => r.label === 'context'), { label: 'context', value: '0%' });
+});

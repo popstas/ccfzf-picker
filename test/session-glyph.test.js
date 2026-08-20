@@ -956,3 +956,36 @@ test('пустой список колонок не роняет мерку', ()
   // неё нулевая, а не пол-строки пустоты.
   assert.strictEqual(projectColumnWidths([{ sessionCount: 1 }], 0).todo, 0);
 });
+
+// ── Контекст у сессии приложения ───────────────────────────────────────────
+
+test('у сессии Claude Desktop доля контекста не показывается', () => {
+  // Считает её перехват статуслайна (claude-wt-statusline.sh), а статуслайна у
+  // приложения нет вовсе — то есть у такой строки там всегда «0%», и это не
+  // ноль, а отсутствие мерки. Цена показанного нуля здесь другая, чем у
+  // терминальной строки: там два случая неразличимы, а тут признак прямой.
+  const desktop = { entrypoint: 'claude-desktop', agentCostUsd: 0, agentContextPct: 0 };
+  assert.strictEqual(
+    usageHtml(desktop, { showCost: true, showContext: true }),
+    '<div class="usage"><span class="cost">$0</span></div>',
+  );
+});
+
+test('у терминальной строки доля контекста остаётся нулём, а не пустотой', () => {
+  // Правило про «0% честнее пустоты» не тронуто: там отличить «нет данных» от
+  // «данных ноль» по-прежнему нечем.
+  const cli = { entrypoint: 'cli', agentCostUsd: 0, agentContextPct: 0 };
+  assert.strictEqual(
+    usageHtml(cli, { showCost: true, showContext: true }),
+    '<div class="usage"><span class="cost">$0</span> · <span class="ctx">0%</span></div>',
+  );
+});
+
+test('у сессии приложения без цены колонка остаётся пустым элементом', () => {
+  // Колонки справа стоят друг за другом, и пропуск сдвинул бы соседей.
+  const desktop = { entrypoint: 'claude-desktop', agentContextPct: 0 };
+  assert.strictEqual(
+    usageHtml(desktop, { showCost: false, showContext: true }),
+    '<div class="usage"></div>',
+  );
+});

@@ -380,8 +380,14 @@
     const cost = Number.isFinite(session?.agentCostUsd) ? session.agentCostUsd : 0;
     const parts = [];
     const level = contextLevel(pct);
+    // У сессии приложения доли контекста не бывает вовсе: считает её перехват
+    // статуслайна, а статуслайна у Claude Desktop нет — то есть там всегда
+    // «0%». Оговорка к правилу выше, а не отмена его: там два случая
+    // неразличимы и ноль честнее пустоты, здесь же признак прямой, и
+    // показанный ноль — единственное число в строке, которое врёт.
+    const knowsContext = showContext && !listApi.inDesktopApp(session);
     if (showCost) parts.push(`<span class="cost">$${cost}</span>`);
-    if (showContext) parts.push(`<span class="ctx${level ? ` ${level}` : ''}">${pct}%</span>`);
+    if (knowsContext) parts.push(`<span class="ctx${level ? ` ${level}` : ''}">${pct}%</span>`);
     // Разделитель тот же, что у stateText: это две независимые величины, а не
     // одно число из двух частей, и пробела для такого мало.
     //
