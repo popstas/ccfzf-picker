@@ -169,8 +169,12 @@ jobs:
           **macOS** (Apple Silicon):
 
           ```
-          brew install --cask --no-quarantine popstas/ccfzf-picker/ccfzf-picker
+          brew trust --tap popstas/apps
+          brew install --cask --no-quarantine popstas/apps/ccfzf-picker
           ```
+
+          Homebrew 6.0.0+ will not load a cask from an untrusted tap, hence `brew trust` —
+          once per tap, not per app.
 
           `--no-quarantine` is required: the app is not signed with an Apple Developer ID,
           and Gatekeeper refuses unsigned apps with a "damaged" message.
@@ -194,7 +198,7 @@ jobs:
       - name: Check out tap repo
         uses: actions/checkout@v4
         with:
-          repository: popstas/homebrew-ccfzf-picker
+          repository: popstas/homebrew-apps
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 

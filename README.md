@@ -68,8 +68,13 @@
 **macOS** (Apple Silicon):
 
 ```
-brew install --cask --no-quarantine popstas/ccfzf-picker/ccfzf-picker
+brew trust --tap popstas/apps
+brew install --cask --no-quarantine popstas/apps/ccfzf-picker
 ```
+
+Homebrew 6.0.0+ не грузит каски из недоверенного тапа, поэтому первой идёт
+`brew trust` — один раз на тап, а не на каждое приложение. Отдельный
+`brew tap` не нужен: его делает сам `brew install user/tap/cask`.
 
 `--no-quarantine` здесь обязателен: приложение не подписано Developer ID, и
 без него Gatekeeper скажет «повреждено» — на поломку сборки это похоже
