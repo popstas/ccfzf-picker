@@ -1770,6 +1770,50 @@ fn open_desktop_session(id: String) -> Result<(), String> {
     spawn_url(url_opener(&url))
 }
 
+/// Путь папки в том виде, в каком его понимает открывашка этой системы.
+///
+/// На Windows папку открывают тем же `cmd /c start ""`, что и ссылку, а он
+/// **съедает обратные слэши** и папку не открывает вовсе. Прямой запуск
+/// `explorer.exe` там не сработал тоже — проверено ещё в windows-mqtt
+/// (`src/picker/session-open-helpers.js`), и единственная работающая форма
+/// осталась одна: прямые слэши. Тот же обход стоит в подстановке
+/// `{localPathSlash}` для настроенных человеком действий; здесь он второй раз
+/// не по недосмотру — там путь подставляют в чужой argv, а тут argv наш.
+///
+/// Признак системы аргументом, а не `cfg`: на машине разработки Windows-ветка
+/// не собирается вовсе, а перепутанный слэш — самый тихий отказ из возможных
+/// (папка просто не открывается, ошибки нет).
+///
+/// Пустой путь — названный отказ, а не тихое «ничего»: у `start` без пути
+/// открылось бы окно консоли в домашнем каталоге.
+fn folder_target(path: &str, windows: bool) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("empty folder path".into());
+    }
+    Ok(if windows {
+        trimmed.replace('\\', "/")
+    } else {
+        trimmed.to_string()
+    })
+}
+
+/// Открыть каталог в проводнике.
+///
+/// Повод один: Enter на строке проекта под Windows, у которой не нашлось
+/// открытого окна. Заводить там сессию нечем — местная дорога кончается
+/// `/bin/sh -c`, которого на этой машине нет, — и папка честнее молчания.
+///
+/// Через `spawn_url`, а не `spawn_detached`: та сознательно идёт мимо
+/// `hidden_command`, потому что у неё окно и есть цель, а здесь консоль
+/// `cmd /c start` вспыхивала бы на каждом нажатии — ровно то, за что уже
+/// заплачено открытием ссылки в приложение.
+#[tauri::command]
+fn open_folder(path: String) -> Result<(), String> {
+    let target = folder_target(&path, cfg!(target_os = "windows"))?;
+    spawn_url(url_opener(&target))
+}
+
 /// Запуск открывашки ссылки — **без своего окна**.
 ///
 /// Мимо `spawn_detached`, и это не дублирование: та сознательно идёт мимо
@@ -2597,7 +2641,7 @@ fn main() {
             restore_snapshot_mqtt, place_windows_mqtt, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
-            set_comment, open_in_editor, read_log, open_desktop_session
+            set_comment, open_in_editor, read_log, open_desktop_session, open_folder
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
@@ -2882,6 +2926,34 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+
+    /// Обратные слэши `cmd /c start` съедает, и папка не открывается вовсе —
+    /// ни ошибки, ни следа. Ветка эта на машине разработки не собирается, а
+    /// перепутанный слэш поведением не поймать: единственный сторож — здесь.
+    #[test]
+    fn folder_path_goes_to_windows_with_forward_slashes() {
+        assert_eq!(
+            super::folder_target("X:\\projects\\demo", true).unwrap(),
+            "X:/projects/demo",
+        );
+    }
+
+    /// На остальных системах путь не трогают: `open` и `xdg-open` берут его
+    /// как есть, а замена сломала бы каталог с обратным слэшем в имени.
+    #[test]
+    fn elsewhere_the_folder_path_is_left_alone() {
+        assert_eq!(
+            super::folder_target("/home/user/projects/x", false).unwrap(),
+            "/home/user/projects/x",
+        );
+    }
+
+    /// Пустой путь — названный отказ: у `start` без пути открылось бы окно
+    /// консоли в домашнем каталоге, и выглядело бы это сработавшей просьбой.
+    #[test]
+    fn an_empty_folder_path_is_a_named_failure() {
+        assert!(super::folder_target("   ", true).is_err());
+    }
 
     /// Каталог запуска — аргумент команды, а не `cd` внутри неё: у местной
     /// строки на Windows шелла нет вовсе, и склеивать команду было бы нечем.

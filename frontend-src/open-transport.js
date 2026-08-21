@@ -207,6 +207,39 @@
   }
 
   /**
+   * Строка своей машины на пикере, запущенном под Windows.
+   *
+   * Называет **факт**, а не последствие, и это не педантизм: последствий у
+   * факта два разных, и оба ломаются молча.
+   *
+   * Первое — шелла нет. Местную команду `commandParts` отдаёт как
+   * `['/bin/sh', '-c', …]`, а `/bin/sh` на Windows не существует: терминал
+   * получает лишний позиционный аргумент и отвечает разбором своей командной
+   * строки («The following arguments were not expected: /bin/sh -c»), то есть
+   * пункт меню не молчит, а показывает человеку чужую ошибку. Так живут
+   * `New session`, `Open terminal`, `Copy reptyr command` и `Resume in
+   * terminal`: windows-ветка `buildOpenCommand` покрывает только `resume`, а у
+   * живой сессии стратегия — `takeover` или `attach`, и она уходит через шелл.
+   *
+   * Второе — комментарий писать некому. На Windows местный агрегатор зовётся
+   * как `python ccfzf.py`, а ветку `--comment` разбирает bash-обёртка, которой
+   * там нет вовсе (`local_ccfzf::resolve`): `mode` становится `"--comment"`, ни
+   * одна ветка блока не совпадает, и он молча выходит с нулём. Текст со stdin
+   * пропадает, а пикер об этом не узнаёт — отказа не было.
+   *
+   * Мерка по строке, а не по системе пикера целиком: на Windows-пикере рядом
+   * стоят строки с ssh-источника, и у них все четыре пункта честно работают
+   * через `ssh -t host`. Спрятать их значило бы отобрать рабочее.
+   *
+   * `os` приходит той же меркой, что и у `buildOpenCommand` — `osOf` из
+   * `terminal-presets.js`. Незнанием системы (`os` не назван) правило
+   * выключается: пункт, спрятанный по догадке, хуже показанного.
+   */
+  function isWindowsLocalRow(row, os) {
+    return String(os || '') === 'windows' && String((row || {}).source || '') === 'local';
+  }
+
+  /**
    * Кто открывает терминал по каталогу: 'manager' | 'local'.
    *
    * Общая для двух поводов: Enter на строке проекта и «New session» (`^N` и
@@ -253,6 +286,6 @@
 
   return {
     chooseOpenTransport, canOpenRemote, chooseEnterAction, rowProjectDir,
-    chooseProjectOpenAction, noAutoplaceWanted, isDesktopRow,
+    chooseProjectOpenAction, noAutoplaceWanted, isDesktopRow, isWindowsLocalRow,
   };
 });

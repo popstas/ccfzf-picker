@@ -9,6 +9,11 @@
   const groupsApi = typeof module === 'object' && module.exports
     ? require('./session-groups')
     : globalThis.SessionGroups;
+  // Тем же порядком: session-windows.js стоит выше и в sessions.html (758
+  // против 793), и в prepare-frontend.js.
+  const windowApi = typeof module === 'object' && module.exports
+    ? require('./session-windows')
+    : globalThis.SessionWindows;
 
   /**
    * Строки проектов из ответа агрегатора.
@@ -163,5 +168,39 @@
     return parts.join('; ');
   }
 
-  return { buildProjectList, markHotkeysTaken, hotkeysTakenMessage };
+  /**
+   * Строка сессии, чьё окно и есть «окно этого проекта здесь».
+   *
+   * Нужна ровно одному поводу — Enter на строке проекта под Windows, где
+   * заводить сессию больше нечем: местная дорога кончается `/bin/sh -c`.
+   * Вместо неё сначала ищется уже открытое окно каталога, и только не найдя
+   * его, пикер открывает папку.
+   *
+   * Спрашивается `focusWindowOf`, а не `row.window`: вопрос здесь тот же, что
+   * у Enter на строке сессии — «есть ли у неё окно **на этой** машине,
+   * которое трекер согласен поднять», — и второе правило про то же самое
+   * разошлось бы с первым молча. Пометка ▣ у строки соседней машины стоит, а
+   * поднимать там нечего.
+   *
+   * Живость обязательна: слот переживает закрытие окна, и без этой проверки
+   * Enter уходил бы поднимать окно вчерашней сессии.
+   *
+   * Свежайшая — той же `compareSessions(…, 'recent')`, какой список сортирует
+   * сам себя, а не сравнением `lastActivity` на месте: округление до минуты и
+   * устойчивое разведение равных — одно правило, и две его копии разошлись бы
+   * на первой же правке. Каталог сверяется без приведения: `cwd` у строки
+   * проекта и у строки сессии приезжают из одного ответа агрегатора, и
+   * приводить их значило бы решать за него, какие пути считать одним.
+   */
+  function projectFocusRow(row, sessions, state, configHost) {
+    const dir = String((row || {}).cwd || '');
+    if (!dir) return null;
+    const found = (Array.isArray(sessions) ? sessions : [])
+      .filter(s => s && s.live && String(s.cwd || '') === dir
+        && windowApi.focusWindowOf(s, state, configHost));
+    if (!found.length) return null;
+    return found.sort((a, b) => groupsApi.compareSessions(a, b, 'recent'))[0];
+  }
+
+  return { buildProjectList, markHotkeysTaken, hotkeysTakenMessage, projectFocusRow };
 });

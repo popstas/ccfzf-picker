@@ -398,3 +398,86 @@ test('есть только спека — только её пункт', () => 
   const docs = acts.filter(a => a.id === 'plan' || a.id === 'spec').map(a => a.id);
   assert.deepStrictEqual(docs, ['spec']);
 });
+
+// --- Сессия приложения и своя строка под Windows --------------------------
+
+test('сессии приложения не предлагают reptyr', () => {
+  // pid у неё настоящий — агрегатор находит процесс, — то есть без оговорки
+  // пункт стоял бы в меню и давал команду, которой не за что взяться: reptyr
+  // перевешивает процесс на другой терминал, а терминала у сессии Claude
+  // Desktop нет вовсе.
+  const live = { ...DESKTOP_ROW, live: true, pid: 42 };
+  assert.ok(!availableActions(live).some(a => a.id === 'attach'));
+  // Та же строка, заведённая терминалом, пункт сохраняет: разница именно в
+  // происхождении, а не в живости или pid.
+  assert.ok(availableActions({ ...live, entrypoint: 'cli' }).some(a => a.id === 'attach'));
+});
+
+// Пункты, которые на своей строке под Windows не сработают. Причин две
+// разные, и обе молчаливые: `new`, `terminal`, `attach` и `resume` уходят
+// через `/bin/sh -c` (`commandParts`), которого там нет, а `comment` зовёт
+// местный агрегатор мимо bash-обёртки, где ветка `--comment` не разбирается
+// вовсе. Мерка на обе одна — `isWindowsLocalRow`.
+const SHELL_ITEMS = ['new', 'terminal', 'attach', 'resume', 'comment'];
+
+// Строка, несущая всё сразу: так видно не «что осталось», а «что мерка
+// пропускает» — тем же приёмом, что и сторож видов строк выше.
+const WIN_ROW = {
+  kind: 'interactive', id: 'abc123', cwd: 'X:\\projects\\demo', live: true, pid: 42,
+  entrypoint: 'claude-desktop', source: 'local',
+};
+
+test('под Windows у своей строки не остаётся ни одного пункта через шелл', () => {
+  const ids = availableActions(WIN_ROW, CONFIGURED, { os: 'windows' }).map(a => a.id);
+  for (const id of SHELL_ITEMS) assert.ok(!ids.includes(id), `${id} остался: ${ids.join(',')}`);
+  // Пустым меню при этом не становится: настроенное действие с папкой и
+  // «Session info» работают там как прежде.
+  assert.deepStrictEqual(ids, ['explorer', 'info']);
+});
+
+test('под Windows строка с ssh-источника пункты сохраняет', () => {
+  // Мерка по строке, а не по системе пикера: команда такой строки уходит
+  // `ssh -t host`, и все пять пунктов честно работают. Спрятать их значило
+  // бы отобрать рабочее.
+  const ids = availableActions(
+    { ...WIN_ROW, cwd: '/home/user/site', source: 'build-host', entrypoint: 'cli' },
+    CONFIGURED, { os: 'windows' },
+  ).map(a => a.id);
+  for (const id of ['new', 'terminal', 'attach', 'comment']) {
+    assert.ok(ids.includes(id), `${id} пропал: ${ids.join(',')}`);
+  }
+});
+
+test('на маке своя строка пункты сохраняет', () => {
+  const ids = availableActions(
+    { ...WIN_ROW, cwd: '/home/user/site', entrypoint: 'cli' }, CONFIGURED, { os: 'macos' },
+  ).map(a => a.id);
+  for (const id of ['new', 'terminal', 'attach', 'comment']) {
+    assert.ok(ids.includes(id), `${id} пропал: ${ids.join(',')}`);
+  }
+});
+
+test('несказанная система оставляет список прежним', () => {
+  // Пункт, спрятанный по догадке, хуже показанного: у вызова без `opts` —
+  // а такие есть в соседних тестах формы строки — поведение обязано остаться
+  // тем же, что и до появления мерки.
+  const withOpts = availableActions(WIN_ROW, CONFIGURED, {}).map(a => a.id);
+  assert.deepStrictEqual(availableActions(WIN_ROW, CONFIGURED).map(a => a.id), withOpts);
+  assert.ok(withOpts.includes('new'), withOpts.join(','));
+});
+
+test('под Windows своя строка проекта и строка снимка теряют те же два пункта', () => {
+  // Копий у `new` и `terminal` три — общая ветка, строка проекта и строка
+  // внутри снимка, — и правило обязано стоять при каждой, иначе оно работало
+  // бы через строку.
+  const project = availableActions(
+    { kind: 'project', id: 'X:\\projects\\demo', cwd: 'X:\\projects\\demo', source: 'local' },
+    CONFIGURED, { os: 'windows' },
+  ).map(a => a.id);
+  assert.deepStrictEqual(project, ['explorer']);
+  const snap = availableActions(
+    { kind: 'snapshot-session', id: 'abc123', cwd: 'X:\\projects\\demo', source: 'local' },
+    CONFIGURED, { os: 'windows' },
+  ).map(a => a.id);
+  assert.deepStrictEqual(snap, ['explorer']);
+});

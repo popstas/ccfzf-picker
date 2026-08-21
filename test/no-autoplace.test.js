@@ -31,11 +31,15 @@ function bodyOf(name, opts) {
     invoke: (cmd, args) => { sent[cmd] = args || {}; return Promise.resolve(); },
     CONFIG: { windowHost: 'pc-win', mqtt: { configured: true } },
     lastState: { windowHost: 'pc-win', windowPid: 4242, sessions: [] },
+    // Модификатор — про просьбу к менеджеру, а под Windows у своей строки
+    // просьбы нет вовсе: там открывается папка. Сторож про первую дорогу.
+    PICKER_OS: 'linux',
     window: {
       OpenTransport: {
         rowProjectDir: (row) => row.cwd,
         chooseProjectOpenAction: () => 'manager',
         chooseOpenTransport: () => 'manager',
+        isWindowsLocalRow: () => false,
       },
       OpenStrategy: { newSessionName: () => 'x-2' },
     },

@@ -39,10 +39,16 @@ function callsOf(name, extra = {}) {
     // Ровно то, чем эти четыре функции пользуются снаружи себя.
     CONFIG: { windowHost: 'pc-win', mqtt: { configured: true } },
     lastState: { windowHost: 'pc-win', windowPid: 4242, sessions: [] },
+    lastSessions: [],
+    // Система пикера: под Windows у openProjectRow своя ветка (папка вместо
+    // сессии), и общий сторож порядка проверяет не её — ей отдан свой тест
+    // ниже.
+    PICKER_OS: 'linux',
     window: {
       OpenTransport: {
         rowProjectDir: (row) => row.cwd,
         chooseProjectOpenAction: () => 'manager',
+        isWindowsLocalRow: () => false,
         // openViaManager спрашивает её про «свою машину» — признак едет в теле
         // просьбы (`sameMachine`). Без заглушки функция падала бы в свой же
         // catch, и сторож ловил бы не порядок вызовов, а отсутствие мока.
@@ -103,6 +109,21 @@ for (const [fn, command] of BRANCHES) {
       `${fn} гасит пикер после просьбы — окно потеряет фокус: ${calls.join(', ')}`);
   });
 }
+
+// Седьмая ветка живёт внутри openProjectRow и общим списком не проверяется:
+// команда у неё другая, и включается она только под Windows. Правило то же —
+// окно проводника выходит вперёд, значит гасить пикер надо до просьбы.
+test('openProjectRow под Windows гасит пикер до открытия папки', async () => {
+  const calls = await callsOf('openProjectRow', {
+    PICKER_OS: 'windows',
+    window: {
+      OpenTransport: { isWindowsLocalRow: () => true },
+      // Открытого окна у каталога нет — иначе ветка ушла бы в focusSession.
+      ProjectList: { projectFocusRow: () => null },
+    },
+  });
+  assert.deepStrictEqual(calls, ['hide_picker', 'open_folder'], calls.join(', '));
+});
 
 test('гашение не повторяется: второй hide_picker после просьбы — тот самый баг наоборот', async () => {
   for (const [fn] of BRANCHES) {
