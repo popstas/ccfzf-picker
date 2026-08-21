@@ -1,233 +1,126 @@
 # ccfzf-picker
 
-Пикер сессий Claude Code, живущих на удалённой машине. Список приезжает по ssh
-из агрегатора `ccfzf --state`, окно и глобальные хоткеи — Tauri 2, сессия
-открывается в терминале по вашему выбору.
+A picker for Claude Code sessions living on a remote machine. The list arrives
+over ssh from the `ccfzf` aggregator, the window and global hotkeys are Tauri 2,
+and a session opens in the terminal of your choice.
 
 ![fullscreen mode](assets/fullscreen.png)
 
-## Возможности
+*[Русская версия](README_ru.md)*
 
-- **Поиск по всему списку** — строка сверху, фильтрует все панели разом. Пять
-  префиксов режима (`/l`, `/r`, `/h`, `/p`, `/s`) оставляют на экране одну
-  панель. Забытая раскладка не мешает: `зшслук` находит `picker`.
-- **Свои живые сессии** — слева. Панель показывается всегда, даже пустой.
-- **Чужие живые сессии** — посередине, одним блоком; машины названы
-  подзаголовками (`mac`, `macbook`) и стоят по свежести.
-- **Проекты** — справа: звёздочка избранного, число сессий и живых среди них
-  (`125 · 1●`), проектный хоткей (`Ctrl+F11` открывает терминал в каталоге
-  проекта мимо пикера) и давность последней работы. Кружок слева различает
-  три состояния: зелёный — есть живые сессии, серый — были, прозрачный — не
-  было ни одной.
-- **Наведение или выбор на строке проекта приглушает чужие строки** — видно,
-  что принадлежит проекту, а что нет, во всех панелях сразу. В списке из
-  одних проектов не включается: отделять там нечего.
-- **Строка сессии** — имя, проект, последний запрос человека и ответ агента.
-  Устаревшие приглушены — и вместе с ними те, чьё окно свёрнуто на этой
-  машине; галка `dim stale` это выключает. Приглушённые строки не идут и в
-  раскладку плиткой. Одноимённые сессии
-  различаются пометкой: сперва именем машины, а если и оно совпало — хвостом
-  id.
-- **Кружок состояния** — зелёный: агент работает; жёлтый: спрашивает;
-  оранжевый: закончил, результат ещё не смотрели; серый: простаивает;
-  прозрачный: сессия закрыта.
-- **Колонки строки** — буква терминала, в котором открыто окно (`k` — kitty,
-  `i` — iTerm2, `z` — WezTerm), машина, короткий id сессии, занятая доля
-  контекста, возраст последней активности. Какие колонки рисовать — настройка.
-- **Ссылка на PR** — `↗ #19` у сессии, из которой он открыт.
-- **Сессии Claude Desktop** помечены буквой `c` в колонке окна, и Enter
-  возвращает их в само приложение, а не открывает терминал. Прежняя дорога
-  осталась пунктом `Resume in terminal` в меню `^K`. Работает у сессий этой
-  же машины: приложение поднимает сессию по транскрипту, а тот лежит там, где
-  её открывали.
-- **Меню `^K`** — действия над сессией; пункт срабатывает голой буквой, без
-  Ctrl. У своих действий из `config.yaml` буква задаётся полем `menuKey`.
-- **Ctrl+Enter или Ctrl+клик** — открыть сессию на том экране, где сейчас
-  мышь, и оставить окно там: оконный трекер не потянет его ни в место, где эта
-  сессия жила вчера, ни под правило из своего конфига. Работает там, где окна
-  открывает менеджер (Windows); галку `Open sessions on active display` при
-  этом не спрашивает — она про все открытия сразу, а модификатор про одно.
-- **Панели сворачиваются и переставляются** — `Snapshots - 20` и
-  `History - 92` свёрнуты, счёт виден и так; заголовок таскается мышью между
-  колонками, порядок переживает перезапуск. Колонок в широком режиме по
-  умолчанию три, а перетаскиванием — до пяти.
-- **Статуслайн** — сортировка, подсказка меню `^K`, галки-фильтры (`project`,
-  `only windowed`, `show all`, `dim stale`), справочник клавиш, переключатель
-  широкого режима и шестерёнка настроек.
+## Features
 
-## Установка
+- **One search line for every panel** — with five mode prefixes (`/l`, `/r`,
+  `/h`, `/p`, `/s`) to narrow to one. A forgotten keyboard layout still finds
+  it: `зшслук` matches `picker`.
+- **Sessions from every machine** — yours on the left, other machines' in the
+  middle, grouped by host and ordered by freshness.
+- **Projects panel** — favourites, session counts, per-project hotkeys, and a
+  dim of everything that does not belong to the project you point at.
+- **Status at a glance** — a colored circle per session (working, asking,
+  finished-unread, idle, closed), the terminal it is open in, context used, and
+  the age of the last activity.
+- **Enter opens the session** — in a terminal, or back inside Claude Desktop for
+  the sessions that came from it.
+- **Raises windows instead of opening new ones** — over MQTT, together with the
+  [window tracker](https://github.com/popstas/macos-windows-manager).
+- **Tile and cascade layouts** — a global hotkey asks the tracker to arrange the
+  windows in the order you see in the list.
+- **Layout snapshots** — `^S` restores a whole remembered arrangement of
+  sessions, or one window out of it.
+- **Wide mode** — `^F` turns the list into a dashboard: a session card next to
+  blocks of groups, projects and snapshots, each with its own scroll.
+- **Configurable without editing files** — a settings window for hotkeys,
+  columns, panel layout, window size and MQTT.
+- **Works with the window closed** — background polling keeps the list ready and
+  the aggregator's dump fresh for Home Assistant and openHASP.
 
-### Готовой сборкой
+## Install
 
-Каждый тег `v*` выкладывает в [релизы][releases] установщик под Windows и
-приложение под macOS.
+### Prebuilt
 
-**Windows** — скачайте `*-setup.exe` и запустите. Установка идёт в профиль
-пользователя, прав администратора не просит.
+Every `v*` tag publishes a Windows installer and a macOS app to the
+[releases page][releases].
+
+**Windows** — download `*-setup.exe` and run it. It installs into the user
+profile and does not ask for administrator rights.
 
 **macOS** (Apple Silicon):
 
-```
+```sh
 brew trust --tap popstas/apps
 brew install --cask --no-quarantine popstas/apps/ccfzf-picker
 ```
 
-Homebrew 6.0.0+ не грузит каски из недоверенного тапа, поэтому первой идёт
-`brew trust` — один раз на тап, а не на каждое приложение. Отдельный
-`brew tap` не нужен: его делает сам `brew install user/tap/cask`.
+Homebrew 6.0.0+ will not load casks from an untrusted tap, so `brew trust` comes
+first — once per tap, not per application. A separate `brew tap` is not needed:
+`brew install user/tap/cask` does it itself.
 
-`--no-quarantine` здесь обязателен: приложение не подписано Developer ID, и
-без него Gatekeeper скажет «повреждено» — на поломку сборки это похоже
-больше, чем на отсутствие подписи. Intel-маки не поддерживаются: сборка идёт
-только под arm64.
+`--no-quarantine` is mandatory here: the app is not signed with a Developer ID,
+and without it Gatekeeper says "damaged" — which looks more like a broken build
+than like a missing signature. Intel Macs are not supported: the build is arm64
+only.
 
 [releases]: https://github.com/popstas/ccfzf-picker/releases
 
-### Из исходников
+### From source
 
-Нужен Rust, Node 22+, `tauri-cli` (`cargo install tauri-cli`) и терминал на
-локальной машине; на удалённой — `ccfzf`.
-Без `tauri-cli` `cargo tauri build` упадёт с `no such subcommand: tauri`.
-
-Clone with `git clone --recurse-submodules`, or run `git submodule update --init`
-in an existing checkout — the vendored `vendor/ccfzf` aggregator is compiled
-into the binary, and without it the whole build fails.
-
-```
-npm test                      # тесты фронтенда
-cd src-tauri && cargo test    # тесты оболочки
-cargo tauri build             # сборка
+```sh
+git clone --recurse-submodules https://github.com/popstas/ccfzf-picker
+npm test                      # frontend tests
+cd src-tauri && cargo test    # shell tests
+cargo tauri build             # build
 ```
 
-## Настройка
+Requires Rust, Node 22+ and `tauri-cli` (`cargo install tauri-cli`); the remote
+machine needs `ccfzf`. The submodules are not optional — the vendored aggregator
+is compiled into the binary.
 
-Скопируйте `config.example.yml` в `~/.config/ccfzf-picker/config.yaml`
-(на Windows — `%USERPROFILE%\.config\ccfzf-picker\config.yaml`) и укажите
-`sshHost`. Без него пикер покажет, что конфиг не настроен: умолчания у хоста
-нет намеренно.
+→ Layout of the source tree and what each script does:
+[docs/architecture.md](docs/architecture.md).
 
-Каждое поле описано комментарием прямо в `config.example.yml`.
+## Configuration
 
-### Sessions from this machine
+Copy `config.example.yml` to `~/.config/ccfzf-picker/config.yaml` (on Windows,
+`%USERPROFILE%\.config\ccfzf-picker\config.yaml`) and set `sshHost`. There is
+deliberately no default host — without one the picker says the config is not set
+up. Every field is documented by a comment in `config.example.yml`.
 
-`localSource: true` adds a second source: the picker runs `ccfzf --state` here,
-as a process, without ssh. Both lists are shown as one — a session keeps the
-machine of its window, and a session with no window belongs to the source that
-reported it.
+Three things worth knowing before reaching for the file:
 
-`ccfzf` is taken from `PATH`. If it is not there, the picker unpacks the copy
-built into the binary (`~/.config/ccfzf-picker/ccfzf`) and runs it through
-`bash`. `PATH` comes first on purpose: on a machine where `ccfzf` is already
-installed, it is the one that rewrites `~/.ccfzf.sessions.json` — the dump the
-window tracker, the Home Assistant export and the openHASP panel live on.
+- `localSource: true` adds a second source — the picker runs `ccfzf --state` on
+  this machine as well, without ssh, and shows both lists as one.
+- `pathMap` maps remote directories onto local ones, which is what turns on the
+  folder-opening actions from `actions`.
+- `mqtt` plus a matching `windowHost` is what enables window raising, layout
+  snapshots and tiling.
 
-Linux and macOS only: `ccfzf` is a bash wrapper around an embedded python
-program, and neither it nor the bundled copy runs on native Windows.
+→ All three in full, plus background refresh:
+[docs/configuration.md](docs/configuration.md).
 
-With `localSource` on, `sshHost` may be left empty — one source is a working
-setup. Local sessions get no window mark and no Enter-to-focus until the window
-tracker on this machine learns to bind them; that is a separate task.
+## Settings window
 
-Если каталоги удалённого хоста примонтированы к этой машине, укажите `pathMap`
-— пару «путь там ⇄ путь здесь». По ней пикер добавит к каждой сессии действия
-открытия папки из `actions`: проводник, Finder, редактор — что пропишете. Пикер
-не знает приложений по имени, он подставляет путь в `argv` и запускает; команду
-и хоткей задаёте вы. Пункт меню `^K` можно вдобавок повесить на голую букву —
-`menuKey`; она работает только при открытом меню, поэтому ей достаются и те
-буквы, которые пикер держит за собой под Ctrl. Без `pathMap` этих действий не
-будет, и сессия, чей каталог лежит вне общего дерева, их тоже не получит.
+The gear in the status line (or `Ctrl+,` / `Cmd+,`) opens a settings window with
+tabs for General, Window popup, Columns, Layout panels, Hotkeys, MQTT and Paths.
+Edits save themselves and apply at once, hotkeys included — no restart.
 
-Если настроен `mqtt` и `windowHost` совпадает с машиной, где видны окна, у
-пикера появляется режим снимков — `^S` или `/s` в строке поиска. Снимок
-раскладки запоминает оконный трекер, когда состав открытых сессий устоялся;
-Enter на заголовке поднимает раскладку целиком, на строке сессии — одну её.
-Снимки приезжают тем же ответом агрегатора, что и список; своего клиента у
-пикера для них нет.
+Note that saving rewrites `config.yaml` in full and **does not preserve its
+comments**, keeping the previous version as `config.yaml.bak`.
 
-`^F` разворачивает окно в широкий режим: сессия показана карточкой с запросом
-и ответом агента, а группы, проекты и снимки стоят рядом блоками, у каждого
-свой скролл. `↑/↓` ходят внутри блока, `←/→` — между блоками. Всё остальное —
-поиск, префиксы, действия, Enter — работает так же, как в узком списке;
-режим помнится в `ui.json` и переживает перезапуск.
+→ Every tab, and the saving rules: [docs/settings.md](docs/settings.md).
 
-## Настройки
+## Documentation
 
-Окно настроек открывается шестерёнкой справа в статуслайне или `Ctrl+,`
-(`Cmd+,` на маке). Слева вкладки, справа страница:
+- [docs/interface.md](docs/interface.md) — panels, the session row, keys, status line
+- [docs/configuration.md](docs/configuration.md) — `config.yaml`, local sources, path mapping, MQTT
+- [docs/settings.md](docs/settings.md) — the settings window
+- [docs/architecture.md](docs/architecture.md) — source layout, build and tests
+- [docs/window-layouts.md](docs/window-layouts.md) — asking the tracker to tile or cascade (ru)
+- [docs/TODO.md](docs/TODO.md) — what is deferred, and why (ru)
+- [CLAUDE.md](CLAUDE.md) — build rules and the bugs already paid for (ru)
 
-- **General** — хост с сессиями, терминал, показывать ли только работающие
-  сессии, гасить ли окно при потере фокуса, опрашивать ли при закрытом окне,
-  приглушение устаревших сессий и проектов, имя этой машины (по нему Enter
-  решает, поднимать ли уже открытое окно).
-- **Window popup** — по ширине и высоте на каждую раскладку, узкую и широкую:
-  радиокнопка `Default` (встроенный размер, одинаковый на любом экране) или
-  доля экрана, либо своё число пикселей в поле рядом. На большом мониторе
-  `80% of screen` по высоте узкого списка вмещает заметно больше сессий. Тут
-  же — приглушение рабочего стола позади пикера, отдельной галкой на каждую
-  раскладку.
-- **Columns** — по каждой колонке две галки: `list` — рисовать ли колонку в
-  строке, `statusline` — выносить ли её галку в строку внизу. Место в
-  статуслайне ограничено, и что туда попадёт, решаете вы.
-- **Layout panels** — порядок, свёрнутость и видимость панелей широкого
-  режима (`^F`): какую колонку занимает панель и по каким осям.
-- **Hotkeys** — глобальный хоткей пикера, хоткей режима проектов, хоткей
-  плитки (просит оконный трекер разложить окна этой машины в порядке списка —
-  см. [docs/window-layouts.md](docs/window-layouts.md)) и проектные хоткеи.
-  Комбинация не набирается текстом: нажмите на поле и нажмите клавиши, а
-  `Clear` вернёт встроенное умолчание. Тут же — что делают клик и средний
-  клик по иконке трея: показать список, показать проекты или разложить окна
-  плиткой. Правая кнопка открывает меню трея, и переназначить её нельзя.
-- **MQTT** — брокер, через который идут подъём окна, снимки раскладки и
-  открытие сессии на машине с оконным трекером.
-- **Paths** — соответствие каталогов (`pathMap`) между этой машиной и
-  удалённой. Действия открытия папки показываются, но правятся только в
-  `config.yaml`.
+## Related
 
-Правка сохраняется сама через 400 мс после паузы в наборе; кнопка Save делает
-то же самое сразу, не дожидаясь паузы. Сохранение вкладок Columns и Layout
-panels пишет `~/.config/ccfzf-picker/ui.json`, остальных —
-`~/.config/ccfzf-picker/config.yaml`. Изменения применяются сразу, включая
-хоткеи: перезапуск не нужен.
-
-**`config.yaml` после первого сохранения из окна теряет комментарии.** Файл
-переписывается целиком, и сохранить пометки при этом нечем. Прежний файл
-остаётся рядом как `config.yaml.bak`, а описание всех ключей всегда лежит в
-`config.example.yml`. Оба файла сохранение закрывает от посторонних (`0600`
-там, где права такие есть): в конфиге лежит пароль брокера.
-
-## Фоновое обновление
-
-Пикер опрашивает агрегатор и при закрытом окне: раз в минуту, а при тишине
-реже — 2, 4, 8 минут, — и снова раз в минуту, как только что-то изменилось.
-Так список готов к следующему открытию, а `ccfzf --state` держит свежим свой
-дамп, с которого живут экспорт в Home Assistant и панель openHASP. Выключается
-ключом `backgroundRefresh: false`.
-
-## Как устроено
-
-- `frontend-src/` — чистые функции и отрисовка, каждый файл в UMD-шиме:
-  работает и как `<script>`, и как CommonJS-модуль в тестах. Порядок тегов в
-  `sessions.html` — часть контракта: модуль берёт соседа из `globalThis` в
-  момент загрузки. Сторожит это `test/frontend-load.test.js`.
-- `sessions.html` — окно пикера: разметка, стили и вся запись в DOM.
-- `src-tauri/` — оболочка: окно, трей, глобальные хоткеи, чтение конфига,
-  вызов ssh.
-- `scripts/prepare-frontend.js` — собирает статику в `frontend/` копированием,
-  без сборщика. Запускается из `beforeBuildCommand` в Tauri.
-- `scripts/check-state.js` — прогон живого ответа агрегатора через ту же
-  проверку формы, что и тесты: `ccfzf --state | node scripts/check-state.js`.
-- `scripts/make-icons.py` — иконки приложения из иконки трея:
-  `python3 scripts/make-icons.py`. Руками рисуется только
-  `src-tauri/icons/favicon.png`, остальное в `src-tauri/icons/` — вывод скрипта.
-
-Тесты — только `node --test`, без зависимостей. Запускать `npm test`;
-`node --test test/` на этих версиях Node не работает. Агрегатор здесь не
-лежит и не проверяется: он живёт своим репозиторием со своими тестами, пути
-выписаны в скилле `/claude-wt`.
-
-## Документы
-
-- [CLAUDE.md](CLAUDE.md) — как собирать и какие правила уже оплачены багами.
-- [docs/TODO.md](docs/TODO.md) — что отложено и почему.
-- [docs/window-layouts.md](docs/window-layouts.md) — как просить оконный трекер
-  расставить окна плиткой или каскадом.
+- [ccfzf](https://github.com/popstas/ccfzf) — the aggregator this picker reads.
+- [macos-windows-manager](https://github.com/popstas/macos-windows-manager) —
+  the window tracker that binds terminal windows to sessions and lays them out.
