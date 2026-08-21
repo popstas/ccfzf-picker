@@ -197,7 +197,7 @@
         // клавиши задаются не тут — их называет `claudeWt.projects` у
         // windows11-manager, и пикер только вешает присланный список.
         { id: 'projectHotkeyAction', label: 'Per-project hotkey', type: 'choice',
-          default: 'focus', options: PROJECT_OPEN_ACTIONS,
+          default: 'new', options: PROJECT_OPEN_ACTIONS,
           hint: 'The keys themselves come from the window manager config.' },
         // Мышь стоит рядом с клавишами намеренно: вкладка отвечает на вопрос
         // «чем вызвать пикер», и клик по иконке — тот же вопрос. Полями типа

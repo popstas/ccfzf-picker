@@ -52,18 +52,20 @@ test('окно настроек предлагает ровно те дейст�
   }
 });
 
-test('умолчания входов разные и оба из той же таблицы', () => {
-  // Разные потому, что поводы разные: строку проекта выбирают глазами, уже
-  // открыв пикер, и просят ею начать работу; хоткей жмут вслепую, чтобы
-  // вернуться туда, где работа идёт. Названное мимо таблицы значило бы, что
-  // выпадашка открывается с пунктом, которого в ней нет, — то есть ни с каким.
+test('умолчания у обоих входов из той же таблицы', () => {
+  // Названное мимо таблицы значило бы, что выпадашка открывается с пунктом,
+  // которого в ней нет, — то есть ни с каким.
   const known = rustActions().map(a => a.value);
   const byId = Object.fromEntries(choiceFields().map(f => [f.id, f.default]));
   for (const [id, value] of Object.entries(byId)) {
     assert.ok(known.includes(value), `умолчание ${value} поля ${id} не из таблицы`);
   }
+  // Сегодня они совпали: от выбора проекта ждут начала работы, а вернуться в
+  // идущую сессию есть чем и без того — у неё своя строка в списке. Клавиши
+  // это касается вдвойне: её жмут при скрытом пикере, чей снимок отстаёт до
+  // восьми минут, и `focus` сбывался через раз.
   assert.strictEqual(byId.projectOpenAction, 'new');
-  assert.strictEqual(byId.projectHotkeyAction, 'focus');
+  assert.strictEqual(byId.projectHotkeyAction, 'new');
 });
 
 test('умолчания те же, по каким живут страница и Rust', () => {
@@ -71,7 +73,7 @@ test('умолчания те же, по каким живут страница 
   // делал бы другое: ключа в config.yaml нет, пока человек его не выбрал.
   assert.strictEqual(DEFAULTS.projectOpenAction, 'new');
   assert.ok(
-    HOTKEYS_RS.includes('project_open_action(&raw, "projectHotkeyAction", "focus")'),
+    HOTKEYS_RS.includes('project_open_action(&raw, "projectHotkeyAction", "new")'),
     'проектный хоткей читает не тот ключ или не с тем умолчанием',
   );
 });
