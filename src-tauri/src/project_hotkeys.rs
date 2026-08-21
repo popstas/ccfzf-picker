@@ -28,23 +28,31 @@ fn norm_host(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
-/// Чего хочет ответ агрегатора.
+/// Живые трекеры ответа поимённо: названа ли среди них эта машина.
 ///
-/// `None` — «трогать нечего»: либо ответ про окна ничего не знает (пустой
-/// `windowHost`: `read_windows` на той стороне на любой отказ возвращает
-/// пустоту целиком), либо окна на чужой машине. Различить «менеджер убрал
-/// хоткей» и «трекер лежит» больше нечем: строки `projects` в ответе есть
-/// всегда, они собираются из закладок ccfzf.
+/// Список `windowHosts` собирает `read_window_sources` из тех файлов окон,
+/// что разобрались и не протухли, — то есть «моё имя здесь есть» значит разом
+/// две вещи: имя в конфиге набрано верно и трекер на этой машине жив. Обе
+/// нужны и `wanted_from_state`, и `host_mismatch_note`, и второе их прочтение
+/// разошлось бы с первым.
 ///
-/// `Some(vec![])` — это «хоткеев нет», и он честно снимает регистрации:
-/// живой трекер сказал, что в конфиге пусто.
-pub fn wanted_from_state(state: &serde_json::Value, own_host: &str) -> Option<Vec<Project>> {
-    let host = state.get("windowHost").and_then(|v| v.as_str()).unwrap_or("");
-    let host_norm = norm_host(host);
-    let own_norm = norm_host(own_host);
-    if host_norm.is_empty() || own_norm.is_empty() || host_norm != own_norm {
-        return None;
+/// Имена приводятся `norm_host` — той же формулой, какой их сравнивает
+/// фронтенд (`normHost` в `session-windows.js`).
+fn names_tracker(state: &serde_json::Value, own_norm: &str) -> bool {
+    if own_norm.is_empty() {
+        return false;
     }
+    state
+        .get("windowHosts")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.get("host").and_then(|v| v.as_str()))
+        .any(|h| norm_host(h) == own_norm)
+}
+
+/// Хоткеи, какими они приехали в ответе: `projects` с непустой клавишей.
+fn hotkeys_of(state: &serde_json::Value) -> Vec<Project> {
     let mut out = Vec::new();
     for row in state
         .get("projects")
@@ -67,36 +75,101 @@ pub fn wanted_from_state(state: &serde_json::Value, own_host: &str) -> Option<Ve
         });
     }
     sort_by_cwd(&mut out);
-    Some(out)
+    out
+}
+
+/// Чего хочет ответ агрегатора.
+///
+/// Список в ответе один, и принадлежит он не машине, а самому ответу:
+/// хоткеи живут в конфиге windows11-manager, а проекты, на которые они
+/// указывают, лежат на машине источника и открываются оттуда с любой машины.
+/// Поэтому веток две.
+///
+/// **Своя машина** — верхний `windowHost` совпал с конфигом. Список берётся
+/// целиком, включая пустой: живой трекер сказал, что в конфиге пусто, и
+/// `Some(vec![])` честно снимает регистрации.
+///
+/// **Чужой список, взятый живой машиной** — имя этой машины названо среди
+/// `windowHosts`, а список непуст. Это мак: верхний `windowHost` называет ту
+/// машину, чьи хоткеи мы взяли (`lead` в `read_window_sources` предпочитает
+/// источник с хоткеями), то есть на маке он всегда чужой, и сравнение с ним
+/// значило «клавиши работают только на Windows». Пустой чужой список при этом
+/// не снимает ничего: ляжет Windows-трекер — `lead` съедет на мак, `projects`
+/// приедут без хоткеев, и прочти это Windows-машина как «хоткеев больше нет»,
+/// она снимала бы свои же клавиши на каждую перезагрузку соседа.
+///
+/// `None` — «трогать нечего»: ответ про окна ничего не знает (пустой
+/// `windowHost`: `read_windows` на той стороне на любой отказ возвращает
+/// пустоту целиком), либо своей машины нет среди живых трекеров, либо чужой
+/// список пуст. Различить «менеджер убрал хоткей» и «трекер лежит» больше
+/// нечем: строки `projects` в ответе есть всегда, они собираются из закладок
+/// ccfzf.
+pub fn wanted_from_state(state: &serde_json::Value, own_host: &str) -> Option<Vec<Project>> {
+    let host = state.get("windowHost").and_then(|v| v.as_str()).unwrap_or("");
+    let host_norm = norm_host(host);
+    let own_norm = norm_host(own_host);
+    if own_norm.is_empty() {
+        return None;
+    }
+    let list = hotkeys_of(state);
+    if !host_norm.is_empty() && host_norm == own_norm {
+        return Some(list);
+    }
+    if !list.is_empty() && names_tracker(state, &own_norm) {
+        return Some(list);
+    }
+    None
+}
+
+/// Возьмётся ли менеджер **этой** машины открыть терминал по просьбе.
+///
+/// Тот же ответ, что странице дают `openManager` и `chooseOpenTransport`
+/// (`session-windows.js`, `open-transport.js`): просьба уходит менеджеру
+/// только на его собственной машине, а не на первой попавшейся из списка.
+/// Спрашивается здесь потому, что клавишу жмут при скрытом пикере, где
+/// webview усыплён целиком, — по той же причине, по какой в Rust живут имя
+/// терминала и порядок плитки.
+///
+/// Мак объявляет `openSession: false`: терминалы там открывает сам пикер, и
+/// ушедшая туда просьба не нашла бы разбирающего — молча, ответа у публикации
+/// нет. Отсутствие поля читается как «берётся»: windows11-manager его не
+/// пишет и не должен, то же правило, что у `canFocus`.
+///
+/// Списка трекеров нет вовсе (старый агрегатор, ответа поллера ещё не было) —
+/// прежняя дорога, публикация: иначе Windows-машина первые секунды после
+/// старта, пока висят клавиши из `hotkeys.json`, уезжала бы на местную
+/// дорогу, которой у неё нет.
+pub fn manager_takes_open(state: &serde_json::Value, own_host: &str) -> bool {
+    let Some(hosts) = state.get("windowHosts").and_then(|v| v.as_array()) else {
+        return true;
+    };
+    let own_norm = norm_host(own_host);
+    if own_norm.is_empty() {
+        return false;
+    }
+    hosts.iter().any(|e| {
+        e.get("host").and_then(|v| v.as_str()).map(norm_host).as_deref() == Some(own_norm.as_str())
+            && e.get("openSession").and_then(|v| v.as_bool()) != Some(false)
+    })
 }
 
 /// Ответ несёт хоткеи, а взять их некому — сказать об этом ровно раз.
 ///
-/// Пустой или чужой `windowHost` на маке — это норма и умолчание: агрегатор
-/// рассказывает там про окна Windows-машины, хоткеев на маке не бывает, и
-/// строка об этом была бы шумом на каждом запуске. Но на самой
-/// Windows-машине незаполненный `windowHost` даёт ровно ту картину, ради
-/// которой всё и затевалось: клавиши не работают, и молчат обе стороны.
-/// Отличить эти два случая по конфигу нельзя — он одинаков; отличает их ответ,
-/// в котором либо есть хоткеи, либо нет. Обе стороны сравнения — в строке:
-/// иначе человеку негде увидеть, какое имя писать в конфиг.
+/// Взять чужой список вправе любая машина с живым трекером, поэтому остаётся
+/// ровно один случай, когда клавиш не будет при непустом списке: имени этой
+/// машины нет среди `windowHosts`. Причин у него две — опечатка в
+/// `windowHost` конфига и лежачий трекер, — и обе дают ровно ту картину, ради
+/// которой заметка и заведена: клавиши не работают, и молчат обе стороны.
+/// Обе стороны сравнения — в строке: иначе человеку негде увидеть, какое имя
+/// писать в конфиг.
 pub fn host_mismatch_note(state: &serde_json::Value, own: &str) -> Option<String> {
     if wanted_from_state(state, own).is_some() {
         return None;
     }
-    // Наше имя названо среди живых трекеров — значит, конфиг верен, а хоткеи
-    // просто приехали от соседней машины. Раньше этот случай был невозможен:
-    // трекер был один, и несовпадение имён значило опечатку. Теперь их
-    // несколько, и без этой проверки заметка ругалась бы на маке всегда.
-    let own_norm = norm_host(own);
-    let known = state
-        .get("windowHosts")
-        .and_then(|v| v.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.get("host").and_then(|v| v.as_str()))
-        .any(|h| norm_host(h) == own_norm);
-    if known && !own_norm.is_empty() {
+    // Наше имя названо среди живых трекеров, а список всё равно не взят —
+    // значит, он пуст, и жаловаться не на что. Заметка ниже говорит о
+    // непустом списке, до которого этой машине не дотянуться.
+    if names_tracker(state, &norm_host(own)) {
         return None;
     }
     let carries = state
@@ -399,11 +472,21 @@ fn take_press(reg: &Registered, cwd: &str, now: Instant) -> bool {
 
 /// Нажали проектный хоткей.
 ///
-/// Развилку «поднять окно или завести сессию» принимает не пикер, а менеджер:
-/// правило «последняя открытая сессия этого каталога» уже написано и покрыто
-/// тестами у него (`pickOpenProjectSession`), список пикера у скрытого окна
-/// отстаёт до восьми минут, и профиль Windows Terminal по каталогу знает тоже
-/// только он. Отсюда уходит просьба, а не решение.
+/// Дорог две, и выбирает между ними не место в коде, а тот же вопрос, каким
+/// его решает страница (`chooseProjectOpenAction`): берётся ли менеджер
+/// **этой** машины открывать терминалы.
+///
+/// Берётся — уходит просьба, а не решение. Развилку «поднять окно или завести
+/// сессию» принимает тогда менеджер: правило «последняя открытая сессия этого
+/// каталога» уже написано и покрыто тестами у него (`pickOpenProjectSession`),
+/// список пикера у скрытого окна отстаёт до восьми минут, и профиль Windows
+/// Terminal по каталогу знает тоже только он.
+///
+/// Не берётся (мак: `openSession: false`) или брокера нет вовсе — нажатие
+/// уезжает на страницу событием `project-hotkey`, и терминал открывает пикер
+/// сам, ровно как по Enter на строке проекта. Опубликуй мы просьбу и здесь,
+/// она ушла бы в топик, который никто не слушает, — молча, ответа у публикации
+/// нет.
 ///
 /// Живёт в этом файле, а не в `main.rs`: она про нажатие хоткея, а не про
 /// пикер вообще, и читается вместе с тем, кто её вешает.
@@ -436,14 +519,42 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
             serde_json::Value::Null
         }
     };
+    // Что делает нажатие: поднять открытое окно проекта (умолчание) или всегда
+    // заводить новую сессию. Умолчания у двух входов разные — у строки списка
+    // `new`, здесь `focus`, — и названы они у самих нажатий, а не в таблице:
+    // выбор строки просит начать работу, хоткей — вернуться туда, где она уже
+    // идёт. Читается на каждом нажатии, как терминал и курсор ниже.
+    //
+    // Считается до развилки транспорта: обеим дорогам нужно одно и то же
+    // решение, и второй его экземпляр на странице разошёлся бы с этим.
+    let action = crate::project_open_action(&raw, "projectHotkeyAction", "focus");
     let broker = crate::mqtt::broker_from_config(&raw);
-    if !broker.is_configured() {
-        // Конфиг прочитан, но брокера в нём нет либо он неполный (см.
-        // `is_configured` в `mqtt.rs`). Просить некого. Прежняя дорога:
-        // страница поднимет новую сессию сама — это и было поведением до
-        // всей правки, и без брокера другого нет.
-        ccfzf_log!("mqtt broker is not configured, falling back to a new session");
-        let _ = app.emit("project-hotkey", cwd.to_string());
+    let own = raw
+        .get("windowHost")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let takes_open = manager_takes_open(&last_state(app), own);
+    if !broker.is_configured() || !takes_open {
+        // Просить некого: либо брокера в конфиге нет (см. `is_configured` в
+        // `mqtt.rs`), либо менеджер этой машины открытием не занимается —
+        // мак. Прежняя дорога: страница открывает терминал сама, тем же
+        // способом, каким его открывает Enter на строке проекта.
+        //
+        // Действие едет с каталогом: `projectHotkeyAction` читает Rust (у
+        // скрытого пикера webview усыплён), а страница про этот ключ не знает
+        // — у неё свой, `projectOpenAction`, и он про другой повод.
+        ccfzf_log!(
+            "{}, opening {cwd} from the picker itself",
+            if broker.is_configured() {
+                "no manager takes open requests on this machine"
+            } else {
+                "mqtt broker is not configured"
+            }
+        );
+        let _ = app.emit(
+            "project-hotkey",
+            serde_json::json!({ "cwd": cwd, "action": action }),
+        );
         return;
     }
 
@@ -468,18 +579,12 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
     let terminal = crate::mqtt::terminal_name(&raw);
     // Точка курсора — оттуда же и по той же причине, что имя терминала: галка
     // `openOnActiveDisplay` живёт в конфиге, а спросить страницу нельзя. Своя
-    // ли это машина, здесь не спрашивают: хоткеи вешаются только когда
-    // `windowHost` трекера совпал с конфигом, то есть на своей же.
+    // ли это машина, здесь не спрашивают: до этой строки доезжает только та,
+    // чей менеджер сам и принимает просьбу (`manager_takes_open` выше).
     // Ctrl у клавиши нет: нажимают её вслепую, при скрытом пикере, — то есть
     // «открой там, куда я смотрю» здесь спросить не у кого. Отсюда `false`, и
     // просьба уходит с одной лишь галкой, как уходила всегда.
     let place = crate::placement(app, &raw, false);
-    // Что делает нажатие: поднять открытое окно проекта (умолчание) или всегда
-    // заводить новую сессию. Умолчания у двух входов разные — у строки списка
-    // `new`, здесь `focus`, — и названы они у самих нажатий, а не в таблице:
-    // выбор строки просит начать работу, хоткей — вернуться туда, где она уже
-    // идёт. Читается на каждом нажатии, как терминал и курсор рядом.
-    let action = crate::project_open_action(&raw, "projectHotkeyAction", "focus");
     // Ветка на каждое значение `PROJECT_OPEN_ACTIONS`; сторож —
     // `every_project_open_action_is_handled` в main.rs. Значение без ветки
     // нажатие бы проглотило: ни ошибки, ни следа.
@@ -513,6 +618,19 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
     });
 }
 
+/// Последний ответ поллера, или `Null` — «спросить не у кого».
+///
+/// Один читатель на два вопроса нажатия: куда уходит просьба
+/// (`manager_takes_open`) и какие имена сессий заняты (`new_session_name`).
+/// Ответ берётся у поллера, а не спрашивается заново: спрашивать — это ssh на
+/// той стороне, а мы стоим в обработчике клавиши.
+fn last_state(app: &tauri::AppHandle) -> serde_json::Value {
+    app.try_state::<crate::poller::Poller>()
+        .map(|p| p.snapshot())
+        .and_then(|s| s.get("state").cloned())
+        .unwrap_or(serde_json::Value::Null)
+}
+
 /// Свободное имя для сессии, которую заведёт это нажатие.
 ///
 /// Занятые — заголовки живых сессий из последнего ответа поллера плюс имена,
@@ -525,11 +643,7 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
 /// нему командную строку до всякого шелла) или каталог без basename. Вызывающий
 /// на неё откатывается к прежней просьбе, а не молчит.
 fn new_session_name(app: &tauri::AppHandle, cwd: &str) -> String {
-    let state = app
-        .try_state::<crate::poller::Poller>()
-        .map(|p| p.snapshot())
-        .and_then(|s| s.get("state").cloned())
-        .unwrap_or(serde_json::Value::Null);
+    let state = last_state(app);
     let mut taken = crate::session_name::live_names(&state);
     taken.extend(crate::session_name::issued(Instant::now()));
     let name = crate::session_name::new_session_name(cwd, &taken);
@@ -814,6 +928,106 @@ mod tests {
     fn a_live_tracker_with_no_hotkeys_clears_them() {
         let s = state("tracker-host", serde_json::json!([{"path": "/p/one"}]));
         assert_eq!(wanted_from_state(&s, "tracker-host"), Some(vec![]));
+    }
+
+
+    /// Мак берёт список, опубликованный Windows-машиной.
+    ///
+    /// Верхний `windowHost` называет ту машину, чей это список (`lead` в
+    /// `read_window_sources` предпочитает источник с хоткеями), и до этой
+    /// правки сравнение с ним значило «клавиши работают только там». На маке
+    /// проекты те же самые — они лежат на машине ssh-источника, — и открыть их
+    /// оттуда пикер умеет; терять из-за имени машины было нечего.
+    #[test]
+    fn a_live_tracker_takes_the_published_list() {
+        let s = serde_json::json!({
+            "windowHost": "tracker-host",
+            "windowHosts": [{"host": "tracker-host"}, {"host": "mac"}],
+            "projects": [{"path": "/p/one", "hotkey": "Ctrl+F11"}],
+        });
+        assert_eq!(
+            wanted_from_state(&s, "mac"),
+            Some(vec![Project { cwd: "/p/one".into(), hotkey: "Ctrl+F11".into() }])
+        );
+    }
+
+    /// Взять чужой список вправе только машина с живым трекером: её имя
+    /// названо среди `windowHosts`. Не названо — это либо опечатка в конфиге,
+    /// либо лежачий трекер, и в обоих случаях вешать клавиши не на что
+    /// опереться: `press` этой же машины спросит тот же список о том, куда
+    /// уходит просьба.
+    #[test]
+    fn a_machine_no_tracker_knows_takes_nothing() {
+        let s = serde_json::json!({
+            "windowHost": "tracker-host",
+            "windowHosts": [{"host": "tracker-host"}],
+            "projects": [{"path": "/p/one", "hotkey": "Ctrl+F11"}],
+        });
+        assert_eq!(wanted_from_state(&s, "mac"), None);
+    }
+
+    /// Пустой чужой список не снимает ничего: снимать вправе только хозяин.
+    ///
+    /// Случай живой: ляжет Windows-трекер — `lead` съедет на мак, и верхним
+    /// хостом станет он, а `projects` останутся без хоткеев. Прочти это
+    /// Windows-машина как «хоткеев больше нет», она сняла бы свои же клавиши
+    /// на каждую перезагрузку соседа.
+    #[test]
+    fn a_foreign_empty_list_clears_nothing() {
+        let s = serde_json::json!({
+            "windowHost": "mac",
+            "windowHosts": [{"host": "mac"}, {"host": "tracker-host"}],
+            "projects": [{"path": "/p/one"}],
+        });
+        assert_eq!(wanted_from_state(&s, "tracker-host"), None);
+    }
+
+    /// Своя машина ведёт себя как раньше и на пустом списке — снимает.
+    #[test]
+    fn the_owner_still_clears_on_an_empty_list() {
+        let s = serde_json::json!({
+            "windowHost": "tracker-host",
+            "windowHosts": [{"host": "tracker-host"}, {"host": "mac"}],
+            "projects": [{"path": "/p/one"}],
+        });
+        assert_eq!(wanted_from_state(&s, "tracker-host"), Some(vec![]));
+    }
+
+    /// Просьбу об открытии принимает та машина, которая объявила `openSession`.
+    ///
+    /// Тот же ответ, что даёт странице `openManager` + `chooseOpenTransport`:
+    /// менеджеру просьба уходит только на его собственной машине. На маке
+    /// (`openSession: false`) она ушла бы в топик, который никто не слушает, —
+    /// молча, потому что ответа у публикации нет.
+    #[test]
+    fn only_the_manager_machine_takes_the_request() {
+        let s = serde_json::json!({"windowHosts": [
+            {"host": "tracker-host", "openSession": true},
+            {"host": "mac", "openSession": false},
+        ]});
+        assert!(manager_takes_open(&s, "tracker-host"));
+        assert!(!manager_takes_open(&s, "mac"));
+        assert!(!manager_takes_open(&s, "macbook"), "машины нет в списке вовсе");
+        assert!(!manager_takes_open(&s, ""), "своё имя не названо");
+    }
+
+    /// Отсутствие поля `openSession` значит «берётся»: windows11-manager его
+    /// не пишет и не должен — то же правило, что у `canFocus`.
+    #[test]
+    fn a_tracker_without_the_field_takes_the_request() {
+        let s = serde_json::json!({"windowHosts": [{"host": "tracker-host"}]});
+        assert!(manager_takes_open(&s, "TRACKER-HOST"), "регистр имени машины не значит ничего");
+    }
+
+    /// Списка трекеров нет вовсе — старый агрегатор или ответа ещё не было.
+    /// Прежняя дорога: просьба уходит менеджеру, как уходила всегда. Иначе
+    /// Windows-машина первые секунды после старта (клавиши висят с
+    /// `hotkeys.json`, ответа поллера ещё нет) уезжала бы на местную дорогу,
+    /// которой у неё нет.
+    #[test]
+    fn without_a_tracker_list_the_request_goes_as_before() {
+        assert!(manager_takes_open(&serde_json::json!({}), "tracker-host"));
+        assert!(manager_takes_open(&serde_json::Value::Null, "tracker-host"));
     }
 
     #[test]

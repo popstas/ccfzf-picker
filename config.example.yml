@@ -58,8 +58,10 @@ trayMiddleClickAction: tile
 # `claudeWt.projects` у windows11-manager, пикер только вешает присланный
 # список) жмут вслепую, чтобы вернуться туда, где работа идёт.
 #
-# Поднимать умеет только менеджер той машины: на машине без него пикер
-# заводит новую сессию при любом значении — поднимать нечем.
+# На машине с менеджером выбор снимается вовсе — просьба уходит ему, и
+# развилку принимает он. Без менеджера (мак) пикер решает сам: под `focus`
+# ищет открытое окно каталога на этой машине и просит трекер поднять его, а
+# не найдя — открывает терминал.
 projectOpenAction: new
 projectHotkeyAction: focus
 
@@ -235,4 +237,6 @@ backgroundRefresh: true
 
 # Project hotkeys live in windows11-manager (claudeWt.projects) and reach the
 # picker through `ccfzf --state`. There is no key for them here on purpose: two
-# lists kept in sync by hand is exactly what this replaced.
+# lists kept in sync by hand is exactly what this replaced. The list belongs to
+# the answer, not to one machine: every picker whose windowHost is a live
+# tracker registers it, and opens the project the way it opens any other row.

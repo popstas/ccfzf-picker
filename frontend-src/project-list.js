@@ -202,5 +202,40 @@
     return found.sort((a, b) => groupsApi.compareSessions(a, b, 'recent'))[0];
   }
 
-  return { buildProjectList, markHotkeysTaken, hotkeysTakenMessage, projectFocusRow };
+  /**
+   * Куда ведёт нажатый проектный хоткей: `{cwd, action, source}` или `null`.
+   *
+   * Тело события `project-hotkey` приезжает из Rust: `projectHotkeyAction`
+   * читает он — клавишу жмут при скрытом пикере, где webview усыплён целиком,
+   * — а страница только исполняет. Ключ у хоткея свой, и путать его с
+   * `projectOpenAction` нельзя: тот про Enter на строке проекта, поводы разные
+   * и умолчания у них разные.
+   *
+   * Источник берётся у строки проекта из последнего ответа, а не у
+   * `CONFIG.sshHost`: местная строка, открытая ssh-командой, уехала бы
+   * заводить сессию на удалённой машине. То же правило, по которому живёт
+   * `commandParts`. Строки в ответе может и не быть — у скрытого пикера он
+   * отстаёт до восьми минут, — и тогда пустой источник читается как «бери
+   * `sshHost` из конфига», ровно как у любой строки без метки.
+   *
+   * Прежнее тело — просто строка с каталогом — понимается тоже: неизвестное
+   * действие обязано значить прежнее поведение, а не непонятую команду.
+   */
+  function projectHotkeyTarget(payload, projects) {
+    const object = payload && typeof payload === 'object' ? payload : null;
+    const cwd = object ? String(object.cwd || '') : String(payload || '');
+    if (!cwd) return null;
+    const row = (Array.isArray(projects) ? projects : [])
+      .find(p => p && String(p.cwd || '') === cwd);
+    return {
+      cwd,
+      action: object ? String(object.action || '') : '',
+      source: row ? String(row.source || '') : '',
+    };
+  }
+
+  return {
+    buildProjectList, markHotkeysTaken, hotkeysTakenMessage, projectFocusRow,
+    projectHotkeyTarget,
+  };
 });
