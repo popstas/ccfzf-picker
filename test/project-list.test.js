@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   buildProjectList, markHotkeysTaken, hotkeysTakenMessage, projectFocusRow,
+  projectHotkeyTarget,
 } = require('../frontend-src/project-list');
 
 const STATE = {
@@ -277,4 +278,83 @@ test('из нескольких берётся свежайшая', () => {
 test('без каталога и без списка — пусто, а не отказ', () => {
   assert.strictEqual(projectFocusRow({ cwd: '' }, [sessionRow()], {}, HERE), null);
   assert.strictEqual(projectFocusRow({ cwd: '/home/user/projects/x' }, undefined, {}, HERE), null);
+});
+
+// --- нажатый проектный хоткей -----------------------------------------------
+
+// Тело события `project-hotkey`: каталог и что с ним делать. Приезжает оно из
+// Rust — `projectHotkeyAction` читает он, у скрытого пикера webview усыплён
+// целиком, — и страница обязана разобрать его так же терпимо, как разбирает
+// всё остальное чужое.
+
+test('нажатие называет каталог, действие и источник строки', () => {
+  // Источник берётся у строки проекта, а не у CONFIG.sshHost: местный проект,
+  // открытый ssh-командой, уехал бы на удалённую машину. Это то же правило,
+  // по которому живёт commandParts.
+  const rows = buildProjectList({
+    projects: [{ path: '/home/user/projects/ccfzf', name: 'ccfzf', source: 'local' }],
+  });
+  assert.deepStrictEqual(
+    projectHotkeyTarget({ cwd: '/home/user/projects/ccfzf', action: 'focus' }, rows),
+    { cwd: '/home/user/projects/ccfzf', action: 'focus', source: 'local' },
+  );
+});
+
+test('каталога нет среди строк — источник пуст, а не выдуман', () => {
+  // Ответ поллера у скрытого пикера отстаёт до восьми минут, и проекта,
+  // названного клавишей, может в нём ещё не быть. Пустой источник читается
+  // как «бери sshHost из конфига» — так же, как у любой строки без метки.
+  assert.deepStrictEqual(
+    projectHotkeyTarget({ cwd: '/home/user/projects/new', action: 'new' }, []),
+    { cwd: '/home/user/projects/new', action: 'new', source: '' },
+  );
+});
+
+test('пустой каталог — не цель', () => {
+  assert.strictEqual(projectHotkeyTarget({ cwd: '', action: 'focus' }, []), null);
+  assert.strictEqual(projectHotkeyTarget(null, []), null);
+  assert.strictEqual(projectHotkeyTarget({}, undefined), null);
+});
+
+test('прежнее тело — просто строка с каталогом', () => {
+  // Rust и страница выкатываются одним бинарём, и всё же: строка без действия
+  // обязана значить прежнее поведение — новую сессию, — а не непонятую
+  // команду. Неизвестное действие читается так же.
+  assert.deepStrictEqual(
+    projectHotkeyTarget('/home/user/projects/ccfzf', []),
+    { cwd: '/home/user/projects/ccfzf', action: '', source: '' },
+  );
+});
+
+// Сторож текстовый, и иначе нельзя: нажатие хоткея приходит в Rust, событие
+// уходит в webview, а исход у ошибки один — ничего не происходит. Ни ошибки,
+// ни следа: страница молча не найдёт обработчика, а пикер об этом не узнает —
+// у события нет ответа. Ровно так проектные хоткеи и не работали на маке.
+const fs = require('node:fs');
+const path = require('node:path');
+const SESSIONS_HTML = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+
+test('нажатый проектный хоткей уходит в openProjectHotkey', () => {
+  assert.match(
+    SESSIONS_HTML,
+    /listen\('project-hotkey', \(event\) => \{\s*openProjectHotkey\(event\.payload\);/,
+    'подписка на project-hotkey должна звать openProjectHotkey',
+  );
+});
+
+test('открывает он тем же, чем открывает Enter на строке проекта', () => {
+  const found = SESSIONS_HTML.match(/\n {2}async function openProjectHotkey\([\s\S]*?\n {2}\}\n/);
+  assert.ok(found, 'openProjectHotkey не найдена в sessions.html — сторож сторожит не то');
+  const body = found[0];
+  // Разбор тела события — общей функцией: источник строки решает транспорт,
+  // и второй его разбор разошёлся бы с этим.
+  assert.match(body, /ProjectList\.projectHotkeyTarget\(/, body);
+  // Подъём окна — та же пара, что у Enter: поиск окна этого каталога здесь и
+  // общая focusSession, в которой написаны гашение до публикации и отметка
+  // «просмотрено».
+  assert.match(body, /ProjectList\.projectFocusRow\(/, body);
+  assert.match(body, /focusSession\(/, body);
+  // Терминал — общей newSession: второй сборки argv терминала на странице
+  // быть не должно, на этой мине уже подорвался newSession с самодельным argv.
+  assert.match(body, /newSession\(target\.cwd, target\.source\)/, body);
 });

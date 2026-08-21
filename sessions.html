@@ -3428,6 +3428,38 @@ const infoBackdrop = document.getElementById('info-backdrop');
   }
 
   /**
+   * Нажали проектный хоткей, а открывать терминал пришлось самим.
+   *
+   * Событие `project-hotkey` шлёт Rust там, где просить некого: менеджер этой
+   * машины открытием не занимается (мак объявляет `openSession: false`) либо
+   * брокера нет вовсе. Развилку он при этом не снимает, а пересылает — тело
+   * несёт и каталог, и посчитанное им `projectHotkeyAction`.
+   *
+   * Делается ровно то же, что делает Enter на строке проекта: при `focus`
+   * сперва ищется уже открытое окно этого каталога **здесь** — той же
+   * `projectFocusRow` и той же `focusSession`, в которой уже написаны и
+   * гашение пикера до публикации, и отметка «просмотрено», — а не нашлось
+   * (или спрошена новая сессия) открывается терминал. Второй копии подъёма
+   * или запуска тут быть не должно.
+   *
+   * Цена известна и уплачена: у скрытого пикера ответ поллера отстаёт до
+   * восьми минут (бэкофф в `poller.rs`), и ветка `focus` может не увидеть
+   * только что открытого окна — тогда откроется второе. Спросить свежее
+   * неоткуда: опрос — это ssh, а мы стоим в обработчике клавиши.
+   */
+  async function openProjectHotkey(payload) {
+    const target = window.ProjectList.projectHotkeyTarget(payload, projectRows);
+    if (!target) return;
+    if (target.action === 'focus') {
+      const open = window.ProjectList.projectFocusRow(
+        { cwd: target.cwd }, lastSessions, lastState, CONFIG.windowHost,
+      );
+      if (open) return focusSession(open);
+    }
+    return newSession(target.cwd, target.source);
+  }
+
+  /**
    * Выполнить действие над строкой.
    *
    * Применимость проверяется здесь, а не у вызывающего: пунктов меню и прямых
@@ -4019,7 +4051,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // оставалась безымянной, и оконный трекер не мог найти её по заголовку
     // окна.
     await listen('project-hotkey', (event) => {
-      newSession(event.payload);
+      openProjectHotkey(event.payload);
     });
 
     // С каким режимом открыться. Rust показывает окно и называет режим:
