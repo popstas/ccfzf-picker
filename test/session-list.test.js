@@ -444,19 +444,48 @@ test('живость родителя не отбирается уснувшим
   assert.strictEqual(rows[0].live, true);
 });
 
-test('машину строке без окна называет её источник', () => {
+test('машину строке без окна называет её источник — если тот следит за окнами', () => {
   // При одном источнике «своей» считалась всякая строка без окна, и это было
   // верно. С двумя — соврёт: удалённая сессия без окна встала бы в блок
-  // местных, и отличить её было бы нечем.
+  // местных, и отличить её было бы нечем. Оговорка про трекер — в соседнем
+  // тесте ниже.
   const rows = buildSessionList({
     sessions: [
       { id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session', source: 'remote-host' },
       { id: 'b', cwd: '/b', title: 'b', mtime: 1, live: true, kind: 'session', source: 'local' },
     ],
-    seen: {}, state: {}, configHost: 'host-a',
+    seen: {},
+    state: { windowHosts: [{ host: 'remote-host', pid: 3 }] },
+    configHost: 'host-a',
   });
   assert.strictEqual(rows.find(r => r.id === 'a').windowHost, 'remote-host');
   assert.strictEqual(rows.find(r => r.id === 'b').windowHost, '', 'местная сессия — своя');
+});
+
+test('источник без трекера машину не называет', () => {
+  // Машина, на которой не стоит оконный трекер, окна не показывает никогда:
+  // сессии там живут в терминалах, открытых с других машин по ssh. «Записи
+  // окна нет» значит на ней «никто не смотрит», а не «окно там», и блок
+  // `Active on <host>` собирал бы из таких строк не машину, а список
+  // непривязанных окон — рядом с их же соседями по машине, которых трекер
+  // привязать сумел.
+  //
+  // Поймано живьём на машине с двумя источниками: шесть сессий ssh-источника
+  // стояли в местном блоке, потому что их окна трекер привязал, а две — те,
+  // что заведены без `claude -n`, и заголовок окна с именем сессии не совпал,
+  // — уезжали в блок «Active on <источник>». Терминалы у всех восьми были на
+  // одной и той же машине, той самой, где показан список.
+  const rows = buildSessionList({
+    sessions: [
+      { id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session', source: 'remote-host' },
+      { id: 'b', cwd: '/b', title: 'b', mtime: 1, live: true, kind: 'session', source: 'local' },
+    ],
+    seen: {},
+    state: { windowHosts: [{ host: 'host-a', pid: 1 }] },
+    configHost: 'host-a',
+  });
+  assert.strictEqual(rows.find(r => r.id === 'a').windowHost, '',
+    'трекера у источника нет — строка остаётся местной');
 });
 
 test('запись окна главнее источника', () => {
@@ -506,7 +535,9 @@ test('источник в форме user@host достаётся без пра�
       { id: 'a', cwd: '/a', title: 'a', mtime: 1, live: true, kind: 'session', source: 'user@remote-host' },
       { id: 'b', cwd: '/b', title: 'b', mtime: 1, live: true, kind: 'session', source: 'local' },
     ],
-    seen: {}, state: {}, configHost: 'host-a',
+    seen: {},
+    state: { windowHosts: [{ host: 'remote-host', pid: 3 }] },
+    configHost: 'host-a',
   });
   assert.strictEqual(rows.find(r => r.id === 'a').windowHost, 'user@remote-host');
 });

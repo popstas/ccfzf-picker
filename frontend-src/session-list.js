@@ -62,12 +62,26 @@
    * (см. `ambiguous` в `buildSessionList`) — при одном сравнивать нечего, и
    * прежнее «нет окна — значит своя» остаётся верным.
    *
-   * Отдаётся дословно, как записан `sshHost`: этой же строкой адресуются
+   * **Но отвечает так только машина, у которой есть свой оконный трекер.**
+   * На машине без трекера окна не видит никто: сессии там живут в терминалах,
+   * открытых с других машин по ssh, и «записи окна нет» значит на ней «никто
+   * не смотрит», а не «окно там». Блок `Active on <host>` собирался из таких
+   * строк не по машине, а по удаче привязки: сессия, заведённая `claude -n`,
+   * попадала в местный блок (заголовок окна совпал с именем, трекер привязал),
+   * а её соседка из того же терминала — в «чужой». Терминал у обеих один и тот
+   * же, и Enter у обеих делает одно и то же — открывает его здесь.
+   *
+   * Список живых трекеров тот же, каким живут снимки и подъём окна
+   * (`trackerHosts`): протухший файл агрегатор выбрасывает сам. Имя источника
+   * при этом бывает в форме `user@host` — сравнивается хвост, а наружу поле
+   * отдаётся дословно, как записан `sshHost`: этой же строкой адресуются
    * действия, и «красивое» имя машины увело бы ssh не туда.
    */
-  function sourceHostOf(source) {
+  function sourceHostOf(source, trackedHosts) {
     const label = String(source || '').trim();
     if (!label || label === 'local') return '';
+    const host = windowApi.normHost(label.slice(label.lastIndexOf('@') + 1));
+    if (!host || !trackedHosts.has(host)) return '';
     return label;
   }
 
@@ -129,6 +143,11 @@
       list.map(s => String((s || {}).source || '').trim()).filter(Boolean),
     );
     const ambiguous = distinctSources.size > 1;
+    // Машины, у которых есть свой оконный трекер: только они могут ответить
+    // на вопрос «где окно» отсутствием записи (см. `sourceHostOf`).
+    const trackedHosts = new Set(
+      windowApi.trackerHosts(state).map(e => windowApi.normHost((e || {}).host)).filter(Boolean),
+    );
 
     const rows = [];
     for (const s of list) {
@@ -223,7 +242,7 @@
           // Запись окна ответ на вопрос: окно называет машину, на экране которой
           // сессия видна, и этот ответ полный — включая когда ответ «своя машина».
           // Источник спрашивается только если записи окна нет вовсе.
-          windowHost: w ? windowHostOf(w, configHost) : (ambiguous ? sourceHostOf(s.source) : ''),
+          windowHost: w ? windowHostOf(w, configHost) : (ambiguous ? sourceHostOf(s.source, trackedHosts) : ''),
           // Заголовок своего окна — то самое имя, которым сессию завёл человек
           // (`claude -n tray-build-time`): по нему её и опознают. `title`
           // строки приезжает из транскрипта (custom-title/ai-title) и с ним
