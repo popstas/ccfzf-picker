@@ -57,6 +57,29 @@
 
 ## Установка
 
+### Готовой сборкой
+
+Каждый тег `v*` выкладывает в [релизы][releases] установщик под Windows и
+приложение под macOS.
+
+**Windows** — скачайте `*-setup.exe` и запустите. Установка идёт в профиль
+пользователя, прав администратора не просит.
+
+**macOS** (Apple Silicon):
+
+```
+brew install --cask --no-quarantine popstas/ccfzf-picker/ccfzf-picker
+```
+
+`--no-quarantine` здесь обязателен: приложение не подписано Developer ID, и
+без него Gatekeeper скажет «повреждено» — на поломку сборки это похоже
+больше, чем на отсутствие подписи. Intel-маки не поддерживаются: сборка идёт
+только под arm64.
+
+[releases]: https://github.com/popstas/ccfzf-picker/releases
+
+### Из исходников
+
 Нужен Rust, Node 22+, `tauri-cli` (`cargo install tauri-cli`) и терминал на
 локальной машине; на удалённой — `ccfzf`.
 Без `tauri-cli` `cargo tauri build` упадёт с `no such subcommand: tauri`.
