@@ -1,0 +1,226 @@
+# Релиз по тегу: установщик под Windows, приложение под macOS, обновлённая
+# homebrew-каска. Разбор решений — docs/superpowers/specs/2026-08-21-release-installers.md.
+name: Release
+
+on:
+  push:
+    # Теги ставятся руками, без префикса компонента. У соседнего
+    # windows11-manager образец разошёлся с тегами, и три релиза вышли без
+    # единого .exe — молча: не сработавший workflow в релизе ничем себя не
+    # проявляет. Поэтому же ниже стоит шаг сверки тега с версией конфига.
+    tags: ['v*']
+  # Ради тега, который уже стоит: пересобрать релиз, не переставляя тег
+  # (`gh workflow run release.yml --ref v0.9.1`).
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Профиль `release` в src-tauri/Cargo.toml собран под скорость выкатки на три
+  # рабочие машины, а здесь вопрос обратный — вес скачиваемого. Своего
+  # `--profile` у `tauri build` нет, поэтому профиль перекрывается сборочными
+  # переменными: они действуют только тут и выкатку не замедляют.
+  CARGO_PROFILE_RELEASE_LTO: fat
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '1'
+  CARGO_PROFILE_RELEASE_INCREMENTAL: 'false'
+  CARGO_PROFILE_RELEASE_STRIP: symbols
+  CARGO_PROFILE_RELEASE_OPT_LEVEL: z
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      # vendor/ccfzf назван в .gitmodules ssh-адресом, а ssh-ключа у бегунка
+      # нет. Правкой .gitmodules это чинить нельзя: пуш в сабмодуль идёт по
+      # ssh. Без сабмодуля не компилируется весь крейт — его вшивает
+      # include_str! в local_ccfzf.rs.
+      - name: Fetch submodules over https
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Check tag matches version
+        shell: bash
+        run: node scripts/check-version.js "${{ github.ref_name }}"
+
+      # CLI берётся из npm, а не `cargo install`: там он готовым бинарём на
+      # платформу, секунды против нескольких минут компиляции.
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli@^2
+
+      - name: Build installer
+        run: tauri build
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccfzf-picker-windows
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+  build-macos:
+    # macos-latest — Apple Silicon, то есть сборка идёт под arm64 без всякой
+    # возни с целями. Universal не собирается намеренно: он удвоил бы вес
+    # ровно в той задаче, где вес и оптимизируется.
+    runs-on: macos-latest
+    steps:
+      - name: Fetch submodules over https
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Check tag matches version
+        run: node scripts/check-version.js "${{ github.ref_name }}"
+
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli@^2
+
+      - name: Build app
+        run: tauri build
+
+      # ditto, а не zip: у .app внутри симлинки и расширенные атрибуты, и
+      # обычный zip приносит на ту сторону сломанный бандл. Имя несёт версию —
+      # его же подставляет каска в url.
+      - name: Pack app
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          mkdir -p dist
+          ditto -c -k --keepParent \
+            "src-tauri/target/release/bundle/macos/ccfzf-picker.app" \
+            "dist/ccfzf-picker-macos-arm64-${VERSION}.zip"
+          ls -la dist
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccfzf-picker-macos
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-macos]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # git-cliff считает заметки по диапазону тегов — на мелкой копии
+          # предыдущего тега не видно, и в заметки уехала бы вся история.
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ccfzf-picker-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Generate release notes
+        id: release_notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Приписка про карантин — не украшение: приложение не подписано
+      # Developer ID, и без --no-quarantine Gatekeeper скажет «повреждено».
+      # Выглядит это поломкой сборки, а не отсутствием подписи.
+      #
+      # Заметки уезжают в шаг переменной окружения, а не подстановкой в текст
+      # скрипта: в сообщении коммита бывают кавычки и доллары, и подстановка
+      # сломала бы сам скрипт.
+      - name: Compose release body
+        env:
+          NOTES: ${{ steps.release_notes.outputs.content }}
+        run: |
+          set -euo pipefail
+          cat > body.md <<'HEAD_EOF'
+          ## Install
+
+          **Windows** — download the `*-setup.exe` below and run it. Per-user install, no admin rights.
+
+          **macOS** (Apple Silicon):
+
+          ```
+          brew install --cask --no-quarantine popstas/ccfzf-picker/ccfzf-picker
+          ```
+
+          `--no-quarantine` is required: the app is not signed with an Apple Developer ID,
+          and Gatekeeper refuses unsigned apps with a "damaged" message.
+
+          HEAD_EOF
+          printf '%s\n' "$NOTES" >> body.md
+          cat body.md
+
+      - name: Create release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: body.md
+          files: artifacts/*
+
+  update-homebrew:
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      # GITHUB_TOKEN в чужой репозиторий не пускают — нужен PAT с правом
+      # записи в tap. Без секрета шаг падает на чекауте, красно и вслух.
+      - name: Check out tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: popstas/homebrew-ccfzf-picker
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ccfzf-picker-macos
+          path: macos-dist
+
+      - name: Update cask
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          MAC_SHA=$(sha256sum macos-dist/ccfzf-picker-macos-arm64-*.zip | awk '{print $1}')
+          sed -i "s/version \".*\"/version \"${VERSION}\"/" tap/Casks/ccfzf-picker.rb
+          sed -i "s/sha256 \".*\"/sha256 \"${MAC_SHA}\"/" tap/Casks/ccfzf-picker.rb
+          cat tap/Casks/ccfzf-picker.rb
+
+      - name: Commit and push tap update
+        run: |
+          set -euo pipefail
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          TAG="${GITHUB_REF#refs/tags/}"
+          git add -A
+          git diff --staged --quiet || git commit -m "Update to ${TAG}"
+          git push

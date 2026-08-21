@@ -116,6 +116,15 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 # Первые две строки — умолчания release, и стоят они здесь ради этой таблицы:
 # без них следующий, кому сборка покажется медленной, вернул бы `lto = true`,
 # не зная цены. Работу делает только `incremental`.
+#
+# **Релизная сборка идёт по этому же профилю, но с другими значениями.** Там
+# вопрос обратный — не «сколько ждать», а «сколько весит скачиваемое», — и
+# ждёт машина GitHub, а не человек. Своего `--profile` у `tauri build` нет
+# (проверено по справочнику CLI v2), поэтому `.github/workflows/release.yml`
+# перекрывает профиль переменными `CARGO_PROFILE_RELEASE_*`: fat-LTO, один
+# codegen-unit, без incremental, `strip` и `opt-level = "z"`. Здесь их нет
+# намеренно: выкатка на три машины (`data/scripts/deploy-*.sh`) обязана
+# остаться быстрой.
 [profile.release]
 lto = false
 codegen-units = 16
