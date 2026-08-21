@@ -3356,7 +3356,14 @@ const infoBackdrop = document.getElementById('info-backdrop');
     const action = window.OpenTransport.chooseProjectOpenAction(
       row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
     );
-    if (action !== 'manager') return newSession(row.cwd, row.source);
+    // Менеджера нет — развилку исполняем сами, той же `openProjectHere`, какой
+    // её исполняет проектный хоткей. Прежде здесь стояла голая `newSession`, и
+    // выбранный человеком `focus` на машине без менеджера не делал ничего:
+    // Enter заводил новую сессию поверх открытого окна, а клавиша по тому же
+    // каталогу окно поднимала.
+    if (action !== 'manager') {
+      return openProjectHere(row.cwd, row.source, CONFIG.projectOpenAction);
+    }
     await invoke('hide_picker');
     try {
       await invoke('open_project_mqtt', {
@@ -3435,28 +3442,45 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * брокера нет вовсе. Развилку он при этом не снимает, а пересылает — тело
    * несёт и каталог, и посчитанное им `projectHotkeyAction`.
    *
-   * Делается ровно то же, что делает Enter на строке проекта: при `focus`
-   * сперва ищется уже открытое окно этого каталога **здесь** — той же
-   * `projectFocusRow` и той же `focusSession`, в которой уже написаны и
-   * гашение пикера до публикации, и отметка «просмотрено», — а не нашлось
-   * (или спрошена новая сессия) открывается терминал. Второй копии подъёма
-   * или запуска тут быть не должно.
-   *
-   * Цена известна и уплачена: у скрытого пикера ответ поллера отстаёт до
-   * восьми минут (бэкофф в `poller.rs`), и ветка `focus` может не увидеть
-   * только что открытого окна — тогда откроется второе. Спросить свежее
-   * неоткуда: опрос — это ssh, а мы стоим в обработчике клавиши.
+   * Дальше — общая `openProjectHere`, та же, в которую уходит Enter на строке
+   * проекта: делают эти два входа одно и то же, и второй копии решения тут
+   * быть не должно.
    */
   async function openProjectHotkey(payload) {
     const target = window.ProjectList.projectHotkeyTarget(payload, projectRows);
     if (!target) return;
-    if (target.action === 'focus') {
+    return openProjectHere(target.cwd, target.source, target.action);
+  }
+
+  /**
+   * Открыть проект своими силами: поднять окно каталога или завести сессию.
+   *
+   * Одна на два входа — Enter (и клик) на строке проекта и проектный хоткей, —
+   * и общая она не ради краткости. Развилку они читают из разных ключей и
+   * разными половинами пикера (`projectOpenAction` разбирает страница, потому
+   * что Enter жмут при показанном окне; `projectHotkeyAction` — Rust, потому
+   * что клавишу жмут при скрытом, где WebView2 усыпляет страницу целиком), а
+   * делать по прочитанному обязаны одно и то же. Двумя копиями это уже
+   * разъехалось: хоткей окно искал, Enter — нет, и на машине без менеджера
+   * (оба мака) выбранный человеком `focus` не делал ровным счётом ничего.
+   *
+   * Окно ищется той же `projectFocusRow`, какой его ищет Enter под Windows, и
+   * поднимается той же `focusSession`: в ней уже написаны и гашение пикера до
+   * публикации, и отметка «просмотрено».
+   *
+   * Цена ветки `focus` известна и уплачена: у скрытого пикера ответ поллера
+   * отстаёт до восьми минут (бэкофф в `poller.rs`), и только что открытого
+   * окна она может не увидеть — тогда откроется второе. Спросить свежее
+   * неоткуда: опрос — это ssh, а мы стоим в обработчике клавиши.
+   */
+  async function openProjectHere(cwd, source, action) {
+    if (action === 'focus') {
       const open = window.ProjectList.projectFocusRow(
-        { cwd: target.cwd }, lastSessions, lastState, CONFIG.windowHost,
+        { cwd }, lastSessions, lastState, CONFIG.windowHost,
       );
       if (open) return focusSession(open);
     }
-    return newSession(target.cwd, target.source);
+    return newSession(cwd, source);
   }
 
   /**

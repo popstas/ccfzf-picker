@@ -112,8 +112,8 @@
           hint: 'One per line — a comma occurs inside the arguments themselves.' },
         { id: 'projectOpenAction', label: 'Enter on a project', type: 'choice',
           default: 'new', options: PROJECT_OPEN_ACTIONS,
-          hint: 'Raising needs the window manager on this machine: '
-            + 'without it the picker always starts a new session.' },
+          hint: 'Raising needs an open window of that project on this machine; '
+            + 'without one the picker starts a new session.' },
         { id: 'onlyLive', label: 'Only running sessions', type: 'bool', default: true },
         { id: 'hideOnBlur', label: 'Hide the window when it loses focus', type: 'bool', default: true },
         { id: 'backgroundRefresh', label: 'Keep polling while the window is closed', type: 'bool',
