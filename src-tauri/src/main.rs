@@ -2451,12 +2451,10 @@ const TRAY_CLICK_ACTIONS: [(&str, &str); 3] = [
 /// `frontend-src/settings-form.js`, а согласие держит
 /// `test/project-open-actions.test.js`: общего кода между двумя языками нет.
 ///
-/// Ключей два — `projectOpenAction` и `projectHotkeyAction`, — и умолчания у
-/// них разные (`new` и `focus`). Разные потому, что поводы разные: строку
-/// проекта выбирают глазами, уже открыв пикер, и просят ею начать работу;
-/// хоткей жмут вслепую, чтобы вернуться туда, где работа идёт. Умолчания
-/// названы у самих нажатий, а не здесь: таблица отвечает на вопрос «что
-/// бывает», а не «что по умолчанию у этого входа».
+/// Ключей два — `projectOpenAction` и `projectHotkeyAction`, — и умолчание у
+/// обоих `new`. Умолчания названы у самих нажатий, а не здесь: таблица
+/// отвечает на вопрос «что бывает», а не «что по умолчанию у этого входа», —
+/// и разойтись им ничто не мешает, просто сегодня они совпали.
 ///
 /// Ветку `focus` держит на той стороне `openClaudeProject` у
 /// windows11-manager: он ищет открытое окно каталога и заводит новую сессию,
@@ -3692,8 +3690,8 @@ mod tests {
             serde_json::json!({ "projectOpenAction": "new" }),
         ] {
             assert_eq!(
-                project_open_action(&config, "projectHotkeyAction", "focus"),
-                "focus",
+                project_open_action(&config, "projectHotkeyAction", "new"),
+                "new",
                 "конфиг {config} увёл хоткей с умолчания"
             );
         }
@@ -3702,11 +3700,11 @@ mod tests {
         // `new`.
         assert_eq!(
             project_open_action(
-                &serde_json::json!({ "projectHotkeyAction": " New " }),
+                &serde_json::json!({ "projectHotkeyAction": " Focus " }),
                 "projectHotkeyAction",
-                "focus"
+                "new"
             ),
-            "new"
+            "focus"
         );
     }
 

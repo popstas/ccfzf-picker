@@ -349,12 +349,20 @@ test('открывает он тем же, чем открывает Enter на 
   // Разбор тела события — общей функцией: источник строки решает транспорт,
   // и второй его разбор разошёлся бы с этим.
   assert.match(body, /ProjectList\.projectHotkeyTarget\(/, body);
-  // Подъём окна — та же пара, что у Enter: поиск окна этого каталога здесь и
-  // общая focusSession, в которой написаны гашение до публикации и отметка
+  // Дальше — общая openProjectHere, та же, в которую уходит Enter на строке
+  // проекта. Своей развилки у хоткея быть не должно: она уже разъезжалась —
+  // окно искал он один, а Enter на машине без менеджера шёл прямиком в
+  // newSession.
+  assert.match(body, /openProjectHere\(target\.cwd, target\.source, target\.action\)/, body);
+  assert.doesNotMatch(body, /ProjectList\.projectFocusRow\(/, body);
+  const shared = SESSIONS_HTML.match(/\n {2}async function openProjectHere\([\s\S]*?\n {2}\}\n/);
+  assert.ok(shared, 'openProjectHere не найдена в sessions.html');
+  // Подъём окна — та же пара: поиск окна этого каталога здесь и общая
+  // focusSession, в которой написаны гашение до публикации и отметка
   // «просмотрено».
-  assert.match(body, /ProjectList\.projectFocusRow\(/, body);
-  assert.match(body, /focusSession\(/, body);
+  assert.match(shared[0], /ProjectList\.projectFocusRow\(/, shared[0]);
+  assert.match(shared[0], /focusSession\(/, shared[0]);
   // Терминал — общей newSession: второй сборки argv терминала на странице
   // быть не должно, на этой мине уже подорвался newSession с самодельным argv.
-  assert.match(body, /newSession\(target\.cwd, target\.source\)/, body);
+  assert.match(shared[0], /newSession\(cwd, source\)/, shared[0]);
 });
