@@ -1068,7 +1068,7 @@ describe('путь сигнала', () => {
 
 - [ ] **Step 2: Убедиться, что тесты падают**
 
-Run: `cd /home/popstas/projects/js/windows11-manager && npx vitest run src/claude-wt/windows-file-helpers.test.js`
+Run: `cd ../windows11-manager && npx vitest run src/claude-wt/windows-file-helpers.test.js`
 Expected: FAIL — `signalPrint is not a function`.
 
 - [ ] **Step 3: Реализация**
@@ -1148,13 +1148,13 @@ function signalPath() {
 
 - [ ] **Step 4: Тесты зелёные**
 
-Run: `cd /home/popstas/projects/js/windows11-manager && npx vitest run src/claude-wt/ && npm run lint`
+Run: `cd ../windows11-manager && npx vitest run src/claude-wt/ && npm run lint`
 Expected: PASS.
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-cd /home/popstas/projects/js/windows11-manager
+cd ../windows11-manager
 git add src/claude-wt/windows-file-helpers.js src/claude-wt/windows-file-helpers.test.js src/claude-wt/index.js
 git commit -m "feat(claude-wt): сигнал пикеру о смене состава окон"
 ```
@@ -1220,7 +1220,7 @@ git commit -m "feat(claude-wt): сигнал пикеру о смене сост
 
 - [ ] **Step 2: Убедиться, что тесты падают**
 
-Run: `cd /home/popstas/projects/js/macos-windows-manager && cargo test -p mwm-core signal_print`
+Run: `cd ../macos-windows-manager && cargo test -p mwm-core signal_print`
 Expected: FAIL — `cannot find function signal_print in this scope`.
 
 - [ ] **Step 3: Реализация**
@@ -1297,13 +1297,13 @@ fn write_tracker_signal(print: &str, host: &str, pid: u32, now_ms: u64) -> Resul
 
 - [ ] **Step 4: Тесты зелёные**
 
-Run: `cd /home/popstas/projects/js/macos-windows-manager && cargo test`
+Run: `cd ../macos-windows-manager && cargo test`
 Expected: PASS.
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-cd /home/popstas/projects/js/macos-windows-manager
+cd ../macos-windows-manager
 git add crates/mwm-core/src/publish.rs src-tauri/src/main.rs
 git commit -m "feat(tracker): сигнал пикеру о смене состава окон"
 ```
@@ -1363,7 +1363,7 @@ git commit -m "feat(tracker): сигнал пикеру о смене соста
 
 - [ ] **Step 2: Убедиться, что тест падает**
 
-Run: `cd /home/popstas/projects/js/windows11-manager && npx vitest run src/claude-wt/sessions.test.js`
+Run: `cd ../windows11-manager && npx vitest run src/claude-wt/sessions.test.js`
 Expected: FAIL — четвёртый аргумент игнорируется, `вторая` не появляется.
 
 - [ ] **Step 3: Реализация**
@@ -1423,13 +1423,13 @@ let wantedIndex = false;
 
 - [ ] **Step 4: Тесты зелёные**
 
-Run: `cd /home/popstas/projects/js/windows11-manager && npx vitest run src/claude-wt/ && npm run lint`
+Run: `cd ../windows11-manager && npx vitest run src/claude-wt/ && npm run lint`
 Expected: PASS.
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-cd /home/popstas/projects/js/windows11-manager
+cd ../windows11-manager
 git add src/claude-wt/sessions.js src/claude-wt/sessions.test.js src/claude-wt/index.js
 git commit -m "feat(claude-wt): незнакомый заголовок перечитывает индекс мимо срока"
 ```
