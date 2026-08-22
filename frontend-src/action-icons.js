@@ -47,9 +47,20 @@
    * (`fill`), а не взят из `currentColor`: внутрь `<img>` каскад страницы не
    * попадает.
    */
-  const GITHUB_MARK = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  /**
+   * Заливка знака GitHub — по теме, а не одна на обе.
+   *
+   * Внутрь `<img>` каскад страницы не попадает, поэтому `currentColor` тут не
+   * работает и цвет обязан быть вшит в сам `data:`-URI. Отсюда две заливки:
+   * светлая на тёмном фоне и тёмная на светлом — иначе на светлой теме знак
+   * исчез бы с экрана. Пересобирает картинку `loadActionIcons` на странице,
+   * та же дорога, какой значки перечитываются на `config-changed`.
+   */
+  const GITHUB_FILL = { dark: '#e6edf3', light: '#1f2328' };
+
+  const githubMark = (theme) => 'data:image/svg+xml;utf8,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">'
-    + '<path fill="#e6edf3" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38'
+    + `<path fill="${GITHUB_FILL[theme] || GITHUB_FILL.dark}" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38`
     + ' 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53'
     + '.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95'
     + ' 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27'
@@ -59,9 +70,9 @@
   );
 
   /** Картинки, которые не нужно ни у кого спрашивать. */
-  const IMAGES = {
-    pr: GITHUB_MARK,
-  };
+  const imagesFor = (theme) => ({
+    pr: githubMark(theme),
+  });
 
   /** Настроенное действие, чей exe не нашёлся: нейтральное «запустить». */
   const FALLBACK = { text: '▸' };
@@ -106,13 +117,13 @@
    * странице, вместе с остальной сборкой строки, — второй escapeHtml здесь
    * разошёлся бы с ним молча.
    */
-  function actionIcon(action, icons) {
+  function actionIcon(action, icons, theme) {
     const id = (action || {}).id;
-    const src = (icons || {})[id] || IMAGES[id];
+    const src = (icons || {})[id] || imagesFor(theme)[id];
     if (src) return { kind: 'img', src };
     const glyph = GLYPHS[id] || FALLBACK;
     return { kind: 'glyph', text: glyph.text, cls: glyph.cls || '' };
   }
 
-  return { GLYPHS, IMAGES, iconSpecs, actionIcon };
+  return { GLYPHS, imagesFor, iconSpecs, actionIcon };
 });

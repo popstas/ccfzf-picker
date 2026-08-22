@@ -152,6 +152,12 @@
     // скрытом пикере, а у скрытого окна webview усыплён целиком. Здесь его нет
     // намеренно — страница про него не спрашивает никогда.
     projectOpenAction: 'new',
+    // Тема обоих окон: `dark`, `light` или `system` — идти за темой системы.
+    // Умолчание `system`, а не сегодняшняя `dark`: спрошено было именно про
+    // это, и `system` — единственное значение, при котором первая отрисовка
+    // страницы верна без всякого JS (палитра стоит на медиазапросе, см.
+    // `frontend-src/theme.css`).
+    theme: 'system',
   };
 
   /**
@@ -169,6 +175,12 @@
   }
 
   const PROJECT_OPEN_ACTIONS = ['new', 'focus'];
+
+  // Порядок тот же, что в выпадашке окна настроек (`THEMES` в
+  // `settings-form.js`), и сверяет их `test/theme.test.js` вместе с
+  // подписями. Третий читатель тех же слов — `theme_script` в `main.rs`:
+  // атрибут страницы он ставит сам, до загрузки страницы.
+  const THEMES = ['system', 'dark', 'light'];
 
   /**
    * Конфиг с проставленными умолчаниями.
@@ -371,8 +383,9 @@
       projectOpenAction: choice(
         src.projectOpenAction, PROJECT_OPEN_ACTIONS, DEFAULTS.projectOpenAction,
       ),
+      theme: choice(src.theme, THEMES, DEFAULTS.theme),
     };
   }
 
-  return { DEFAULTS, normalizeConfig };
+  return { DEFAULTS, THEMES, normalizeConfig };
 });

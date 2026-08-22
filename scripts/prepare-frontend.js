@@ -10,6 +10,9 @@ const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'frontend');
 
 const FILES = [
+  // Палитра обеих страниц. Не скрипт, но копируется тем же списком: забудь
+  // его здесь — и окна поедут без единого цвета, молча.
+  'frontend-src/theme.css',
   'frontend-src/state-shape.js',
   'frontend-src/session-agent.js',
   'frontend-src/session-list.js',

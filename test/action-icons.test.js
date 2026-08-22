@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { GLYPHS, IMAGES, iconSpecs, actionIcon } = require('../frontend-src/action-icons');
+const { GLYPHS, imagesFor, iconSpecs, actionIcon } = require('../frontend-src/action-icons');
 const { availableActions } = require('../frontend-src/session-actions');
 
 // Сторож на будущее: новый встроенный пункт приедет в меню без значка, и
@@ -38,7 +38,7 @@ test('у каждого встроенного пункта есть свой з
   // Дописан руками, потому и особый.
   for (const id of [...ids, 'open-remote', 'tile', 'cascade']) {
     assert.ok(
-      GLYPHS[id] || IMAGES[id],
+      GLYPHS[id] || imagesFor('dark')[id],
       `у встроенного пункта ${id} нет ни глифа, ни картинки — встанет запасной знак`,
     );
   }

@@ -45,7 +45,12 @@ function persistCoreSrc() {
     + sourceOf(/\n {2}function overlayDirtyPanels\(fresh\) \{[\s\S]*?\n {2}\}\n/, 'overlayDirtyPanels')
     + sourceOf(/\n {2}function overlayDirtyToggles\(fresh\) \{[\s\S]*?\n {2}\}\n/, 'overlayDirtyToggles')
     + sourceOf(/\n {2}async function persist\(\) \{[\s\S]*?\n {2}\}\n/, 'persist')
-    + sourceOf(/\n {2}async function persistOnce\(\) \{[\s\S]*?\n {2}\}\n/, 'persistOnce');
+    + sourceOf(/\n {2}async function persistOnce\(\) \{[\s\S]*?\n {2}\}\n/, 'persistOnce')
+    // applyTheme зовётся из persistOnce на вкладке General: тема обязана
+    // примениться сразу, не дожидаясь переоткрытия окна. Вычитывается, а не
+    // заглушается, по тому же правилу, что и всё остальное здесь — заглушка
+    // разошлась бы с настоящей молча.
+    + sourceOf(/\n {2}function applyTheme\(\) \{[\s\S]*?\n {2}\}\n/, 'applyTheme');
 }
 
 /**
@@ -65,7 +70,7 @@ async function saveUiTab({ onDisk, snapshot, dirty }) {
   const status = { className: '', textContent: '' };
   const ctx = {
     window: { UiState },
-    document: { getElementById: () => status },
+    document: { getElementById: () => status, documentElement: { dataset: {} } },
     invoke: (cmd, args) => {
       calls.push({ cmd, args });
       return Promise.resolve(cmd === 'load_ui' ? onDisk : undefined);
@@ -446,7 +451,7 @@ async function savePanelsTab({ onDisk, snapshot, dirty }) {
   const status = { className: '', textContent: '' };
   const ctx = {
     window: { UiState, PickerPanels },
-    document: { getElementById: () => status },
+    document: { getElementById: () => status, documentElement: { dataset: {} } },
     invoke: (cmd, args) => {
       calls.push({ cmd, args });
       return Promise.resolve(cmd === 'load_ui' ? onDisk : undefined);
@@ -828,7 +833,7 @@ test('flushPendingSave сохраняет правку старой вкладк
   const timers = new Map();
   let nextId = 0;
   const ctx = {
-    document: { getElementById: () => status },
+    document: { getElementById: () => status, documentElement: { dataset: {} } },
     window: {},
     invoke: (cmd, args) => {
       calls.push({ cmd, args });
@@ -895,7 +900,7 @@ async function persistGeneralTab({ fields, config }) {
   const calls = [];
   const status = { className: '', textContent: '' };
   const ctx = {
-    document: { getElementById: () => status },
+    document: { getElementById: () => status, documentElement: { dataset: {} } },
     window: {},
     invoke: (cmd, args) => {
       calls.push({ cmd, args });
@@ -1143,7 +1148,7 @@ test('persist(): правка, залетевшая во время записи
   let maxInFlight = 0;
 
   const ctx = {
-    document: { getElementById: () => status },
+    document: { getElementById: () => status, documentElement: { dataset: {} } },
     window: {},
     invoke: (cmd, args) => {
       calls.push({ cmd, args });
@@ -1221,7 +1226,7 @@ test('persist(): правка ui.toggles, залетевшая во время a
   const snapshot = defaults();
 
   const ctx = {
-    document: { getElementById: () => status },
+    document: { getElementById: () => status, documentElement: { dataset: {} } },
     window: { UiState },
     invoke: (cmd, args) => {
       calls.push({ cmd, args });
@@ -1391,7 +1396,7 @@ test('не вставший хоткей плитки виден человек�
   const src = persistCoreSrc();
   const status = { className: '', textContent: '' };
   const ctx = {
-    document: { getElementById: () => status },
+    document: { getElementById: () => status, documentElement: { dataset: {} } },
     window: {},
     invoke: async (cmd) => (cmd === 'save_config'
       ? { hotkeyRegistered: true, projectsHotkeyRegistered: true,

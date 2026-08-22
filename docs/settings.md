@@ -8,7 +8,10 @@ a Mac). Tabs on the left, the page on the right.
   the window closed, dimming of stale sessions and projects, and the name of
   this machine (Enter uses it to decide whether to raise an already-open
   window).
-- **Window popup** — width and height per layout, narrow and wide: a `Default`
+- **Window popup** — the theme first: `As system` (the default, following the
+  desktop), `Dark` or `Light`. It repaints both windows at once, this one
+  included, without reopening them. Then width and height per layout, narrow and
+  wide: a `Default`
   radio button (the built-in size, identical on any screen), a share of the
   screen, or your own pixel count in the field next to it. On a large monitor,
   `80% of screen` for the narrow list's height fits noticeably more sessions.

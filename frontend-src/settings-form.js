@@ -83,6 +83,19 @@
     { value: 'focus', label: 'Raise the last session of the project if it is open' },
   ];
 
+  /**
+   * Тема обоих окон.
+   *
+   * Вторая половина списка `THEMES` из `frontend-src/config-shape.js`;
+   * сверяет их вместе с подписями `test/theme.test.js`. `system` стоит
+   * первым не по алфавиту, а потому что это умолчание.
+   */
+  const THEMES = [
+    { value: 'system', label: 'As system' },
+    { value: 'dark', label: 'Dark' },
+    { value: 'light', label: 'Light' },
+  ];
+
   const TRAY_ACTIONS = [
     { value: 'sessions', label: 'Show the picker' },
     { value: 'projects', label: 'Show the picker on projects' },
@@ -144,6 +157,12 @@
       id: 'window',
       title: 'Window popup',
       fields: [
+        // Первым полем вкладки: вопрос «каким видеть окно» начинается с
+        // темы, а не с размера. Правит она обе страницы разом — и пикер, и
+        // это самое окно настроек.
+        { id: 'theme', label: 'Theme', type: 'choice', default: 'system',
+          options: THEMES,
+          hint: 'As system follows the desktop theme.' },
         { id: 'pickerSize.narrow.width', label: 'List width', type: 'size',
           options: SIZE_CHOICES },
         { id: 'pickerSize.narrow.height', label: 'List height', type: 'size',
