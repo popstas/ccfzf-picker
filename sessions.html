@@ -3,20 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <title>claude sessions</title>
+    <link rel="stylesheet" href="theme.css">
+    <!-- Тема ставится до первой отрисовки, а не после загрузки конфига:
+         окно настроек создаётся сразу видимым, и при `theme: light` человек
+         увидел бы тёмную вспышку. Значение приезжает `initialization_script`-ом
+         из Rust (`theme_script` в main.rs) — там же оно и просеивается.
+         Значения нет — атрибута не ставим, и страница идёт за системой: ровно
+         то, что значит `system`. -->
+    <script>
+      (function () {
+        var t = window.__THEME__;
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      })();
+    </script>
     <style>
-        :root { color-scheme: dark; }
         * { box-sizing: border-box; }
         body {
             margin: 0; height: 100vh; overflow: hidden; position: relative;
             font-family: "Segoe UI", Arial, sans-serif;
-            background: #1e1f22; color: #e6e6e6;
-            border: 1px solid #3a3d42; border-radius: 10px;
+            background: var(--bg); color: var(--fg);
+            border: 1px solid var(--border); border-radius: 10px;
             display: flex; flex-direction: column;
         }
         #search {
             width: 100%; padding: 16px 18px; font-size: 18px;
             background: transparent; color: inherit;
-            border: none; border-bottom: 1px solid #3a3d42; outline: none;
+            border: none; border-bottom: 1px solid var(--border); outline: none;
             flex: 0 0 auto;
         }
         #list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 0; }
@@ -183,14 +195,14 @@
         #list.blocks .row.session .dot { margin-top: 5px; }
         #statusline {
             height: 28px; padding: 0 18px; display: flex; align-items: center; gap: 14px;
-            font-size: 11px; color: #7d838c; border-top: 1px solid #3a3d42;
+            font-size: 11px; color: var(--fg-dim); border-top: 1px solid var(--border);
             user-select: none; flex: 0 0 28px;
         }
         #sort-control {
             display: flex; align-items: center; gap: 8px;
             cursor: pointer;
         }
-        #sort-control:hover { color: #a8adb5; }
+        #sort-control:hover { color: var(--fg-hover); }
         #statusline .icon { font-size: 12px; line-height: 1; }
         /* Подсказка про Ctrl+K, между переключателем сортировки и чекбоксами.
            min-width: 0 + ellipsis — тем же приёмом, что .text у строки списка:
@@ -221,25 +233,25 @@
         /* Подсветка при наведении — у всех трёх. Раньше её не было у
            шестерёнки: ряд из одной кнопки не выглядел рядом, а в ряду из трёх
            неподсвеченная читалась бы как нерабочая. */
-        .icon-button:hover { color: #a8adb5; }
+        .icon-button:hover { color: var(--fg-hover); }
         /* Включённый широкий режим: кнопка светлее ряда. Состояние показано
            цветом, а не вторым глифом, — чем меньше разных знаков, тем меньше
            шансов на квадратик-заглушку в чужом системном шрифте. */
-        #wide-button.on { color: #d4d8de; }
+        #wide-button.on { color: var(--fg-strong); }
         .status-check {
             display: flex; align-items: center; gap: 6px;
-            cursor: pointer; color: #7d838c;
+            cursor: pointer; color: var(--fg-dim);
         }
-        .status-check:hover { color: #a8adb5; }
+        .status-check:hover { color: var(--fg-hover); }
         /* Левая половина чекбоксов (то, что рисуется под именем сессии) отбита
            от правой (колонки справа) — к обычным 12px ещё столько же. */
         .status-check.gap { margin-left: 12px; }
         .status-check input {
-            margin: 0; accent-color: #7d838c; cursor: pointer;
+            margin: 0; accent-color: var(--fg-dim); cursor: pointer;
         }
         .group-label {
             padding: 8px 18px 4px; font-size: 10px; letter-spacing: .08em;
-            text-transform: uppercase; color: #7d838c;
+            text-transform: uppercase; color: var(--fg-dim);
         }
         .row {
             display: flex; align-items: center; gap: 12px;
@@ -253,8 +265,8 @@
            Стоит перед `.row.active`: специфичность у правил равная (два
            селектора класса против класса с псевдоклассом), и спор решает
            порядок — иначе наведение на выбранную строку гасило бы выбор. */
-        .row:hover { background: #26282d; }
-        .row.active { background: #31343a; }
+        .row:hover { background: var(--row-hover); }
+        .row.active { background: var(--row-active); }
         .row.stale { opacity: var(--stale-opacity, 0.5); }
         /* Снимает затемнение только наведение. Выбор его снимал тоже — и делал самой
            яркой строкой списка первую попавшуюся: `active` ставится на неё при каждом
@@ -278,7 +290,7 @@
            перекрывают друг друга по порядку в файле. Главнее здесь наведение — оно
            временное и отвечает на прямой жест человека. */
         .row.dim-other { opacity: 0.3; }
-        .row.active .cwd { color: #9aa0a8; }
+        .row.active .cwd { color: var(--fg-muted); }
         /* Заголовок секции — строка списка, но читается заголовком: те же
            мелкие прописные, что и у подписи группы, которой он пришёл на
            смену. Строкой он стал затем, чтобы секцию было чем свернуть, и
@@ -286,22 +298,22 @@
         .row.section { padding: 9px 18px 5px; }
         .row.section .name {
             font-size: 10px; letter-spacing: .08em;
-            text-transform: uppercase; color: #7d838c;
+            text-transform: uppercase; color: var(--fg-dim);
         }
         .dot {
             flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%;
-            background: #6e7681;
+            background: var(--idle);
         }
         /* Агент работает. */
-        .dot.active { background: #3fb950; }
+        .dot.active { background: var(--ok); }
         /* Агент спрашивает — ждёт ответа человека. */
-        .dot.question { background: #d29922; }
+        .dot.question { background: var(--warn); }
         /* Агент закончил, результат ещё не смотрели. */
-        .dot.review { background: #db6d28; }
+        .dot.review { background: var(--review); }
         /* Простаивает: закончил и постоял, считается проверенным. Серый здесь
            остаётся: он отличает живую сессию от закрытой, у которой кружка нет
            вовсе, — а это и есть главный вопрос к строке. Гасили и вернули. */
-        .dot.idle { background: #6e7681; }
+        .dot.idle { background: var(--idle); }
         /* Закрытая сессия — кружка нет, но место под него остаётся,
            иначе текст закрытых строк съезжает относительно живых. */
         .dot.closed { background: transparent; }
@@ -312,22 +324,22 @@
            хуже, чем не обещать ничего. */
         body.shift .row.markable:hover .dot {
             background: transparent;
-            box-shadow: inset 0 0 0 2px #db6d28;
+            box-shadow: inset 0 0 0 2px var(--review);
         }
         /* Тусклое имя — там, где строка есть, а дела до неё сейчас нет:
            закрытая сессия и сессия снимка, чьё окно уже на экране (её
            восстановление пропустит). Случая два, цвет один — правило одно. */
         .row.closed .name,
-        .row.snapshot-session.on-screen .name { color: #a8adb5; }
+        .row.snapshot-session.on-screen .name { color: var(--fg-hover); }
         /* Заголовок дня. Читается заголовком, как и заголовок секции: те же
            мелкие прописные. Кружка у него нет вовсе — и места под кружок тоже:
            день стоит выше снимков, а не в одной с ними колонке. */
         .row.snapshot-day { padding: 9px 18px 5px; }
         .row.snapshot-day .name {
             font-size: 10px; letter-spacing: .08em;
-            text-transform: uppercase; color: #7d838c;
+            text-transform: uppercase; color: var(--fg-dim);
         }
-        .row.snapshot-day .count { color: #6f757e; }
+        .row.snapshot-day .count { color: var(--fg-dimmer); }
         /* Заголовок раскладки. Не group-label: у него есть своё действие —
            Enter поднимает снимок целиком, — поэтому это строка, а не подпись.
            Отличается от строки сессии разрядкой и цветом подписи, как группа. */
@@ -340,7 +352,7 @@
         .row.snapshot { padding-top: 14px; }
         .row.snapshot-session { padding-top: 3px; padding-bottom: 3px; }
         .row.snapshot .name {
-            font-size: 11px; letter-spacing: .06em; color: #9aa0a8;
+            font-size: 11px; letter-spacing: .06em; color: var(--fg-muted);
         }
         /* У заголовка снимка кружка нет: состояния у раскладки не бывает, и
            серая точка там ничего не значила — в отличие от строк сессий под
@@ -370,17 +382,17 @@
         .row.session .name .label, .row.zellij .name .label, .row.project .name .label {
             min-width: 0; overflow: hidden; text-overflow: ellipsis;
         }
-        .cwd { font-size: 11px; color: #868c95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .cwd { font-size: 11px; color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         /* Чем сессия закончила / что спросили. Тусклее пути: это подсказка, а
            не опознание — строку ищут глазами по названию и каталогу. */
-        .summary { font-size: 11px; color: #6f757e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .prompt { font-size: 11px; color: #868c95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .summary { font-size: 11px; color: var(--fg-dimmer); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .prompt { font-size: 11px; color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         /* Метка PR — той же тусклостью, что и колонка хоткея: опознают строку
            по имени и пути, это подсказка рядом. */
-        .name .pr { margin-left: 6px; font-size: 11px; color: #7d838c; font-weight: normal; }
+        .name .pr { margin-left: 6px; font-size: 11px; color: var(--fg-dim); font-weight: normal; }
         /* Имя окна — той же тусклостью, что и метка PR, и по той же причине:
            опознают строку по первому имени, это подсказка рядом. */
-        .name .wname { margin-left: 6px; font-size: 11px; color: #7d838c; font-weight: normal; }
+        .name .wname { margin-left: 6px; font-size: 11px; color: var(--fg-dim); font-weight: normal; }
         /* Правые колонки одной группой: статус, id, контекст с деньгами,
            возраст. Прижимает их сюда именно она — раньше это делала `.state`
            своим margin-left: auto, и выключенный чекбокс события уносил
@@ -393,7 +405,7 @@
         /* Текстовый статус агента. */
         .state {
             flex: 0 0 auto; padding-left: 10px;
-            font-size: 11px; color: #7d838c; white-space: nowrap;
+            font-size: 11px; color: var(--fg-dim); white-space: nowrap;
         }
         /* Короткий id сессии — тем же, чем `claude --resume` и имя транскрипта.
            Стоит в строке имени, прижатый вправо: правая группа колонок отвечает
@@ -404,7 +416,7 @@
            должны дышать от строки к строке. */
         .name .sid {
             flex: 0 0 auto; margin-left: auto; padding-left: 8px;
-            font-size: 11px; color: #7d838c; white-space: nowrap;
+            font-size: 11px; color: var(--fg-dim); white-space: nowrap;
             font-variant-numeric: tabular-nums;
         }
         /* Хоткей проекта (`^F12`) — подпись в строке имени, той же тусклостью
@@ -413,7 +425,7 @@
            разбор в hotkeyHtml (session-glyph.js). */
         .name .hk {
             flex: 0 0 auto; margin-left: 6px;
-            font-size: 11px; color: #7d838c; white-space: nowrap;
+            font-size: 11px; color: var(--fg-dim); white-space: nowrap;
         }
         /* Клавиша, которую забрал сосед по системе: видна, но погашена — по
            ней узнают, какая именно комбинация не сработала, а не только то,
@@ -425,7 +437,7 @@
            до которой можно дотянуться прямо сейчас. */
         .win {
             flex: 0 0 auto; width: 10px; padding-left: 10px;
-            font-size: 11px; color: #3fb950; text-align: center;
+            font-size: 11px; color: var(--ok); text-align: center;
         }
         /* Машина чужого окна. Ширины не задано намеренно, в отличие от `.win`:
            там элемент либо пуст, либо в один знак, а имена машин разной длины,
@@ -433,7 +445,7 @@
            и строк не сдвигает. */
         .winhost {
             flex: 0 0 auto; padding-left: 10px;
-            font-size: 11px; color: #7d838c; white-space: nowrap;
+            font-size: 11px; color: var(--fg-dim); white-space: nowrap;
         }
         /* Размер сессии: сколько раз человек писал. Своя колонка, а не третья
            величина в `.usage` — та про деньги и запас контекста, эта про длину
@@ -441,16 +453,16 @@
            разъезжаться кеглем и отступом. */
         .prompts {
             flex: 0 0 auto; padding-left: 10px;
-            font-size: 11px; color: #7d838c; white-space: nowrap;
+            font-size: 11px; color: var(--fg-dim); white-space: nowrap;
             font-variant-numeric: tabular-nums;
         }
         /* Контекст и деньги, между статусом и возрастом. */
         /* Значок бумаг. Тусклее имени и той же природы, что `.pr`: не
            колонка, а пометка внутри строки имени. */
-        .docs { margin-left: 6px; font-size: 11px; color: #7d838c; }
+        .docs { margin-left: 6px; font-size: 11px; color: var(--fg-dim); }
         .usage {
             flex: 0 0 auto; padding-left: 10px;
-            font-size: 11px; color: #7d838c; white-space: nowrap;
+            font-size: 11px; color: var(--fg-dim); white-space: nowrap;
             font-variant-numeric: tabular-nums;
         }
         /* Галочки docs/TODO.md у строки проекта. Форма та же, что у .usage:
@@ -460,25 +472,25 @@
            чем возвращаются вторым взглядом. */
         .todo {
             flex: 0 0 auto; padding-left: 10px;
-            font-size: 11px; color: #7d838c; white-space: nowrap;
+            font-size: 11px; color: var(--fg-dim); white-space: nowrap;
             font-variant-numeric: tabular-nums;
         }
-        .todo .rest { color: #6f757e; }
+        .todo .rest { color: var(--fg-dimmer); }
         /* Заполненность контекста. Жёлтый — тот же, что у спрашивающего агента:
            «обрати внимание». Красный — «скоро начнёт забывать начало». */
-        .usage .ctx.warn { color: #d29922; }
-        .usage .ctx.hot { color: #f85149; }
-        .usage .cost { color: #6f757e; }
+        .usage .ctx.warn { color: var(--warn); }
+        .usage .ctx.hot { color: var(--danger); }
+        .usage .cost { color: var(--fg-dimmer); }
         /* Возраст последней активности, крайняя правая колонка. */
         .age {
             flex: 0 0 auto; padding-left: 10px; min-width: 34px; text-align: right;
-            font-size: 11px; color: #7d838c; font-variant-numeric: tabular-nums;
+            font-size: 11px; color: var(--fg-dim); font-variant-numeric: tabular-nums;
         }
         /* Сколько у проекта сессий и сколько из них живых. Рядом с возрастом,
            поэтому цифры моноширинные — колонки не должны разъезжаться. */
         .count {
             flex: 0 0 auto; padding-left: 10px; min-width: 48px; text-align: right;
-            font-size: 11px; color: #7d838c; font-variant-numeric: tabular-nums;
+            font-size: 11px; color: var(--fg-dim); font-variant-numeric: tabular-nums;
             /* nowrap, как у соседних колонок: `123 · 45●` шире min-width, а `●`
                под tabular-nums не попадает — на WebView2 метрики этого знака
                наименее предсказуемы, и без запрета строка переносилась бы. */
@@ -516,25 +528,25 @@
            правилом, а не пробелом в разметке: строка имени у проекта стала
            flex, а пробел между flex-элементами схлопывается — звезда слиплась
            бы с именем. */
-        .mark { color: #d29922; }
+        .mark { color: var(--warn); }
         .row.project .name .mark { flex: 0 0 auto; margin-right: 4px; }
-        #message { padding: 24px 18px; color: #868c95; font-size: 13px; flex: 0 0 auto; }
+        #message { padding: 24px 18px; color: var(--fg-soft); font-size: 13px; flex: 0 0 auto; }
         /* Ctrl+K actions overlay — sits above the session list, same palette. */
         #actions-backdrop {
             display: none; position: absolute; inset: 0; z-index: 10;
-            background: rgba(0, 0, 0, .45);
+            background: var(--shadow);
             align-items: center; justify-content: center; padding: 24px;
         }
         #actions-backdrop.open { display: flex; }
         #actions-menu {
-            width: min(360px, 100%); background: #25262a;
-            border: 1px solid #3a3d42; border-radius: 10px;
-            box-shadow: 0 12px 40px rgba(0, 0, 0, .45); overflow: hidden;
+            width: min(360px, 100%); background: var(--surface);
+            border: 1px solid var(--border); border-radius: 10px;
+            box-shadow: 0 12px 40px var(--shadow); overflow: hidden;
         }
         #actions-title {
-            padding: 12px 16px 8px; font-size: 11px; color: #7d838c;
+            padding: 12px 16px 8px; font-size: 11px; color: var(--fg-dim);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-            border-bottom: 1px solid #3a3d42;
+            border-bottom: 1px solid var(--border);
         }
         #actions-list { padding: 6px 0; }
         /* flex, а не блок: подпись клавиши прижимается вправо тем же приёмом,
@@ -548,8 +560,8 @@
            списка (см. `.row:hover`): меню открывается поверх него, и второй
            набор цветов читался бы как другое окно. Порядок решает так же —
            специфичность у правил равная. */
-        .action-row:hover { background: #26282d; }
-        .action-row.active { background: #31343a; }
+        .action-row:hover { background: var(--row-hover); }
+        .action-row.active { background: var(--row-active); }
         /* Слот значка. Ширина фиксированная и одинаковая у всех строк, включая
            глифовые: без неё подпись на строке без иконки съезжает влево, и
            меню читается как два списка в одном окне.
@@ -560,11 +572,11 @@
         .action-icon {
             flex: 0 0 16px; width: 16px; height: 16px;
             display: flex; align-items: center; justify-content: center;
-            margin-right: 10px; font-size: 12px; color: #7d838c;
+            margin-right: 10px; font-size: 12px; color: var(--fg-dim);
         }
         .action-icon img { width: 16px; height: 16px; }
         /* Тем же оранжевым горит непросмотренная сессия в списке. */
-        .action-icon.unread { color: #db6d28; }
+        .action-icon.unread { color: var(--review); }
         .action-label {
             flex: 1 1 auto; min-width: 0; overflow: hidden;
             text-overflow: ellipsis; white-space: nowrap;
@@ -572,10 +584,10 @@
         /* Прямая клавиша действия, тусклым — тем же цветом, что и подпись .hk. */
         .action-hotkey {
             flex: 0 0 auto; margin-left: auto; padding-left: 12px;
-            font-size: 11px; color: #7d838c;
+            font-size: 11px; color: var(--fg-dim);
         }
         #actions-empty {
-            display: none; padding: 16px; font-size: 13px; color: #868c95;
+            display: none; padding: 16px; font-size: 13px; color: var(--fg-soft);
         }
         /* Session info — тот же модал, что и меню действий: разные только
            содержимое и ширина. Справочник клавиш берёт то же оформление, а не
@@ -585,17 +597,17 @@
            про действия над строкой, у неё выбор стрелками и запуск. */
         #info-backdrop, #keys-backdrop, #comment-backdrop {
             display: none; position: absolute; inset: 0; z-index: 10;
-            background: rgba(0, 0, 0, .45);
+            background: var(--shadow);
             align-items: center; justify-content: center; padding: 24px;
         }
         #info-backdrop.open, #keys-backdrop.open, #comment-backdrop.open { display: flex; }
         #comment-card {
             width: min(420px, 100%);
-            background: #25262a; border: 1px solid #3a3d42; border-radius: 10px;
-            box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+            background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+            box-shadow: 0 12px 40px var(--shadow);
         }
         #comment-title {
-            padding: 12px 16px 8px; font-size: 11px; color: #7d838c;
+            padding: 12px 16px 8px; font-size: 11px; color: var(--fg-dim);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         /* Поле без рамки и на фоне карточки: это единственный элемент внутри
@@ -603,63 +615,63 @@
         #comment-input {
             width: 100%; box-sizing: border-box; padding: 8px 16px 14px;
             background: none; border: none; outline: none;
-            color: #e6e6e6; font: inherit; font-size: 13px;
+            color: var(--fg); font: inherit; font-size: 13px;
         }
         /* Комментарий человека — под ответом и той же формы, что prompt и
            answer: это третья строка тела, а не колонка. Отличается цветом
            подписи: сказал его не агент, а человек. */
         .comment {
-            margin-top: 3px; font-size: 11px; color: #8b939c;
+            margin-top: 3px; font-size: 11px; color: var(--fg-soft);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         #info-card, #keys-card {
             width: min(560px, 100%); max-height: 100%; overflow-y: auto;
-            background: #25262a; border: 1px solid #3a3d42; border-radius: 10px;
-            box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+            background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+            box-shadow: 0 12px 40px var(--shadow);
         }
         #info-title, #keys-title {
-            padding: 12px 16px 8px; font-size: 11px; color: #7d838c;
+            padding: 12px 16px 8px; font-size: 11px; color: var(--fg-dim);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-            border-bottom: 1px solid #3a3d42;
+            border-bottom: 1px solid var(--border);
         }
         /* У справочника клавиш заголовок и подпись разнесены: строка выше —
            имя и версия приложения, эта — прежний текст «Keyboard shortcuts».
            Граница переезжает на подпись, #info-title её не теряет. */
         #keys-title { border-bottom: none; padding-bottom: 2px; }
         #keys-subtitle {
-            padding: 0 16px 8px; font-size: 11px; color: #7d838c;
-            border-bottom: 1px solid #3a3d42;
+            padding: 0 16px 8px; font-size: 11px; color: var(--fg-dim);
+            border-bottom: 1px solid var(--border);
         }
         #info-rows, #keys-rows { padding: 8px 0; }
         /* Подвал: версия — не только в заголовке, лицензия и ссылка на
            репозиторий. Та же серая палитра карточки, граница сверху отделяет
            его от списка клавиш. */
         #keys-footer {
-            padding: 8px 16px 12px; font-size: 11px; color: #7d838c;
-            border-top: 1px solid #3a3d42;
+            padding: 8px 16px 12px; font-size: 11px; color: var(--fg-dim);
+            border-top: 1px solid var(--border);
         }
-        #keys-footer a { color: #6aa9ff; }
+        #keys-footer a { color: var(--link); }
         .info-row { display: flex; gap: 12px; padding: 3px 16px; font-size: 12px; }
-        .info-row .k { flex: 0 0 96px; color: #7d838c; }
+        .info-row .k { flex: 0 0 96px; color: var(--fg-dim); }
         .info-row .v { min-width: 0; word-break: break-word; }
         /* Заголовок секции справочника. Не `.info-row`: у него нет пары
            «ключ — значение», это подпись над группой строк. */
         .keys-section {
-            padding: 10px 16px 4px; font-size: 11px; color: #7d838c;
+            padding: 10px 16px 4px; font-size: 11px; color: var(--fg-dim);
             text-transform: uppercase; letter-spacing: .04em;
         }
         .keys-section:first-child { padding-top: 4px; }
         /* Клавиша слева — моноширинным: комбинации читаются столбиком, и
            пропорциональный шрифт ставил бы `^K` и `⌘⇧C` разной ширины. */
         #keys-rows .info-row .k {
-            flex: 0 0 132px; color: #c8ccd2;
+            flex: 0 0 132px; color: var(--fg-strong);
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         }
         /* Не вставшая клавиша: показана, но зачёркнута. Убрать её нельзя —
            тогда «не настроено» и «отобрал сосед по системе» выглядят
            одинаково, а это расследование однажды заняло полдня. */
-        #keys-rows .info-row.taken .k { text-decoration: line-through; color: #7d838c; }
-        #keys-rows .info-row.taken .v { color: #868c95; }
+        #keys-rows .info-row.taken .k { text-decoration: line-through; color: var(--fg-dim); }
+        #keys-rows .info-row.taken .v { color: var(--fg-soft); }
         /* Перетаскивание заголовка секции.
            `touch-action: none` обязателен: без него движение пальцем или по
            тачпаду уходит в прокрутку списка, и pointermove до нас не
@@ -672,7 +684,7 @@
            отпускания, а не во время. */
         #drop-line {
             position: absolute; z-index: 20; height: 2px;
-            background: #6aa9ff; border-radius: 2px;
+            background: var(--link); border-radius: 2px;
             pointer-events: none; display: none;
         }
         #drop-line.on { display: block; }
@@ -686,7 +698,7 @@
            и по весу выигрывает у двух классов. Без этого пустая колонка
            забирала бы свою треть ширины, ради ухода от чего она и временная. */
         #list.blocks .block-col.drop-zone {
-            flex: 0 0 96px; border: 1px dashed #3a3d42; border-radius: 8px;
+            flex: 0 0 96px; border: 1px dashed var(--border); border-radius: 8px;
         }
     </style>
 </head>
@@ -1112,6 +1124,34 @@ let commentRow = null;
   /** Передать одно нормализованное значение всем stale-строкам через CSS. */
   function applyStaleOpacity() {
     list.style.setProperty('--stale-opacity', String(CONFIG.stale.opacity));
+  }
+
+  /**
+   * Тема окна — атрибутом на `<html>`, откуда её берёт палитра
+   * (`frontend-src/theme.css`).
+   *
+   * `system` — **снятый** атрибут, а не третье его значение: светлую половину
+   * при нём включает медиазапрос, и потому первая отрисовка страницы верна
+   * ещё до того, как конфиг приедет. Зовётся из тех же двух мест, что и
+   * `applyStaleOpacity`, — с загрузки и с `config-changed`.
+   */
+  function applyTheme() {
+    const theme = CONFIG.theme;
+    const root = document.documentElement;
+    if (theme === 'system') delete root.dataset.theme;
+    else root.dataset.theme = theme;
+  }
+
+  /**
+   * Тема, которая нарисована на самом деле.
+   *
+   * Спрашивает её только знак GitHub: заливка вшита в `data:`-URI, каскад
+   * внутрь `<img>` не попадает, и «как система» надо разрешить в одно из двух
+   * слов. Всему остальному хватает переменных.
+   */
+  function resolvedTheme() {
+    if (CONFIG.theme !== 'system') return CONFIG.theme;
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   }
 
   /**
@@ -3082,7 +3122,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
         // Значок: картинка приложения, если Rust её отдал, иначе глиф.
         // Экранируется здесь, вместе с остальной строкой: data-URI приходит
         // из Rust, но правило одно на всю сборку разметки.
-        const icon = window.ActionIcons.actionIcon(action, actionIcons);
+        const icon = window.ActionIcons.actionIcon(action, actionIcons, resolvedTheme());
         const iconHtml = icon.kind === 'img'
           ? `<span class="action-icon"><img src="${escapeHtml(icon.src)}" alt=""></span>`
           : `<span class="action-icon${icon.cls ? ` ${icon.cls}` : ''}">${escapeHtml(icon.text)}</span>`;
@@ -4023,6 +4063,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       error = String(e);
     }
     applyStaleOpacity();
+    applyTheme();
 
     // Вид списка — до первой отрисовки: иначе первый показ рисуется чужой
     // сортировкой и перекладывается на глазах.
@@ -4150,6 +4191,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
         error = String(e);
       }
       applyStaleOpacity();
+      applyTheme();
       // regroup() иконок не читает — их читает только renderMenu; список не
       // обязан ждать похода за иконками, чтобы перерисоваться.
       regroup();

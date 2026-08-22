@@ -168,6 +168,21 @@ test('каждый тег из sessions.html копируется в frontend/',
   }
 });
 
+// `<link>` живёт в том же списке FILES, что и скрипты, но глазами его там
+// не видно: файл не .js, и «все теги на месте» про него ничего не говорит.
+// Забытая строка даёт окно, у которого не разрешается ни одна переменная
+// палитры — фон, текст и рамки становятся прозрачными разом.
+test('каждый стиль из страниц копируется в frontend/', () => {
+  const prepare = fs.readFileSync(path.join(ROOT, 'scripts/prepare-frontend.js'), 'utf8');
+  const copied = [...prepare.matchAll(/'frontend-src\/([^']+)'/g)].map(m => m[1]);
+  for (const page of ['sessions.html', 'settings.html']) {
+    const html = fs.readFileSync(path.join(ROOT, page), 'utf8');
+    for (const [, href] of html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)) {
+      assert.ok(copied.includes(href), `${href} есть в ${page}, но не в prepare-frontend.js`);
+    }
+  }
+});
+
 test('settings.html грузит те же модули, что и зовёт', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
   // Модуль, забытый в разметке, даёт пустую страницу настроек и ошибку в

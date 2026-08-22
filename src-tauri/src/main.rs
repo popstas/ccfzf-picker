@@ -1671,7 +1671,7 @@ async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
         let _ = window.set_focus();
     } else {
         let (width, height) = settings_size(&app);
-        tauri::WebviewWindowBuilder::new(
+        let mut builder = tauri::WebviewWindowBuilder::new(
             &app,
             "settings",
             tauri::WebviewUrl::App("settings.html".into()),
@@ -1679,9 +1679,16 @@ async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
         .title("ccfzf-picker Settings")
         .inner_size(width, height)
         .center()
-        .resizable(true)
-        .build()
-        .map_err(|e| format!("cannot open settings window: {e}"))?;
+        .resizable(true);
+        // Тема — до загрузки страницы, иначе окно мигнёт тёмным. Нечитаемый
+        // конфиг не отменяет открытия: окно без темы верно выглядит на тёмной
+        // системе и всего лишь мигнёт на светлой.
+        if let Some(script) = load_config().ok().as_ref().and_then(theme_script) {
+            builder = builder.initialization_script(script);
+        }
+        builder
+            .build()
+            .map_err(|e| format!("cannot open settings window: {e}"))?;
     }
     // Обе ветки проходят через активацию, и ветки объединены ради неё: с
     // прежним ранним `return` одна из двух дорог рано или поздно её потеряла
@@ -2464,6 +2471,36 @@ const PROJECT_OPEN_ACTIONS: [(&str, &str); 2] = [
     ("new", "Always start a new session"),
     ("focus", "Raise the last session of the project if it is open"),
 ];
+
+/// Тема обеих страниц: значение конфига и подпись для настроек.
+///
+/// Вторая половина списка `THEMES` из `frontend-src/config-shape.js`; сверяет
+/// их вместе с подписями `test/theme.test.js`. Rust про темы знает ровно одно
+/// — какое слово поставить странице до её загрузки, чтобы окно настроек не
+/// мигало тёмным при `light`; сами цвета живут в `frontend-src/theme.css`.
+const THEMES: [(&str, &str); 3] = [
+    ("system", "As system"),
+    ("dark", "Dark"),
+    ("light", "Light"),
+];
+
+/// Скрипт, ставящий тему до первой отрисовки страницы.
+///
+/// Окно настроек создаётся сразу видимым, то есть при `theme: light` человек
+/// увидел бы тёмную вспышку: конфиг страница спрашивает уже после загрузки.
+/// Отсюда `initialization_script` — он отрабатывает раньше всего нашего.
+///
+/// `system` скрипта не получает вовсе, и это не экономия: атрибута при нём
+/// быть не должно, светлую половину палитры включает медиазапрос
+/// (`frontend-src/theme.css`). Просеивание тут и есть вся защита — значение
+/// уезжает в исходный текст страницы, и чужое слово в нём было бы дырой.
+fn theme_script(config: &serde_json::Value) -> Option<String> {
+    match config_choice(config, "theme", "system", &THEMES) {
+        "dark" => Some("window.__THEME__ = 'dark';".into()),
+        "light" => Some("window.__THEME__ = 'light';".into()),
+        _ => None,
+    }
+}
 
 /// Значение конфига, приведённое к известному действию из таблицы.
 ///
@@ -3628,6 +3665,30 @@ mod tests {
     /// `tray_action` отдаёт его как известное, ветки оно себе не находит и
     /// уезжает в общую — ни ошибки, ни следа, просто не то действие.
     ///
+    /// Значение уезжает в исходный текст страницы, и просеивание тут — вся
+    /// защита. `system` скрипта не получает вовсе: атрибута при нём быть не
+    /// должно, светлую половину палитры включает медиазапрос.
+    #[test]
+    fn theme_script_only_emits_known_words() {
+        let of = |v: serde_json::Value| theme_script(&v);
+        assert_eq!(of(serde_json::json!({})), None, "без ключа тема системная");
+        assert_eq!(of(serde_json::json!({"theme": "system"})), None);
+        assert_eq!(
+            of(serde_json::json!({"theme": " Dark "})),
+            Some("window.__THEME__ = 'dark';".to_string()),
+            "регистр и пробелы прощаются — конфиг правят руками",
+        );
+        assert_eq!(
+            of(serde_json::json!({"theme": "light"})),
+            Some("window.__THEME__ = 'light';".to_string()),
+        );
+        assert_eq!(
+            of(serde_json::json!({"theme": "'; alert(1); //"})),
+            None,
+            "незнакомое слово в страницу не уезжает",
+        );
+    }
+
     /// Сторож текстовый, потому что поведением его не поймать: настоящий
     /// вызов требует `AppHandle`, которого в тестах нет.
     #[test]

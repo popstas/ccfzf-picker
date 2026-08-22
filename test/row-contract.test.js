@@ -1430,10 +1430,13 @@ test('подсветка наведения объявлена до подсве
 // другое окно. Поэтому сверяются не только порядок правил, но и цвета:
 // разойдясь, они разойдутся молча, пикер на такое не падает.
 test('строка меню красится тем же, чем строка списка', () => {
-  const menuHover = SESSIONS_HTML.match(/\.action-row:hover \{ background: (#[0-9a-f]{6}); \}/);
-  const menuActive = SESSIONS_HTML.match(/\.action-row\.active \{ background: (#[0-9a-f]{6}); \}/);
-  const rowHover = SESSIONS_HTML.match(/\.row:hover \{ background: (#[0-9a-f]{6}); \}/);
-  const rowActive = SESSIONS_HTML.match(/\.row\.active \{ background: (#[0-9a-f]{6}); \}/);
+  // Цвет теперь называется токеном, а не литералом (`frontend-src/theme.css`),
+  // и сверять надо именно имя токена: разойдись они, меню поехало бы своим
+  // фоном ровно так же молча, как и прежде.
+  const menuHover = SESSIONS_HTML.match(/\.action-row:hover \{ background: (var\(--[a-z-]+\)); \}/);
+  const menuActive = SESSIONS_HTML.match(/\.action-row\.active \{ background: (var\(--[a-z-]+\)); \}/);
+  const rowHover = SESSIONS_HTML.match(/\.row:hover \{ background: (var\(--[a-z-]+\)); \}/);
+  const rowActive = SESSIONS_HTML.match(/\.row\.active \{ background: (var\(--[a-z-]+\)); \}/);
   assert.ok(menuHover, '.action-row:hover пропал — у меню снова нет подсветки под мышью');
   assert.ok(menuActive && rowHover && rowActive, 'правила фона переписаны — тест сторожит не то');
   assert.strictEqual(menuHover[1], rowHover[1], 'наведение в меню и в списке — один цвет');
@@ -1460,7 +1463,7 @@ test('строка меню начинается со слота значка', 
 test('слот значка собирается через ActionIcons', () => {
   assert.match(
     SESSIONS_HTML,
-    /window\.ActionIcons\.actionIcon\(action, actionIcons\)/,
+    /window\.ActionIcons\.actionIcon\(action, actionIcons, resolvedTheme\(\)\)/,
     'значок должен выбирать модуль, а не разметка по месту',
   );
   assert.match(SESSIONS_HTML, /class="action-icon/, 'слот рисуется классом action-icon');

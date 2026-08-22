@@ -3,26 +3,38 @@
 <head>
 <meta charset="utf-8">
 <title>ccfzf-picker Settings</title>
+<link rel="stylesheet" href="theme.css">
+<!-- Тема ставится до первой отрисовки, а не после загрузки конфига: это окно
+     создаётся сразу видимым, и при `theme: light` человек увидел бы тёмную
+     вспышку. Значение приезжает `initialization_script`-ом из Rust
+     (`theme_script` в main.rs) — там же оно и просеивается. Значения нет —
+     атрибута не ставим, и страница идёт за системой: ровно то, что значит
+     `system`. -->
+<script>
+  (function () {
+    var t = window.__THEME__;
+    if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+  })();
+</script>
 <style>
-  :root { color-scheme: dark; }
   body {
     margin: 0; display: flex; height: 100vh;
     font: 13px -apple-system, "Segoe UI", system-ui, sans-serif;
-    background: #1c1c1e; color: #e6e6e6;
+    background: var(--bg); color: var(--fg);
   }
-  #tabs { width: 170px; flex: none; padding: 12px 0; background: #232326; border-right: 1px solid #333; }
+  #tabs { width: 170px; flex: none; padding: 12px 0; background: var(--surface); border-right: 1px solid var(--border); }
   .tab { padding: 7px 16px; cursor: pointer; }
-  .tab.active { background: #3a3a3e; }
+  .tab.active { background: var(--row-active); }
   #page { flex: 1; overflow-y: auto; padding: 18px 22px; }
   .field { margin-bottom: 14px; }
   .field label { display: block; margin-bottom: 4px; }
   .field input[type=text], .field input[type=password], .field input[type=number],
   .field textarea, .field select {
     width: 100%; box-sizing: border-box; padding: 5px 7px;
-    background: #2a2a2e; color: inherit; border: 1px solid #444; border-radius: 4px;
+    background: var(--surface); color: inherit; border: 1px solid var(--border); border-radius: 4px;
     font: inherit;
   }
-  .hint { color: #999; margin-top: 3px; }
+  .hint { color: var(--fg-dim); margin-top: 3px; }
   /* Свёрнутая подробность терминала — такое же поле формы, как соседние, и
      отбивка снизу у неё обязана быть та же: без неё следующая строка (выбор
      пресета или галка) прилипает к `<summary>` вплотную и читается его
@@ -30,30 +42,30 @@
   #page details { margin-bottom: 14px; }
   .range-row { display: flex; align-items: center; gap: 10px; }
   .range-row input[type=range] { flex: 1; }
-  .range-current { white-space: nowrap; color: #bbb; }
-  #bar { position: sticky; bottom: 0; padding: 12px 0 0; background: #1c1c1e; }
+  .range-current { white-space: nowrap; color: var(--fg-muted); }
+  #bar { position: sticky; bottom: 0; padding: 12px 0 0; background: var(--bg); }
   /* Лог прокручивается сам, а не страницей: строк в буфере тысяча, и уедь они
      страницей — вместе с ними уехал бы липкий `#bar`. */
   #log-view {
     margin: 0; height: 420px; overflow: auto;
     box-sizing: border-box; padding: 8px;
-    border: 1px solid #3a3a3c; border-radius: 4px;
-    background: #2c2c2e; color: #d6d6d6;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: var(--surface); color: var(--fg-strong);
     font: 11px ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
     white-space: pre-wrap; word-break: break-word;
   }
   #save { padding: 8px 18px; }
-  #status { color: #999; margin-left: 10px; }
-  #status.bad { color: #ff7b72; }
+  #status { color: var(--fg-dim); margin-left: 10px; }
+  #status.bad { color: var(--danger); }
   table.axes { border-collapse: collapse; }
   table.axes th, table.axes td { padding: 3px 12px 3px 0; text-align: left; font-weight: normal; }
   /* Вторая таблица шла вплотную за первой, и её шапка читалась последней
      строкой первой — то есть колонкой `window`. */
   .field.axes-group { margin-top: 18px; }
   table.axes th[title] { cursor: help; }
-  .col-icon { display: inline-block; width: 1.4em; color: #999; }
+  .col-icon { display: inline-block; width: 1.4em; color: var(--fg-dim); }
   table.axes label.axis-head { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-  table.axes span[title] { border-bottom: 1px dotted #666; cursor: help; }
+  table.axes span[title] { border-bottom: 1px dotted var(--fg-dimmer); cursor: help; }
   /* Пять радиокнопок и поле пикселей в один ряд, а не столбиком, как
      остальные поля формы, — их и так пять, вертикально они заняли бы
      четверть страницы. */
@@ -65,7 +77,7 @@
   /* Во время записи кнопка обязана отличаться от обычной: иначе «Press keys…»
      читалось бы как подпись, а не как состояние, и уйти из него человек мог
      бы, не заметив, что оно вообще было. */
-  .hotkey-capture.recording { outline: 2px solid #4a90d9; outline-offset: 1px; }
+  .hotkey-capture.recording { outline: 2px solid var(--link); outline-offset: 1px; }
   .size-row { display: flex; flex-wrap: wrap; gap: 4px 14px; }
   .size-choice { display: inline-flex; align-items: center; gap: 4px; margin: 0; width: auto; }
   /* Общее правило `.field input[type=number] { width: 100% }` тут неверно:
@@ -75,7 +87,7 @@
      min="101", и по setCustomValidity в renderPage. Слово с причиной несёт
      статусная строка внизу — тут только пятно, чтобы взгляд сразу нашёл
      поле. */
-  .size-px input[type=number]:invalid { border-color: #ff7b72; }
+  .size-px input[type=number]:invalid { border-color: var(--danger); }
 </style>
 </head>
 <body>
@@ -1162,6 +1174,7 @@
         for (const key of dirtyFields) reloaded[key] = fields[key];
         dirtyFields.clear();
         fields = reloaded;
+        applyTheme();
         // Регистрация глобального хоткея могла не удаться (Windows держит
         // часть комбинаций за собой). Отказ не фатален, но молчать о нём
         // нельзя: человек будет думать, что хоткей сменился, а тот мёртв.
@@ -1188,12 +1201,33 @@
     }
   }
 
+  /**
+   * Тема этого окна — тем же атрибутом и по тому же правилу, что и у пикера
+   * (`applyTheme` в `sessions.html`): `system` значит снятый атрибут, а не
+   * третье его значение.
+   *
+   * Значение берётся из `fields`, а не из сырого `config`: умолчание
+   * отсутствующему ключу проставляет `configToFields` (для `choice` — тот
+   * самый `field.default`), и второй разбор здесь разошёлся бы с ним.
+   *
+   * Зовётся дважды — на загрузке и после сохранения. До загрузки её уже сделал
+   * `initialization_script` из Rust (`theme_script`), и потому окно не мигает;
+   * здесь же тема применяется живьём, не дожидаясь переоткрытия окна.
+   */
+  function applyTheme() {
+    const theme = fields.theme;
+    const root = document.documentElement;
+    if (theme === 'system') delete root.dataset.theme;
+    else root.dataset.theme = theme;
+  }
+
   try {
     config = await invoke('load_config') || {};
   } catch (e) {
     config = {};
   }
   fields = configToFields(config);
+  applyTheme();
   // Умолчание dimStale — от того же config.stale.enabled, что видит пикер в
   // toggleDefaults() (sessions.html), а не от литерала true чуть выше: без
   // этого свежая установка (stale.enabled: false по умолчанию, см.
