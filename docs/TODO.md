@@ -381,7 +381,7 @@ Rust-сборку windows11-manager на этой машинеows,
   хотя `home` на экране свободен. Держал имя `877cff31` — `claude -n home`,
   pid 2633214, pts/0, `live: true`, `window: null` и ни одной записи окна ни у
   одного трекера, то есть ровно эта задача (родитель — `sshd:
-  popstas@pts/2,pts/0`, рядом под ним канарейка стенда). `takenSessionNames`
+  <пользователь>@pts/2,pts/0`, рядом под ним канарейка стенда). `takenSessionNames`
   (`sessions.html`) и его вторая копия `live_names`
   (`src-tauri/src/session_name.rs`) берут заголовки **всех** строк с `live`, а
   живость агрегатор считает по процессу и про разрыв не знает.
