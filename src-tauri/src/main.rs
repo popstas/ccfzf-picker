@@ -947,14 +947,13 @@ fn transport_for(http: &str) -> Transport {
     if http.trim().is_empty() { Transport::Mqtt } else { Transport::Http }
 }
 
-/// Ретраев между транспортами нет. Функция существует ради сторожа: правило
-/// это невидимо в коде («просто нет ветки»), и без теста его вернули бы как
-/// улучшение живучести. Вне тестов её не зовёт никто — `#[cfg(test)]`, а не
-/// `#[allow(dead_code)]`: production-код про неё знать не должен вовсе.
-#[cfg(test)]
-fn fallback_after_http_failure() -> Option<Transport> {
-    None
-}
+// Ретраев между транспортами нет: у каждой команды `match transport_for(...)`
+// с двумя взаимоисключающими плечами — Rust не даёт исполнить оба разом, и
+// отдельной функции-флага под это заводить незачем. Сторожит правило не
+// утверждение вида «после отказа нет отката» (такое зелёное на любой
+// реализации, включая ту, что тихо ничего не делает), а `split_targets` ниже:
+// она проверяет ровно то место, где транспорт для нескольких целей выбирается
+// руками, а не единственным `match`, — и падает на опечатке в предикате.
 
 /// Конфиг для просьбы: брокер только если он есть, плюс имя терминала и сырой
 /// конфиг.
@@ -1039,6 +1038,19 @@ struct Target {
     http: String,
 }
 
+/// Разбить цели на http- и mqtt-половину: транспорт для каждой цели выбирает
+/// `transport_for`, и цель попадает ровно в одну из половин. Вынесена в
+/// чистую функцию ради сторожа — единственное место, где транспорт для
+/// нескольких целей выбирается не единственным `match` (как во всех
+/// остальных командах), а парой фильтров, и опечатка в одном из них
+/// (`== Http` вместо `== Mqtt`) молча дала бы http-цели ещё и mqtt-попытку —
+/// то самое запрещённое удвоение.
+fn split_targets(targets: &[Target]) -> (Vec<&Target>, Vec<&Target>) {
+    let http = targets.iter().filter(|t| transport_for(&t.http) == Transport::Http).collect();
+    let mqtt = targets.iter().filter(|t| transport_for(&t.http) == Transport::Mqtt).collect();
+    (http, mqtt)
+}
+
 /// Каждая цель получает свою попытку независимо от исхода предыдущих: ранний
 /// выход на первой же ошибке оставлял бы вторую машину неотмотанной — ровно
 /// половинчатую отмотку, ради ухода от которой список целей и завели. Наружу
@@ -1060,9 +1072,11 @@ async fn unread_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), Str
         };
         let mut first_err: Option<String> = None;
 
+        let (http_targets, mqtt_targets) = split_targets(&targets);
+
         // http-цели — каждая своим запросом. Транспорт для каждой уже выбран
         // `transport_for`, и повторной публикации в MQTT для неё не будет.
-        for t in targets.iter().filter(|t| transport_for(&t.http) == Transport::Http) {
+        for t in http_targets {
             if let Err(e) = manager_http::unread(&t.http, &id) {
                 if first_err.is_none() {
                     first_err = Some(e);
@@ -1074,11 +1088,7 @@ async fn unread_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), Str
         // что и раньше, только на своём подсписке: совпавшие после
         // `resolve_base` базы не должны обернуться двумя одинаковыми
         // публикациями в один топик.
-        let mqtt_bases: Vec<String> = targets
-            .iter()
-            .filter(|t| transport_for(&t.http) == Transport::Mqtt)
-            .map(|t| t.base.clone())
-            .collect();
+        let mqtt_bases: Vec<String> = mqtt_targets.iter().map(|t| t.base.clone()).collect();
         if !mqtt_bases.is_empty() {
             match &broker {
                 Some(broker) => {
@@ -4550,11 +4560,31 @@ actions:
         assert_eq!(super::transport_for("   "), super::Transport::Mqtt);
     }
 
-    /// Ретрая нет: при выбранном http провал остаётся провалом. Публикация
-    /// вдогонку открыла бы человеку второй терминал — `claude-session-open` не
-    /// идемпотентна.
+    /// `split_targets` — единственное место, где транспорт для нескольких
+    /// целей выбирается не одним `match`, а парой фильтров: опечатка во
+    /// втором (`== Http` вместо `== Mqtt`) отправила бы http-цель туда же, во
+    /// второй раз, — ровно запрещённое удвоение. Три проверки ловят её порознь:
+    /// http-список не должен нести пустых адресов, mqtt-список — непустых, а
+    /// сумма долей — быть равна списку целиком (ни потери, ни задвоения).
     #[test]
-    fn a_failed_http_request_does_not_fall_back() {
-        assert_eq!(super::fallback_after_http_failure(), None::<super::Transport>);
+    fn split_targets_sends_each_target_through_exactly_one_transport() {
+        let targets = vec![
+            super::Target { base: "home/mac/windows".to_string(), http: String::new() },
+            super::Target {
+                base: "home/pc/windows".to_string(),
+                http: "windows-box:9722".to_string(),
+            },
+        ];
+        let (http, mqtt) = super::split_targets(&targets);
+
+        assert_eq!(http.len(), 1, "windows-box:9722 обязана попасть в http-список");
+        assert_eq!(http[0].http, "windows-box:9722");
+        assert!(http.iter().all(|t| !t.http.trim().is_empty()), "в http-список попала mqtt-цель");
+
+        assert_eq!(mqtt.len(), 1, "цель без адреса обязана попасть в mqtt-список");
+        assert_eq!(mqtt[0].base, "home/mac/windows");
+        assert!(mqtt.iter().all(|t| t.http.trim().is_empty()), "в mqtt-список попала http-цель");
+
+        assert_eq!(http.len() + mqtt.len(), targets.len(), "цель потерялась или задвоилась");
     }
 }

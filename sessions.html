@@ -1955,16 +1955,31 @@ const infoBackdrop = document.getElementById('info-backdrop');
   let lastState = {};
 
   /**
+   * Достижима ли машина `host` — своим http-адресом либо общим брокером.
+   *
+   * `managerReachable()` рядом отвечает про машину **менеджера**, а трекер
+   * своего окна на ней стоять не обязан: `openManager` при своей машине с
+   * `openSession: false` (мак) отдаёт чужую запись (`able[0]`), и её
+   * достижимость ничего не говорит про достижимость трекера строки. Брокер
+   * — общий канал: он публикует в топик любой машины одинаково, а вот прямой
+   * http есть только у той машины, чей адрес назвали явно.
+   */
+  function machineReachable(host) {
+    return Boolean(window.SessionWindows.httpForHost(lastState, host) || CONFIG.mqtt.configured);
+  }
+
+  /**
    * Жив ли трекер на этой машине и умеет ли он поднимать окна.
    *
    * Вопрос про машину целиком, а не про строку: доступен ли режим снимков и
-   * показывать ли подсказку о нём. Достижимость менеджера — не второе решение,
-   * а условие выполнимости: без неё просьбе некуда уйти ни одним из двух
-   * транспортов. Предложить режим, у которого нет транспорта, значит подарить
-   * человеку молчащий Enter.
+   * показывать ли подсказку о нём. Достижимость — не второе решение, а условие
+   * выполнимости: без неё просьбе некуда уйти ни одним из двух транспортов.
+   * Предложить режим, у которого нет транспорта, значит подарить человеку
+   * молчащий Enter. Спрашивается достижимость **своей** машины
+   * (`CONFIG.windowHost`), а не менеджера — трекер снимков стоит здесь.
    */
   function trackerIsHere() {
-    return managerReachable()
+    return machineReachable(CONFIG.windowHost)
       && !!window.SessionWindows.trackerHere(lastState, CONFIG.windowHost);
   }
 
@@ -1974,9 +1989,15 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * Раньше на этот вопрос отвечала машина целиком, и другого ответа быть не
    * могло: трекер был один. Теперь окно строки может стоять на соседней
    * машине, и подъём его отсюда ничего не дал бы человеку перед экраном.
+   *
+   * Достижимость спрашивается у машины **окна строки** (`focusHttp(row)`), а
+   * не у менеджера: `canFocusRow` уже гарантирует, что окно стоит на своей
+   * машине (`CONFIG.windowHost`), и адрес обязан называть ту же машину —
+   * иначе достижимый чужой менеджер включал бы Enter там, где просьбе идти
+   * некуда, и он утыкался бы в «mqtt is not configured».
    */
   function rowCanFocus(row) {
-    return managerReachable()
+    return (Boolean(focusHttp(row)) || CONFIG.mqtt.configured)
       && window.SessionWindows.canFocusRow(row, lastState, CONFIG.windowHost);
   }
 
@@ -2211,22 +2232,31 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * каждой: сессию открывают на двух машинах сразу, отметка складывается по
    * максимуму всех, и отмотай у одного трекера — второй вернёт «просмотрено»
    * на следующем же опросе. Строка без окон адреса не назовёт — тогда просьба
-   * уходит по своей базе, как раньше: слот в windows11-manager переживает
-   * закрытие окна, и такую сессию он всё ещё может знать по id.
+   * уходит по адресу менеджера, как раньше уходила по своей базе: слот в
+   * windows11-manager переживает закрытие окна, и такую сессию он всё ещё
+   * может знать по id.
    *
    * Транспорт для каждой машины свой — `unreadTargets` отдаёт пару `base` и
    * `http` на цель, а Rust выбирает между ними `transport_for`. Свёртки до
    * одних баз здесь больше нет: она была временной платой задачи 5, пока Rust
    * ещё не принимал http-половину.
+   *
+   * Пустой список целей (строка без окон) не уходит пустым: Rust на пустом
+   * списке подставляет одну mqtt-цель по своей базе и требует брокер даже
+   * там, где просьбе есть куда пойти напрямую, — на машине без брокера
+   * молчаливый выход обернулся бы красной строкой. Подставляется цель с
+   * адресом менеджера: пусто — тот же откат на mqtt, что был бы и без
+   * подстановки, есть — просьба уходит напрямую и без брокера.
    */
   function markUnread(row) {
     // Перерисовка — из последнего ответа, без похода на удалённый хост:
     // изменились отметки, а не сессии.
     markSeen(row.id, row.lastActivity - 1).then(regroup);
     if (!managerReachable()) return;
+    const targets = window.SessionWindows.unreadTargets(row, lastState);
     invoke('unread_session_mqtt', {
       id: row.id,
-      targets: window.SessionWindows.unreadTargets(row, lastState),
+      targets: targets.length ? targets : [{ base: '', http: managerHttpHere() }],
     })
       .catch((e) => { error = String(e); render(); });
   }
@@ -2378,8 +2408,13 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * просьба к ней исчезнет молча — цена необъявленного умения. У http-ветки
    * ответ есть, и отказ доезжает до статуслайна пикера.
    *
-   * `http` — адрес менеджера своей машины: раскладка идёт по своему же экрану,
-   * тем же адресом, каким открывает сессии `openViaManager`.
+   * `http` — адрес трекера машины, чьи окна раскладываем, тем же способом,
+   * каким берётся `base`: `focusHttp(row)`, а не `managerHttpHere()`. Это не
+   * одно и то же — `openManager` на машине с `openSession: false` (мак)
+   * отдаёт запись **чужой** машины (`able[0]`), и адрес менеджера мог бы
+   * увести маковские id раскладки Windows-менеджеру. Тот же адрес, что берёт
+   * `place_order::tracker_http` для хоткея плитки в Rust — второй вход в ту
+   * же просьбу не должен расходиться с первым по адресату.
    */
   async function placeWindows(row, mode) {
     await invoke('hide_picker');
@@ -2394,7 +2429,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
           stale: staleSettings(),
         }),
         base: focusBase(row),
-        http: managerHttpHere(),
+        http: focusHttp(row),
       });
     } catch (e) {
       error = String(e);
