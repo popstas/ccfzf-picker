@@ -20,6 +20,7 @@ mod local_ccfzf;
 // пяти ниже, и все они объявлены после этой строки — макрос виден им всем.
 #[macro_use]
 mod log;
+mod manager_http;
 mod merge_state;
 mod mqtt;
 mod place_order;
