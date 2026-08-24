@@ -71,6 +71,10 @@ function callsOf(name, extra = {}) {
     openManagerHere: () => ({ host: 'pc-win', mqttBase: 'windows/pc-win' }),
     focusBase: () => 'windows/pc-win',
     managerBase: () => 'windows/pc-win',
+    // Достижимость менеджера — тоже не предмет этого сторожа: он про порядок
+    // вызовов, а не про развилку транспорта. Заглушка с тем же именем, что и
+    // у настоящего помощника, — та же дорога, что у managerBase рядом.
+    managerReachable: () => true,
     render: () => {},
     error: '',
     row: ROW,

@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const SessionWindows = require('../frontend-src/session-windows');
-const { canFocusRow, trackerHere, trackerHosts, focusPid, openManager, windowsOf, windowOf, focusWindowOf, mqttBaseFor, unreadBases } = SessionWindows;
+const { canFocusRow, trackerHere, trackerHosts, focusPid, openManager, windowsOf, windowOf, focusWindowOf, mqttBaseFor, unreadTargets } = SessionWindows;
 
 // Ответ нового агрегатора: две машины, у каждой свой трекер.
 const STATE = {
@@ -180,6 +180,51 @@ test('старый агрегатор адреса не даёт, и это пу
   assert.equal(SessionWindows.mqttBaseFor({ window: { title: 'ccfzf' } }, state), '');
 });
 
+// Адрес прямой просьбы — свойство машины, и берётся он из записи машины, а не
+// окна: в записи окна его нет вовсе (см. read_window_sources в ccfzf). Дорога
+// поэтому двухшаговая — окно называет host, host находится в windowHosts.
+test('httpFor находит адрес по машине окна', () => {
+  const state = {
+    windowHosts: [
+      { host: 'windows-box', pid: 9, canFocus: true, openSession: true, mqttBase: '', http: { port: 9722 } },
+      { host: 'mac-host', pid: 7, canFocus: true, openSession: false, mqttBase: 'home/mac/windows', http: null },
+    ],
+  };
+  const row = { id: 'aaa', window: { host: 'windows-box' } };
+  assert.equal(SessionWindows.httpFor(row, state, 'windows-box'), 'windows-box:9722');
+});
+
+// Трекер прежней версии поля не пишет — пустая строка значит «иди прежней
+// дорогой, через MQTT». Молчаливого отката тут нет: MQTT и был единственным
+// транспортом, а не запасным.
+test('httpFor пуст, когда машина адреса не назвала', () => {
+  const state = {
+    windowHosts: [{ host: 'mac-host', pid: 7, canFocus: true, openSession: true, mqttBase: '', http: null }],
+  };
+  const row = { id: 'aaa', window: { host: 'mac-host' } };
+  assert.equal(SessionWindows.httpFor(row, state, 'mac-host'), '');
+});
+
+// Отмотать «просмотрено» надо у каждого трекера сессии, и транспорт у каждого
+// свой: у одной машины http, у другой MQTT. Пара едет вместе, иначе адрес и
+// база разъехались бы по индексам массивов.
+test('unreadTargets даёт паре машин свой транспорт каждой', () => {
+  const state = {
+    windowHosts: [
+      { host: 'windows-box', pid: 9, canFocus: true, openSession: true, mqttBase: '', http: { port: 9722 } },
+      { host: 'mac-host', pid: 7, canFocus: true, openSession: true, mqttBase: 'home/mac/windows', http: null },
+    ],
+  };
+  const row = {
+    id: 'aaa',
+    sessionWindows: [{ host: 'windows-box', mqttBase: '' }, { host: 'mac-host', mqttBase: 'home/mac/windows' }],
+  };
+  assert.deepEqual(SessionWindows.unreadTargets(row, state), [
+    { base: '', http: 'windows-box:9722' },
+    { base: 'home/mac/windows', http: '' },
+  ]);
+});
+
 test('менеджером берётся свой трекер, если он умеет открывать сессии', () => {
   const state = {
     windowHosts: [{ host: 'mac-host', pid: 7, openSession: false, mqttBase: 'home/room/mac/windows' },
@@ -248,22 +293,27 @@ test('строка без окон даёт пустой список, а window
   assert.strictEqual(windowOf({}, {}), null);
 });
 
-test('unreadBases называет базу каждого окна, без повторов', () => {
+test('unreadTargets называет базу каждого окна, без повторов', () => {
   // Отметка складывается по максимуму всех окон, значит отмотать надо у
   // каждого трекера: иначе второй вернёт «просмотрено» следующим же опросом.
+  // Транспорт у всех троих окон пуст — state не называет ни одного трекера, —
+  // и дедупликация тогда работает как раньше, по одной базе.
   const row = { windows: [
     { host: 'mac-host', mqttBase: 'home/mac/windows' },
     { host: 'windows-box', mqttBase: 'home/pc/windows' },
     { host: 'other-box', mqttBase: 'home/pc/windows' },
   ] };
-  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', 'home/pc/windows']);
+  assert.deepStrictEqual(unreadTargets(row, {}), [
+    { base: 'home/mac/windows', http: '' },
+    { base: 'home/pc/windows', http: '' },
+  ]);
 });
 
 test('строка без окон баз не называет — просьба уйдёт по своей', () => {
-  assert.deepStrictEqual(unreadBases({}, {}), []);
+  assert.deepStrictEqual(unreadTargets({}, {}), []);
 });
 
-test('unreadBases читает sessionWindows карточки, а не её собственное окно', () => {
+test('unreadTargets читает sessionWindows карточки, а не её собственное окно', () => {
   // Карточка теперь несёт одно окно (row.windows), а сессия открыта на двух
   // машинах сразу. Отмотать «просмотрено» надо у обоих трекеров — иначе
   // сосед, которого не тронули, вернёт «просмотрено» на следующем же опросе,
@@ -275,29 +325,38 @@ test('unreadBases читает sessionWindows карточки, а не её с�
       { host: 'windows-box', mqttBase: 'home/pc/windows' },
     ],
   };
-  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', 'home/pc/windows']);
+  assert.deepStrictEqual(unreadTargets(row, {}), [
+    { base: 'home/mac/windows', http: '' },
+    { base: 'home/pc/windows', http: '' },
+  ]);
 });
 
-test('unreadBases без sessionWindows откатывается на windowsOf(row, state)', () => {
+test('unreadTargets без sessionWindows откатывается на windowsOf(row, state)', () => {
   // Строки, собранные не buildSessionList (старые вызовы в тестах, чужие
   // источники строк), поля sessionWindows не несут вовсе.
   const row = { windows: [
     { host: 'mac-host', mqttBase: 'home/mac/windows' },
     { host: 'windows-box', mqttBase: 'home/pc/windows' },
   ] };
-  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', 'home/pc/windows']);
+  assert.deepStrictEqual(unreadTargets(row, {}), [
+    { base: 'home/mac/windows', http: '' },
+    { base: 'home/pc/windows', http: '' },
+  ]);
 });
 
 test('окно без адреса просит отмотку по своей базе, а не пропускается', () => {
   // windows11-manager поля mqttBase не пишет вовсе, и агрегатор приписывает
-  // такому окну пустую строку. Выбрось её unreadBases — и просьба до этого
+  // такому окну пустую строку. Выбрось её unreadTargets — и просьба до этого
   // трекера не доедет никогда: Rust трактует '' как «спроси свой конфиг»
   // (resolve_base), а пропуск это переводит в «трекера тут нет».
   const row = { windows: [
     { host: 'mac-host', mqttBase: 'home/mac/windows' },
     { host: 'windows-box' },
   ] };
-  assert.deepStrictEqual(unreadBases(row, {}), ['home/mac/windows', '']);
+  assert.deepStrictEqual(unreadTargets(row, {}), [
+    { base: 'home/mac/windows', http: '' },
+    { base: '', http: '' },
+  ]);
 });
 
 // ---- placeIds: порядок для просьбы о раскладке ----------------------------

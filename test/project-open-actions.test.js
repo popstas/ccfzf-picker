@@ -121,6 +121,10 @@ function openProjectRow(projectOpenAction) {
     newSessionHere: () => { calls.push('newSessionHere'); return Promise.resolve(); },
     openManagerHere: () => ({ host: 'pc-win', mqttBase: 'windows/pc-win' }),
     managerBase: () => 'windows/pc-win',
+    // Достижимость менеджера — заглушка с тем же именем, что и у настоящего
+    // помощника: этот сторож про настройку projectOpenAction, а не про
+    // развилку транспорта.
+    managerReachable: () => true,
     render: () => {},
     error: '',
     row: { kind: 'project', cwd: '/home/user/projects/x' },

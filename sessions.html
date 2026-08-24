@@ -2023,6 +2023,14 @@ const infoBackdrop = document.getElementById('info-backdrop');
     return { host: manager.host, mqttBase: window.PickerSnapshots.snapshotBase(snap) };
   }
 
+  /** Есть ли вообще дорога до менеджера: прямой адрес либо брокер. */
+  function managerReachable() {
+    return Boolean(
+      window.SessionWindows.managerHttp(lastState, CONFIG.windowHost)
+      || CONFIG.mqtt.configured,
+    );
+  }
+
   /** Куда просить о подъёме окна этой строки. Пусто — спросим свой конфиг. */
   function focusBase(row) {
     return window.SessionWindows.mqttBaseFor(row, lastState, CONFIG.windowHost);
@@ -2194,7 +2202,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (!CONFIG.mqtt.configured) return;
     invoke('unread_session_mqtt', {
       id: row.id,
-      bases: window.SessionWindows.unreadBases(row, lastState),
+      bases: window.SessionWindows.unreadTargets(row, lastState).map((t) => t.base),
     })
       .catch((e) => { error = String(e); render(); });
   }
@@ -2386,7 +2394,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
   async function restoreSnapshot(snapshotId, sessionIds) {
     const owner = snapshotOwner(snapshotId);
     const transport = window.OpenTransport.chooseOpenTransport(
-      owner, CONFIG.windowHost, CONFIG.mqtt.configured,
+      owner, CONFIG.windowHost, managerReachable(),
     );
     await invoke('hide_picker');
     if (transport !== 'manager') return restoreLocally(snapshotId, sessionIds);
@@ -2484,7 +2492,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // взялись подъём окна мимо права на передний план и Enter, не сделавший
     // ничего у незнакомой трекеру сессии.
     const action = window.OpenTransport.chooseEnterAction(
-      row, strategy, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
+      row, strategy, openManagerHere(), CONFIG.windowHost, managerReachable(),
     );
     // Окно уже открыто, и поднять его умеет только эта дорога: она гасит пикер
     // до публикации и выдаёт трекеру право на передний план.
@@ -2568,7 +2576,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
         // пункта «Open on <host>» она уехала бы координатой чужого стола.
         // Считает та же `chooseOpenTransport`, что выбирает транспорт.
         sameMachine: window.OpenTransport.chooseOpenTransport(
-          openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
+          openManagerHere(), CONFIG.windowHost, managerReachable(),
         ) === 'manager',
       });
     } catch (e) {
@@ -3150,7 +3158,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
    */
   function actionsFor(row) {
     const actions = window.SessionActions.availableActions(row, CONFIG, { os: PICKER_OS });
-    if (window.OpenTransport.canOpenRemote(row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured)) {
+    if (window.OpenTransport.canOpenRemote(row, openManagerHere(), CONFIG.windowHost, managerReachable())) {
       actions.push({
         id: 'open-remote',
         label: `Open on ${(openManagerHere() || {}).host}`,
@@ -3394,7 +3402,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (CONFIG.projectOpenAction === 'new') return newSessionHere(row, opts);
     const dir = window.OpenTransport.rowProjectDir(row);
     const action = window.OpenTransport.chooseProjectOpenAction(
-      row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
+      row, openManagerHere(), CONFIG.windowHost, managerReachable(),
     );
     // Менеджера нет — развилку исполняем сами, той же `openProjectHere`, какой
     // её исполняет проектный хоткей. Прежде здесь стояла голая `newSession`, и
@@ -3445,7 +3453,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
   async function newSessionHere(row, opts = {}) {
     const dir = window.OpenTransport.rowProjectDir(row);
     const action = window.OpenTransport.chooseProjectOpenAction(
-      row, openManagerHere(), CONFIG.windowHost, CONFIG.mqtt.configured,
+      row, openManagerHere(), CONFIG.windowHost, managerReachable(),
     );
     if (action !== 'manager') return newSession(row.cwd, row.source);
     const taken = takenSessionNames();

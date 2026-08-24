@@ -50,6 +50,9 @@ function bodyOf(name, opts) {
     markSeen: () => Promise.resolve(),
     openManagerHere: () => ({ host: 'pc-win', mqttBase: 'windows/pc-win' }),
     managerBase: () => 'windows/pc-win',
+    // Достижимость менеджера — заглушка с тем же именем, что и у настоящего
+    // помощника: этот сторож про тело просьбы, а не про развилку транспорта.
+    managerReachable: () => true,
     render: () => {},
     error: '',
     row: ROW,
