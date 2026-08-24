@@ -306,6 +306,6 @@
 
   return {
     windowOf, windowsOf, normHost, canFocusRow, focusWindowOf, trackerHere, trackerHosts, focusPid,
-    mqttBaseFor, httpFor, managerHttp, openManager, unreadTargets, placeIds, minimizedHere,
+    mqttBaseFor, httpFor, httpForHost, managerHttp, openManager, unreadTargets, placeIds, minimizedHere,
   };
 });

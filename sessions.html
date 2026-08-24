@@ -1958,13 +1958,13 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * Жив ли трекер на этой машине и умеет ли он поднимать окна.
    *
    * Вопрос про машину целиком, а не про строку: доступен ли режим снимков и
-   * показывать ли подсказку о нём. Настроенный брокер — не второе решение, а
-   * условие выполнимости: просьба уходит только публикацией, и без брокера её
-   * некуда отправить. Предложить режим, у которого нет транспорта, значит
-   * подарить человеку молчащий Enter.
+   * показывать ли подсказку о нём. Достижимость менеджера — не второе решение,
+   * а условие выполнимости: без неё просьбе некуда уйти ни одним из двух
+   * транспортов. Предложить режим, у которого нет транспорта, значит подарить
+   * человеку молчащий Enter.
    */
   function trackerIsHere() {
-    return CONFIG.mqtt.configured
+    return managerReachable()
       && !!window.SessionWindows.trackerHere(lastState, CONFIG.windowHost);
   }
 
@@ -1976,7 +1976,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * машине, и подъём его отсюда ничего не дал бы человеку перед экраном.
    */
   function rowCanFocus(row) {
-    return CONFIG.mqtt.configured
+    return managerReachable()
       && window.SessionWindows.canFocusRow(row, lastState, CONFIG.windowHost);
   }
 
@@ -2014,13 +2014,22 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * префикс топиков, и просьба обязана уйти той, что снимок сняла. Пустая
    * строка значит «спроси свой конфиг» — так её читает `resolve_base` в
    * `src-tauri/src/mqtt.rs`.
+   *
+   * Прямой http-адрес — свойство машины владельца, а не снимка: у снимка
+   * своего адреса нет, топик у него один на всех транспортов не бывает.
+   * Берётся `httpForHost` по хосту менеджера — та же дорога, что у `httpFor`
+   * для строки сессии.
    */
   function snapshotOwner(id) {
     const snap = snapshotById(id);
     if (!snap) return null;
     const manager = window.SessionWindows.openManager(lastState, CONFIG.windowHost);
     if (!manager) return null;
-    return { host: manager.host, mqttBase: window.PickerSnapshots.snapshotBase(snap) };
+    return {
+      host: manager.host,
+      mqttBase: window.PickerSnapshots.snapshotBase(snap),
+      http: window.SessionWindows.httpForHost(lastState, manager.host),
+    };
   }
 
   /** Есть ли вообще дорога до менеджера: прямой адрес либо брокер. */
@@ -2036,9 +2045,19 @@ const infoBackdrop = document.getElementById('info-backdrop');
     return window.SessionWindows.mqttBaseFor(row, lastState, CONFIG.windowHost);
   }
 
+  /** Куда просить о подъёме окна напрямую. Пусто — пойдём через MQTT. */
+  function focusHttp(row) {
+    return window.SessionWindows.httpFor(row, lastState, CONFIG.windowHost);
+  }
+
   /** Куда просить об открытии сессии. Пусто — спросим свой конфиг. */
   function managerBase() {
     return (openManagerHere() || {}).mqttBase || '';
+  }
+
+  /** Куда просить об открытии сессии напрямую. Пусто — пойдём через MQTT. */
+  function managerHttpHere() {
+    return window.SessionWindows.managerHttp(lastState, CONFIG.windowHost);
   }
 
   /**
@@ -2180,29 +2199,34 @@ const infoBackdrop = document.getElementById('info-backdrop');
    *
    * Просьба уходит независимо от `rowCanFocus()`: там речь о подъёме окна,
    * который на чужом экране бессмысленен, а отметка о просмотре приезжает в
-   * список на любой машине. Не настроен брокер — остаётся местная отметка, как
-   * было до появления трекерной.
+   * список на любой машине. Не достижим ни один трекер — остаётся местная
+   * отметка, как было до появления трекерной.
    *
-   * Отказ публикации местную отметку не отменяет: она уже стоит, кружок уже
+   * Отказ просьбы местную отметку не отменяет: она уже стоит, кружок уже
    * оранжевый, и откатывать его обратно значило бы отвечать на неудачу тем же,
    * чем на успех. Пикер при этом не гаснет — список перерисовывается раз в
    * секунду, и перекраску видно на глазах.
    *
    * Адреса берутся у машин окон, а не у своего конфига, и просьба уходит
-   * каждому: сессию открывают на двух машинах сразу, отметка складывается по
+   * каждой: сессию открывают на двух машинах сразу, отметка складывается по
    * максимуму всех, и отмотай у одного трекера — второй вернёт «просмотрено»
    * на следующем же опросе. Строка без окон адреса не назовёт — тогда просьба
    * уходит по своей базе, как раньше: слот в windows11-manager переживает
    * закрытие окна, и такую сессию он всё ещё может знать по id.
+   *
+   * Транспорт для каждой машины свой — `unreadTargets` отдаёт пару `base` и
+   * `http` на цель, а Rust выбирает между ними `transport_for`. Свёртки до
+   * одних баз здесь больше нет: она была временной платой задачи 5, пока Rust
+   * ещё не принимал http-половину.
    */
   function markUnread(row) {
     // Перерисовка — из последнего ответа, без похода на удалённый хост:
     // изменились отметки, а не сессии.
     markSeen(row.id, row.lastActivity - 1).then(regroup);
-    if (!CONFIG.mqtt.configured) return;
+    if (!managerReachable()) return;
     invoke('unread_session_mqtt', {
       id: row.id,
-      bases: window.SessionWindows.unreadTargets(row, lastState).map((t) => t.base),
+      targets: window.SessionWindows.unreadTargets(row, lastState),
     })
       .catch((e) => { error = String(e); render(); });
   }
@@ -2280,15 +2304,16 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * просьб, кончающихся окном: `openProjectRow`, `newSessionHere`,
    * `openViaManager`.
    *
-   * Просьба уходит публикацией в MQTT: брокер в этой установке слышат обе
-   * машины. Ответа у неё нет — приёмник отчитывается в свой лог, а не нам, — и
-   * это сознательный размен. Http-сервер, у которого ответ был, вешал демона на
-   * той стороне; отчёт о подъёме окна того не стоит.
+   * Транспорт — прямой http, если адрес известен, иначе публикация в MQTT;
+   * развилку решает Rust (`transport_for`), сюда едут обе половины и `base`, и
+   * `http`. У ветки MQTT ответа нет — приёмник отчитывается в свой лог, а не
+   * нам, — и это сознательный размен: отчёт о подъёме окна того не стоит. У
+   * ветки http ответ есть, и отказ доезжает до статуслайна пикера.
    */
   async function focusSession(row) {
     await invoke('hide_picker');
     try {
-      await invoke('focus_window_mqtt', { id: row.id, base: focusBase(row) });
+      await invoke('focus_window_mqtt', { id: row.id, base: focusBase(row), http: focusHttp(row) });
     } catch (e) {
       error = String(e);
       render();
@@ -2348,9 +2373,13 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * Отметки «просмотрено» здесь нет намеренно: раскладка не открывает сессию и
    * ни на одну из них человек не смотрел — окна лишь встали по местам.
    *
-   * Ответа у просьбы нет, как и у подъёма окна: отказ трекер показывает своему
-   * человеку строкой в трее. Если машина не объявила умение раскладок, просьба
-   * к ней исчезнет молча — цена необъявленного умения.
+   * Ответа у mqtt-ветки нет, как и у подъёма окна: отказ трекер показывает
+   * своему человеку строкой в трее. Если машина не объявила умение раскладок,
+   * просьба к ней исчезнет молча — цена необъявленного умения. У http-ветки
+   * ответ есть, и отказ доезжает до статуслайна пикера.
+   *
+   * `http` — адрес менеджера своей машины: раскладка идёт по своему же экрану,
+   * тем же адресом, каким открывает сессии `openViaManager`.
    */
   async function placeWindows(row, mode) {
     await invoke('hide_picker');
@@ -2365,6 +2394,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
           stale: staleSettings(),
         }),
         base: focusBase(row),
+        http: managerHttpHere(),
       });
     } catch (e) {
       error = String(e);
@@ -2384,7 +2414,8 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * появятся. Знать о восстановлении трекеру для этого не нужно.
    *
    * Адрес просьбы берётся у снимка: у каждой машины свой префикс топиков, и
-   * уйти она обязана той, что снимок сняла.
+   * уйти она обязана той, что снимок сняла. Транспорт решает Rust
+   * (`transport_for`) по тому же принципу — прямой адрес есть, он и побеждает.
    *
    * Пикер гасится до просьбы, как и на фокусе: окна поднимутся на том же
    * экране, и держать поверх них список незачем.
@@ -2402,6 +2433,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       await invoke('restore_snapshot_mqtt', {
         id: snapshotId, sessionIds,
         base: (owner || {}).mqttBase || '',
+        http: (owner || {}).http || '',
       });
     } catch (e) {
       error = String(e);
@@ -2543,10 +2575,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * Попросить трекер открыть сессию у себя.
    *
    * Один вход на два повода: Enter на машине самого трекера (ветка `manager`
-   * в openSession выше) и пункт меню «Open on <host>» с чужой машины. Publish
-   * в MQTT дойдёт до демона одинаково независимо от того, откуда он
-   * отправлен, и тело просьбы у обоих одно — разводить их значило бы завести
-   * два места, где отметка «посмотрел» и гашение пикера ставятся по-разному.
+   * в openSession выше) и пункт меню «Open on <host>» с чужой машины. Просьба
+   * дойдёт до демона одинаково независимо от того, откуда она отправлена и
+   * каким из двух транспортов, а тело у обоих поводов одно — разводить их
+   * значило бы завести два места, где отметка «посмотрел» и гашение пикера
+   * ставятся по-разному.
    *
    * Пикер гасится до просьбы: она кончается окном — поднятым, восстановленным
    * или новым, — и гашение после отбирало бы у него передний план. Право на
@@ -2564,7 +2597,8 @@ const infoBackdrop = document.getElementById('info-backdrop');
     await invoke('hide_picker');
     try {
       await invoke('open_session_mqtt', {
-        id: row.id, cwd: window.OpenTransport.rowProjectDir(row), base: managerBase(),
+        id: row.id, cwd: window.OpenTransport.rowProjectDir(row),
+        base: managerBase(), http: managerHttpHere(),
         // Ctrl на строке: «поставь окно там, куда я смотрю, и не двигай
         // дальше». Признак едет ключом в тело просьбы, а решение — за
         // менеджером: расставляет окна он, и вторая пометка на нашей стороне
@@ -3415,7 +3449,8 @@ const infoBackdrop = document.getElementById('info-backdrop');
     await invoke('hide_picker');
     try {
       await invoke('open_project_mqtt', {
-        cwd: dir, base: managerBase(), noAutoplace: opts.noAutoplace === true,
+        cwd: dir, base: managerBase(), http: managerHttpHere(),
+        noAutoplace: opts.noAutoplace === true,
       });
     } catch (e) {
       error = String(e);
@@ -3461,15 +3496,17 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (!name) return newSession(row.cwd, row.source);
     // Имя занимается до отправки, а не после — в отличие от местной
     // newSession, где имя ждёт лишь миллисекунды локального spawn, здесь
-    // invoke ждёт публикацию в брокер (таймаут до 5 с). Пикер эти секунды
-    // уже погашен, но хоткей поднимает его обратно в любую из них: второй
-    // `^N` увидел бы то же самое issuedNames, что и первый. Заняв имя
-    // заранее, закрываем гонку, а не документируем её как отсутствующую.
+    // invoke ждёт ответа менеджера (таймаут до 5 с у обоих транспортов).
+    // Пикер эти секунды уже погашен, но хоткей поднимает его обратно в любую
+    // из них: второй `^N` увидел бы то же самое issuedNames, что и первый.
+    // Заняв имя заранее, закрываем гонку, а не документируем её как
+    // отсутствующую.
     issuedNames.set(name, Date.now());
     await invoke('hide_picker');
     try {
       await invoke('new_session_mqtt', {
-        cwd: dir, name, base: managerBase(), noAutoplace: opts.noAutoplace === true,
+        cwd: dir, name, base: managerBase(), http: managerHttpHere(),
+        noAutoplace: opts.noAutoplace === true,
       });
     } catch (e) {
       // Отказ — имя не занято: сессия не поднялась, и следующая попытка
