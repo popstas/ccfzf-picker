@@ -63,11 +63,17 @@ fn parse_endpoint(raw: &str) -> Option<(String, u16)> {
 }
 
 /// Общий ход всех пяти просьб.
+///
+/// Маршрут разрешается раньше адреса — не по важности отказа, а ради теста:
+/// отказ по кривому адресу называет в тексте и маршрут, каким шла просьба, а
+/// значит опечатка в захардкоженном хвосте у любой из семи публичных функций
+/// видна в тексте самого отказа, и ловит её тест без единого похода в сеть
+/// (`every_public_request_carries_its_own_route` ниже).
 fn post(endpoint: &str, topic_tail: &str, body: String) -> Result<(), String> {
-    let (host, port) = parse_endpoint(endpoint)
-        .ok_or_else(|| format!("manager address is malformed: {endpoint}"))?;
     let route = route_for(topic_tail)
         .ok_or_else(|| format!("no http route for {topic_tail}"))?;
+    let (host, port) = parse_endpoint(endpoint)
+        .ok_or_else(|| format!("manager address is malformed: {endpoint} (route {route})"))?;
     let url = format!("http://{host}:{port}{route}");
     let agent = ureq::AgentBuilder::new().timeout(TIMEOUT).build();
     agent
@@ -174,5 +180,47 @@ mod tests {
     #[test]
     fn focus_body_is_the_same_as_the_published_one() {
         assert_eq!(focus_body("aaa"), r#"{"id":"aaa"}"#);
+    }
+
+    /// Оба предполётных отказа `post()` — до всякого ввода-вывода, и текст у
+    /// них человеческий: это то, что увидит статуслайн пикера.
+    #[test]
+    fn post_refuses_a_malformed_address_before_any_network() {
+        assert_eq!(
+            post("windows-box", "/claude-focus", "{}".to_string()),
+            Err("manager address is malformed: windows-box (route /claude-wt/focus)".to_string()),
+        );
+    }
+
+    #[test]
+    fn post_refuses_an_unknown_route_before_any_network() {
+        assert_eq!(
+            post("windows-box:9722", "/claude-unknown", "{}".to_string()),
+            Err("no http route for /claude-unknown".to_string()),
+        );
+    }
+
+    /// Опечатка в захардкоженном хвосте у любой из семи публичных функций
+    /// ловится здесь без похода в сеть: адрес нарочно кривой, `post()`
+    /// отказывает раньше, чем дошёл бы до сети, а маршрут, которым шла
+    /// просьба, виден в тексте самого отказа (см. комментарий у `post`).
+    /// Разошлись бы хвост функции и хвост в `ROUTES` — текст назвал бы не тот
+    /// маршрут, и `assert_eq!` это увидит.
+    #[test]
+    fn every_public_request_carries_its_own_route() {
+        let placement = Placement::default();
+        let cases: [(&str, Result<(), String>); 7] = [
+            ("/claude-wt/focus", focus("bad", "id")),
+            ("/claude-wt/session-unread", unread("bad", "id")),
+            ("/claude-wt/session-open", open("bad", "id", "cwd", "wt", placement)),
+            ("/claude-wt/session-open", open_project("bad", "cwd", "wt", placement)),
+            ("/claude-wt/session-open", open_new("bad", "cwd", "name", "wt", placement)),
+            ("/claude-wt/snapshot-restore", restore("bad", "id", &[])),
+            ("/claude-wt/place", place("bad", "tile", &[])),
+        ];
+        for (route, result) in cases {
+            let want = format!("manager address is malformed: bad (route {route})");
+            assert_eq!(result, Err(want), "маршрут просьбы к {route} разошёлся с текстом отказа");
+        }
     }
 }
