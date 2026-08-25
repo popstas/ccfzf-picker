@@ -1864,12 +1864,11 @@ fn read_log() -> Vec<String> {
 #[tauri::command]
 fn tracker_signal_status() -> serde_json::Value {
     let path = state_path(tracker_signal::FILE).ok();
-    let age = path
-        .as_ref()
-        .and_then(|p| std::fs::metadata(p).ok())
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.elapsed().ok())
-        .map(|d| d.as_secs());
+    // Возраст считает `Watcher`, а не эта команда: то же правило («сколько
+    // назад трекер трогал файл») своей копией здесь разошлось бы с тем, по
+    // которому живёт опрос, — и разошлось молча, потому что показывает оно
+    // человеку, а не тесту.
+    let age = tracker_signal::Watcher::new(path.clone()).age_secs();
     serde_json::json!({
         "path": path.map(|p| p.display().to_string()).unwrap_or_default(),
         "seen": age.is_some(),
