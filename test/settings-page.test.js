@@ -701,7 +701,14 @@ test('вкладка Window показывает состояние сигнал
   // приходить, и отличить это от «ничего не менялось» будет нечем. Строка в
   // настройках — единственное, чем человек может это увидеть.
   assert.match(SETTINGS_HTML, /Tracker signal/, 'подпись на месте');
-  assert.match(SETTINGS_HTML, /tracker_signal_status/, 'страница спрашивает состояние у Rust');
+  // Не голый поиск подстроки: та же мина, что нашло ревью у первой версии
+  // теста, — упоминание в комментарии (JSDoc над trackerSignalHtml) сторожа
+  // не отличило бы от настоящей проводки. Здесь, как и у соседнего теста
+  // вкладки Log, две конкретные вещи — маршрутизация и закавыченный вызов.
+  assert.match(SETTINGS_HTML, /current === 'window' \? trackerSignalHtml\(\)/,
+    'вкладка window не маршрутизирована на trackerSignalHtml — строка не появится в разметке');
+  assert.match(SETTINGS_HTML, /invoke\('tracker_signal_status'\)/,
+    'страница не зовёт tracker_signal_status — переименование или удаление вызова тест не поймал бы');
 });
 
 test('renderPage знает columns и paths, а не ui и integrations', () => {
