@@ -67,14 +67,31 @@ pub fn sources_from(config: &serde_json::Value) -> Vec<Source> {
     out
 }
 
+/// Переменная, которой пикер просит агрегатор переписать дамп немедленно.
+///
+/// Имя названо здесь один раз на обе дороги: по ssh оно уезжает приставкой к
+/// команде, местному вызову ставится через `Command::env`. Второе написание
+/// разошлось бы с первым молча — ответ пришёл бы прежний, а дамп остался бы
+/// старым, и всплеск опроса ушёл бы впустую.
+pub const DUMP_ENV: &str = "CCFZF_STATE_DUMP_MAX_AGE";
+
+/// Приставка к удалённой команде.
+fn dump_env_prefix(fresh_dump: bool) -> String {
+    if fresh_dump {
+        format!("{DUMP_ENV}=0 ")
+    } else {
+        String::new()
+    }
+}
+
 /// Аргументы вызова `--state`, свои у каждой дороги.
 ///
 /// Через ssh уезжает одна строка: её заново разбирает удалённый шелл, и
 /// `ccfzf --state` там команда. Местный вызов шелла не поднимает вовсе —
 /// `--state` обязан быть отдельным аргументом процесса.
-fn state_args(source: &Source) -> Vec<String> {
+fn state_args(source: &Source, fresh_dump: bool) -> Vec<String> {
     match source {
-        Source::Ssh(_) => vec!["ccfzf --state".to_string()],
+        Source::Ssh(_) => vec![format!("{}ccfzf --state", dump_env_prefix(fresh_dump))],
         Source::Local => vec!["--state".to_string()],
     }
 }
@@ -95,13 +112,16 @@ fn comment_args(source: &Source, id: &str, from: &str) -> Vec<String> {
 ///
 /// `hidden_command`, а не `Command::new`: на Windows иначе на каждый опрос
 /// всплывает консольное окно, а опрос идёт раз в секунду.
-fn command_for(source: &Source) -> Result<std::process::Command, String> {
+fn command_for(source: &Source, fresh_dump: bool) -> Result<std::process::Command, String> {
     match source {
         Source::Ssh(host) => Ok(ssh(host)),
         Source::Local => {
             let (program, args) = crate::local_ccfzf::resolve()?;
             let mut cmd = hidden_command(&program);
             cmd.args(args);
+            if fresh_dump {
+                cmd.env(DUMP_ENV, "0");
+            }
             Ok(cmd)
         }
     }
@@ -121,9 +141,9 @@ fn command_for(source: &Source) -> Result<std::process::Command, String> {
 /// на установке соединения после сна машины или обрыва VPN,
 /// `ServerAliveInterval`/`ServerAliveCountMax` обрывают уже установленное, но
 /// замолчавшее соединение самое большее через 10 секунд.
-pub fn fetch(source: &Source) -> Result<serde_json::Value, String> {
-    let out = command_for(source)?
-        .args(state_args(source))
+pub fn fetch(source: &Source, fresh_dump: bool) -> Result<serde_json::Value, String> {
+    let out = command_for(source, fresh_dump)?
+        .args(state_args(source, fresh_dump))
         .output()
         .map_err(|e| format!("failed to start: {e}"))?;
 
@@ -170,7 +190,7 @@ pub fn set_comment(source: &Source, id: &str, text: &str, from: &str) -> Result<
     if !looks_like_session_id(id) {
         return Err("not a session id".into());
     }
-    let mut child = command_for(source)?
+    let mut child = command_for(source, false)?
         .args(comment_args(source, id, from))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -216,7 +236,7 @@ pub fn looks_like_session_id(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{comment_args, looks_like_session_id, sources_from, state_args, Source};
+    use super::{comment_args, dump_env_prefix, looks_like_session_id, sources_from, state_args, Source, DUMP_ENV};
 
     #[test]
     fn id_sessii_prinimaetsya_tolko_v_forme_uuid() {
@@ -283,8 +303,41 @@ mod tests {
     /// Склей мы их одинаково — местный ccfzf получил бы аргумент `ccfzf --state`.
     #[test]
     fn state_args_differ_by_transport() {
-        assert_eq!(state_args(&Source::Ssh("remote-host".into())), vec!["ccfzf --state".to_string()]);
-        assert_eq!(state_args(&Source::Local), vec!["--state".to_string()]);
+        assert_eq!(
+            state_args(&Source::Ssh("remote-host".into()), false),
+            vec!["ccfzf --state".to_string()]
+        );
+        assert_eq!(state_args(&Source::Local, false), vec!["--state".to_string()]);
+    }
+
+    #[test]
+    fn свежий_дамп_едет_приставкой_только_по_ssh() {
+        // По ssh команду разбирает шелл той стороны, и переменная едет строкой.
+        assert_eq!(
+            state_args(&Source::Ssh("remote-host".into()), true),
+            vec!["CCFZF_STATE_DUMP_MAX_AGE=0 ccfzf --state".to_string()]
+        );
+        // Местный вызов шелла не поднимает вовсе: там переменная ставится
+        // процессу через Command::env, и в аргументах ей делать нечего.
+        assert_eq!(state_args(&Source::Local, true), vec!["--state".to_string()]);
+    }
+
+    #[test]
+    fn обычный_опрос_дамп_не_просит() {
+        assert_eq!(
+            state_args(&Source::Ssh("remote-host".into()), false),
+            vec!["ccfzf --state".to_string()]
+        );
+        assert_eq!(state_args(&Source::Local, false), vec!["--state".to_string()]);
+    }
+
+    #[test]
+    fn имя_переменной_одно_на_обе_дороги() {
+        // Разойдись приставка с именем в Command::env — одна дорога просила бы
+        // дамп, а вторая молча нет, и заметить это можно было бы только на той
+        // машине, где живёт вторая.
+        assert!(dump_env_prefix(true).starts_with(DUMP_ENV));
+        assert_eq!(dump_env_prefix(false), "");
     }
 
     /// То же и у комментария: id и имя машины едут аргументами по обеим

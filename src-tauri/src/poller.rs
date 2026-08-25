@@ -84,10 +84,10 @@ pub fn combine(
 /// По очереди, а не параллельно: поток здесь один, источников два, а
 /// таймауты у ssh уже выставлены (`ConnectTimeout=5`, `ServerAlive*`), то есть
 /// худший случай ограничен. Второй поток стоил бы синхронизации ради секунд.
-pub fn poll_once(sources: &[Source]) -> (Option<serde_json::Value>, String) {
+pub fn poll_once(sources: &[Source], fresh_dump: bool) -> (Option<serde_json::Value>, String) {
     let parts = sources
         .iter()
-        .map(|s| (s.clone(), crate::state_source::fetch(s)))
+        .map(|s| (s.clone(), crate::state_source::fetch(s, fresh_dump)))
         .collect();
     combine(parts)
 }
@@ -174,7 +174,9 @@ impl Poller {
                     }
                 }
                 if !idle {
-                    let (state, error) = poll_once(&sources);
+                    // Всплеск, заставляющий агрегатор переписать дамп немедленно,
+                    // приезжает задачей 4 — здесь опрос всегда обычный.
+                    let (state, error) = poll_once(&sources, false);
                     let changed = match state {
                         Some(state) => {
                             let fp = fingerprint(&state);
