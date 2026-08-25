@@ -30,6 +30,7 @@ mod project_hotkeys;
 mod scrim;
 mod session_name;
 mod state_source;
+mod tracker_signal;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
 /// только что открытое окно. Тот же ограничитель стоит в соседнем пикере.
@@ -2139,7 +2140,7 @@ fn copy_to_clipboard(text: String) -> Result<(), String> {
     Ok(())
 }
 
-fn state_path(name: &str) -> Result<std::path::PathBuf, String> {
+pub(crate) fn state_path(name: &str) -> Result<std::path::PathBuf, String> {
     let home = home_dir().ok_or("neither HOME nor USERPROFILE is set")?;
     Ok(std::path::Path::new(&home).join(".config/ccfzf-picker").join(name))
 }
