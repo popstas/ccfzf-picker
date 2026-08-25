@@ -55,7 +55,7 @@
 
 ВНИМАНИЕ: `vendor/ccfzf` — сабмодуль со своим репозиторием. Коммит делается **внутри** `vendor/ccfzf`, а в пикере отдельным коммитом двигается указатель сабмодуля (шаг 6).
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 Создать `vendor/ccfzf/tests/test_state_dump_age.py`:
 
@@ -135,12 +135,12 @@ if __name__ == "__main__":
             print("ok", name)
 ```
 
-- [ ] **Step 2: Убедиться, что тест падает**
+- [x] **Step 2: Убедиться, что тест падает**
 
 Run: `cd vendor/ccfzf && python3 tests/test_state_dump_age.py`
 Expected: FAIL — `KeyError: 'env_int'`.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `vendor/ccfzf/ccfzf` рядом с `stale_dump` (~2900) добавить:
 
@@ -190,12 +190,12 @@ def env_int(name, default):
 #                                    (default 30; 0 — rewrite every time)
 ```
 
-- [ ] **Step 4: Тесты зелёные**
+- [x] **Step 4: Тесты зелёные**
 
 Run: `cd vendor/ccfzf && python3 tests/test_state_dump_age.py && python3 tests/test_state_mode.py`
 Expected: PASS оба.
 
-- [ ] **Step 5: Коммит в сабмодуле**
+- [x] **Step 5: Коммит в сабмодуле**
 
 ```bash
 cd vendor/ccfzf
@@ -203,7 +203,7 @@ git add ccfzf tests/test_state_dump_age.py
 git commit -m "feat: CCFZF_STATE_DUMP_MAX_AGE — заставить --state переписать дамп"
 ```
 
-- [ ] **Step 6: Двинуть указатель сабмодуля в пикере**
+- [x] **Step 6: Двинуть указатель сабмодуля в пикере**
 
 ```bash
 cd ../..
@@ -223,7 +223,7 @@ git commit -m "chore: vendor/ccfzf — переменная порога дам�
 - Consumes: переменная `CCFZF_STATE_DUMP_MAX_AGE` из задачи 1.
 - Produces: `state_source::fetch(source: &Source, fresh_dump: bool) -> Result<serde_json::Value, String>`; `poller::poll_once(sources: &[Source], fresh_dump: bool) -> (Option<serde_json::Value>, String)`; `pub const state_source::DUMP_ENV: &str`.
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты**
 
 В `src-tauri/src/state_source.rs`, в существующий `mod tests`:
 
@@ -259,12 +259,12 @@ git commit -m "chore: vendor/ccfzf — переменная порога дам�
     }
 ```
 
-- [ ] **Step 2: Убедиться, что не компилируется**
+- [x] **Step 2: Убедиться, что не компилируется**
 
 Run: `cd src-tauri && cargo test state_source`
 Expected: FAIL — `this function takes 1 argument but 2 arguments were supplied`.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `src-tauri/src/state_source.rs`:
 
@@ -345,12 +345,12 @@ pub fn poll_once(sources: &[Source], fresh_dump: bool) -> (Option<serde_json::Va
 
 Существующий тест `state_args` (~286) поправить под новую арность: добавить вторым аргументом `false`.
 
-- [ ] **Step 4: Тесты зелёные**
+- [x] **Step 4: Тесты зелёные**
 
 Run: `cd src-tauri && cargo test`
 Expected: PASS.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add src-tauri/src/state_source.rs src-tauri/src/poller.rs
@@ -369,7 +369,7 @@ git commit -m "feat(poller): опрос умеет просить свежий �
 - Consumes: `main::state_path(name) -> Result<PathBuf, String>` (`main.rs:1966`).
 - Produces: `tracker_signal::FILE: &str`; `tracker_signal::print_of(&str) -> Option<String>`; `tracker_signal::decide(&mut Option<String>, &mut bool, Option<String>) -> bool`; `tracker_signal::Watcher::new(Option<PathBuf>) -> Watcher`; `Watcher::changed(&mut self) -> bool`; `Watcher::age_secs(&self) -> Option<u64>`.
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 Создать `src-tauri/src/tracker_signal.rs` с одним только блоком тестов (реализация — следующим шагом):
 
@@ -441,12 +441,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Убедиться, что тест падает**
+- [x] **Step 2: Убедиться, что тест падает**
 
 Run: `cd src-tauri && cargo test tracker_signal`
 Expected: FAIL — `cannot find function print_of in this scope`.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 Тело `src-tauri/src/tracker_signal.rs` (над блоком тестов):
 
@@ -526,12 +526,12 @@ impl Watcher {
 
 В `main.rs` добавить `mod tracker_signal;` рядом с остальными объявлениями модулей, а `fn state_path` (`main.rs:1966`) сделать `pub(crate) fn state_path`.
 
-- [ ] **Step 4: Тесты зелёные**
+- [x] **Step 4: Тесты зелёные**
 
 Run: `cd src-tauri && cargo test tracker_signal`
 Expected: PASS, 7 тестов.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add src-tauri/src/tracker_signal.rs src-tauri/src/main.rs
@@ -789,7 +789,7 @@ git commit -m "feat(poller): сигнал трекера будит опрос, 
 - Consumes: `Poller::opened()` (задача 4).
 - Produces: сторож формы; для следующих задач ничего.
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 В `src-tauri/src/main.rs`, в `mod tests`:
 
@@ -835,12 +835,12 @@ git commit -m "feat(poller): сигнал трекера будит опрос, 
     }
 ```
 
-- [ ] **Step 2: Убедиться, что тест падает**
+- [x] **Step 2: Убедиться, что тест падает**
 
 Run: `cd src-tauri && cargo test every_branch_that_ends_in_a_terminal`
 Expected: FAIL — `open_session_mqtt кончается терминалом и обязана завести всплеск опроса`.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В каждую из пяти функций добавить параметр (если его там ещё нет):
 
@@ -860,17 +860,17 @@ Expected: FAIL — `open_session_mqtt кончается терминалом и
 
 У `spawn_detached` вызов ставится после `spawn()`, вернувшего `Ok`: не запустилось — окна не будет, и всплеск гнал бы ssh впустую.
 
-- [ ] **Step 4: Тесты зелёные**
+- [x] **Step 4: Тесты зелёные**
 
 Run: `cd src-tauri && cargo test`
 Expected: PASS.
 
-- [ ] **Step 5: Проверить, что фронтенд не сломан**
+- [x] **Step 5: Проверить, что фронтенд не сломан**
 
 Run: `npm test`
 Expected: PASS — `tauri::State` в аргументы `invoke` не входит, сигнатуры со стороны JS прежние.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src-tauri/src/main.rs
@@ -890,7 +890,7 @@ git commit -m "feat(picker): открытие терминала заводит 
 - Consumes: `tracker_signal::FILE`, `crate::state_path` (задача 3).
 - Produces: команда `tracker_signal_status() -> {path: string, seen: bool, ageSec: number|null}`.
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 В `test/settings-page.test.js` добавить:
 
@@ -907,12 +907,12 @@ test('вкладка Window показывает состояние сигнал
 
 `SETTINGS_HTML` — уже готовая константа файла (`test/settings-page.test.js:23`), второго чтения того же файла заводить не надо.
 
-- [ ] **Step 2: Убедиться, что тест падает**
+- [x] **Step 2: Убедиться, что тест падает**
 
 Run: `npm test -- test/settings-page.test.js`
 Expected: FAIL — `подпись на месте`.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `main.rs` рядом с остальными командами:
 
@@ -964,12 +964,12 @@ invoke('tracker_signal_status').then(s => {
 });
 ```
 
-- [ ] **Step 4: Тесты зелёные**
+- [x] **Step 4: Тесты зелёные**
 
 Run: `npm test && cd src-tauri && cargo test`
 Expected: PASS оба.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add src-tauri/src/main.rs settings.html test/settings-page.test.js
@@ -989,7 +989,7 @@ git commit -m "feat(settings): строка состояния сигнала т
 - Consumes: `payload` из `buildWindowsFile` — объект с полями `windows` (id → запись) и `projects` (массив `{cwd, name, hotkey}`).
 - Produces: `signalPrint(payload) -> string`; `shouldWriteSignal({print, lastPrint}) -> boolean`; `signalPath() -> string`.
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты**
 
 В `windows11-manager/src/claude-wt/windows-file-helpers.test.js` дописать (импорты `describe/it/expect` там уже есть — добавить только недостающие имена в существующий импорт из `./windows-file-helpers.js`):
 
@@ -1066,12 +1066,12 @@ describe('путь сигнала', () => {
 });
 ```
 
-- [ ] **Step 2: Убедиться, что тесты падают**
+- [x] **Step 2: Убедиться, что тесты падают**
 
 Run: `cd ../windows11-manager && npx vitest run src/claude-wt/windows-file-helpers.test.js`
 Expected: FAIL — `signalPrint is not a function`.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `windows-file-helpers.js` рядом с `windowsFingerprint`:
 
@@ -1146,12 +1146,12 @@ function signalPath() {
 
 `writeWindowsFile` переиспользуется намеренно: там уже tmp + rename и `mkdirSync` каталога — второй записи атомарного файла заводить не надо.
 
-- [ ] **Step 4: Тесты зелёные**
+- [x] **Step 4: Тесты зелёные**
 
 Run: `cd ../windows11-manager && npx vitest run src/claude-wt/ && npm run lint`
 Expected: PASS.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 cd ../windows11-manager
@@ -1171,7 +1171,7 @@ git commit -m "feat(claude-wt): сигнал пикеру о смене сост
 - Consumes: `bound: &BTreeMap<String, Bound>` и `focus: bool` — обе уже в тике.
 - Produces: `mwm_core::publish::signal_print(&BTreeMap<String, Bound>, bool) -> String`.
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты**
 
 В `crates/mwm-core/src/publish.rs`, в `mod tests`. Помощник `bound(title, last_seen_ms)`
 и константа `SID` там уже есть (строки 184-197) — второго сборщика заводить не надо:
@@ -1218,12 +1218,12 @@ git commit -m "feat(claude-wt): сигнал пикеру о смене сост
     }
 ```
 
-- [ ] **Step 2: Убедиться, что тесты падают**
+- [x] **Step 2: Убедиться, что тесты падают**
 
 Run: `cd ../macos-windows-manager && cargo test -p mwm-core signal_print`
 Expected: FAIL — `cannot find function signal_print in this scope`.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `publish.rs` рядом с `fingerprint`:
 
@@ -1295,12 +1295,12 @@ fn write_tracker_signal(print: &str, host: &str, pid: u32, now_ms: u64) -> Resul
 
 Сигнатуру `write_atomic` сверить с её вызовом в этом же файле (там она зовётся для `state_path`, ~572) и подставить тот же вид аргументов.
 
-- [ ] **Step 4: Тесты зелёные**
+- [x] **Step 4: Тесты зелёные**
 
 Run: `cd ../macos-windows-manager && cargo test`
 Expected: PASS.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 cd ../macos-windows-manager
@@ -1321,7 +1321,7 @@ git commit -m "feat(tracker): сигнал пикеру о смене соста
 - Consumes: `unresolvedTitles(nextWindows)` из `tracker-helpers.js` — им уже пользуется `reportUnresolved` в том же файле.
 - Produces: `loadSessionIndex(filePath, progressDir, nowMs, wanted)` — четвёртый аргумент, умолчание `false`.
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 В `windows11-manager/src/claude-wt/sessions.test.js`, внутрь существующего
 `describe('loadSessionIndex', ...)`. Помощники `freshPath()`, `writeDump(path, dump, when)`,
@@ -1361,12 +1361,12 @@ git commit -m "feat(tracker): сигнал пикеру о смене соста
   });
 ```
 
-- [ ] **Step 2: Убедиться, что тест падает**
+- [x] **Step 2: Убедиться, что тест падает**
 
 Run: `cd ../windows11-manager && npx vitest run src/claude-wt/sessions.test.js`
 Expected: FAIL — четвёртый аргумент игнорируется, `вторая` не появляется.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `sessions.js`:
 
@@ -1421,12 +1421,12 @@ let wantedIndex = false;
 
 Импортировать `unresolvedTitles` в `index.js`, если его там ещё нет в шапке (сейчас им пользуется `reportUnresolved` в этом же файле — проверить импорты).
 
-- [ ] **Step 4: Тесты зелёные**
+- [x] **Step 4: Тесты зелёные**
 
 Run: `cd ../windows11-manager && npx vitest run src/claude-wt/ && npm run lint`
 Expected: PASS.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 cd ../windows11-manager

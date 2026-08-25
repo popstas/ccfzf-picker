@@ -695,6 +695,33 @@ test('вкладка Log спрашивает буфер и гасит опро�
   assert.match(src, /clearInterval\(logTimer\)/);
 });
 
+test('вкладка Log показывает состояние сигнала трекера и обновляет его каждую секунду', () => {
+  // Путь и формат сигнала живут в трёх репозиториях, а текстовым сторожем
+  // через репозитории не дотянуться: разъедутся — сигнал молча перестанет
+  // приходить, и отличить это от «ничего не менялось» будет нечем. Строка в
+  // настройках — единственное, чем человек может это увидеть.
+  assert.match(SETTINGS_HTML, /Tracker signal/, 'подпись на месте');
+  // Не голый поиск подстроки: та же мина, что нашло ревью у первой версии
+  // теста, — упоминание в комментарии (JSDoc над trackerSignalHtml) сторожа
+  // не отличило бы от настоящей проводки. Поэтому проводка ищется в теле
+  // именно той функции, что собирает вкладку.
+  const logBody = SETTINGS_HTML.split('function logBodyHtml() {')[1];
+  assert.ok(logBody, 'logBodyHtml пропала — тест сторожит не то');
+  assert.match(logBody.split('\n  }')[0], /trackerSignalHtml\(\)/,
+    'вкладка Log не собирает строку сигнала — в разметке её не будет');
+  assert.match(SETTINGS_HTML, /invoke\('tracker_signal_status'\)/,
+    'страница не зовёт tracker_signal_status — переименование или удаление вызова тест не поймал бы');
+  // Секундный такт — половина смысла строки: спрошенный один раз возраст
+  // старел бы на глазах, и остановившийся трекер выглядел бы точно как
+  // только что отписавшийся.
+  const tick = SETTINGS_HTML.split('function refreshLogPage() {')[1];
+  assert.ok(tick, 'refreshLogPage пропала — такт вкладки сторожить нечем');
+  assert.match(tick.split('\n  }')[0], /refreshTrackerSignal\(\)/,
+    'такт вкладки Log не обновляет возраст сигнала');
+  assert.match(SETTINGS_HTML, /setInterval\(refreshLogPage, 1000\)/,
+    'такт вкладки Log перестал быть секундным');
+});
+
 test('renderPage знает columns и paths, а не ui и integrations', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
   assert.match(src, /current === 'columns'/);

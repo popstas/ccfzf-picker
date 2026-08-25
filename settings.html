@@ -532,7 +532,8 @@
   /* Вкладка Log: буфер строк, которые раньше уходили только в stderr — то
      есть в никуда у пикера, запущенного из ярлыка или из `.app`. */
   function logBodyHtml() {
-    return '<p class="note">What this app has written since it started. '
+    return trackerSignalHtml()
+      + '<p class="note">What this app has written since it started. '
       + 'Newest at the bottom.</p><pre id="log-view"></pre>';
   }
 
@@ -555,6 +556,39 @@
     const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 20;
     view.textContent = text;
     if (atBottom) view.scrollTop = view.scrollHeight;
+  }
+
+  /**
+   * Возраст сигнала трекера, тем же секундным тактом, что и лог.
+   *
+   * Прежде строка спрашивалась один раз при показе вкладки, и число в ней
+   * старело на глазах: «12s ago» стояло тем же числом и минутой позже, то
+   * есть остановившийся трекер выглядел точно как только что отписавшийся.
+   * Ровно это строка и должна была различать.
+   *
+   * Молчаливый такт не трогает узел — та же причина, что у `refreshLog`:
+   * перезапись того же текста сбивала бы выделение под курсором раз в
+   * секунду.
+   */
+  async function refreshTrackerSignal() {
+    const node = document.getElementById('tracker-signal');
+    if (!node) return;
+    const signal = await invoke('tracker_signal_status');
+    const text = signal && signal.seen ? `${signal.ageSec}s ago` : 'never seen';
+    if (text !== node.textContent) node.textContent = text;
+    node.title = (signal && signal.path) || '';
+  }
+
+  /**
+   * Один такт вкладки Log: обе её строки живут общим таймером.
+   *
+   * Второй `setInterval` пришлось бы гасить вторым же `clearInterval` в
+   * `renderPage`, и забытый пережил бы страницу — раз в секунду и до закрытия
+   * окна, ровно та беда, ради которой у лога и стоит гашение таймера.
+   */
+  function refreshLogPage() {
+    refreshLog();
+    refreshTrackerSignal();
   }
 
   function axesTableHtml() {
@@ -614,6 +648,26 @@
     return '<div class="field"><label>Folder-opening actions</label><ul>'
       + actions.map(a => `<li>${esc(a && a.id)} — <code>${esc(JSON.stringify(a && a.argv))}</code></li>`).join('')
       + '</ul><div class="hint">Edited in config.yaml — the window only shows them.</div></div>';
+  }
+
+  /**
+   * Строка про сигнал оконного трекера этой машины.
+   *
+   * Живёт на вкладке Log, а не в настройках окна: это диагностика, а не
+   * настройка, — трогать в ней нечего, и читают её тогда же, когда лог.
+   * Разметка статична, значение приезжает асинхронно и обновляется каждую
+   * секунду (`refreshTrackerSignal`). Путь и формат сигнала живут в трёх
+   * репозиториях сразу
+   * (этот, windows11-manager, macos-windows-manager), и текстовым сторожем
+   * через репозитории не дотянуться: разъедутся они — сигнал молча
+   * перестанет приходить, а отличить это от «ничего не менялось» будет
+   * нечем. Эта строка — единственное, чем человек это увидит.
+   */
+  function trackerSignalHtml() {
+    return '<div class="field"><label>Tracker signal</label>'
+      + '<span id="tracker-signal">…</span>'
+      + '<div class="hint">Set by the window tracker on this machine when the set of tracked '
+      + 'windows changes — the picker polls immediately once it sees this file move.</div></div>';
   }
 
   /**
@@ -825,8 +879,8 @@
     clearInterval(logTimer);
     logTimer = null;
     if (current === 'log') {
-      refreshLog();
-      logTimer = setInterval(refreshLog, 1000);
+      refreshLogPage();
+      logTimer = setInterval(refreshLogPage, 1000);
     }
 
     // `indeterminate` — свойство DOM, а не HTML-атрибут: строкой его не
