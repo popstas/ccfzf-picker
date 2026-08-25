@@ -544,7 +544,7 @@ mod tests {
     }
 
     #[test]
-    fn расписание_всплеска_три_шага_и_конец() {
+    fn the_burst_has_three_steps_and_then_ends() {
         assert_eq!(BURST.len(), 3, "расписание названо в спеке: 3, 8, 20 секунд");
         assert_eq!(BURST[0], Duration::from_secs(3));
         // Отдаётся смещение следующего шага от действия: вычитание живёт в
@@ -560,7 +560,7 @@ mod tests {
     /// страницей следом за `Opened`, сигнал трекера, что угодно ещё.
     ///
     /// Возвращает моменты опросов, считая от якоря.
-    fn прогон_всплеска(wakes: &[u64]) -> Vec<Duration> {
+    fn a_burst_run(wakes: &[u64]) -> Vec<Duration> {
         let mut step = 0;
         let mut now = Duration::ZERO;
         let mut polls = Vec::new();
@@ -584,19 +584,19 @@ mod tests {
     }
 
     #[test]
-    fn опросы_всплеска_ложатся_на_три_восемь_и_двадцать_секунд() {
+    fn burst_polls_land_at_three_eight_and_twenty_seconds() {
         // Стеречь надо смещения, названные спекой, а не промежуточную
         // арифметику: перепиши кто-нибудь `burst_next` или `burst_sleep` —
         // порознь они сойдутся сами с собой, а точки разъедутся.
         assert_eq!(
-            прогон_всплеска(&[]),
+            a_burst_run(&[]),
             vec![Duration::from_secs(3), Duration::from_secs(8), Duration::from_secs(20)],
             "весь всплеск обязан уложиться в двадцать секунд — в порог дампа"
         );
     }
 
     #[test]
-    fn опроса_раньше_трёх_секунд_от_действия_не_бывает() {
+    fn no_poll_comes_sooner_than_three_seconds_after_the_action() {
         // Разбудить поток может что угодно, и ни один из будильников не вправе
         // стронуть первый опрос: терминал ещё не поднялся, сессия ещё не
         // родилась, и принудительный дамп ушёл бы впустую.
@@ -606,19 +606,19 @@ mod tests {
     }
 
     #[test]
-    fn чужое_пробуждение_посреди_всплеска_расписания_не_сдвигает() {
+    fn an_unrelated_wakeup_mid_burst_does_not_shift_the_schedule() {
         // Живой случай, из-за которого якорь и заведён: страница зовёт
         // `spawn_detached` (там `opened`), а следом `hide_picker` (там
         // `hidden`), и `Hidden` лежит в канале уже к первому сну. На цепочке
         // относительных снов это давало опросы на +0, +5 и +17: первый — тот
         // самый, которого спека запрещает, и он же тратил дамп впустую.
         let точки = vec![Duration::from_secs(3), Duration::from_secs(8), Duration::from_secs(20)];
-        assert_eq!(прогон_всплеска(&[1]), точки, "Hidden сразу за Opened");
-        assert_eq!(прогон_всплеска(&[1, 4, 5, 9, 12, 19]), точки, "и трекер, и что угодно ещё");
+        assert_eq!(a_burst_run(&[1]), точки, "Hidden сразу за Opened");
+        assert_eq!(a_burst_run(&[1, 4, 5, 9, 12, 19]), точки, "и трекер, и что угодно ещё");
     }
 
     #[test]
-    fn сон_всплеска_это_остаток_до_своей_точки() {
+    fn a_burst_sleep_is_the_remainder_up_to_its_own_point() {
         assert_eq!(burst_sleep(0, Duration::ZERO), Duration::from_secs(3));
         assert_eq!(burst_sleep(0, Duration::from_secs(1)), Duration::from_secs(2));
         assert_eq!(burst_sleep(1, Duration::from_secs(3)), Duration::from_secs(5));
@@ -627,19 +627,19 @@ mod tests {
     }
 
     #[test]
-    fn первый_шаг_всплеска_не_раньше_трёх_секунд() {
+    fn the_first_burst_step_is_never_sooner_than_three_seconds() {
         // Раньше — впустую: терминал ещё не поднялся, сессия ещё не родилась.
         assert!(BURST[0] >= Duration::from_secs(3));
     }
 
     #[test]
-    fn кусок_сна_короче_фонового_такта() {
+    fn a_sleep_slice_is_shorter_than_the_background_tick() {
         assert_eq!(SIGNAL_TICK, Duration::from_secs(1));
         assert!(SIGNAL_TICK < BACKGROUND_MIN, "иначе сигнал ничего бы не ускорил");
     }
 
     #[test]
-    fn сигнал_не_будит_выключенный_фон() {
+    fn the_signal_does_not_wake_a_disabled_background() {
         // Текстовый: поведение потока в тесте не поднять, а правило молчаливое
         // — разреши мы сторожу работать при idle, выключенный человеком
         // фоновый опрос воскресал бы сам собой.
@@ -654,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn всплеск_просит_свежий_дамп_а_обычный_опрос_нет() {
+    fn a_burst_asks_for_a_fresh_dump_and_an_ordinary_poll_does_not() {
         // Без принудительного дампа всплеск ушёл бы впустую: STATE_DUMP_MAX_AGE
         // в агрегаторе тридцать секунд, а весь всплеск укладывается в двадцать.
         //
@@ -671,23 +671,33 @@ mod tests {
     }
 
     #[test]
-    fn показанное_окно_всплеска_не_ведёт() {
+    fn a_visible_window_never_bursts() {
         // Текстовый, как соседи: тела потока в юнит-тесте не поднять. Правило
         // молчаливое вдвойне — под всплеском срок сна считается от якоря, и
         // `visible` в нём не участвует вовсе: побеги всплеск при показанном
         // окне, секундный такт списка стал бы трёхсекундным.
+        //
+        // Проверяются ВСЕ вхождения, а не первое. Их два — гейт опроса и срок
+        // сна, — и прежний сторож брал первое: замена второго на голое `burst`
+        // оставляла все тесты зелёными, а открытый список замирал на три
+        // секунды после каждого Enter. Заведи третье место — оно попадёт сюда
+        // само.
         let src = include_str!("poller.rs");
-        let body = src
-            .split_once("let bursting = ")
-            .expect("пауза всплеска при показанном окне пропала")
-            .1;
-        let (body, _) = body.split_once(';').expect("строка не закрыта");
-        assert!(body.contains("visible"), "всплеск идёт только у скрытого окна");
-        assert!(body.contains("None"), "показанному окну всплеск не отдаётся");
+        // Боевая часть: `mod tests` идёт последним, и литерал этого же теста
+        // сторожить самого себя не должен.
+        let (code, _) = src.split_once("mod tests").expect("mod tests пропал — тест сторожит не то");
+        let mut seen = 0;
+        for tail in code.split("let bursting = ").skip(1) {
+            let (line, _) = tail.split_once(';').expect("строка не закрыта");
+            assert!(line.contains("visible"), "всплеск идёт только у скрытого окна: {line}");
+            assert!(line.contains("None"), "показанному окну всплеск не отдаётся: {line}");
+            seen += 1;
+        }
+        assert!(seen >= 2, "мест два — гейт опроса и срок сна; найдено {seen}");
     }
 
     #[test]
-    fn показ_окна_всплеск_отменяет() {
+    fn showing_the_window_cancels_the_burst() {
         // Пауза при `visible` его бы только придержала, а якорь остался бы
         // взведённым: человек, открывший сессию и тут же вернувший пикер,
         // получил бы досиженный всплеск посреди работы со списком.

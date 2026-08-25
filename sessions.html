@@ -3623,7 +3623,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
         localPath: window.PathMap.mapRowPath(row, CONFIG.pathMap),
         remotePath: row.cwd,
       });
-      invoke('spawn_detached', { argv })
+      // Терминала здесь нет: настроенные действия открывают папку (Finder,
+      // Explorer, редактор), и всплеск опроса гнал бы ssh за то, к сессиям
+      // отношения не имеющее.
+      invoke('spawn_detached', { argv, terminal: false })
         .then(() => invoke('hide_picker'))
         .catch((e) => { error = String(e); render(); });
       return;
@@ -3647,7 +3650,8 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (id === 'pr') {
       // Форму ссылки уже проверил availableActions — до сюда доходит только
       // https://github.com/<owner>/<repo>/pull/<число>.
-      invoke('spawn_detached', { argv: ['open', row.pr_url] });
+      // Браузер, а не терминал: всплеска опроса тут не за чем.
+      invoke('spawn_detached', { argv: ['open', row.pr_url], terminal: false });
       invoke('hide_picker');
       return;
     }

@@ -314,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn свежий_дамп_едет_приставкой_только_по_ssh() {
+    fn a_fresh_dump_rides_a_prefix_only_over_ssh() {
         // По ssh команду разбирает шелл той стороны, и переменная едет строкой.
         assert_eq!(
             state_args(&Source::Ssh("remote-host".into()), true),
@@ -326,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn обычный_опрос_дамп_не_просит() {
+    fn an_ordinary_poll_does_not_ask_for_a_dump() {
         assert_eq!(
             state_args(&Source::Ssh("remote-host".into()), false),
             vec!["ccfzf --state".to_string()]
@@ -335,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    fn обычный_опрос_приставки_не_добавляет() {
+    fn an_ordinary_poll_adds_no_prefix() {
         assert_eq!(dump_env_prefix(false), "");
     }
 
@@ -348,7 +348,7 @@ mod tests {
     /// можно было бы только на той машине, где живёт местный источник, —
     /// сторож обязан ловить именно это расхождение, а не форму строки-приставки.
     #[test]
-    fn местная_дорога_ставит_переменную_через_command_env() {
+    fn the_local_road_sets_the_variable_through_command_env() {
         let cmd = command_for(&Source::Local, true).expect("местный ccfzf обязан находиться в тестовой среде");
         let value = cmd.get_envs().find(|(k, _)| *k == DUMP_ENV).and_then(|(_, v)| v);
         assert_eq!(value, Some(std::ffi::OsStr::new("0")));
