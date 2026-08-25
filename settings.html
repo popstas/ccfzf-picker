@@ -532,7 +532,8 @@
   /* Вкладка Log: буфер строк, которые раньше уходили только в stderr — то
      есть в никуда у пикера, запущенного из ярлыка или из `.app`. */
   function logBodyHtml() {
-    return '<p class="note">What this app has written since it started. '
+    return trackerSignalHtml()
+      + '<p class="note">What this app has written since it started. '
       + 'Newest at the bottom.</p><pre id="log-view"></pre>';
   }
 
@@ -555,6 +556,39 @@
     const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 20;
     view.textContent = text;
     if (atBottom) view.scrollTop = view.scrollHeight;
+  }
+
+  /**
+   * Возраст сигнала трекера, тем же секундным тактом, что и лог.
+   *
+   * Прежде строка спрашивалась один раз при показе вкладки, и число в ней
+   * старело на глазах: «12s ago» стояло тем же числом и минутой позже, то
+   * есть остановившийся трекер выглядел точно как только что отписавшийся.
+   * Ровно это строка и должна была различать.
+   *
+   * Молчаливый такт не трогает узел — та же причина, что у `refreshLog`:
+   * перезапись того же текста сбивала бы выделение под курсором раз в
+   * секунду.
+   */
+  async function refreshTrackerSignal() {
+    const node = document.getElementById('tracker-signal');
+    if (!node) return;
+    const signal = await invoke('tracker_signal_status');
+    const text = signal && signal.seen ? `${signal.ageSec}s ago` : 'never seen';
+    if (text !== node.textContent) node.textContent = text;
+    node.title = (signal && signal.path) || '';
+  }
+
+  /**
+   * Один такт вкладки Log: обе её строки живут общим таймером.
+   *
+   * Второй `setInterval` пришлось бы гасить вторым же `clearInterval` в
+   * `renderPage`, и забытый пережил бы страницу — раз в секунду и до закрытия
+   * окна, ровно та беда, ради которой у лога и стоит гашение таймера.
+   */
+  function refreshLogPage() {
+    refreshLog();
+    refreshTrackerSignal();
   }
 
   function axesTableHtml() {
@@ -619,9 +653,11 @@
   /**
    * Строка про сигнал оконного трекера этой машины.
    *
-   * Диагностика, а не настройка: сама разметка тут статична, значение
-   * приезжает асинхронно после отрисовки (см. вызов `tracker_signal_status`
-   * в `renderPage`). Путь и формат сигнала живут в трёх репозиториях сразу
+   * Живёт на вкладке Log, а не в настройках окна: это диагностика, а не
+   * настройка, — трогать в ней нечего, и читают её тогда же, когда лог.
+   * Разметка статична, значение приезжает асинхронно и обновляется каждую
+   * секунду (`refreshTrackerSignal`). Путь и формат сигнала живут в трёх
+   * репозиториях сразу
    * (этот, windows11-manager, macos-windows-manager), и текстовым сторожем
    * через репозитории не дотянуться: разъедутся они — сигнал молча
    * перестанет приходить, а отличить это от «ничего не менялось» будет
@@ -833,8 +869,7 @@
       : current === 'general' ? generalBodyHtml(def.fields)
       : (current === 'mqtt' ? mqttIntroHtml() : '')
         + def.fields.map(fieldHtml).join('')
-        + (current === 'paths' ? actionsListHtml() : '')
-        + (current === 'window' ? trackerSignalHtml() : '');
+        + (current === 'paths' ? actionsListHtml() : '');
     page.innerHTML = body
       + '<div id="bar"><button id="save">Save</button><span id="status"></span></div>';
 
@@ -844,22 +879,8 @@
     clearInterval(logTimer);
     logTimer = null;
     if (current === 'log') {
-      refreshLog();
-      logTimer = setInterval(refreshLog, 1000);
-    }
-
-    // Диагностика вкладки Window: спрашивается один раз при её показе — файл
-    // трогает трекер этой машины, а окно настроек живёт секунды, опрашивать
-    // чаще незачем. Отсутствие моста (нет window.__TAURI__, как в тестах и
-    // предпросмотре) резолвит invoke() в undefined — тогда строка молчит,
-    // а не падает.
-    if (current === 'window') {
-      invoke('tracker_signal_status').then((s) => {
-        const node = document.getElementById('tracker-signal');
-        if (!node) return;
-        node.textContent = s && s.seen ? `${s.ageSec}s ago` : 'never seen';
-        node.title = (s && s.path) || '';
-      });
+      refreshLogPage();
+      logTimer = setInterval(refreshLogPage, 1000);
     }
 
     // `indeterminate` — свойство DOM, а не HTML-атрибут: строкой его не
