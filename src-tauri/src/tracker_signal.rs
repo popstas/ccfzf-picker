@@ -54,7 +54,7 @@ impl Watcher {
         // была бы своей собственной бедой.
         if fresh.is_none() && text.is_some() && !self.warned {
             self.warned = true;
-            eprintln!("[picker] tracker signal at {} is unreadable", path.display());
+            eprintln!("[picker] tracker signal at {} has unrecognized content", path.display());
         }
         decide(&mut self.last, &mut self.started, fresh)
     }
@@ -133,5 +133,100 @@ mod tests {
         let mut w = Watcher::new(None);
         assert!(!w.changed());
         assert_eq!(w.age_secs(), None);
+    }
+
+    /// Свой файл во временном каталоге на каждый тест: `Watcher::changed`
+    /// трогает реальную файловую систему, и тесты не должны видеть файлы друг
+    /// друга при параллельном запуске. Тот же приём, что у `temp_config_path`
+    /// в `main.rs`.
+    fn temp_signal_path(tag: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "ccfzf-picker-test-tracker-signal-{}-{tag}-{n}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn путь_задан_но_файла_на_диске_нет_сторож_молчит() {
+        // Путь у сторожа есть — трекер на этой машине просто ещё не разу не
+        // писал файл. Отличается от «без_пути_сторож_молчит»: там функция
+        // выключена контрактом, здесь путь рабочий, а файла ещё нет.
+        let path = temp_signal_path("missing");
+        let mut w = Watcher::new(Some(path));
+        assert!(!w.changed());
+        assert!(!w.changed(), "повторный вызов на всё ещё отсутствующем файле");
+    }
+
+    #[test]
+    fn реальный_файл_меняется_по_отпечатку() {
+        // Три состояния подряд, как их видел бы поток опроса: первое чтение,
+        // другой отпечаток, тот же отпечаток.
+        let path = temp_signal_path("real");
+        std::fs::write(&path, r#"{"print":"a"}"#).unwrap();
+        let mut w = Watcher::new(Some(path.clone()));
+        assert!(!w.changed(), "первое чтение реального файла — не изменение");
+
+        std::fs::write(&path, r#"{"print":"b"}"#).unwrap();
+        assert!(w.changed(), "другой отпечаток на диске — опроси сейчас");
+
+        std::fs::write(&path, r#"{"print":"b"}"#).unwrap();
+        assert!(!w.changed(), "тот же отпечаток — снова ничего не значит");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn испорченный_файл_на_диске_не_стирает_запомненное() {
+        let path = temp_signal_path("corrupt");
+        std::fs::write(&path, r#"{"print":"a"}"#).unwrap();
+        let mut w = Watcher::new(Some(path.clone()));
+        assert!(!w.changed());
+
+        std::fs::write(&path, "не json").unwrap();
+        assert!(!w.changed(), "порча на диске — не сигнал к опросу");
+
+        std::fs::write(&path, r#"{"print":"a"}"#).unwrap();
+        assert!(
+            !w.changed(),
+            "прежний отпечаток после порчи — по-прежнему тот же, не изменение"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn жалоба_на_испорченный_файл_только_один_раз() {
+        // `eprintln!` в самом коде не заглушить и не перехватить тестом, но
+        // ровно на нём и держится правило «однажды»: второе и третье порченые
+        // чтения обязаны идти по ветке `!self.warned` и не печатать снова.
+        // Флаг `warned` — приватное поле `Watcher`, но `tests` вложен в тот же
+        // модуль, что и структура, и Rust открывает приватность потомкам —
+        // отдельного геттера ради теста заводить не пришлось.
+        let path = temp_signal_path("warn");
+        std::fs::write(&path, "не json").unwrap();
+        let mut w = Watcher::new(Some(path.clone()));
+        assert!(!w.warned);
+
+        w.changed();
+        assert!(w.warned, "первое порченое чтение обязано взвести флаг");
+
+        w.changed();
+        w.changed();
+        assert!(w.warned, "флаг остаётся взведённым — вторая жалоба не нужна");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn age_secs_на_реальном_файле_есть_а_после_удаления_снова_нет() {
+        let path = temp_signal_path("age");
+        std::fs::write(&path, r#"{"print":"a"}"#).unwrap();
+        let age = Watcher::new(Some(path.clone())).age_secs();
+        assert!(matches!(age, Some(s) if s < 5), "{age:?}");
+
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(Watcher::new(Some(path)).age_secs(), None);
     }
 }
