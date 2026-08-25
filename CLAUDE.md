@@ -278,7 +278,7 @@ Developer ID нет, universal удвоил бы вес ровно в той з�
 | Настройки и `ui.json` | [`docs/rules/settings-and-ui-state.md`](docs/rules/settings-and-ui-state.md) | 7 | шесть полей `ui.json`, слияние `config.yaml`, создание окна, гашение пикера |
 | Терминалы | [`docs/rules/terminals.md`](docs/rules/terminals.md) | 6 | argv, пресеты, подстановки `{command}` и `{helper}`, iTerm2, папки |
 | Источники состояния | [`docs/rules/state-sources.md`](docs/rules/state-sources.md) | 7 | откуда берётся список, местный и ssh-источник, состояние агента, бэкофф, сигнал трекера |
-| Фильтры и режимы | [`docs/rules/filtering.md`](docs/rules/filtering.md) | 4 | `onlyLive`, `onlyWindow`, `showAll`, префиксы и что их перебивает |
+| Фильтры и режимы | [`docs/rules/filtering.md`](docs/rules/filtering.md) | 5 | `onlyLive`, `onlyWindow`, `showAll`, `showDesktop`, префиксы и что их перебивает |
 | Секции и раскладки | [`docs/rules/layouts.md`](docs/rules/layouts.md) | 3 | `buildSections`, узкий и широкий список, перетаскивание, размер окна, плитка |
 | Снимки раскладки | [`docs/rules/snapshots.md`](docs/rules/snapshots.md) | 2 | откуда приезжают, как сгруппированы, кто их восстанавливает |
 

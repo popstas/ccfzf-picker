@@ -1279,6 +1279,26 @@ test('фильтры и колонки разделены в обоих окна
   );
 });
 
+test('фильтр Claude Desktop включён по умолчанию в обоих окнах', () => {
+  // Единственный из трёх фильтров, включённый по умолчанию, — и потому
+  // единственный, чьё разошедшееся умолчание молча прячет сессии: набор
+  // ключей сторожат тесты выше, а значения — нет. Забудь `true` в пикере, и
+  // приложение Claude Desktop пропало бы у всех, кто про галку не знает.
+  const picker = SESSIONS_HTML.match(/\n {2}let uiToggles = \{[\s\S]*?\n {2}\};\n/);
+  assert.ok(picker, 'uiToggles не найден в sessions.html — тест сторожит не то');
+  const settings = SETTINGS_HTML.match(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/);
+  assert.ok(settings, 'UI_DEFAULTS не найден в settings.html — тест сторожит не то');
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(
+    `${picker[0]}\n${settings[0]}\nvar a = uiToggles.showDesktop;\nvar b = UI_DEFAULTS.toggles.showDesktop;`,
+    ctx, { filename: 'two-windows.js' });
+  assert.deepStrictEqual({ ...ctx.a }, { list: true, statusline: false },
+    'умолчание showDesktop в пикере не то');
+  assert.deepStrictEqual({ ...ctx.b }, { list: true, statusline: false },
+    'умолчание showDesktop в настройках не то');
+});
+
 test('подписи колонок совпадают в пикере и в настройках', () => {
   // Расхождение здесь молчаливое: строка статуслайна берёт подпись из
   // TOGGLE_CHECKS, таблица настроек — из TOGGLE_LABELS, и разница видна

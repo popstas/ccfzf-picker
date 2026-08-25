@@ -451,6 +451,64 @@ test('onlyWindow считает окном и само приложение Clau
   );
 });
 
+test('hideDesktop убирает сессии приложения Claude Desktop, и только их', () => {
+  // Отсев про entrypoint, а не про живость: приложение отвечает на вопрос «в
+  // чём открыта сессия», и закрытая в нём — такая же его сессия, как живая.
+  const raw = {
+    ok: true,
+    seen: {},
+    sessions: [
+      { id: 'app-live', title: 'В приложении', cwd: '/home/user/a', live: true,
+        entrypoint: 'claude-desktop' },
+      { id: 'app-past', title: 'Было в приложении', cwd: '/home/user/b', live: false,
+        entrypoint: 'claude-desktop' },
+      { id: 'cli-live', title: 'В терминале', cwd: '/home/user/c', live: true,
+        entrypoint: 'cli' },
+      { id: 'cli-past', title: 'Было в терминале', cwd: '/home/user/d', live: false },
+    ],
+  };
+  assert.deepStrictEqual(
+    idsOf(buildSessionsPayload(raw, 'name', { hideDesktop: true })),
+    ['cli-live', 'cli-past'],
+  );
+  // Выключенный отсев — нынешнее поведение: не убирает никого.
+  assert.deepStrictEqual(
+    idsOf(buildSessionsPayload(raw, 'name', { hideDesktop: false })).sort(),
+    ['app-live', 'app-past', 'cli-live', 'cli-past'],
+  );
+});
+
+test('hideDesktop и onlyWindow спорят в пользу отсева приложения', () => {
+  // `onlyWindow` считает приложение окном (сторож выше), и без явного порядка
+  // строка приложения пережила бы отсев, которым её и просили убрать.
+  const raw = {
+    ok: true,
+    seen: {},
+    sessions: [
+      { id: 'app-1', title: 'В приложении', cwd: '/home/user/a', live: true,
+        entrypoint: 'claude-desktop' },
+      { id: 'win-1', title: 'С окном', cwd: '/home/user/b', live: true,
+        window: { title: 'С окном', host: 'desktop-box', pid: 42, canFocus: true, lastSeen: 1 } },
+    ],
+  };
+  assert.deepStrictEqual(
+    idsOf(buildSessionsPayload(raw, 'name', { onlyWindow: true, hideDesktop: true })),
+    ['win-1'],
+  );
+});
+
+test('отсев hideDesktop зелийных строк не касается', () => {
+  // Та же причина, что у onlyLive и onlyWindow: зелийная строка — не сессия
+  // агента, и entrypoint у неё не бывает вовсе.
+  const res = {
+    ok: true,
+    sessions: [{ id: 'app-1', title: 'В приложении', live: true, entrypoint: 'claude-desktop' }],
+    zellij: [{ name: 'home', created: 50 }],
+  };
+  const out = buildSessionsPayload(res, 'recent', { hideDesktop: true });
+  assert.ok(out.groups.some(g => g.label === 'Zellij'));
+});
+
 test('onlyWindow историю не трогает: окна у неё не бывает по определению', () => {
   // Отсев спрашивает «покажи то, что сейчас на экране», и живой сессии без
   // окна отвечает честно. История же вычищалась им целиком — не потому, что
@@ -724,21 +782,21 @@ test('карточки сессии с окнами на своей и на чу
 
 test('без запроса и без префикса отсевы остаются как есть', () => {
   assert.deepStrictEqual(
-    activeFilters({ mode: 'sessions', query: '', onlyLive: true, onlyWindow: true }),
-    { onlyLive: true, onlyWindow: true },
+    activeFilters({ mode: 'sessions', query: '', onlyLive: true, onlyWindow: true, hideDesktop: true }),
+    { onlyLive: true, onlyWindow: true, hideDesktop: true },
   );
   assert.deepStrictEqual(
-    activeFilters({ mode: 'sessions', query: '', onlyLive: false, onlyWindow: false }),
-    { onlyLive: false, onlyWindow: false },
+    activeFilters({ mode: 'sessions', query: '', onlyLive: false, onlyWindow: false, hideDesktop: false }),
+    { onlyLive: false, onlyWindow: false, hideDesktop: false },
   );
 });
 
-test('непустой запрос снимает оба отсева', () => {
+test('непустой запрос снимает все отсевы', () => {
   // Искали сессию, а не отбор. Отсев при поиске молчит: найденного просто нет
   // в списке, и почему — не сказано ни словом.
   assert.deepStrictEqual(
-    activeFilters({ mode: 'sessions', query: 'ccfzf', onlyLive: true, onlyWindow: true }),
-    { onlyLive: false, onlyWindow: false },
+    activeFilters({ mode: 'sessions', query: 'ccfzf', onlyLive: true, onlyWindow: true, hideDesktop: true }),
+    { onlyLive: false, onlyWindow: false, hideDesktop: false },
   );
 });
 
@@ -746,8 +804,8 @@ test('пробелы запросом не считаются', () => {
   // Иначе случайно нажатый пробел молча снимал бы отсевы, и человек видел бы
   // другой список, ничего не набрав.
   assert.deepStrictEqual(
-    activeFilters({ mode: 'sessions', query: '   ', onlyLive: true, onlyWindow: true }),
-    { onlyLive: true, onlyWindow: true },
+    activeFilters({ mode: 'sessions', query: '   ', onlyLive: true, onlyWindow: true, hideDesktop: true }),
+    { onlyLive: true, onlyWindow: true, hideDesktop: true },
   );
 });
 
@@ -757,8 +815,8 @@ test('любой префикс режима снимает отсевы и на
   // бы вторым списком рядом с PREFIXES и разошлась бы с ним на первой правке.
   for (const mode of ['local', 'remote', 'history', 'projects', 'snapshots']) {
     assert.deepStrictEqual(
-      activeFilters({ mode, query: '', onlyLive: true, onlyWindow: true }),
-      { onlyLive: false, onlyWindow: false },
+      activeFilters({ mode, query: '', onlyLive: true, onlyWindow: true, hideDesktop: true }),
+      { onlyLive: false, onlyWindow: false, hideDesktop: false },
       `режим ${mode}`,
     );
   }
@@ -766,6 +824,6 @@ test('любой префикс режима снимает отсевы и на
 
 test('пустой вход не роняет и не выдумывает отсевов', () => {
   // Зовётся она из regroup, а тот бывает позван и до первого ответа.
-  assert.deepStrictEqual(activeFilters(), { onlyLive: false, onlyWindow: false });
-  assert.deepStrictEqual(activeFilters({}), { onlyLive: false, onlyWindow: false });
+  assert.deepStrictEqual(activeFilters(), { onlyLive: false, onlyWindow: false, hideDesktop: false });
+  assert.deepStrictEqual(activeFilters({}), { onlyLive: false, onlyWindow: false, hideDesktop: false });
 });
