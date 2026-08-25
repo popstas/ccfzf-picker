@@ -34,16 +34,31 @@ pub const BURST: [Duration; 3] = [
     Duration::from_secs(20),
 ];
 
-/// Следующий шаг расписания: его номер и промежуток сна до него.
-///
-/// Промежуток считается вычитанием соседних смещений, а не лежит второй
-/// таблицей рядом: две таблицы об одном разошлись бы молча, и заметить это
-/// было бы нечем. `saturating_sub` — чтобы порченая таблица (смещения не по
-/// возрастанию) стоила лишнего опроса, а не паники в потоке.
+/// Следующий шаг расписания: его номер и смещение от действия. `None` —
+/// всплеск кончился.
 pub fn burst_next(step: usize) -> Option<(usize, Duration)> {
-    let at = BURST.get(step)?;
-    let next = BURST.get(step + 1)?;
-    Some((step + 1, next.saturating_sub(*at)))
+    BURST.get(step + 1).map(|at| (step + 1, *at))
+}
+
+/// Пора ли всплеску опрашивать: прошло ли от действия смещение своего шага.
+///
+/// Решение это молчаливое, а поток будят и сигналы из канала, и трекер, и
+/// конец чужого сна — поэтому спрашивается оно от прошедшего времени, а не от
+/// того, чем кончился сон. Без `Instant` в подписи, чтобы тест мог подставить
+/// любое время: тела потока в юнит-тесте не поднять.
+pub fn burst_due(step: usize, elapsed: Duration) -> bool {
+    // Шага нет — расписание кончилось, и держать опрос больше нечем.
+    BURST.get(step).map_or(true, |at| elapsed >= *at)
+}
+
+/// Сколько спать до опроса нынешнего шага.
+///
+/// Остаток до точки, а не промежуток от прошлого опроса: считается от того же
+/// якоря, поэтому чужое пробуждение посреди расписания точек не сдвигает.
+/// `saturating_sub` — опоздали (долгий ssh, порченая таблица) — опрос
+/// немедленный, а не паника в потоке.
+pub fn burst_sleep(step: usize, elapsed: Duration) -> Duration {
+    BURST.get(step).map_or(Duration::ZERO, |at| at.saturating_sub(elapsed))
 }
 
 /// Сколько ждать до следующего опроса.
@@ -231,8 +246,10 @@ impl Poller {
             let mut visible = false;
             let mut delay = BACKGROUND_MIN;
             let mut prev_fingerprint: Option<String> = None;
-            let mut burst: Option<usize> = None;
-            let mut skip_poll = false;
+            // Номер шага и момент действия. Якорь, а не флаг: опрос
+            // отмеряется от `Opened`, и чем бы поток ни разбудили посреди
+            // расписания, точки опроса не сдвигаются.
+            let mut burst: Option<(usize, std::time::Instant)> = None;
             let mut watcher =
                 tracker_signal::Watcher::new(crate::state_path(tracker_signal::FILE).ok());
 
@@ -257,8 +274,17 @@ impl Poller {
                         let _ = app.emit("state", body);
                     }
                 }
-                if !idle && !std::mem::replace(&mut skip_poll, false) {
-                    let fresh_dump = burst.is_some();
+                // Всплеск идёт только у скрытого окна: показанное опрашивает
+                // раз в секунду само, и расписание всплеска замедлило бы его до
+                // трёх. Пауза, а не гашение: `Opened` приходит со страницы
+                // раньше `Hidden` (сперва `spawn_detached`, следом
+                // `hide_picker`), то есть при живом ещё показанном окне, — и
+                // погаси мы всплеск здесь, до дела он не дошёл бы ни разу.
+                let bursting = if visible { None } else { burst };
+                let due =
+                    bursting.map_or(true, |(step, started)| burst_due(step, started.elapsed()));
+                if !idle && due {
+                    let fresh_dump = bursting.is_some();
                     let (state, error) = poll_once(&sources, fresh_dump);
                     let changed = match state {
                         Some(state) => {
@@ -289,21 +315,32 @@ impl Poller {
                             false
                         }
                     };
-                    delay = match burst.and_then(burst_next) {
-                        Some((step, wait)) => {
-                            burst = Some(step);
-                            wait
-                        }
-                        None => {
-                            burst = None;
-                            next_delay(visible, changed, delay)
-                        }
-                    };
+                    if let Some((step, started)) = bursting {
+                        // Шаг съеден: следующий отмеряется от того же якоря.
+                        burst = burst_next(step).map(|(next, _)| (next, started));
+                    }
+                    // Обычный такт считается, только когда всплеск не идёт: под
+                    // всплеском срок берётся от якоря, а бэкофф стоит
+                    // нетронутым и продолжит с того такта, на котором его
+                    // прервали.
+                    if bursting.is_none() || burst.is_none() {
+                        delay = next_delay(visible, changed, delay);
+                    }
                 }
 
+                // Всплеск пересчитан: опрос мог съесть шаг, а мог и длиться
+                // секунды — сон всё равно отмеряется от якоря, а не от конца
+                // прошлого сна.
+                let bursting = if visible { None } else { burst };
                 // Спящий поток ждёт либо срока, либо сигнала. `recv_timeout`
                 // на закрытом канале выходит из цикла: приложение кончилось.
-                let wait = if idle { Duration::from_secs(3600) } else { delay };
+                let wait = if idle {
+                    Duration::from_secs(3600)
+                } else if let Some((step, started)) = bursting {
+                    burst_sleep(step, started.elapsed())
+                } else {
+                    delay
+                };
                 // Сторож смотрится только у скрытого окна и только при
                 // работающем фоне: показанное и так опрашивает раз в секунду, а
                 // выключенный человеком фон сигнал воскрешать не вправе.
@@ -327,9 +364,9 @@ impl Poller {
                         delay = BACKGROUND_MIN;
                     }
                     Woke::Got(Signal::Opened) => {
-                        burst = Some(0);
-                        delay = BURST[0];
-                        skip_poll = true;
+                        // Якорь ставится здесь и больше не двигается: `Hidden`,
+                        // посланный страницей следом, расписания не сдвинет.
+                        burst = Some((0, std::time::Instant::now()));
                     }
                     Woke::Got(Signal::Nudge) => {
                         let cache = thread_cache.lock().unwrap();
@@ -510,33 +547,83 @@ mod tests {
     fn расписание_всплеска_три_шага_и_конец() {
         assert_eq!(BURST.len(), 3, "расписание названо в спеке: 3, 8, 20 секунд");
         assert_eq!(BURST[0], Duration::from_secs(3));
-        // Отдаётся промежуток сна до следующего шага, а не его смещение:
-        // от +3 до +8 — пять секунд, от +8 до +20 — двенадцать.
-        assert_eq!(burst_next(0), Some((1, Duration::from_secs(5))));
-        assert_eq!(burst_next(1), Some((2, Duration::from_secs(12))));
+        // Отдаётся смещение следующего шага от действия: вычитание живёт в
+        // одном месте — в `burst_sleep`, где считается сон.
+        assert_eq!(burst_next(0), Some((1, Duration::from_secs(8))));
+        assert_eq!(burst_next(1), Some((2, Duration::from_secs(20))));
         assert_eq!(burst_next(2), None, "после третьего шага — обычный бэкофф");
+    }
+
+    /// Прогон расписания ровно так, как его проходит поток: решение «пора
+    /// ли», опрос, шаг, сон до своей точки. `wakes` — чужие пробуждения
+    /// (секунды от действия), приходящие не по своему сну: `Hidden`, посланный
+    /// страницей следом за `Opened`, сигнал трекера, что угодно ещё.
+    ///
+    /// Возвращает моменты опросов, считая от якоря.
+    fn прогон_всплеска(wakes: &[u64]) -> Vec<Duration> {
+        let mut step = 0;
+        let mut now = Duration::ZERO;
+        let mut polls = Vec::new();
+        for _ in 0..100 {
+            if burst_due(step, now) {
+                polls.push(now);
+                match burst_next(step) {
+                    Some((next, _)) => step = next,
+                    None => return polls,
+                }
+            }
+            let till = now + burst_sleep(step, now);
+            now = wakes
+                .iter()
+                .map(|s| Duration::from_secs(*s))
+                .filter(|w| *w > now && *w < till)
+                .min()
+                .unwrap_or(till);
+        }
+        panic!("расписание не кончилось — всплеск зациклился");
     }
 
     #[test]
     fn опросы_всплеска_ложатся_на_три_восемь_и_двадцать_секунд() {
-        // Стеречь надо смещения, а не промежуточную арифметику: именно их
-        // называет спека, и перепиши кто-нибудь `burst_next` — промежутки
-        // сойдутся сами с собой, а сумма разъедется и поймает правку.
-        // Сложено ровно так, как это делает поток: первый сон — `BURST[0]`,
-        // дальше промежутки от `burst_next`.
-        let mut at = BURST[0];
-        let mut points = vec![at];
-        let mut step = 0;
-        while let Some((next, gap)) = burst_next(step) {
-            at += gap;
-            points.push(at);
-            step = next;
-        }
+        // Стеречь надо смещения, названные спекой, а не промежуточную
+        // арифметику: перепиши кто-нибудь `burst_next` или `burst_sleep` —
+        // порознь они сойдутся сами с собой, а точки разъедутся.
         assert_eq!(
-            points,
+            прогон_всплеска(&[]),
             vec![Duration::from_secs(3), Duration::from_secs(8), Duration::from_secs(20)],
             "весь всплеск обязан уложиться в двадцать секунд — в порог дампа"
         );
+    }
+
+    #[test]
+    fn опроса_раньше_трёх_секунд_от_действия_не_бывает() {
+        // Разбудить поток может что угодно, и ни один из будильников не вправе
+        // стронуть первый опрос: терминал ещё не поднялся, сессия ещё не
+        // родилась, и принудительный дамп ушёл бы впустую.
+        assert!(!burst_due(0, Duration::ZERO), "разбудили сразу — опрашивать рано");
+        assert!(!burst_due(0, Duration::from_millis(2999)));
+        assert!(burst_due(0, Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn чужое_пробуждение_посреди_всплеска_расписания_не_сдвигает() {
+        // Живой случай, из-за которого якорь и заведён: страница зовёт
+        // `spawn_detached` (там `opened`), а следом `hide_picker` (там
+        // `hidden`), и `Hidden` лежит в канале уже к первому сну. На цепочке
+        // относительных снов это давало опросы на +0, +5 и +17: первый — тот
+        // самый, которого спека запрещает, и он же тратил дамп впустую.
+        let точки = vec![Duration::from_secs(3), Duration::from_secs(8), Duration::from_secs(20)];
+        assert_eq!(прогон_всплеска(&[1]), точки, "Hidden сразу за Opened");
+        assert_eq!(прогон_всплеска(&[1, 4, 5, 9, 12, 19]), точки, "и трекер, и что угодно ещё");
+    }
+
+    #[test]
+    fn сон_всплеска_это_остаток_до_своей_точки() {
+        assert_eq!(burst_sleep(0, Duration::ZERO), Duration::from_secs(3));
+        assert_eq!(burst_sleep(0, Duration::from_secs(1)), Duration::from_secs(2));
+        assert_eq!(burst_sleep(1, Duration::from_secs(3)), Duration::from_secs(5));
+        // Опоздали (долгий ssh) — спать нечего, опрос немедленный.
+        assert_eq!(burst_sleep(2, Duration::from_secs(25)), Duration::ZERO);
     }
 
     #[test]
@@ -570,10 +657,46 @@ mod tests {
     fn всплеск_просит_свежий_дамп_а_обычный_опрос_нет() {
         // Без принудительного дампа всплеск ушёл бы впустую: STATE_DUMP_MAX_AGE
         // в агрегаторе тридцать секунд, а весь всплеск укладывается в двадцать.
+        //
+        // `split_once`, а не `contains`: последний нашёл бы собственный литерал
+        // этого же теста и прошёл бы при удалённой боевой строке. Первое
+        // вхождение — боевое, `mod tests` в файле идёт последним.
         let src = include_str!("poller.rs");
-        assert!(
-            src.contains("let fresh_dump = burst.is_some();"),
-            "свежий дамп просят ровно опросы всплеска"
-        );
+        let body = src
+            .split_once("let fresh_dump = ")
+            .expect("свежий дамп перестали просить — тест сторожит не то")
+            .1;
+        let (body, _) = body.split_once(';').expect("строка не закрыта");
+        assert!(body.contains("bursting.is_some()"), "свежий дамп просят ровно опросы всплеска");
+    }
+
+    #[test]
+    fn показанное_окно_всплеска_не_ведёт() {
+        // Текстовый, как соседи: тела потока в юнит-тесте не поднять. Правило
+        // молчаливое вдвойне — под всплеском срок сна считается от якоря, и
+        // `visible` в нём не участвует вовсе: побеги всплеск при показанном
+        // окне, секундный такт списка стал бы трёхсекундным.
+        let src = include_str!("poller.rs");
+        let body = src
+            .split_once("let bursting = ")
+            .expect("пауза всплеска при показанном окне пропала")
+            .1;
+        let (body, _) = body.split_once(';').expect("строка не закрыта");
+        assert!(body.contains("visible"), "всплеск идёт только у скрытого окна");
+        assert!(body.contains("None"), "показанному окну всплеск не отдаётся");
+    }
+
+    #[test]
+    fn показ_окна_всплеск_отменяет() {
+        // Пауза при `visible` его бы только придержала, а якорь остался бы
+        // взведённым: человек, открывший сессию и тут же вернувший пикер,
+        // получил бы досиженный всплеск посреди работы со списком.
+        let src = include_str!("poller.rs");
+        let body = src
+            .split_once("Woke::Got(Signal::Shown) => {")
+            .expect("ветка показа пропала — тест сторожит не то")
+            .1;
+        let (body, _) = body.split_once("Woke::Got(").expect("ветка не закрыта");
+        assert!(body.contains("burst = None"), "показ окна гасит всплеск, а не откладывает");
     }
 }
