@@ -10,6 +10,29 @@ pub const BACKGROUND_MIN: Duration = Duration::from_secs(60);
 /// этим же опросом живёт панель openHASP, и такт — это её отставание.
 pub const BACKGROUND_MAX: Duration = Duration::from_secs(8 * 60);
 
+/// Кусок, которым проспан фоновый такт, пока под присмотром сигнал трекера.
+///
+/// Секунда — не такт опроса, а частота одного локального `stat`: сам опрос
+/// по-прежнему идёт по бэкоффу, и цена этой секунды ровно один системный
+/// вызов.
+pub const SIGNAL_TICK: Duration = Duration::from_secs(1);
+
+/// Всплеск опроса после своего же действия, кончающегося терминалом.
+///
+/// Три шага, потому что окно приезжает не сразу: терминал поднимается секунды,
+/// заголовок устаивается ещё два тика трекера. Дальше работу забирает сигнал —
+/// досиживать до появления окна всплеск не обязан.
+pub const BURST: [Duration; 3] = [
+    Duration::from_secs(3),
+    Duration::from_secs(8),
+    Duration::from_secs(20),
+];
+
+/// Следующий шаг расписания: его номер и срок. `None` — всплеск кончился.
+pub fn burst_next(step: usize) -> Option<(usize, Duration)> {
+    BURST.get(step + 1).map(|d| (step + 1, *d))
+}
+
 /// Сколько ждать до следующего опроса.
 ///
 /// Смена видимости в формулу не входит: её обрабатывает поток, подменяя
@@ -51,6 +74,7 @@ pub fn fingerprint(state: &serde_json::Value) -> String {
 }
 
 use crate::state_source::Source;
+use crate::tracker_signal;
 
 /// Сложить ответы источников в пару «состояние, текст отказа».
 ///
@@ -92,7 +116,7 @@ pub fn poll_once(sources: &[Source], fresh_dump: bool) -> (Option<serde_json::Va
     combine(parts)
 }
 
-use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 
@@ -106,6 +130,9 @@ enum Signal {
     Hidden,
     /// Опросить сейчас (первая подписка фронтенда, смена настроек).
     Nudge,
+    /// Пикер сам открыл что-то, кончающееся терминалом. Не опрос, а
+    /// расписание: на само нажатие опрашивать нечего, терминал ещё не поднялся.
+    Opened,
 }
 
 /// Последнее, что известно об агрегаторе.
@@ -138,6 +165,46 @@ fn payload(cache: &Cache) -> serde_json::Value {
     })
 }
 
+/// Чем кончилось ожидание.
+enum Woke {
+    Got(Signal),
+    Elapsed,
+    Tracker,
+    Gone,
+}
+
+/// Проспать срок, поглядывая на сигнал трекера.
+///
+/// Кусками по `SIGNAL_TICK`, а не одним сном: у скрытого окна срок доходит до
+/// восьми минут, и всё это время поток нечем разбудить, кроме сигнала из
+/// канала. Без сторожа (показанное окно, выключенный фон) спим одним куском —
+/// лишний системный вызов в секунду там ни за что.
+fn wait_for(
+    rx: &Receiver<Signal>,
+    wait: Duration,
+    mut watcher: Option<&mut tracker_signal::Watcher>,
+) -> Woke {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return Woke::Elapsed;
+        }
+        let slice = if watcher.is_some() { left.min(SIGNAL_TICK) } else { left };
+        match rx.recv_timeout(slice) {
+            Ok(signal) => return Woke::Got(signal),
+            Err(RecvTimeoutError::Disconnected) => return Woke::Gone,
+            Err(RecvTimeoutError::Timeout) => {
+                if let Some(w) = watcher.as_deref_mut() {
+                    if w.changed() {
+                        return Woke::Tracker;
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl Poller {
     /// Поднять поток опроса. Окно на старте скрыто.
     pub fn start(app: tauri::AppHandle, sources: Vec<Source>, background: bool) -> Poller {
@@ -151,6 +218,10 @@ impl Poller {
             let mut visible = false;
             let mut delay = BACKGROUND_MIN;
             let mut prev_fingerprint: Option<String> = None;
+            let mut burst: Option<usize> = None;
+            let mut skip_poll = false;
+            let mut watcher =
+                tracker_signal::Watcher::new(crate::state_path(tracker_signal::FILE).ok());
 
             loop {
                 let (sources, background) = thread_settings.lock().unwrap().clone();
@@ -173,10 +244,9 @@ impl Poller {
                         let _ = app.emit("state", body);
                     }
                 }
-                if !idle {
-                    // Всплеск, заставляющий агрегатор переписать дамп немедленно,
-                    // приезжает задачей 4 — здесь опрос всегда обычный.
-                    let (state, error) = poll_once(&sources, false);
+                if !idle && !std::mem::replace(&mut skip_poll, false) {
+                    let fresh_dump = burst.is_some();
+                    let (state, error) = poll_once(&sources, fresh_dump);
                     let changed = match state {
                         Some(state) => {
                             let fp = fingerprint(&state);
@@ -206,16 +276,32 @@ impl Poller {
                             false
                         }
                     };
-                    delay = next_delay(visible, changed, delay);
+                    delay = match burst.and_then(burst_next) {
+                        Some((step, wait)) => {
+                            burst = Some(step);
+                            wait
+                        }
+                        None => {
+                            burst = None;
+                            next_delay(visible, changed, delay)
+                        }
+                    };
                 }
 
                 // Спящий поток ждёт либо срока, либо сигнала. `recv_timeout`
                 // на закрытом канале выходит из цикла: приложение кончилось.
                 let wait = if idle { Duration::from_secs(3600) } else { delay };
-                match rx.recv_timeout(wait) {
-                    Ok(Signal::Shown) => {
+                // Сторож смотрится только у скрытого окна и только при
+                // работающем фоне: показанное и так опрашивает раз в секунду, а
+                // выключенный человеком фон сигнал воскрешать не вправе.
+                let watching = !visible && !idle;
+                match wait_for(&rx, wait, if watching { Some(&mut watcher) } else { None }) {
+                    Woke::Got(Signal::Shown) => {
                         visible = true;
                         delay = VISIBLE_TICK;
+                        // Показанное окно опрашивает раз в секунду — всплеску
+                        // тут делать нечего, и досиживать его незачем.
+                        burst = None;
                         // Кэш отдаётся до опроса: ради этого фон и заведён —
                         // список рисуется, не дожидаясь ssh.
                         let cache = thread_cache.lock().unwrap();
@@ -223,18 +309,25 @@ impl Poller {
                         drop(cache);
                         let _ = app.emit("state", body);
                     }
-                    Ok(Signal::Hidden) => {
+                    Woke::Got(Signal::Hidden) => {
                         visible = false;
                         delay = BACKGROUND_MIN;
                     }
-                    Ok(Signal::Nudge) => {
+                    Woke::Got(Signal::Opened) => {
+                        burst = Some(0);
+                        delay = BURST[0];
+                        skip_poll = true;
+                    }
+                    Woke::Got(Signal::Nudge) => {
                         let cache = thread_cache.lock().unwrap();
                         let body = payload(&cache);
                         drop(cache);
                         let _ = app.emit("state", body);
                     }
-                    Err(RecvTimeoutError::Timeout) => {}
-                    Err(RecvTimeoutError::Disconnected) => return,
+                    // Трекер сказал, что состав окон изменился: опрос на
+                    // следующем витке, без всякой задержки.
+                    Woke::Tracker | Woke::Elapsed => {}
+                    Woke::Gone => return,
                 }
             }
         });
@@ -256,6 +349,11 @@ impl Poller {
 
     pub fn nudge(&self) {
         self.signal(Signal::Nudge);
+    }
+
+    /// Пикер открыл что-то, кончающееся терминалом.
+    pub fn opened(&self) {
+        self.signal(Signal::Opened);
     }
 
     /// Новые настройки подхватываются следующим тактом: рвать текущий ssh
@@ -393,5 +491,52 @@ mod tests {
         let (state, error) = combine(parts);
         assert!(state.is_some());
         assert_eq!(error, "");
+    }
+
+    #[test]
+    fn расписание_всплеска_три_шага_и_конец() {
+        assert_eq!(BURST.len(), 3, "расписание названо в спеке: 3, 8, 20 секунд");
+        assert_eq!(BURST[0], Duration::from_secs(3));
+        assert_eq!(burst_next(0), Some((1, Duration::from_secs(8))));
+        assert_eq!(burst_next(1), Some((2, Duration::from_secs(20))));
+        assert_eq!(burst_next(2), None, "после третьего шага — обычный бэкофф");
+    }
+
+    #[test]
+    fn первый_шаг_всплеска_не_раньше_трёх_секунд() {
+        // Раньше — впустую: терминал ещё не поднялся, сессия ещё не родилась.
+        assert!(BURST[0] >= Duration::from_secs(3));
+    }
+
+    #[test]
+    fn кусок_сна_короче_фонового_такта() {
+        assert_eq!(SIGNAL_TICK, Duration::from_secs(1));
+        assert!(SIGNAL_TICK < BACKGROUND_MIN, "иначе сигнал ничего бы не ускорил");
+    }
+
+    #[test]
+    fn сигнал_не_будит_выключенный_фон() {
+        // Текстовый: поведение потока в тесте не поднять, а правило молчаливое
+        // — разреши мы сторожу работать при idle, выключенный человеком
+        // фоновый опрос воскресал бы сам собой.
+        let src = include_str!("poller.rs");
+        let body = src
+            .split_once("let watching = ")
+            .expect("выбор сторожа пропал — тест сторожит не то")
+            .1;
+        let (body, _) = body.split_once(';').expect("строка не закрыта");
+        assert!(body.contains("!idle"), "сторож смотрится только при работающем фоне");
+        assert!(body.contains("!visible"), "показанное окно и так опрашивает раз в секунду");
+    }
+
+    #[test]
+    fn всплеск_просит_свежий_дамп_а_обычный_опрос_нет() {
+        // Без принудительного дампа всплеск ушёл бы впустую: STATE_DUMP_MAX_AGE
+        // в агрегаторе тридцать секунд, а весь всплеск укладывается в двадцать.
+        let src = include_str!("poller.rs");
+        assert!(
+            src.contains("let fresh_dump = burst.is_some();"),
+            "свежий дамп просят ровно опросы всплеска"
+        );
     }
 }
