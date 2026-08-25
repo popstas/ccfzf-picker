@@ -1135,9 +1135,10 @@ async fn restore_snapshot_mqtt(
     session_ids: Vec<String>,
     base: Option<String>,
     http: Option<String>,
+    poller: tauri::State<'_, poller::Poller>,
 ) -> Result<(), String> {
     let endpoint = http.unwrap_or_default();
-    match transport_for(&endpoint) {
+    let result = match transport_for(&endpoint) {
         Transport::Http => tauri::async_runtime::spawn_blocking(move || {
             manager_http::restore(&endpoint, &id, &session_ids)
         })
@@ -1154,7 +1155,13 @@ async fn restore_snapshot_mqtt(
             .await
             .map_err(|e| format!("restore_snapshot_mqtt task failed: {e}"))?
         }
+    };
+    if result.is_ok() {
+        // Расписание опроса, а не опрос: восстановленные окна поднимутся через
+        // секунды, и список обязан узнать о них раньше, чем через минуту бэкоффа.
+        poller.opened();
     }
+    result
 }
 
 /// Попросить трекер разложить окна — плиткой или каскадом.
@@ -1249,6 +1256,7 @@ async fn open_session_mqtt(
     http: Option<String>,
     same_machine: Option<bool>,
     no_autoplace: Option<bool>,
+    poller: tauri::State<'_, poller::Poller>,
 ) -> Result<(), String> {
     allow_any_foreground();
     // Брокер читается на общей дороге, даже когда его нет: терминал и
@@ -1262,7 +1270,7 @@ async fn open_session_mqtt(
         mqtt::Placement::default()
     };
     let endpoint = http.unwrap_or_default();
-    match transport_for(&endpoint) {
+    let result = match transport_for(&endpoint) {
         Transport::Http => tauri::async_runtime::spawn_blocking(move || {
             manager_http::open(&endpoint, &id, &cwd, &terminal, place)
         })
@@ -1279,7 +1287,13 @@ async fn open_session_mqtt(
             .await
             .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
         }
+    };
+    if result.is_ok() {
+        // Расписание опроса, а не опрос: терминал поднимется через секунды, и
+        // список обязан узнать о нём раньше, чем через минуту бэкоффа.
+        poller.opened();
     }
+    result
 }
 
 /// Попросить менеджера открыть проект по каталогу.
@@ -1301,6 +1315,7 @@ async fn open_project_mqtt(
     base: Option<String>,
     http: Option<String>,
     no_autoplace: Option<bool>,
+    poller: tauri::State<'_, poller::Poller>,
 ) -> Result<(), String> {
     allow_any_foreground();
     let (broker, terminal, raw) = config_parts()?;
@@ -1308,7 +1323,7 @@ async fn open_project_mqtt(
     // отдаёт ветку менеджера только на машине самого менеджера.
     let place = placement(&app, &raw, no_autoplace.unwrap_or(false));
     let endpoint = http.unwrap_or_default();
-    match transport_for(&endpoint) {
+    let result = match transport_for(&endpoint) {
         Transport::Http => tauri::async_runtime::spawn_blocking(move || {
             manager_http::open_project(&endpoint, &cwd, &terminal, place)
         })
@@ -1326,7 +1341,13 @@ async fn open_project_mqtt(
             .await
             .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
         }
+    };
+    if result.is_ok() {
+        // Расписание опроса, а не опрос: терминал поднимется через секунды, и
+        // список обязан узнать о нём раньше, чем через минуту бэкоффа.
+        poller.opened();
     }
+    result
 }
 
 /// Попросить менеджера завести новую сессию в каталоге.
@@ -1345,6 +1366,7 @@ async fn new_session_mqtt(
     base: Option<String>,
     http: Option<String>,
     no_autoplace: Option<bool>,
+    poller: tauri::State<'_, poller::Poller>,
 ) -> Result<(), String> {
     allow_any_foreground();
     let (broker, terminal, raw) = config_parts()?;
@@ -1352,7 +1374,7 @@ async fn new_session_mqtt(
     // машины — ветку выбирает `chooseProjectOpenAction`.
     let place = placement(&app, &raw, no_autoplace.unwrap_or(false));
     let endpoint = http.unwrap_or_default();
-    match transport_for(&endpoint) {
+    let result = match transport_for(&endpoint) {
         Transport::Http => tauri::async_runtime::spawn_blocking(move || {
             manager_http::open_new(&endpoint, &cwd, &name, &terminal, place)
         })
@@ -1370,7 +1392,13 @@ async fn new_session_mqtt(
             .await
             .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
         }
+    };
+    if result.is_ok() {
+        // Расписание опроса, а не опрос: терминал поднимется через секунды, и
+        // список обязан узнать о нём раньше, чем через минуту бэкоффа.
+        poller.opened();
     }
+    result
 }
 
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
@@ -1899,14 +1927,17 @@ async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Запуск терминала. Открепляется сразу: пикер не ждёт, пока человек
-/// закончит работать в сессии, и не держит его вывод.
+/// Запуск терминала — тело без грамоты опроса.
+///
+/// Отдельная от команды функция ради двух звонков, которым всплеск опроса не
+/// нужен: `open_in_editor` открывает редактор, а не сессию, и существующий
+/// юнит-тест зовёт её напрямую двумя аргументами — без `tauri::State`, которого
+/// в юнит-тесте не собрать вовсе.
 ///
 /// Единственное место, которое сознательно идёт мимо `proc::hidden_command`:
 /// здесь окно и есть цель. Спрятать его значило бы открыть сессию, которую
 /// человек не увидит.
-#[tauri::command]
-fn spawn_detached(argv: Vec<String>, cwd: Option<String>) -> Result<(), String> {
+fn spawn_detached_argv(argv: Vec<String>, cwd: Option<String>) -> Result<(), String> {
     let Some((file, args)) = argv.split_first() else {
         return Err("empty argv".into());
     };
@@ -1924,6 +1955,22 @@ fn spawn_detached(argv: Vec<String>, cwd: Option<String>) -> Result<(), String> 
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("failed to spawn {file}: {e}"))
+}
+
+/// Запуск терминала. Открепляется сразу: пикер не ждёт, пока человек
+/// закончит работать в сессии, и не держит его вывод.
+#[tauri::command]
+fn spawn_detached(
+    argv: Vec<String>,
+    cwd: Option<String>,
+    poller: tauri::State<poller::Poller>,
+) -> Result<(), String> {
+    let result = spawn_detached_argv(argv, cwd);
+    if result.is_ok() {
+        // Не запустилось — окна не будет, и всплеск гнал бы ssh впустую.
+        poller.opened();
+    }
+    result
 }
 
 /// Ссылка, поднимающая сессию в приложении Claude Desktop.
@@ -2107,7 +2154,10 @@ fn open_in_editor(editor: String, path: String) -> Result<(), String> {
     }
     let argv = editor_argv(&editor, &path);
     if !editor_is_launcher(&argv) {
-        return spawn_detached(argv, None);
+        // spawn_detached_argv, а не команда: открытие спеки в редакторе
+        // терминала за собой не оставляет, и всплеск опроса тут гнал бы ssh
+        // впустую.
+        return spawn_detached_argv(argv, None);
     }
     let (file, args) = argv.split_first().expect("argv пускача не бывает пустым");
     let out = std::process::Command::new(file)
@@ -3222,7 +3272,47 @@ mod tests {
         } else {
             vec!["pwd".to_string()]
         };
-        assert!(super::spawn_detached(argv, Some(dir.to_string_lossy().into_owned())).is_ok());
+        assert!(super::spawn_detached_argv(argv, Some(dir.to_string_lossy().into_owned())).is_ok());
+    }
+
+    /// Каждая ветка, кончающаяся терминалом, заводит всплеск опроса.
+    ///
+    /// Текстовый, и иначе никак: забытая ветка не падает и не молчит — она
+    /// работает ровно как раньше, то есть окно появляется, а список узнаёт о
+    /// нём через минуту-восемь. Поймать это можно было бы только глазами и
+    /// только на той ветке, которую забыли.
+    #[test]
+    fn every_branch_that_ends_in_a_terminal_starts_a_burst() {
+        let src = include_str!("main.rs");
+        for name in [
+            "async fn restore_snapshot_mqtt(",
+            "async fn open_session_mqtt(",
+            "async fn open_project_mqtt(",
+            "async fn new_session_mqtt(",
+            "fn spawn_detached(",
+        ] {
+            let body = src
+                .split_once(name)
+                .unwrap_or_else(|| panic!("{name} пропала — тест сторожит не то"))
+                .1;
+            let (body, _) = body.split_once("\n}\n").expect("команда не закрыта");
+            assert!(
+                body.contains("poller.opened()"),
+                "{name} кончается терминалом и обязана завести всплеск опроса"
+            );
+        }
+    }
+
+    /// Ветки, которые нового окна не открывают, всплеска не заводят.
+    #[test]
+    fn branches_without_a_new_window_do_not_start_a_burst() {
+        let src = include_str!("main.rs");
+        let (_, body) = src.split_once("fn spawn_url(").expect("spawn_url пропала");
+        let (body, _) = body.split_once("\n}\n").expect("команда не закрыта");
+        assert!(
+            !body.contains("poller.opened()"),
+            "spawn_url открывает папку и ссылку claude:// — состава окон это не меняет"
+        );
     }
 
     #[test]
