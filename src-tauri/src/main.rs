@@ -1826,6 +1826,29 @@ fn read_log() -> Vec<String> {
     log::lines()
 }
 
+/// Что известно про сигнал оконного трекера этой машины.
+///
+/// Диагностика, а не настройка: ни ключа в конфиге, ни сохранения. Путь и
+/// формат сигнала живут в трёх репозиториях сразу, и разъехавшись, они не дают
+/// ни ошибки, ни следа — пикер просто возвращается к прежнему бэкоффу. Строка
+/// здесь единственное, чем человек отличит «трекер молчит» от «ничего не
+/// менялось».
+#[tauri::command]
+fn tracker_signal_status() -> serde_json::Value {
+    let path = state_path(tracker_signal::FILE).ok();
+    let age = path
+        .as_ref()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.elapsed().ok())
+        .map(|d| d.as_secs());
+    serde_json::json!({
+        "path": path.map(|p| p.display().to_string()).unwrap_or_default(),
+        "seen": age.is_some(),
+        "ageSec": age,
+    })
+}
+
 /// не загружается никогда — белый прямоугольник с рамкой и без содержимого.
 /// `async` уводит команду в пул, цикл остаётся свободен, и webview
 /// дозревает. Заодно это единственная причина, по которой команда не может
@@ -2875,7 +2898,7 @@ fn main() {
             restore_snapshot_mqtt, place_windows_mqtt, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
-            set_comment, open_in_editor, read_log, open_desktop_session, open_folder
+            set_comment, open_in_editor, read_log, tracker_signal_status, open_desktop_session, open_folder
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из

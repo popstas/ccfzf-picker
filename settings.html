@@ -617,6 +617,24 @@
   }
 
   /**
+   * Строка про сигнал оконного трекера этой машины.
+   *
+   * Диагностика, а не настройка: сама разметка тут статична, значение
+   * приезжает асинхронно после отрисовки (см. вызов `tracker_signal_status`
+   * в `renderPage`). Путь и формат сигнала живут в трёх репозиториях сразу
+   * (этот, windows11-manager, macos-windows-manager), и текстовым сторожем
+   * через репозитории не дотянуться: разъедутся они — сигнал молча
+   * перестанет приходить, а отличить это от «ничего не менялось» будет
+   * нечем. Эта строка — единственное, чем человек это увидит.
+   */
+  function trackerSignalHtml() {
+    return '<div class="field"><label>Tracker signal</label>'
+      + '<span id="tracker-signal">…</span>'
+      + '<div class="hint">Set by the window tracker on this machine when the set of tracked '
+      + 'windows changes — the picker polls immediately once it sees this file move.</div></div>';
+  }
+
+  /**
    * Панели одной раскладки: показывать ли, в какой колонке и развёрнутой ли.
    *
    * Осей у широкой три, у узкой две: колонок в узком списке нет вовсе, и
@@ -815,7 +833,8 @@
       : current === 'general' ? generalBodyHtml(def.fields)
       : (current === 'mqtt' ? mqttIntroHtml() : '')
         + def.fields.map(fieldHtml).join('')
-        + (current === 'paths' ? actionsListHtml() : '');
+        + (current === 'paths' ? actionsListHtml() : '')
+        + (current === 'window' ? trackerSignalHtml() : '');
     page.innerHTML = body
       + '<div id="bar"><button id="save">Save</button><span id="status"></span></div>';
 
@@ -827,6 +846,20 @@
     if (current === 'log') {
       refreshLog();
       logTimer = setInterval(refreshLog, 1000);
+    }
+
+    // Диагностика вкладки Window: спрашивается один раз при её показе — файл
+    // трогает трекер этой машины, а окно настроек живёт секунды, опрашивать
+    // чаще незачем. Отсутствие моста (нет window.__TAURI__, как в тестах и
+    // предпросмотре) резолвит invoke() в undefined — тогда строка молчит,
+    // а не падает.
+    if (current === 'window') {
+      invoke('tracker_signal_status').then((s) => {
+        const node = document.getElementById('tracker-signal');
+        if (!node) return;
+        node.textContent = s && s.seen ? `${s.ageSec}s ago` : 'never seen';
+        node.title = (s && s.path) || '';
+      });
     }
 
     // `indeterminate` — свойство DOM, а не HTML-атрибут: строкой его не

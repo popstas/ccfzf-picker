@@ -695,6 +695,15 @@ test('вкладка Log спрашивает буфер и гасит опро�
   assert.match(src, /clearInterval\(logTimer\)/);
 });
 
+test('вкладка Window показывает состояние сигнала трекера', () => {
+  // Путь и формат сигнала живут в трёх репозиториях, а текстовым сторожем
+  // через репозитории не дотянуться: разъедутся — сигнал молча перестанет
+  // приходить, и отличить это от «ничего не менялось» будет нечем. Строка в
+  // настройках — единственное, чем человек может это увидеть.
+  assert.match(SETTINGS_HTML, /Tracker signal/, 'подпись на месте');
+  assert.match(SETTINGS_HTML, /tracker_signal_status/, 'страница спрашивает состояние у Rust');
+});
+
 test('renderPage знает columns и paths, а не ui и integrations', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
   assert.match(src, /current === 'columns'/);
