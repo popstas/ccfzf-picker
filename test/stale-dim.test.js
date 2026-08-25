@@ -48,8 +48,8 @@ test('галка dim stale есть и она не фильтр', () => {
   assert.match(SESSIONS_HTML, /\{ key: 'dimStale', label: 'dim stale', side: 'dim' \}/,
     'галки dim stale нет в TOGGLE_CHECKS или у неё другая сторона');
   const filters = SESSIONS_HTML.match(/side: 'filter'/g) || [];
-  assert.strictEqual(filters.length, 2,
-    'фильтров стало не два — проверь, не уехала ли dimStale в фильтры');
+  assert.strictEqual(filters.length, 3,
+    'фильтров стало не три — проверь, не уехала ли dimStale в фильтры');
 });
 
 test('умолчание галки берётся из конфига, а не из литерала', () => {

@@ -136,7 +136,11 @@
     dimStale: 'dim stale',
     dimProject: 'dim project',
   };
-  const FILTER_LABELS = { onlyWindow: 'only sessions with a window', showAll: 'show all sessions' };
+  const FILTER_LABELS = {
+    onlyWindow: 'only sessions with a window',
+    showAll: 'show all sessions',
+    showDesktop: 'show Claude Desktop sessions',
+  };
 
   // Как назвать человеку не вставший хоткей и по какому ключу спросить о нём
   // ответ `save_config`. Подпись здесь своя, а не поле формы: там она про то,
@@ -165,6 +169,8 @@
       showTodo: { list: true, statusline: false },
       onlyWindow: { list: false, statusline: false },
       showAll: { list: false, statusline: true },
+      // Единственный фильтр, включённый по умолчанию: см. sessions.html.
+      showDesktop: { list: true, statusline: false },
       showTerminalIcon: { list: false, statusline: false },
       // `list` тут — плейсхолдер: настоящее значение переписывает строка
       // `UI_DEFAULTS.toggles.dimStale.list = Boolean(config?.stale?.enabled)`

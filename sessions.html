@@ -980,6 +980,10 @@
     { key: 'showTodo', label: 'todo', side: 'right' },
     { key: 'onlyWindow', label: 'only windowed', side: 'filter' },
     { key: 'showAll', label: 'show all', side: 'filter' },
+    // Третий фильтр, и единственный из трёх, включённый по умолчанию:
+    // выключенным он прятал бы сессии приложения у всех, кто про галку не
+    // знает, — а узнать про пропажу неоткуда, отсев о себе не сообщает.
+    { key: 'showDesktop', label: 'claude desktop', side: 'filter' },
     // Четвёртая группа, `dim`, — и не колонка, и не фильтр. Состав списка
     // затемнение не меняет (класс вешает отрисовщик строки), поэтому
     // обработчику хватает render(); попади ключ в FILTER_KEYS, каждое
@@ -1034,6 +1038,11 @@
     // config.yaml: галка — это отступление от настройки, а не вторая
     // настройка. Отступление запоминается в ui.json, как и все остальные.
     showAll: { list: false, statusline: true },
+    // Включён: показывать сессии приложения Claude Desktop — то, что пикер
+    // делал всегда, и галка заводится ради обратного, для тех, кто
+    // приложением не пользуется. В статуслайн не вынесена: место внизу
+    // кончилось, а щёлкают её один раз.
+    showDesktop: { list: true, statusline: false },
     // Умолчание подставляется при загрузке ui.json (toggleDefaults): здесь
     // CONFIG ещё пустой — load_config идёт позже, — и значение застыло бы на
     // встроенном. `true` тут только затем, чтобы ключ существовал.
@@ -1912,6 +1921,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // галка «только живые» поверх настройки читалась бы как второй фильтр.
       onlyLive: CONFIG.onlyLive && !toggles.showAll,
       onlyWindow: toggles.onlyWindow,
+      // Переворот здесь, а не в activeFilters: галка спрашивает «показывать
+      // ли», а отсевам по ту сторону все поля значат «отсев включён».
+      hideDesktop: !toggles.showDesktop,
     });
     const payload = window.SessionGroups.buildSessionsPayload(
       // Верхние поля ответа переезжают сюда поимённо: на старом агрегаторе
