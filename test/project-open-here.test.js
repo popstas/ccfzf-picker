@@ -67,6 +67,10 @@ function endOf(script, { sessions = [], projectOpenAction = 'focus' } = {}) {
       ProjectList,
     },
     openManagerHere: () => null,
+    // Достижимость менеджера — заглушка с тем же именем, что и у настоящего
+    // помощника: этот сторож про то, куда ведёт Enter, а не про развилку
+    // транспорта, которую здесь уже решает замоканная chooseProjectOpenAction.
+    managerReachable: () => true,
     focusSession: (row) => { calls.push(`focusSession:${row.id}`); return Promise.resolve(); },
     newSession: (cwd) => { calls.push(`newSession:${cwd}`); return Promise.resolve(); },
     newSessionHere: () => { calls.push('newSessionHere'); return Promise.resolve(); },

@@ -201,6 +201,45 @@
   }
 
   /**
+   * Адрес прямой просьбы к менеджеру машины — `"host:port"` или пусто.
+   *
+   * Дорога двухшаговая, и это не лишний шаг: в записи окна адреса нет вовсе.
+   * Агрегатор кладёт его только в запись машины (`windowHosts`), потому что
+   * адрес — свойство машины, а запись окна ехала бы им в каждом ответе
+   * `--state`, раз в секунду. `mqttBase` дублируется в обеих по историческим
+   * причинам, и повторять это незачем.
+   *
+   * Пустая строка значит «иди через MQTT»: трекер или агрегатор прежней версии
+   * поля не пишет. Отката тут не изобретается — MQTT и был единственной
+   * дорогой.
+   */
+  function httpEndpointOf(entry) {
+    const host = String((entry || {}).host || '').trim();
+    const port = ((entry || {}).http || {}).port;
+    if (!host) return '';
+    return Number.isInteger(port) && port > 0 ? `${host}:${port}` : '';
+  }
+
+  function httpForHost(state, host) {
+    const mine = normHost(host);
+    if (!mine) return '';
+    const entry = trackerHosts(state).find(e => normHost(e.host) === mine);
+    return entry ? httpEndpointOf(entry) : '';
+  }
+
+  /** Адрес прямой просьбы для строки — по машине её окна. */
+  function httpFor(row, state, configHost) {
+    const w = focusWindowOf(row, state, configHost) || windowOf(row, state);
+    return httpForHost(state, (w || {}).host);
+  }
+
+  /** Адрес прямой просьбы к машине, чей менеджер открывает сессии. */
+  function managerHttp(state, configHost) {
+    const manager = openManager(state, configHost);
+    return manager ? httpEndpointOf(manager) : '';
+  }
+
+  /**
    * Трекер, чей менеджер берётся открывать сессии и терминалы.
    *
    * Вопрос про машину, а не про строку, и построчным он стать не может: у
@@ -248,17 +287,25 @@
    * как «спроси свой конфиг» (`resolve_base`) — так пикер вёл себя и до
    * появления нескольких трекеров, — а дедупликация ниже схлопывает повторы
    * сама, даже если пустых окон несколько.
+   *
+   * Транспорт считается на каждую машину отдельно и едет в паре с базой: у
+   * одного трекера может быть http, у соседнего нет. Двумя параллельными
+   * массивами это разъехалось бы по индексам на первой же правке.
    */
-  function unreadBases(row, state) {
+  function unreadTargets(row, state) {
     const r = row || {};
     const wins = Array.isArray(r.sessionWindows) ? r.sessionWindows : windowsOf(row, state);
     const out = [];
     for (const w of wins) {
       const base = w && typeof w.mqttBase === 'string' ? w.mqttBase.trim() : '';
-      if (!out.includes(base)) out.push(base);
+      const http = httpForHost(state, (w || {}).host);
+      if (!out.some(t => t.base === base && t.http === http)) out.push({ base, http });
     }
     return out;
   }
 
-  return { windowOf, windowsOf, normHost, canFocusRow, focusWindowOf, trackerHere, trackerHosts, focusPid, mqttBaseFor, openManager, unreadBases, placeIds, minimizedHere };
+  return {
+    windowOf, windowsOf, normHost, canFocusRow, focusWindowOf, trackerHere, trackerHosts, focusPid,
+    mqttBaseFor, httpFor, httpForHost, managerHttp, openManager, unreadTargets, placeIds, minimizedHere,
+  };
 });

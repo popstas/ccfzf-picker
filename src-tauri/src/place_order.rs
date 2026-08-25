@@ -419,17 +419,13 @@ pub fn tile_ids(state: &Value, config_host: &str, sort: &str, stale: &Stale) -> 
     out
 }
 
-/// Топик машины, на которой стоят раскладываемые окна.
-///
-/// Адрес называет трекер, а не конфиг пикера, — то же правило, что у подъёма
-/// окна: трекеров несколько, у каждого свой префикс. Ищется запись **своей**
-/// машины теми же тремя условиями, что и `trackerHere`. Пустая строка значит
-/// «спроси свой конфиг»: старый трекер `mqttBase` не называет вовсе, и на
-/// такой ветке `resolve_base` откатывается на `<config.base>/windows`.
-pub fn tracker_base(state: &Value, config_host: &str) -> String {
+/// Запись **своей** машины в списке трекеров — общий поиск для `tracker_base`
+/// и `tracker_http`: те же три условия и тот же откат на верхние поля ответа
+/// для старого агрегатора, который список `windowHosts` не отдаёт вовсе.
+fn own_tracker_entry(state: &Value, config_host: &str) -> Option<Value> {
     let mine = config_host.trim().to_lowercase();
     if mine.is_empty() {
-        return String::new();
+        return None;
     }
     let hosts = match state.get("windowHosts").and_then(|v| v.as_array()) {
         Some(arr) => arr.clone(),
@@ -444,18 +440,58 @@ pub fn tracker_base(state: &Value, config_host: &str) -> String {
             _ => Vec::new(),
         },
     };
-    hosts
-        .iter()
-        .find(|e| {
-            norm_host(e.get("host")) == mine
-                && e.get("canFocus") != Some(&Value::Bool(false))
-                && focus_pid(e) > 0.0
-        })
-        .and_then(|e| e.get("mqttBase"))
+    hosts.into_iter().find(|e| {
+        norm_host(e.get("host")) == mine
+            && e.get("canFocus") != Some(&Value::Bool(false))
+            && focus_pid(e) > 0.0
+    })
+}
+
+/// Топик машины, на которой стоят раскладываемые окна.
+///
+/// Адрес называет трекер, а не конфиг пикера, — то же правило, что у подъёма
+/// окна: трекеров несколько, у каждого свой префикс. Пустая строка значит
+/// «спроси свой конфиг»: старый трекер `mqttBase` не называет вовсе, и на
+/// такой ветке `resolve_base` откатывается на `<config.base>/windows`.
+pub fn tracker_base(state: &Value, config_host: &str) -> String {
+    match own_tracker_entry(state, config_host) {
+        Some(e) => e
+            .get("mqttBase")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        None => String::new(),
+    }
+}
+
+/// Адрес прямой просьбы к трекеру своей машины — `"host:port"` или пусто.
+///
+/// Тот же поиск записи, что у `tracker_base`, и те же три условия. Отдельная
+/// функция, а не второе поле у первой: базу спрашивают и там, где адрес не
+/// нужен, — а лишний возврат пришлось бы игнорировать в каждом вызове.
+///
+/// Маковский трекер поля `http` не пишет вовсе — попадает в «пусто» той же
+/// дорогой, какой попал бы старый трекер без него: ни здесь, ни в
+/// `transport_for` нет ни одного условия про систему.
+pub fn tracker_http(state: &Value, config_host: &str) -> String {
+    let entry = match own_tracker_entry(state, config_host) {
+        Some(e) => e,
+        None => return String::new(),
+    };
+    let host = entry
+        .get("host")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .trim()
-        .to_string()
+        .to_string();
+    if host.is_empty() {
+        return String::new();
+    }
+    match entry.get("http").and_then(|h| h.get("port")).and_then(|v| v.as_i64()) {
+        Some(port) if port > 0 => format!("{host}:{port}"),
+        _ => String::new(),
+    }
 }
 
 #[cfg(test)]
@@ -800,5 +836,50 @@ mod tests {
         assert_eq!(tracker_base(&old, "pc"), "");
         let dead = json!({ "windowHosts": [{ "host": "pc", "pid": 0, "mqttBase": "home/pc/windows" }] });
         assert_eq!(tracker_base(&dead, "pc"), "");
+    }
+
+    /// `tracker_http` ищет ту же запись, что и `tracker_base`, и собирает
+    /// `"host:port"` из её же полей.
+    #[test]
+    fn tracker_http_finds_the_address_of_our_own_tracker() {
+        let s = json!({
+            "windowHosts": [
+                { "host": "mac", "pid": 7, "mqttBase": "home/mac/windows" },
+                { "host": "pc", "pid": 9, "mqttBase": "home/pc/windows", "http": { "port": 9722 } },
+            ],
+            "sessions": [],
+        });
+        assert_eq!(tracker_http(&s, "pc"), "pc:9722");
+        // Мак трекер http не пишет вовсе — не заведи здесь условие про
+        // систему, эта строка не отличила бы мак от старого трекера.
+        assert_eq!(tracker_http(&s, "mac"), "");
+    }
+
+    /// Кривой или нулевой порт — то же самое, что отсутствующее поле: пустая
+    /// строка, «спроси свой конфиг».
+    #[test]
+    fn tracker_http_refuses_a_malformed_port() {
+        let s = json!({
+            "windowHosts": [
+                { "host": "pc", "pid": 9, "http": { "port": 0 } },
+            ],
+        });
+        assert_eq!(tracker_http(&s, "pc"), "");
+        let s = json!({
+            "windowHosts": [
+                { "host": "pc", "pid": 9, "http": { "port": "9722" } },
+            ],
+        });
+        assert_eq!(tracker_http(&s, "pc"), "");
+    }
+
+    /// Тот же трекер, что «не наш» или мёртвый (pid = 0), для `tracker_http`
+    /// тоже не существует — то же правило, что у `tracker_base`.
+    #[test]
+    fn tracker_http_is_empty_without_a_live_tracker() {
+        let dead = json!({
+            "windowHosts": [{ "host": "pc", "pid": 0, "http": { "port": 9722 } }],
+        });
+        assert_eq!(tracker_http(&dead, "pc"), "");
     }
 }

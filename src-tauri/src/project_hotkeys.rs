@@ -470,6 +470,25 @@ fn take_press(reg: &Registered, cwd: &str, now: Instant) -> bool {
     true
 }
 
+/// Транспорт для просьбы нажатия — или отказ, если дороги нет вовсе.
+///
+/// Тот же выбор, что уже стоит у шести команд со страницы и у плитки с
+/// хоткея (`transport_for` в `main.rs`): непустой адрес трекера своей машины
+/// значит HTTP, пустой — публикацию, а публиковать есть куда только пока
+/// брокер настроен в конфиге. И то и другое пусто — просить некого.
+///
+/// Чистая функция ради теста: `press` целиком лезет в `app` (снимок поллера,
+/// показ и скрытие окна), и без разделения решение было бы нечем проверить,
+/// не поднимая Tauri, — та же причина, по которой у `unread_session_mqtt`
+/// вынесен `split_targets` (`main.rs`).
+fn open_route(endpoint: &str, broker_configured: bool) -> Option<crate::Transport> {
+    match crate::transport_for(endpoint) {
+        t @ crate::Transport::Http => Some(t),
+        crate::Transport::Mqtt if broker_configured => Some(crate::Transport::Mqtt),
+        crate::Transport::Mqtt => None,
+    }
+}
+
 /// Нажали проектный хоткей.
 ///
 /// Дорог две, и выбирает между ними не место в коде, а тот же вопрос, каким
@@ -482,7 +501,8 @@ fn take_press(reg: &Registered, cwd: &str, now: Instant) -> bool {
 /// список пикера у скрытого окна отстаёт до восьми минут, и профиль Windows
 /// Terminal по каталогу знает тоже только он.
 ///
-/// Не берётся (мак: `openSession: false`) или брокера нет вовсе — нажатие
+/// Не берётся (мак: `openSession: false`) или дороги до менеджера этой машины
+/// нет вовсе (ни http-адреса трекера, ни настроенного брокера) — нажатие
 /// уезжает на страницу событием `project-hotkey`, и терминал открывает пикер
 /// сам, ровно как по Enter на строке проекта. Опубликуй мы просьбу и здесь,
 /// она ушла бы в топик, который никто не слушает, — молча, ответа у публикации
@@ -538,22 +558,30 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
         .get("windowHost")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
-    let takes_open = manager_takes_open(&last_state(app), own);
-    if !broker.is_configured() || !takes_open {
-        // Просить некого: либо брокера в конфиге нет (см. `is_configured` в
-        // `mqtt.rs`), либо менеджер этой машины открытием не занимается —
-        // мак. Прежняя дорога: страница открывает терминал сама, тем же
-        // способом, каким его открывает Enter на строке проекта.
+    let state = last_state(app);
+    let takes_open = manager_takes_open(&state, own);
+    // Адрес — у своей машины, а не у менеджера: тем же способом, каким его
+    // берёт плитка с хоткея (`tile_press`, `main.rs`) — `place_order::tracker_http`.
+    // На этом уже поймали `placeWindows`, где `managerHttpHere()` на маке
+    // отдавал адрес чужой машины.
+    let endpoint = crate::place_order::tracker_http(&state, own);
+    let route = open_route(&endpoint, broker.is_configured());
+    if route.is_none() || !takes_open {
+        // Просить некого: либо дороги до менеджера этой машины нет вовсе (ни
+        // http-адреса трекера, ни настроенного брокера — см. `open_route`),
+        // либо менеджер этой машины открытием не занимается — мак. Прежняя
+        // дорога: страница открывает терминал сама, тем же способом, каким
+        // его открывает Enter на строке проекта.
         //
         // Действие едет с каталогом: `projectHotkeyAction` читает Rust (у
         // скрытого пикера webview усыплён), а страница про этот ключ не знает
         // — у неё свой, `projectOpenAction`, и он про другой повод.
         ccfzf_log!(
             "{}, opening {cwd} from the picker itself",
-            if broker.is_configured() {
+            if route.is_some() {
                 "no manager takes open requests on this machine"
             } else {
-                "mqtt broker is not configured"
+                "no road to this machine's manager"
             }
         );
         let _ = app.emit(
@@ -562,6 +590,7 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
         );
         return;
     }
+    let transport = route.expect("route.is_none() checked above");
 
     // Грамота уходит до публикации: нажатие хоткея — последнее событие ввода, и
     // оно наше, а через секунду право отдавать будет уже нечем. Кому именно —
@@ -612,10 +641,26 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
         // Пустое имя — это ветка `focus` либо отказ считать имя (путь с `;`,
         // пустой каталог): в обоих случаях уходит прежняя просьба, и открытое
         // окно поднимет менеджер. Про отказ уже сказано в журнал.
-        let sent = if name.is_empty() {
-            crate::mqtt::open_project(&broker, &base, &cwd, &terminal, place)
-        } else {
-            crate::mqtt::open_new(&broker, &base, &cwd, &name, &terminal, place)
+        //
+        // Транспорт, как и у шести команд со страницы и у плитки с хоткея, —
+        // `route`, выбранный до публикации `allow_any_foreground`. Ретрая
+        // между плечами нет: `match` исполняет ровно одно из двух, второй
+        // попытки для той же просьбы не будет.
+        let sent = match transport {
+            crate::Transport::Http => {
+                if name.is_empty() {
+                    crate::manager_http::open_project(&endpoint, &cwd, &terminal, place)
+                } else {
+                    crate::manager_http::open_new(&endpoint, &cwd, &name, &terminal, place)
+                }
+            }
+            crate::Transport::Mqtt => {
+                if name.is_empty() {
+                    crate::mqtt::open_project(&broker, &base, &cwd, &terminal, place)
+                } else {
+                    crate::mqtt::open_new(&broker, &base, &cwd, &name, &terminal, place)
+                }
+            }
         };
         if let Err(e) = sent {
             ccfzf_log!("cannot ask to open {cwd}: {e}");
@@ -1404,6 +1449,29 @@ mod tests {
         });
         let note = host_mismatch_note(&state, "windwos-box").expect("опечатку надо назвать");
         assert!(note.contains("windwos-box"), "человеку нужно его же имя: {note}");
+    }
+
+    /// Непустой адрес трекера своей машины — HTTP, и брокер уже не спрашивается:
+    /// с этого гейта задача и заведена. Он живой ровно тогда, когда есть кому
+    /// звонить напрямую, а не только тогда, когда настроен брокер в конфиге.
+    #[test]
+    fn a_tracker_http_address_routes_over_http_without_a_broker() {
+        assert_eq!(open_route("windows-box:9722", false), Some(crate::Transport::Http));
+    }
+
+    /// Пустой адрес — прежняя дорога, публикация, но только пока брокер
+    /// настроен: ровно так вело себя нажатие до этой задачи.
+    #[test]
+    fn no_tracker_address_falls_back_to_mqtt_when_broker_is_configured() {
+        assert_eq!(open_route("", true), Some(crate::Transport::Mqtt));
+    }
+
+    /// Ни адреса, ни брокера — дороги до менеджера нет вовсе, и звонить
+    /// некому ни одним из двух транспортов. Это и есть случай из брифа: до
+    /// правки такое нажатие молча уходило на локальный терминал.
+    #[test]
+    fn neither_address_nor_broker_leaves_no_route() {
+        assert_eq!(open_route("", false), None);
     }
 
 }

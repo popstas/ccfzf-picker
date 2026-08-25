@@ -92,8 +92,9 @@ Three things worth knowing before reaching for the file:
   this machine as well, without ssh, and shows both lists as one.
 - `pathMap` maps remote directories onto local ones, which is what turns on the
   folder-opening actions from `actions`.
-- `mqtt` plus a matching `windowHost` is what enables window raising, layout
-  snapshots and tiling.
+- A matching `windowHost` plus a reachable manager is what enables window
+  raising, layout snapshots and tiling — reachable meaning either the tracker
+  announced a direct address, or `mqtt` is configured as a fallback.
 
 → All three in full, plus background refresh:
 [docs/configuration.md](docs/configuration.md).

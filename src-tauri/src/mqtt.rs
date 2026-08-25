@@ -154,9 +154,19 @@ pub fn terminal_name(raw: &serde_json::Value) -> String {
         .unwrap_or_default()
 }
 
+/// Тело просьбы о подъёме окна — и об отметке «непросмотрено»: у обеих один
+/// и тот же снаряд, `{"id": …}`.
+///
+/// Общая точка сборки для обоих транспортов (`manager_http.rs` зовёт её же):
+/// разойдись тело по транспортам, одна и та же просьба значила бы разное в
+/// зависимости от дороги, а поймать это можно было бы только на живой машине.
+pub(crate) fn focus_body(id: &str) -> String {
+    serde_json::json!({ "id": id }).to_string()
+}
+
 /// Попросить о подъёме окна сессии.
 pub fn focus(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
-    publish(broker, base, FOCUS_TOPIC, &serde_json::json!({ "id": id }).to_string())
+    publish(broker, base, FOCUS_TOPIC, &focus_body(id))
 }
 
 /// Вернуть сессию в непрочитанное — у трекера, а не у себя.
@@ -170,7 +180,7 @@ pub fn focus(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
 /// вопрос «поднимать ли окно», а отметка о просмотре приезжает в список на
 /// любой машине.
 pub fn unread(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
-    publish(broker, base, UNREAD_TOPIC, &serde_json::json!({ "id": id }).to_string())
+    publish(broker, base, UNREAD_TOPIC, &focus_body(id))
 }
 
 /// Попросить открыть сессию на машине трекера.
@@ -276,7 +286,7 @@ fn put_placement(body: &mut serde_json::Map<String, serde_json::Value>, place: P
 /// Пустого ключа в теле нет вовсе: приёмник читает пустую строку как «каталога
 /// не знаем», а отсутствие ключа говорит то же самое честнее — то же правило,
 /// что у `restore_payload`.
-fn open_payload(id: &str, cwd: &str, terminal: &str, place: Placement) -> String {
+pub(crate) fn open_payload(id: &str, cwd: &str, terminal: &str, place: Placement) -> String {
     let mut body = serde_json::Map::new();
     body.insert("id".to_string(), serde_json::Value::String(id.to_string()));
     body.insert(
@@ -311,7 +321,7 @@ pub fn open_project(
 /// Пустой `id` сюда класть не надо, хотя приёмник его и переживёт: ключ без
 /// значения — это тело, которое врёт о том, что знает. Ровно по этому правилу
 /// здесь же выброшен пустой `cwd` в `open_payload`.
-fn open_project_payload(cwd: &str, terminal: &str, place: Placement) -> String {
+pub(crate) fn open_project_payload(cwd: &str, terminal: &str, place: Placement) -> String {
     let mut body = serde_json::Map::new();
     body.insert(
         "action".to_string(),
@@ -352,7 +362,7 @@ pub fn open_new(
 /// каталога — то самое имя, которое уже занято открытой сессией. Пустую строку
 /// сюда класть нельзя по тому же правилу, по которому её нет в `open_payload`:
 /// ключ без значения — это тело, которое врёт о том, что знает.
-fn open_new_payload(cwd: &str, name: &str, terminal: &str, place: Placement) -> String {
+pub(crate) fn open_new_payload(cwd: &str, name: &str, terminal: &str, place: Placement) -> String {
     let mut body = serde_json::Map::new();
     body.insert(
         "action".to_string(),
@@ -370,7 +380,7 @@ fn open_new_payload(cwd: &str, name: &str, terminal: &str, place: Placement) -> 
 /// Без `sessionIds` приёмник поднимает снимок целиком. Пустой массив он
 /// прочитал бы как «поднять ноль сессий», поэтому при пустом списке ключа в
 /// теле нет вовсе: разница между «все» и «никого» стоит целой раскладки.
-fn restore_payload(id: &str, session_ids: &[String]) -> String {
+pub(crate) fn restore_payload(id: &str, session_ids: &[String]) -> String {
     if session_ids.is_empty() {
         return serde_json::json!({ "id": id }).to_string();
     }
@@ -401,7 +411,7 @@ pub fn restore(broker: &Broker, base: &str, id: &str, session_ids: &[String]) ->
 /// Незнакомая раскладка — отказ, а не публикация: приёмник её отбрасывает
 /// молча, и ошибка выглядела бы сработавшей просьбой. Страница шлёт только
 /// свои две константы, но команда Tauri — второй вход в ту же дорогу.
-fn place_payload(mode: &str, ids: &[String]) -> Result<String, String> {
+pub(crate) fn place_payload(mode: &str, ids: &[String]) -> Result<String, String> {
     if !LAYOUT_MODES.contains(&mode) {
         return Err(format!("unknown layout mode: {mode}"));
     }

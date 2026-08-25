@@ -68,9 +68,18 @@ function callsOf(name, extra = {}) {
     markSeen: () => { calls.push('markSeen'); return Promise.resolve(); },
     // Адрес машины — не предмет этого сторожа, он про порядок вызовов; тут
     // достаточно заглушки с тем же именем, что и у настоящих помощников.
+    // Пустая строка — mqtt-ветка, как вело себя всё до появления http;
+    // http-ветку проверяет отдельный блок тестов ниже, переопределяя обе
+    // заглушки своим адресом.
     openManagerHere: () => ({ host: 'pc-win', mqttBase: 'windows/pc-win' }),
     focusBase: () => 'windows/pc-win',
+    focusHttp: () => '',
     managerBase: () => 'windows/pc-win',
+    managerHttpHere: () => '',
+    // Достижимость менеджера — тоже не предмет этого сторожа: он про порядок
+    // вызовов, а не про развилку транспорта. Заглушка с тем же именем, что и
+    // у настоящего помощника, — та же дорога, что у managerBase рядом.
+    managerReachable: () => true,
     render: () => {},
     error: '',
     row: ROW,
@@ -102,6 +111,26 @@ const BRANCHES = [
 for (const [fn, command] of BRANCHES) {
   test(`${fn} гасит пикер до просьбы, а не после`, async () => {
     const calls = await callsOf(fn);
+    assert.ok(calls.includes(command), `${fn} не отправила ${command}: ${calls.join(', ')}`);
+    assert.strictEqual(calls.indexOf('hide_picker'), 0,
+      `${fn} должна гасить пикер первой, а вызвала: ${calls.join(', ')}`);
+    assert.ok(calls.indexOf('hide_picker') < calls.indexOf(command),
+      `${fn} гасит пикер после просьбы — окно потеряет фокус: ${calls.join(', ')}`);
+  });
+}
+
+// Правило про гашение до просьбы общее для обоих транспортов: страница не
+// решает, каким транспортом уйдёт просьба, — это делает Rust (`transport_for`
+// по наличию http-адреса), а страница лишь гасит себя раньше любого invoke.
+// Тот же список веток, но с непустым http-адресом у `focusHttp`/
+// `managerHttpHere`, — чтобы находка транспорта на Rust-стороне не осталась
+// незамеченной, если бы страница вдруг стала решать порядок по нему сама.
+for (const [fn, command] of BRANCHES) {
+  test(`${fn} гасит пикер до просьбы и на http-ветке`, async () => {
+    const calls = await callsOf(fn, {
+      focusHttp: () => 'windows-box:9722',
+      managerHttpHere: () => 'windows-box:9722',
+    });
     assert.ok(calls.includes(command), `${fn} не отправила ${command}: ${calls.join(', ')}`);
     assert.strictEqual(calls.indexOf('hide_picker'), 0,
       `${fn} должна гасить пикер первой, а вызвала: ${calls.join(', ')}`);

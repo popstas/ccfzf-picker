@@ -44,8 +44,10 @@ outside the shared tree does not get them either.
 
 ## Layout snapshots
 
-If `mqtt` is configured and `windowHost` matches the machine where the windows
-are, the picker gains snapshot mode — `^S`, or `/s` in the search line.
+If `windowHost` matches the machine where the windows are and that machine's
+manager is reachable — either a direct address from the tracker, or `mqtt`
+configured as a fallback — the picker gains snapshot mode — `^S`, or `/s` in
+the search line.
 
 A layout snapshot is remembered by the window tracker once the set of open
 sessions has settled. Enter on the header raises the whole layout, Enter on a

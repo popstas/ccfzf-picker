@@ -44,6 +44,15 @@ test('pid трекера на выбор не влияет', () => {
   assert.equal(chooseOpenTransport({ host: 'pc-win', pid: 0 }, 'pc-win', true), 'manager');
 });
 
+// Ровно тот случай, ради которого всё делалось: брокера нет, а менеджер
+// достижим напрямую. До этой правки Enter молча открывал локальный терминал,
+// теряя профиль Windows Terminal из claudeWt.projects.
+test('менеджер выбирается по достижимости, а не по брокеру', () => {
+  const manager = { host: 'windows-box' };
+  assert.equal(OpenTransport.chooseOpenTransport(manager, 'windows-box', true), 'manager');
+  assert.equal(OpenTransport.chooseOpenTransport(manager, 'windows-box', false), 'local');
+});
+
 // canOpenRemote: применимость пункта «Open on <host>» — на каждый вид
 // строки, который реально существует в приложении (session-list.js,
 // project-list.js, picker-snapshots.js), и на все четыре состояния трекера.

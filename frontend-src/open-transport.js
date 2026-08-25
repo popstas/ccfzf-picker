@@ -28,10 +28,12 @@
    * Где трекера нет — открываем сами, как раньше: на macOS менеджера не
    * существует, и просьба уехала бы открывать окно на чужой машине.
    *
-   * Без брокера MQTT ветка `manager` вела бы Enter в ошибку там, где раньше
-   * он открывал терминал локально — регрессия на машине, которой MQTT никогда
-   * не был нужен. Поэтому совпадения имени хоста недостаточно: нужен ещё и
-   * настроенный брокер, иначе просьбе некуда уйти и остаётся `local`.
+   * Без транспорта до менеджера ветка `manager` вела бы Enter в ошибку там,
+   * где раньше он открывал терминал локально. Поэтому совпадения имени хоста
+   * недостаточно: нужна ещё дорога, по которой просьба уйдёт, — прямой адрес
+   * менеджера либо настроенный брокер. Раньше здесь спрашивался только брокер,
+   * и на машине, где MQTT не настроен вовсе, ветка не включалась бы никогда —
+   * то есть ровно в том случае, ради которого http и заводился.
    *
    * `windowPid` здесь, в отличие от `canFocus`, не смотрим: право переднего
    * плана нужно для подъёма окна, а не для запуска терминала.
@@ -47,10 +49,10 @@
    * Раньше здесь стояло верхнее поле `windowHost`, но с несколькими трекерами
    * оно называет машину с проектными хоткеями, а не машину с менеджером.
    */
-  function chooseOpenTransport(manager, configHost, mqttConfigured) {
+  function chooseOpenTransport(manager, configHost, managerReachable) {
     const host = normHost((manager || {}).host);
     const mine = normHost(configHost);
-    return host && host === mine && mqttConfigured ? 'manager' : 'local';
+    return host && host === mine && managerReachable ? 'manager' : 'local';
   }
 
   /**
@@ -84,18 +86,19 @@
    * Совмещает три независимых условия: строка несёт настоящий id сессии (иначе
    * приёмник ответит `unknown session` в свой лог, а пикер этого не увидит —
    * PubAck подтверждает публикацию, а не то, что менеджер нашёл сессию),
-   * трекер существует, но стоит не на этой машине, и брокер MQTT настроен —
-   * без него просьбе некуда уйти, и пункт меню выполнил бы `open_session_mqtt`
-   * прямиком в «mqtt не настроен» (main.rs). Пустой `manager.host` проверяется
+   * трекер существует, но стоит не на этой машине, и есть дорога до менеджера
+   * — прямой адрес либо настроенный брокер: без неё просьбе некуда уйти, и
+   * пункт меню выполнил бы `open_session_mqtt` прямиком в «mqtt не настроен»
+   * (main.rs). Пустой `manager.host` проверяется
    * отдельно от `chooseOpenTransport`: та возвращает `'local'` и при пустом
    * хосте (трекера нет вовсе), и пункт в этом случае предлагать тоже нечего —
    * открывать «у себя», когда себя не существует.
    */
-  function canOpenRemote(row, manager, configHost, mqttConfigured) {
+  function canOpenRemote(row, manager, configHost, managerReachable) {
     if (!row || !SESSION_ID_ROW_KINDS.has(row.kind)) return false;
     if (!manager || !manager.host) return false;
-    if (!mqttConfigured) return false;
-    return chooseOpenTransport(manager, configHost, mqttConfigured) === 'local';
+    if (!managerReachable) return false;
+    return chooseOpenTransport(manager, configHost, managerReachable) === 'local';
   }
 
   /**
@@ -182,12 +185,12 @@
    * тогда у неё есть настоящее открытое окно. Поднять его — это подъём, а не
    * открытие, и правило это общее для всех строк.
    */
-  function chooseEnterAction(row, strategy, manager, configHost, mqttConfigured) {
+  function chooseEnterAction(row, strategy, manager, configHost, managerReachable) {
     if (strategy === 'focus') return 'focus';
     if (isDesktopRow(row)) return 'desktop';
     if (!row || !SESSION_ID_ROW_KINDS.has(row.kind)) return 'local';
     if (!trackerKnowsSession(row) && !rowProjectDir(row)) return 'local';
-    return chooseOpenTransport(manager, configHost, mqttConfigured);
+    return chooseOpenTransport(manager, configHost, managerReachable);
   }
 
   /**
@@ -255,9 +258,9 @@
    * что взяться, он записал бы отказ в свой журнал, а пикер об этом не узнал
    * бы — ответа у публикации нет.
    */
-  function chooseProjectOpenAction(row, manager, configHost, mqttConfigured) {
+  function chooseProjectOpenAction(row, manager, configHost, managerReachable) {
     if (!rowProjectDir(row)) return 'local';
-    return chooseOpenTransport(manager, configHost, mqttConfigured);
+    return chooseOpenTransport(manager, configHost, managerReachable);
   }
 
   /**

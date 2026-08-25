@@ -20,6 +20,7 @@ mod local_ccfzf;
 // пяти ниже, и все они объявлены после этой строки — макрос виден им всем.
 #[macro_use]
 mod log;
+mod manager_http;
 mod merge_state;
 mod mqtt;
 mod place_order;
@@ -927,26 +928,43 @@ fn activate_self() {
 #[cfg(not(target_os = "macos"))]
 fn activate_self() {}
 
-/// Брокер из конфига или внятный отказ.
+/// Транспорт просьбы к менеджеру: прямой http или публикация в MQTT.
 ///
-/// Общий для всех команд, публикующих просьбы: шесть копий одной проверки
-/// разошлись бы в тексте отказа, а его читает человек в строке ошибки пикера.
-fn configured_broker() -> Result<mqtt::Broker, String> {
-    Ok(configured_broker_and_terminal()?.0)
+/// Двух копий этого списка (пикер и `manager_http.rs`) быть не должно —
+/// `Transport` живёт здесь, рядом с развилкой, которая его и использует.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum Transport {
+    Http,
+    Mqtt,
 }
 
-/// То же самое плюс имя выбранного терминала — одним чтением конфига.
+/// Транспорт выбирается наличием адреса и ничем больше.
 ///
-/// Отдельная функция, а не второй `load_config()` рядом: файл читается с диска,
-/// а зовут это на каждое нажатие Enter. Имя нужно только тем трём просьбам, что
-/// кончаются терминалом, — остальным (фокус, отметка, восстановление) хватает
-/// брокера, и грузить их лишним полем незачем.
-fn configured_broker_and_terminal() -> Result<(mqtt::Broker, String, serde_json::Value), String> {
+/// Маковский трекер попадает в `Mqtt` сам, без единого условия про macOS: у
+/// него http-сервера нет, поля он не пишет. Заведись здесь проверка системы —
+/// появление сервера на маке потребовало бы правки в пикере.
+fn transport_for(http: &str) -> Transport {
+    if http.trim().is_empty() { Transport::Mqtt } else { Transport::Http }
+}
+
+// Ретраев между транспортами нет: у каждой команды `match transport_for(...)`
+// с двумя взаимоисключающими плечами — Rust не даёт исполнить оба разом, и
+// отдельной функции-флага под это заводить незачем. Сторожит правило не
+// утверждение вида «после отказа нет отката» (такое зелёное на любой
+// реализации, включая ту, что тихо ничего не делает), а `split_targets` ниже:
+// она проверяет ровно то место, где транспорт для нескольких целей выбирается
+// руками, а не единственным `match`, — и падает на опечатке в предикате.
+
+/// Конфиг для просьбы: брокер только если он есть, плюс имя терминала и сырой
+/// конфиг.
+///
+/// Брокер стал необязательным, и это суть правки: до неё каждая из команд
+/// первым делом требовала его и отвечала «mqtt is not configured» — на
+/// машине, где брокер не нужен вовсе, потому что менеджер достижим напрямую.
+fn config_parts() -> Result<(Option<mqtt::Broker>, String, serde_json::Value), String> {
     let raw = load_config()?;
     let broker = mqtt::broker_from_config(&raw);
-    if !broker.is_configured() {
-        return Err("mqtt is not configured: host and base are required in config.yaml".to_string());
-    }
+    let broker = if broker.is_configured() { Some(broker) } else { None };
     let terminal = mqtt::terminal_name(&raw);
     // Сырой конфиг отдаётся третьим, а не читается вторым разом: кроме брокера
     // и терминала из него же спрашивается `openOnActiveDisplay` (`cursor_hint`),
@@ -955,28 +973,46 @@ fn configured_broker_and_terminal() -> Result<(mqtt::Broker, String, serde_json:
     Ok((broker, terminal, raw))
 }
 
+/// Брокер или внятный отказ — для ветки, которая уже выбрала MQTT.
+fn require_broker(broker: Option<mqtt::Broker>) -> Result<mqtt::Broker, String> {
+    broker.ok_or_else(|| {
+        "mqtt is not configured: host and base are required in config.yaml".to_string()
+    })
+}
+
 /// Поднять окно сессии через MQTT.
 ///
 /// Зовётся вместо `spawn_detached` у стратегии `focus`: окно уже открыто, и
 /// заводить рядом второй процесс на том же транскрипте незачем.
 ///
-/// Просьба уходит публикацией — тело и топик те, что уже слушает демон на
-/// Windows-машине. Ответа у неё нет: приёмник отчитывается в свой лог. Так
-/// вышло не от хорошей жизни — http-сервер, у которого ответ был, вешал демона
-/// на той стороне, — но цена оказалась мала: отказ («сессия неизвестна», «окна
-/// нет») человек и так увидел бы уже после того, как пикер погас.
+/// Просьба уходит одним из двух транспортов, выбранным `transport_for` по
+/// наличию http-адреса. Публикация — тело и топик те, что уже слушает демон на
+/// Windows-машине; http — прямой запрос тому же демону, `manager_http.rs`.
+/// Ответа у публикации нет: приёмник отчитывается в свой лог. Так вышло не от
+/// хорошей жизни — http-сервер, у которого ответ был, вешал демона на той
+/// стороне, — но цена оказалась мала: отказ («сессия неизвестна», «окна нет»)
+/// человек и так увидел бы уже после того, как пикер погас. У http-ветки ответ
+/// есть, и отказ доезжает до статуслайна пикера сразу.
 #[tauri::command]
-async fn focus_window_mqtt(id: String, base: Option<String>) -> Result<(), String> {
-    // До публикации, а не после: право должно быть на той стороне к моменту,
-    // когда там дойдут до подъёма окна.
+async fn focus_window_mqtt(id: String, base: Option<String>, http: Option<String>) -> Result<(), String> {
+    // До просьбы, а не после: право должно быть на той стороне к моменту,
+    // когда там дойдут до подъёма окна. Правило общее для обоих транспортов.
     allow_any_foreground();
-    let broker = configured_broker()?;
-    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
-    // запасной ход для трекера прежней версии.
-    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || mqtt::focus(&broker, &base, &id))
-        .await
-        .map_err(|e| format!("focus_window_mqtt task failed: {e}"))?
+    let endpoint = http.unwrap_or_default();
+    match transport_for(&endpoint) {
+        Transport::Http => tauri::async_runtime::spawn_blocking(move || manager_http::focus(&endpoint, &id))
+            .await
+            .map_err(|e| format!("focus_window_mqtt task failed: {e}"))?,
+        Transport::Mqtt => {
+            let broker = require_broker(config_parts()?.0)?;
+            // Адрес называет трекер той машины, где стоит окно; свой из конфига
+            // — запасной ход для трекера прежней версии.
+            let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+            tauri::async_runtime::spawn_blocking(move || mqtt::focus(&broker, &base, &id))
+                .await
+                .map_err(|e| format!("focus_window_mqtt task failed: {e}"))?
+        }
+    }
 }
 
 /// Вернуть сессию в непрочитанное у оконных трекеров.
@@ -992,26 +1028,89 @@ async fn focus_window_mqtt(id: String, base: Option<String>) -> Result<(), Strin
 /// окно никто не поднимает. Пикер по этой команде не гаснет — список
 /// перерисовывается раз в секунду, и кружок оранжевеет на глазах.
 ///
-/// Каждая база получает свою попытку независимо от исхода предыдущих: ранний
+/// Цель одной попытки отмотки — окно одной машины: своя база и свой http-адрес,
+/// в паре, а не в двух параллельных списках. У соседних трекеров транспорт
+/// бывает разный — у одного есть http, у другого нет, — и разъехавшиеся по
+/// индексам массивы перепутали бы адреса на первой же правке.
+#[derive(serde::Deserialize)]
+struct Target {
+    base: String,
+    http: String,
+}
+
+/// Разбить цели на http- и mqtt-половину: транспорт для каждой цели выбирает
+/// `transport_for`, и цель попадает ровно в одну из половин. Вынесена в
+/// чистую функцию ради сторожа — единственное место, где транспорт для
+/// нескольких целей выбирается не единственным `match` (как во всех
+/// остальных командах), а парой фильтров, и опечатка в одном из них
+/// (`== Http` вместо `== Mqtt`) молча дала бы http-цели ещё и mqtt-попытку —
+/// то самое запрещённое удвоение.
+fn split_targets(targets: &[Target]) -> (Vec<&Target>, Vec<&Target>) {
+    let http = targets.iter().filter(|t| transport_for(&t.http) == Transport::Http).collect();
+    let mqtt = targets.iter().filter(|t| transport_for(&t.http) == Transport::Mqtt).collect();
+    (http, mqtt)
+}
+
+/// Каждая цель получает свою попытку независимо от исхода предыдущих: ранний
 /// выход на первой же ошибке оставлял бы вторую машину неотмотанной — ровно
-/// половинчатую отмотку, ради ухода от которой список баз и завели. Наружу
-/// уходит первая случившаяся ошибка, но только после того, как испробованы все.
+/// половинчатую отмотку, ради ухода от которой список целей и завели. Наружу
+/// уходит первая случившаяся ошибка, но только после того, как испробованы
+/// все. Транспорт выбирается для каждой цели своим `transport_for`: при
+/// наличии http публикации в MQTT для этой же цели не происходит вовсе.
 #[tauri::command]
-async fn unread_session_mqtt(id: String, bases: Vec<String>) -> Result<(), String> {
-    let broker = configured_broker()?;
-    // Адрес называет трекер той машины, где стоит окно, и машин этих бывает
-    // несколько: сессию открывают на всех сразу. Пустой список — трекер
-    // прежней версии или строка без окон, тогда остаётся база своего конфига.
-    let bases = mqtt::unread_bases(&broker, &bases);
+async fn unread_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), String> {
+    let broker = config_parts()?.0;
     tauri::async_runtime::spawn_blocking(move || {
+        // Адрес называет трекер той машины, где стоит окно, и машин этих бывает
+        // несколько: сессию открывают на всех сразу. Пустой список — трекер
+        // прежней версии или строка без окон, тогда остаётся одна попытка по
+        // своей базе, как было до появления нескольких трекеров.
+        let targets = if targets.is_empty() {
+            vec![Target { base: String::new(), http: String::new() }]
+        } else {
+            targets
+        };
         let mut first_err: Option<String> = None;
-        for base in &bases {
-            if let Err(e) = mqtt::unread(&broker, base, &id) {
+
+        let (http_targets, mqtt_targets) = split_targets(&targets);
+
+        // http-цели — каждая своим запросом. Транспорт для каждой уже выбран
+        // `transport_for`, и повторной публикации в MQTT для неё не будет.
+        for t in http_targets {
+            if let Err(e) = manager_http::unread(&t.http, &id) {
                 if first_err.is_none() {
                     first_err = Some(e);
                 }
             }
         }
+
+        // Остаток — mqtt-цели; резолвятся и схлопываются той же `unread_bases`,
+        // что и раньше, только на своём подсписке: совпавшие после
+        // `resolve_base` базы не должны обернуться двумя одинаковыми
+        // публикациями в один топик.
+        let mqtt_bases: Vec<String> = mqtt_targets.iter().map(|t| t.base.clone()).collect();
+        if !mqtt_bases.is_empty() {
+            match &broker {
+                Some(broker) => {
+                    for base in mqtt::unread_bases(broker, &mqtt_bases) {
+                        if let Err(e) = mqtt::unread(broker, &base, &id) {
+                            if first_err.is_none() {
+                                first_err = Some(e);
+                            }
+                        }
+                    }
+                }
+                None => {
+                    if first_err.is_none() {
+                        first_err = Some(
+                            "mqtt is not configured: host and base are required in config.yaml"
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+        }
+
         match first_err {
             Some(e) => Err(e),
             None => Ok(()),
@@ -1026,19 +1125,35 @@ async fn unread_session_mqtt(id: String, bases: Vec<String>) -> Result<(), Strin
 /// Пустой `session_ids` значит «весь снимок». Права на передний план здесь не
 /// выдаётся: восстановление открывает новые окна, а не поднимает существующее,
 /// и `AllowSetForegroundWindow` тут не при чём.
+///
+/// Транспорт — как и у остальных пяти просьб: наличие http-адреса решает
+/// `transport_for`, и второй попытки после отказа первой не будет.
 #[tauri::command]
 async fn restore_snapshot_mqtt(
     id: String,
     session_ids: Vec<String>,
     base: Option<String>,
+    http: Option<String>,
 ) -> Result<(), String> {
-    let broker = configured_broker()?;
-    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
-    // запасной ход для трекера прежней версии.
-    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || mqtt::restore(&broker, &base, &id, &session_ids))
+    let endpoint = http.unwrap_or_default();
+    match transport_for(&endpoint) {
+        Transport::Http => tauri::async_runtime::spawn_blocking(move || {
+            manager_http::restore(&endpoint, &id, &session_ids)
+        })
         .await
-        .map_err(|e| format!("restore_snapshot_mqtt task failed: {e}"))?
+        .map_err(|e| format!("restore_snapshot_mqtt task failed: {e}"))?,
+        Transport::Mqtt => {
+            let broker = require_broker(config_parts()?.0)?;
+            // Адрес называет трекер той машины, где стоит окно; свой из конфига
+            // — запасной ход для трекера прежней версии.
+            let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+            tauri::async_runtime::spawn_blocking(move || {
+                mqtt::restore(&broker, &base, &id, &session_ids)
+            })
+            .await
+            .map_err(|e| format!("restore_snapshot_mqtt task failed: {e}"))?
+        }
+    }
 }
 
 /// Попросить трекер разложить окна — плиткой или каскадом.
@@ -1052,22 +1167,37 @@ async fn restore_snapshot_mqtt(
 /// кончается окном. Выдаётся оно до публикации, пока нажатие ещё наше, —
 /// гашение пикера страница делает там же и по той же причине.
 ///
-/// Незнакомую раскладку отвергает `mqtt::place`, а не эта команда: приёмник
-/// такое тело отбрасывает молча, и отказ обязан случиться до публикации.
+/// Незнакомую раскладку отвергает `mqtt::place`/`manager_http::place`, а не
+/// эта команда: приёмник такое тело отбрасывает молча, и отказ обязан
+/// случиться до публикации на обоих транспортах.
+///
+/// Транспорт выбирает `transport_for` по наличию http-адреса; ретрая по
+/// второму транспорту после отказа первого нет.
 #[tauri::command]
 async fn place_windows_mqtt(
     mode: String,
     ids: Vec<String>,
     base: Option<String>,
+    http: Option<String>,
 ) -> Result<(), String> {
     allow_any_foreground();
-    let broker = configured_broker()?;
-    // Адрес называет трекер той машины, чьи окна раскладываем; свой из
-    // конфига — запасной ход для трекера прежней версии.
-    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || mqtt::place(&broker, &base, &mode, &ids))
-        .await
-        .map_err(|e| format!("place_windows_mqtt task failed: {e}"))?
+    let endpoint = http.unwrap_or_default();
+    match transport_for(&endpoint) {
+        Transport::Http => {
+            tauri::async_runtime::spawn_blocking(move || manager_http::place(&endpoint, &mode, &ids))
+                .await
+                .map_err(|e| format!("place_windows_mqtt task failed: {e}"))?
+        }
+        Transport::Mqtt => {
+            let broker = require_broker(config_parts()?.0)?;
+            // Адрес называет трекер той машины, чьи окна раскладываем; свой из
+            // конфига — запасной ход для трекера прежней версии.
+            let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+            tauri::async_runtime::spawn_blocking(move || mqtt::place(&broker, &base, &mode, &ids))
+                .await
+                .map_err(|e| format!("place_windows_mqtt task failed: {e}"))?
+        }
+    }
 }
 
 /// Попросить трекер открыть сессию у себя.
@@ -1075,10 +1205,13 @@ async fn place_windows_mqtt(
 /// Зовётся и с машины, которая не является трекером — пункт меню «Open on
 /// <host>» появляется только там, где `canOpenRemote` разрешил, — и со своей же
 /// машины, где Enter вызывает эту же команду напрямую, когда `chooseEnterAction`
-/// отдал `manager`. Транспорт один и тот же в обоих случаях: HTTP здесь не
-/// сработал бы даже на своей машине — webview Tauri режет такой запрос как
-/// cross-origin ещё до отправки. Ответа у просьбы нет по той же причине, что и
-/// у фокуса: приёмник отчитывается в свой лог, а не нам.
+/// отдал `manager`. Развилка транспорта одна и та же в обоих случаях —
+/// `transport_for` по наличию http-адреса. Запрос уходит не из webview, а
+/// отсюда, из Rust (`manager_http.rs`, `ureq`), и cross-origin здесь ни при
+/// чём: это ограничение — про прямой запрос из страницы, которого тут нет и не
+/// было. У ветки MQTT ответа нет по той же причине, что и у фокуса: приёмник
+/// отчитывается в свой лог, а не нам. У ветки http ответ есть, и отказ доезжает
+/// до статуслайна пикера.
 ///
 /// Право на передний план выдаётся и здесь: просьба кончается либо подъёмом
 /// окна, либо новым терминалом, и оба на той стороне упираются в одно и то же
@@ -1112,25 +1245,40 @@ async fn open_session_mqtt(
     id: String,
     cwd: Option<String>,
     base: Option<String>,
+    http: Option<String>,
     same_machine: Option<bool>,
     no_autoplace: Option<bool>,
 ) -> Result<(), String> {
     allow_any_foreground();
-    let (broker, terminal, raw) = configured_broker_and_terminal()?;
+    // Брокер читается на общей дороге, даже когда его нет: терминал и
+    // `openOnActiveDisplay` нужны обеим ветками, а требовать брокер обязана
+    // только та из них, что его действительно спрашивает.
+    let (broker, terminal, raw) = config_parts()?;
     let cwd = cwd.unwrap_or_default().trim().to_string();
     let place = if same_machine.unwrap_or(false) {
         placement(&app, &raw, no_autoplace.unwrap_or(false))
     } else {
         mqtt::Placement::default()
     };
-    // Адрес называет трекер той машины, где стоит окно; свой из конфига —
-    // запасной ход для трекера прежней версии.
-    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || {
-        mqtt::open(&broker, &base, &id, &cwd, &terminal, place)
-    })
-    .await
-    .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
+    let endpoint = http.unwrap_or_default();
+    match transport_for(&endpoint) {
+        Transport::Http => tauri::async_runtime::spawn_blocking(move || {
+            manager_http::open(&endpoint, &id, &cwd, &terminal, place)
+        })
+        .await
+        .map_err(|e| format!("open_session_mqtt task failed: {e}"))?,
+        Transport::Mqtt => {
+            let broker = require_broker(broker)?;
+            // Адрес называет трекер той машины, где стоит окно; свой из
+            // конфига — запасной ход для трекера прежней версии.
+            let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+            tauri::async_runtime::spawn_blocking(move || {
+                mqtt::open(&broker, &base, &id, &cwd, &terminal, place)
+            })
+            .await
+            .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
+        }
+    }
 }
 
 /// Попросить менеджера открыть проект по каталогу.
@@ -1143,27 +1291,41 @@ async fn open_session_mqtt(
 ///
 /// Грамота — как у хоткея, и по той же причине: оба исхода просьбы кончаются
 /// окном, которому нужен передний план.
+///
+/// Транспорт — `transport_for` по наличию http-адреса, как и у соседей.
 #[tauri::command]
 async fn open_project_mqtt(
     app: tauri::AppHandle,
     cwd: String,
     base: Option<String>,
+    http: Option<String>,
     no_autoplace: Option<bool>,
 ) -> Result<(), String> {
     allow_any_foreground();
-    let (broker, terminal, raw) = configured_broker_and_terminal()?;
+    let (broker, terminal, raw) = config_parts()?;
     // Оговорки «своя ли машина» здесь нет и не нужно: `chooseProjectOpenAction`
     // отдаёт ветку менеджера только на машине самого менеджера.
     let place = placement(&app, &raw, no_autoplace.unwrap_or(false));
-    // У строки проекта окна нет вовсе: адрес называет трекер машины
-    // менеджера, а не машины окна. Свой из конфига — запасной ход для
-    // трекера прежней версии.
-    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || {
-        mqtt::open_project(&broker, &base, &cwd, &terminal, place)
-    })
-    .await
-    .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
+    let endpoint = http.unwrap_or_default();
+    match transport_for(&endpoint) {
+        Transport::Http => tauri::async_runtime::spawn_blocking(move || {
+            manager_http::open_project(&endpoint, &cwd, &terminal, place)
+        })
+        .await
+        .map_err(|e| format!("open_project_mqtt task failed: {e}"))?,
+        Transport::Mqtt => {
+            let broker = require_broker(broker)?;
+            // У строки проекта окна нет вовсе: адрес называет трекер машины
+            // менеджера, а не машины окна. Свой из конфига — запасной ход для
+            // трекера прежней версии.
+            let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+            tauri::async_runtime::spawn_blocking(move || {
+                mqtt::open_project(&broker, &base, &cwd, &terminal, place)
+            })
+            .await
+            .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
+        }
+    }
 }
 
 /// Попросить менеджера завести новую сессию в каталоге.
@@ -1172,28 +1334,42 @@ async fn open_project_mqtt(
 /// стал бы необязательным аргументом, а различает он две разные просьбы с
 /// разными телами. Имя считает пикер и присылает готовым — менеджер списка
 /// занятых имён не ведёт.
+///
+/// Транспорт — `transport_for` по наличию http-адреса, как и у соседей.
 #[tauri::command]
 async fn new_session_mqtt(
     app: tauri::AppHandle,
     cwd: String,
     name: String,
     base: Option<String>,
+    http: Option<String>,
     no_autoplace: Option<bool>,
 ) -> Result<(), String> {
     allow_any_foreground();
-    let (broker, terminal, raw) = configured_broker_and_terminal()?;
+    let (broker, terminal, raw) = config_parts()?;
     // Как и у `open_project_mqtt`: до этой команды доходят только со своей
     // машины — ветку выбирает `chooseProjectOpenAction`.
     let place = placement(&app, &raw, no_autoplace.unwrap_or(false));
-    // Окна ещё нет — сессия только заводится: адрес называет трекер машины
-    // менеджера, а не машины окна. Свой из конфига — запасной ход для
-    // трекера прежней версии.
-    let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-    tauri::async_runtime::spawn_blocking(move || {
-        mqtt::open_new(&broker, &base, &cwd, &name, &terminal, place)
-    })
-    .await
-    .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
+    let endpoint = http.unwrap_or_default();
+    match transport_for(&endpoint) {
+        Transport::Http => tauri::async_runtime::spawn_blocking(move || {
+            manager_http::open_new(&endpoint, &cwd, &name, &terminal, place)
+        })
+        .await
+        .map_err(|e| format!("new_session_mqtt task failed: {e}"))?,
+        Transport::Mqtt => {
+            let broker = require_broker(broker)?;
+            // Окна ещё нет — сессия только заводится: адрес называет трекер
+            // машины менеджера, а не машины окна. Свой из конфига — запасной
+            // ход для трекера прежней версии.
+            let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
+            tauri::async_runtime::spawn_blocking(move || {
+                mqtt::open_new(&broker, &base, &cwd, &name, &terminal, place)
+            })
+            .await
+            .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
+        }
+    }
 }
 
 /// Конфиг читается сырым и разбирается во фронтенде той же функцией, что и
@@ -2266,7 +2442,14 @@ pub(crate) fn tile_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
 /// Отметки «просмотрено» здесь нет намеренно, как и у пунктов `^K`: окна
 /// встали по местам, но ни в одно из них человек не смотрел.
 ///
-/// Ответа у просьбы нет — трекер отчитывается своему человеку строкой в трее.
+/// Ответа у просьбы нет на ветке MQTT — трекер отчитывается своему человеку
+/// строкой в трее; на ветке http ответ есть, но она попадает туда же, в лог,
+/// а не в статуслайн пикера, — хоткей жмут при скрытом окне, показывать
+/// отказ там некому.
+///
+/// Транспорт, как и у шести команд, выбирает `transport_for`. Адрес идёт мимо
+/// фронтенда — страница на скрытом окне усыплена целиком, — тем же способом,
+/// каким берётся база: сиблинг `tracker_base` — `place_order::tracker_http`.
 fn tile_press(app: &tauri::AppHandle) {
     // Идемпотентно: уже скрытое окно повторно не гасит.
     hide_window(app);
@@ -2281,14 +2464,6 @@ fn tile_press(app: &tauri::AppHandle) {
             return;
         }
     };
-    let broker = mqtt::broker_from_config(&raw);
-    if !broker.is_configured() {
-        // Запасной дороги у раскладки нет: разложить окна сам пикер не умеет
-        // ни на одной системе — этим занят трекер. Молчать нельзя, иначе
-        // ненастроенный брокер неотличим от сломанной клавиши.
-        ccfzf_log!("mqtt broker is not configured, cannot ask for a tile layout");
-        return;
-    }
 
     let host = raw
         .get("windowHost")
@@ -2361,23 +2536,46 @@ fn tile_press(app: &tauri::AppHandle) {
         return;
     }
 
-    // Адрес называет трекер строки, а не конфиг: у каждой машины свой префикс
-    // топиков. Пустое имя откатывает `resolve_base` на `<config.base>/windows`
-    // — так пикер вёл себя до появления поля и обязан вести себя со старым
-    // трекером.
-    let base = mqtt::resolve_base(&broker, &place_order::tracker_base(&state, &host));
+    // Адрес просьбы — от трекера строки, тем же способом, каким берётся база:
+    // сиблинг `tracker_base`.
+    let endpoint = place_order::tracker_http(&state, &host);
 
-    // Грамота уходит до публикации: нажатие хоткея — последнее событие ввода,
-    // и оно наше. Кому именно — не выбираем, см. `allow_any_foreground`.
+    // Грамота уходит до просьбы: нажатие хоткея — последнее событие ввода, и
+    // оно наше. Кому именно — не выбираем, см. `allow_any_foreground`.
     allow_any_foreground();
 
-    // Публикация ждёт подтверждения брокера до пяти секунд — держать на этом
-    // поток, из которого плагин зовёт обработчик, нельзя.
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Err(e) = mqtt::place(&broker, &base, "tile", &ids) {
-            ccfzf_log!("cannot ask for a tile layout: {e}");
+    match transport_for(&endpoint) {
+        Transport::Http => {
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(e) = manager_http::place(&endpoint, "tile", &ids) {
+                    ccfzf_log!("cannot ask for a tile layout: {e}");
+                }
+            });
         }
-    });
+        Transport::Mqtt => {
+            let broker = mqtt::broker_from_config(&raw);
+            if !broker.is_configured() {
+                // Запасной дороги у раскладки нет: разложить окна сам пикер не
+                // умеет ни на одной системе — этим занят трекер. Молчать
+                // нельзя, иначе ненастроенный брокер неотличим от сломанной
+                // клавиши.
+                ccfzf_log!("mqtt broker is not configured, cannot ask for a tile layout");
+                return;
+            }
+            // Адрес называет трекер строки, а не конфиг: у каждой машины свой
+            // префикс топиков. Пустое имя откатывает `resolve_base` на
+            // `<config.base>/windows` — так пикер вёл себя до появления поля и
+            // обязан вести себя со старым трекером.
+            let base = mqtt::resolve_base(&broker, &place_order::tracker_base(&state, &host));
+            // Публикация ждёт подтверждения брокера до пяти секунд — держать
+            // на этом потоке, из которого плагин зовёт обработчик, нельзя.
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(e) = mqtt::place(&broker, &base, "tile", &ids) {
+                    ccfzf_log!("cannot ask for a tile layout: {e}");
+                }
+            });
+        }
+    }
 }
 
 /// Время сборки этого бинаря, если оно в него вшито.
@@ -4350,5 +4548,43 @@ actions:
         let (w, h) = fit_to_screen(WIDE_SIZE, (1000.0, 0.0));
         assert!(w < 1000.0, "известная сторона обязана зажаться: {w}");
         assert_eq!(h, WIDE_SIZE.1);
+    }
+
+    /// Правило выбора транспорта — одной функцией, а не условием по месту в
+    /// шести командах: разойдись копии, одна просьба ушла бы http, соседняя
+    /// MQTT, и объяснялось бы это «иногда не работает».
+    #[test]
+    fn transport_follows_the_address_only() {
+        assert_eq!(super::transport_for("windows-box:9722"), super::Transport::Http);
+        assert_eq!(super::transport_for(""), super::Transport::Mqtt);
+        assert_eq!(super::transport_for("   "), super::Transport::Mqtt);
+    }
+
+    /// `split_targets` — единственное место, где транспорт для нескольких
+    /// целей выбирается не одним `match`, а парой фильтров: опечатка во
+    /// втором (`== Http` вместо `== Mqtt`) отправила бы http-цель туда же, во
+    /// второй раз, — ровно запрещённое удвоение. Три проверки ловят её порознь:
+    /// http-список не должен нести пустых адресов, mqtt-список — непустых, а
+    /// сумма долей — быть равна списку целиком (ни потери, ни задвоения).
+    #[test]
+    fn split_targets_sends_each_target_through_exactly_one_transport() {
+        let targets = vec![
+            super::Target { base: "home/mac/windows".to_string(), http: String::new() },
+            super::Target {
+                base: "home/pc/windows".to_string(),
+                http: "windows-box:9722".to_string(),
+            },
+        ];
+        let (http, mqtt) = super::split_targets(&targets);
+
+        assert_eq!(http.len(), 1, "windows-box:9722 обязана попасть в http-список");
+        assert_eq!(http[0].http, "windows-box:9722");
+        assert!(http.iter().all(|t| !t.http.trim().is_empty()), "в http-список попала mqtt-цель");
+
+        assert_eq!(mqtt.len(), 1, "цель без адреса обязана попасть в mqtt-список");
+        assert_eq!(mqtt[0].base, "home/mac/windows");
+        assert!(mqtt.iter().all(|t| t.http.trim().is_empty()), "в mqtt-список попала http-цель");
+
+        assert_eq!(http.len() + mqtt.len(), targets.len(), "цель потерялась или задвоилась");
     }
 }
