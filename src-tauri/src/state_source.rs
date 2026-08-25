@@ -236,7 +236,10 @@ pub fn looks_like_session_id(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{comment_args, dump_env_prefix, looks_like_session_id, sources_from, state_args, Source, DUMP_ENV};
+    use super::{
+        command_for, comment_args, dump_env_prefix, looks_like_session_id, sources_from, state_args, Source,
+        DUMP_ENV,
+    };
 
     #[test]
     fn id_sessii_prinimaetsya_tolko_v_forme_uuid() {
@@ -332,12 +335,26 @@ mod tests {
     }
 
     #[test]
-    fn имя_переменной_одно_на_обе_дороги() {
-        // Разойдись приставка с именем в Command::env — одна дорога просила бы
-        // дамп, а вторая молча нет, и заметить это можно было бы только на той
-        // машине, где живёт вторая.
-        assert!(dump_env_prefix(true).starts_with(DUMP_ENV));
+    fn обычный_опрос_приставки_не_добавляет() {
         assert_eq!(dump_env_prefix(false), "");
+    }
+
+    /// Местная дорога ставит переменную не строкой, а `Command::env` — эта
+    /// проверка смотрит именно туда, а не в `dump_env_prefix`, которая этой
+    /// дороги вовсе не касается.
+    ///
+    /// Захардкодь `command_for` литерал с опечаткой вместо `DUMP_ENV`, ответ
+    /// агрегатора пришёл бы прежний, дамп остался бы старым, и заметить это
+    /// можно было бы только на той машине, где живёт местный источник, —
+    /// сторож обязан ловить именно это расхождение, а не форму строки-приставки.
+    #[test]
+    fn местная_дорога_ставит_переменную_через_command_env() {
+        let cmd = command_for(&Source::Local, true).expect("местный ccfzf обязан находиться в тестовой среде");
+        let value = cmd.get_envs().find(|(k, _)| *k == DUMP_ENV).and_then(|(_, v)| v);
+        assert_eq!(value, Some(std::ffi::OsStr::new("0")));
+
+        let cmd = command_for(&Source::Local, false).expect("местный ccfzf обязан находиться в тестовой среде");
+        assert!(cmd.get_envs().all(|(k, _)| k != DUMP_ENV), "обычный опрос переменную не ставит");
     }
 
     /// То же и у комментария: id и имя машины едут аргументами по обеим
