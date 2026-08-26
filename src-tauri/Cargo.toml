@@ -66,6 +66,11 @@ windows = { version = "0.61", features = [
     "Win32_System_Environment",
     "Win32_System_IO",
     "Win32_System_LibraryLoader",
+    # Простой человека за машиной (`user_idle.rs`): `GetLastInputInfo` лежит
+    # под `Win32_UI_Input_KeyboardAndMouse`, а `GetTickCount`, которым от её
+    # отметки считают разность, — под `Win32_System_SystemInformation`.
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_SystemInformation",
 ] }
 
 # Подложка позади пикера (`scrim.rs`) на маке — тем же приёмом, каким Windows

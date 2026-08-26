@@ -96,6 +96,45 @@ fn state_args(source: &Source, fresh_dump: bool) -> Vec<String> {
     }
 }
 
+/// Аргументы вызова `--dump` — того самого, который переписывает дампы и
+/// выходит, ничего не отдавая.
+///
+/// `None` у местного источника, и причин тому две. На Windows местная ветка
+/// зовёт не `ccfzf`, а вырезанный из него python-блок, который режим считает
+/// себе сам по алиасу `--state` и про `--dump` не знает вовсе. А на машинах,
+/// где пикер стоит, местный дамп не читает никто: панель openHASP живёт
+/// дампом агрегатора, до которого ходят по ssh.
+pub fn dump_args(source: &Source) -> Option<Vec<String>> {
+    match source {
+        // Одной строкой, как и `--state`: её заново разбирает удалённый шелл.
+        Source::Ssh(_) => Some(vec!["ccfzf --dump".to_string()]),
+        Source::Local => None,
+    }
+}
+
+/// Переписать дамп агрегатора, не забирая состояние.
+///
+/// Ради этого вызова фоновый поток и не засыпает совсем, пока человека нет за
+/// машиной: дамп читает windows11-manager, а из него живут Home Assistant и
+/// плата openHASP. Состояние при этом не едет ни в кэш, ни на страницу —
+/// смотреть на список некому.
+///
+/// Ответа у режима нет: он переписывает файлы и выходит. Поэтому здесь
+/// проверяется только код возврата — «спросить не смогли» против «спросили».
+pub fn refresh_dump(source: &Source) -> Result<(), String> {
+    let Some(args) = dump_args(source) else { return Ok(()) };
+    let out = command_for(source, false)?
+        .args(args)
+        .output()
+        .map_err(|e| format!("failed to start: {e}"))?;
+
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("exited with {}: {}", out.status, err.trim()));
+    }
+    Ok(())
+}
+
 /// То же для комментария. Текст сюда не входит: он уходит на stdin.
 fn comment_args(source: &Source, id: &str, from: &str) -> Vec<String> {
     let mut out = match source {
@@ -237,8 +276,8 @@ pub fn looks_like_session_id(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        command_for, comment_args, dump_env_prefix, looks_like_session_id, sources_from, state_args, Source,
-        DUMP_ENV,
+        command_for, comment_args, dump_args, dump_env_prefix, looks_like_session_id, sources_from,
+        state_args, Source, DUMP_ENV,
     };
 
     #[test]
@@ -337,6 +376,21 @@ mod tests {
     #[test]
     fn an_ordinary_poll_adds_no_prefix() {
         assert_eq!(dump_env_prefix(false), "");
+    }
+
+    /// Освежение дампа в простое идёт только по ssh, и это не экономия.
+    ///
+    /// Местная ветка на Windows — вырезанный из `ccfzf` python-блок, который
+    /// режим считает себе сам по алиасу `--state`: получи он `--dump`, ответом
+    /// был бы отказ разбора аргументов, а виден он был бы раз в минуту в
+    /// строке ошибки на машине, где пикер стоит.
+    #[test]
+    fn a_dump_goes_only_to_the_ssh_source() {
+        assert_eq!(
+            dump_args(&Source::Ssh("remote-host".into())),
+            Some(vec!["ccfzf --dump".to_string()])
+        );
+        assert_eq!(dump_args(&Source::Local), None);
     }
 
     /// Местная дорога ставит переменную не строкой, а `Command::env` — эта

@@ -10,6 +10,23 @@ pub const BACKGROUND_MIN: Duration = Duration::from_secs(60);
 /// этим же опросом живёт панель openHASP, и такт — это её отставание.
 pub const BACKGROUND_MAX: Duration = Duration::from_secs(8 * 60);
 
+/// Через сколько без ввода человека машина считается простаивающей.
+///
+/// Пять минут — не «когда гаснет экран», а «когда точно никто не смотрит на
+/// список». Меньше было бы опасно: человек, читающий с экрана длинный ответ
+/// агента, ввода не делает вовсе, и опрос гас бы у него под носом.
+pub const AWAY_AFTER: Duration = Duration::from_secs(5 * 60);
+
+/// Как часто в простое освежается дамп агрегатора.
+///
+/// Это единственная работа, которая в простое остаётся, и мерка ей не своя:
+/// дамп читает windows11-manager, а из него живут Home Assistant и плата
+/// openHASP. Порог самого агрегатора вдвое ниже (`STATE_DUMP_MAX_AGE`, 30 с),
+/// то есть минута — это отставание платы, за которое заплачено вдвое меньшим
+/// числом походов по ssh. Больше платить нечем: трекер и так не видит новую
+/// сессию быстрее 15 с (кэш индекса `sessions.js`).
+pub const AWAY_DUMP_TICK: Duration = Duration::from_secs(60);
+
 /// Кусок, которым проспан фоновый такт, пока под присмотром сигнал трекера.
 ///
 /// Секунда — не такт опроса, а частота одного локального `stat`: сам опрос
@@ -144,6 +161,20 @@ pub fn poll_once(sources: &[Source], fresh_dump: bool) -> (Option<serde_json::Va
     combine(parts)
 }
 
+/// Освежить дампы всех источников, ничего себе не забирая.
+///
+/// Такт простоя: состояние никому не нужно, а дамп нужен панели. Отказ
+/// называет источник поимённо и той же строкой, что у опроса, — читателю у
+/// неё одно место, поле `error` в кэше, и две разных формулировки одной беды
+/// он принял бы за две беды.
+pub fn dump_once(sources: &[Source]) -> String {
+    let errors: Vec<String> = sources
+        .iter()
+        .filter_map(|s| crate::state_source::refresh_dump(s).err().map(|e| format!("{}: {e}", s.label())))
+        .collect();
+    errors.join("; ")
+}
+
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
@@ -250,6 +281,11 @@ impl Poller {
             // отмеряется от `Opened`, и чем бы поток ни разбудили посреди
             // расписания, точки опроса не сдвигаются.
             let mut burst: Option<(usize, std::time::Instant)> = None;
+            // Простой машины и момент последнего освежённого в нём дампа.
+            // Флаг нужен ради возврата человека: бэкофф, накопленный до
+            // простоя, к вернувшемуся отношения не имеет.
+            let mut was_away = false;
+            let mut last_dump: Option<std::time::Instant> = None;
             let mut watcher =
                 tracker_signal::Watcher::new(crate::state_path(tracker_signal::FILE).ok());
 
@@ -283,7 +319,37 @@ impl Poller {
                 let bursting = if visible { None } else { burst };
                 let due =
                     bursting.map_or(true, |(step, started)| burst_due(step, started.elapsed()));
-                if !idle && due {
+                // Человека за машиной нет: тянуть состояние себе в кэш незачем
+                // — смотреть на список некому, — а дамп на агрегаторе освежать
+                // надо, им живёт панель openHASP.
+                //
+                // Спрашивается это только у скрытого окна при работающем фоне:
+                // показанное окно и так опрашивает раз в секунду, а
+                // выключенный человеком фон простой воскрешать не вправе — как
+                // и сигнал трекера ниже. Всплеск простой перебивает целиком:
+                // его завело своё же действие человека, и оно младше любого
+                // порога.
+                let away = !visible && !idle && bursting.is_none() && crate::user_idle::away(AWAY_AFTER);
+                // Человек вернулся: бэкофф начинается заново, и опрос идёт этим
+                // же витком — вернувшемуся отдаётся свежий список, а не тот,
+                // что застыл к началу простоя. Показанного окна это не
+                // касается: ему такт ставит ветка `Shown`.
+                if was_away && !away && !visible {
+                    delay = BACKGROUND_MIN;
+                }
+                was_away = away;
+
+                if away {
+                    if last_dump.map_or(true, |at| at.elapsed() >= AWAY_DUMP_TICK) {
+                        let error = dump_once(&sources);
+                        // Скрытому окну отказ сообщать некому — оно узнает при
+                        // показе, той же дорогой, что и отказ опроса. Удача
+                        // строку чистит: ssh, который только что ответил, —
+                        // это ответ и на прошлую жалобу.
+                        thread_cache.lock().unwrap().error = error;
+                        last_dump = Some(std::time::Instant::now());
+                    }
+                } else if !idle && due {
                     let fresh_dump = bursting.is_some();
                     let (state, error) = poll_once(&sources, fresh_dump);
                     let changed = match state {
@@ -336,6 +402,12 @@ impl Poller {
                 // на закрытом канале выходит из цикла: приложение кончилось.
                 let wait = if idle {
                     Duration::from_secs(3600)
+                } else if away {
+                    // Кусками по секунде, а не одним сном на минуту: спит здесь
+                    // не опрос, а ожидание человека, и заметить его возвращение
+                    // надо тотчас. Цена куска — один системный вызов, ровно как
+                    // у сторожа сигнала, которым спит обычный фоновый такт.
+                    SIGNAL_TICK
                 } else if let Some((step, started)) = bursting {
                     burst_sleep(step, started.elapsed())
                 } else {
@@ -343,8 +415,10 @@ impl Poller {
                 };
                 // Сторож смотрится только у скрытого окна и только при
                 // работающем фоне: показанное и так опрашивает раз в секунду, а
-                // выключенный человеком фон сигнал воскрешать не вправе.
-                let watching = !visible && !idle;
+                // выключенный человеком фон сигнал воскрешать не вправе. В
+                // простое он тоже молчит: сигнал заведён ради снимка для
+                // проектного хоткея, а хоткей нажимает тот, кого за машиной нет.
+                let watching = !visible && !idle && !away;
                 match wait_for(&rx, wait, if watching { Some(&mut watcher) } else { None }) {
                     Woke::Got(Signal::Shown) => {
                         visible = true;
@@ -694,6 +768,66 @@ mod tests {
             seen += 1;
         }
         assert!(seen >= 2, "мест два — гейт опроса и срок сна; найдено {seen}");
+    }
+
+    #[test]
+    fn an_idle_machine_is_asked_about_only_where_it_may_decide_anything() {
+        // Текстовый, как соседи: тела потока в юнит-тесте не поднять. Правило
+        // молчаливое трижды. Показанному окну простой решать нечего — его такт
+        // секундный. Выключенный человеком фон простой воскрешать не вправе:
+        // спроси мы отметку раньше `idle`, и `backgroundRefresh: false` начал
+        // бы ходить по ssh раз в минуту. А всплеск завело своё же действие
+        // человека — он младше любого порога, и перебить его простой значило бы
+        // потерять окно только что открытой сессии.
+        let src = include_str!("poller.rs");
+        let body = src
+            .split_once("let away = ")
+            .expect("простой перестали спрашивать — тест сторожит не то")
+            .1;
+        let (body, _) = body.split_once(';').expect("строка не закрыта");
+        assert!(body.contains("!visible"), "показанное окно опрашивает раз в секунду");
+        assert!(body.contains("!idle"), "выключенный фон простой не воскрешает");
+        assert!(body.contains("bursting.is_none()"), "всплеск простой перебивает целиком");
+    }
+
+    #[test]
+    fn an_idle_machine_keeps_feeding_the_dump() {
+        // Порядок величин, а не вкусовщина: дамп читает панель openHASP, и
+        // такт простоя — это её отставание. Порог агрегатора тридцать секунд,
+        // и подниматься сильно выше нельзя по той же причине, по какой
+        // ограничен BACKGROUND_MAX.
+        assert_eq!(AWAY_AFTER, Duration::from_secs(300));
+        assert_eq!(AWAY_DUMP_TICK, Duration::from_secs(60));
+        assert!(AWAY_DUMP_TICK <= BACKGROUND_MAX, "в простое панель отставать больше не должна");
+        assert!(SIGNAL_TICK < AWAY_DUMP_TICK, "кусок сна короче такта дампа");
+    }
+
+    #[test]
+    fn a_local_source_gets_no_dump_of_its_own() {
+        // Ничего не запускает: `dump_args` у местного источника `None`, и
+        // дальше вызова дело не доходит. Проверка именно про это — местная
+        // ветка на Windows про `--dump` не знает, и отказ разбора аргументов
+        // лёг бы в строку ошибки раз в минуту.
+        assert_eq!(dump_once(&[Source::Local]), "");
+        assert_eq!(dump_once(&[]), "");
+    }
+
+    #[test]
+    fn returning_from_idle_starts_the_backoff_over() {
+        // Иначе вернувшийся человек получил бы список, застывший к началу
+        // простоя, и ждал бы до восьми минут — ровно та беда, ради которой
+        // заведены и сигнал трекера, и всплеск.
+        let src = include_str!("poller.rs");
+        let body = src
+            .split_once("if was_away && !away")
+            .expect("сброс бэкоффа на возврате пропал — тест сторожит не то")
+            .1;
+        let (body, _) = body.split_once('}').expect("ветка не закрыта");
+        assert!(body.contains("BACKGROUND_MIN"), "бэкофф начинается заново");
+        assert!(
+            src.split_once("if was_away && !away").unwrap().1.starts_with(" && !visible"),
+            "показанному окну такт ставит ветка Shown, и перебивать её нельзя",
+        );
     }
 
     #[test]
