@@ -390,9 +390,17 @@
         /* Метка PR — той же тусклостью, что и колонка хоткея: опознают строку
            по имени и пути, это подсказка рядом. */
         .name .pr { margin-left: 6px; font-size: 11px; color: var(--fg-dim); font-weight: normal; }
-        /* Имя окна — той же тусклостью, что и метка PR, и по той же причине:
-           опознают строку по первому имени, это подсказка рядом. */
-        .name .wname { margin-left: 6px; font-size: 11px; color: var(--fg-dim); font-weight: normal; }
+        /* Имя окна у строки сессии и имя сессии у строки снимка — той же
+           тусклостью, что и метка PR, и по той же причине: опознают строку по
+           первому имени, это подсказка рядом. Правило одно на оба класса —
+           подпись у них одного рода, и разъехаться их виду незачем; классы
+           разные, потому что имена разные, и по разметке видно, что читаешь.
+           Строка имени у обоих остаётся голым текстом, а не flex: подпись
+           здесь дописывается в строку, ей не нужно ни `margin-left: auto`, ни
+           своей колонки, — а flex отнял бы у имени многоточие. */
+        .name .wname, .name .sname {
+            margin-left: 6px; font-size: 11px; color: var(--fg-dim); font-weight: normal;
+        }
         /* Правые колонки одной группой: статус, id, контекст с деньгами,
            возраст. Прижимает их сюда именно она — раньше это делала `.state`
            своим margin-left: auto, и выключенный чекбокс события уносил
@@ -1220,7 +1228,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     projectCountHtml, projectColumnWidths,
     docsBadgeHtml, promptsHtml, commentHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
-    windowNameHtml,
+    windowNameHtml, snapshotNameHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -1461,7 +1469,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
       html: `<div class="row snapshot-session${row.open ? ' on-screen' : ''}" data-index="${index}"` +
         ` title="${escapeHtml(row.cwd)}">` +
         `<div class="dot${row.open ? ' active' : ''}"></div>` +
-        `<div class="text"><div class="name">${escapeHtml(row.label)}</div>` +
+        `<div class="text"><div class="name">${escapeHtml(row.label)}` +
+        // Имя сессии — подписью рядом, и только когда оно расходится с именем
+        // каталога: сессий одного проекта в снимке бывает несколько.
+        `${snapshotNameHtml(row.label, row.title)}</div>` +
         (snapCwdLine ? `<div class="cwd">${escapeHtml(snapCwdLine)}</div>` : '') +
         `</div>` +
         `<div class="meta"><div class="count">${row.open ? '▣ open' : ''}</div>` +

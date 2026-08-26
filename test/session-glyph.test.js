@@ -754,6 +754,43 @@ test('имя окна экранируется: оно приезжает с ч�
   assert.ok(!html.includes('<img'), 'заголовок окна пишет чужой трекер, и в разметку он не уходит');
 });
 
+test('имя сессии в строке снимка показывается только при расхождении с проектом', () => {
+  const { snapshotNameHtml } = require('../frontend-src/session-glyph');
+  // Строка снимка названа каталогом, а сессий одного каталога в снимке бывает
+  // несколько: без имени сессии они читаются как одинаковые строки подряд.
+  assert.match(snapshotNameHtml('ccfzf-picker', 'tray-build-time'), /tray-build-time/);
+  // Мерка та же, что у имени окна (sameWords): `picker` внутри `ccfzf-picker`
+  // — то же имя в сокращении, и подпись из него была бы ни о чём.
+  assert.strictEqual(snapshotNameHtml('ccfzf-picker', 'picker'), '');
+  assert.strictEqual(snapshotNameHtml('ccfzf-picker', 'ccfzf_picker'), '');
+  // Имени нет — показывать нечего; поле у строки пустой строкой, а не undefined.
+  assert.strictEqual(snapshotNameHtml('ccfzf-picker', ''), '');
+  assert.strictEqual(snapshotNameHtml('ccfzf-picker', undefined), '');
+});
+
+test('имя сессии из снимка экранируется: его пишет чужой трекер', () => {
+  const { snapshotNameHtml } = require('../frontend-src/session-glyph');
+  const html = snapshotNameHtml('proj', '<img src=x>');
+  assert.ok(!html.includes('<img'), 'снимок приезжает с чужой машины, и в разметку он не уходит');
+});
+
+test('мерка «то же имя» одна на всех, кто ею меряет', () => {
+  const { sameWords, hidesProject, windowNameHtml, snapshotNameHtml } =
+    require('../frontend-src/session-glyph');
+  // Разойдись копии — одно и то же совпадение считалось бы повтором в одном
+  // месте и расхождением в соседнем.
+  assert.strictEqual(sameWords('ccfzf-picker', 'ccfzf_picker'), true);
+  assert.strictEqual(sameWords('picker', 'ccfzf-picker'), true);
+  assert.strictEqual(sameWords('esm-migration', 'tray-build-time'), false);
+  // Пустую сторону сравнивать не с чем — это расхождение, а не совпадение.
+  assert.strictEqual(sameWords('', 'picker'), false);
+  assert.strictEqual(sameWords('picker', null), false);
+  // Все трое отвечают ею одинаково на одну и ту же пару имён.
+  assert.strictEqual(hidesProject('picker', '/home/user/projects/ccfzf-picker'), true);
+  assert.strictEqual(windowNameHtml({ title: 'picker', windowTitle: 'ccfzf-picker' }), '');
+  assert.strictEqual(snapshotNameHtml('ccfzf-picker', 'picker'), '');
+});
+
 // --- Счётчики docs/TODO.md у строки проекта (Task T4) ---------------------
 //
 // Приезжают полем `todo` от агрегатора: список секций по заголовкам первого
