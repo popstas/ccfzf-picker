@@ -679,20 +679,33 @@
 
   /**
    * Каталог уже назван именем строки — вторая подпись с тем же смыслом
-   * только отнимает место.
+   * только отнимает место. Мерка совпадения — общая, sameWords.
+   */
+  function hidesProject(name, cwd) {
+    return sameWords(name, pathBasename(cwd));
+  }
+
+  /**
+   * «Это то же имя, просто по-другому набрано» — одна мерка на весь пикер.
+   *
+   * Спрашивают её трое: вторая строка с каталогом (hidesProject), имя окна
+   * рядом с именем строки (windowNameHtml) и имя сессии в строке снимка
+   * (snapshotNameHtml). Разойдись копии — одно и то же совпадение считалось бы
+   * повтором в одном месте и расхождением в соседнем, и подпись то появлялась
+   * бы, то нет без всякой видимой причины.
    *
    * Сравниваются множества слов, а не строки целиком: разделители у людей
    * разные (`_` против `-`), а порядок слов и регистр значения не имеют.
    * Правило одностороннее — «одно множество внутри другого», а не равенство:
-   * `picker` внутри `ccfzf-picker` тоже читается как то же имя в
-   * сокращении, а точное совпадение такой случай упустило бы. Пустое имя или
-   * пустой каталог гасить нечем — сравнивать не с чем.
+   * `picker` внутри `ccfzf-picker` тоже читается как то же имя в сокращении, а
+   * точное совпадение такой случай упустило бы. Пустую сторону сравнивать не с
+   * чем — это расхождение, а не совпадение.
    */
-  function hidesProject(name, cwd) {
-    const nameWords = wordSet(name);
-    const dirWords = wordSet(pathBasename(cwd));
-    if (!nameWords.size || !dirWords.size) return false;
-    return isSubset(nameWords, dirWords) || isSubset(dirWords, nameWords);
+  function sameWords(left, right) {
+    const leftWords = wordSet(left);
+    const rightWords = wordSet(right);
+    if (!leftWords.size || !rightWords.size) return false;
+    return isSubset(leftWords, rightWords) || isSubset(rightWords, leftWords);
   }
 
   /**
@@ -725,10 +738,29 @@
   function windowNameHtml(session) {
     const name = String(session?.windowTitle ?? '').trim();
     if (!name) return '';
-    const own = wordSet(session?.title);
-    const win = wordSet(name);
-    if (own.size && win.size && (isSubset(own, win) || isSubset(win, own))) return '';
+    if (sameWords(session?.title, name)) return '';
     return `<span class="wname">${escapeHtml(name)}</span>`;
+  }
+
+  /**
+   * Имя сессии рядом с именем проекта в строке снимка — и только когда они
+   * разошлись.
+   *
+   * Строка снимка названа каталогом проекта (projectBasename в
+   * picker-snapshots.js), а сессий одного каталога в снимке бывает несколько:
+   * различить их в списке было нечем, и восстанавливаемая раскладка читалась
+   * как несколько одинаковых строк подряд. Имя сессии — то самое, чем они
+   * отличаются, и стоит оно подписью рядом, а не вместо: опознают строку
+   * по проекту, имя сессии уточняет, какая из них это.
+   *
+   * Мерка расхождения — общая (sameWords): `picker` рядом с `ccfzf-picker`
+   * был бы подписью ни о чём.
+   */
+  function snapshotNameHtml(label, title) {
+    const name = String(title ?? '').trim();
+    if (!name) return '';
+    if (sameWords(label, name)) return '';
+    return `<span class="sname">${escapeHtml(name)}</span>`;
   }
 
   /**
@@ -824,7 +856,8 @@
     todoHtml, todoText, projectCountHtml, projectCountText, projectColumnWidths, ageText,
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
-    prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, windowNameHtml,
+    prNumber, prBadgeHtml, wordSet, sameWords, hidesProject, projectLine, windowNameHtml,
+    snapshotNameHtml,
     docsBadgeHtml, docKindOf, promptsHtml, commentHtml,
   };
 });

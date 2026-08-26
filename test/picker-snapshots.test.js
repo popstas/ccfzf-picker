@@ -266,6 +266,41 @@ test('снимок старого агрегатора адреса не наз�
   assert.equal(snapshotBase(null), '');
 });
 
+test('строка сессии несёт имя сессии, а не один каталог', () => {
+  // Имя проекта у строки — каталог, и сессий одного каталога в снимке бывает
+  // несколько: имя сессии — то самое, чем они отличаются. Рисует его подписью
+  // рядом snapshotNameHtml (session-glyph.js), решая заодно, расходятся ли
+  // имена вовсе.
+  const rows = buildSnapshotRows([SNAP], new Set(), '')
+    .filter(r => r.kind === 'snapshot-session');
+  assert.deepEqual(rows.map(r => r.title), ['picker', 'mqtt']);
+});
+
+test('сессия снимка без имени несёт пустую строку, а не undefined', () => {
+  // Стог поиска склеивается из полей строки, и недостающее уехало бы в него
+  // словом `undefined` — запрос из него нашёл бы разом весь снимок.
+  const rows = buildSnapshotRows(
+    [{ id: 's', created: SNAP.created, sessions: [{ id: 'a', cwd: '/home/user/projects/js/x' }] }],
+    new Set(), '',
+  ).filter(r => r.kind === 'snapshot-session');
+  assert.deepEqual(rows.map(r => r.title), ['']);
+});
+
+test('снимок ищется и по имени сессии, а не только по каталогу', () => {
+  // Показанное в строке обязано и находиться: иначе запрос по имени, которое
+  // человек читает глазами, даёт ноль строк.
+  const snap = {
+    ...SNAP,
+    sessions: [
+      { id: 'aaa', cwd: '/home/user/projects/js/ccfzf-picker', title: 'tray-build-time' },
+      { id: 'bbb', cwd: '/home/user/projects/js/windows-mqtt', title: 'mqtt' },
+    ],
+  };
+  const found = rowsUnderDays([snap], undefined, 'tray-build')
+    .filter(r => r.kind === 'snapshot-session');
+  assert.deepEqual(found.map(r => r.id), ['aaa']);
+});
+
 test('снимки ищутся и в русской раскладке', () => {
   // Третий отбор был написан в этом файле руками и filterProjects не звал
   // вовсе: перевод, положенный в два места из трёх, дал бы поиск, который

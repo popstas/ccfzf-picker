@@ -621,7 +621,9 @@ const AGGREGATOR_SNAPSHOTS = [{
   created: 1786045860,
   sessions: [
     { id: 'aaa', cwd: '/home/user/projects/ccfzf', title: 'ccfzf' },
-    { id: 'bbb', cwd: '/home/user/projects/empty', title: 'empty' },
+    // Имя сессии второй разошлось с каталогом — так бывает у долгой сессии, и
+    // ровно этим сессии одного каталога в снимке и отличаются друг от друга.
+    { id: 'bbb', cwd: '/home/user/projects/empty', title: 'tray-build-time' },
   ],
 }];
 
@@ -646,6 +648,7 @@ function renderSnapshotRows(snapshots, query, options) {
     escapeHtml: Glyph.escapeHtml,
     shortPath: Glyph.shortPath,
     projectLine: Glyph.projectLine,
+    snapshotNameHtml: Glyph.snapshotNameHtml,
     query: query || '',
     nowSec: PROJECTS_NOW,
   };
@@ -698,9 +701,20 @@ test('строка снимка доезжает с настоящего пут�
   assert.ok(items[3].html.includes('<div class="dot"></div>'), items[3].html);
   assert.ok(items[3].html.includes('<div class="count"></div>'), items[3].html);
 
-  // Имя строки — каталог проекта; в подсказке остаётся полный путь.
-  assert.ok(items[3].html.includes('<div class="name">empty</div>'), items[3].html);
+  // Имя строки — каталог проекта, а имя сессии стоит при нём подписью и той
+  // же тусклостью, что метка PR и имя окна: опознают строку по проекту, имя
+  // сессии уточняет, какая она. В подсказке остаётся полный путь.
+  assert.ok(
+    items[3].html.includes(
+      '<div class="name">empty<span class="sname">tray-build-time</span></div>'),
+    items[3].html);
   assert.ok(items[3].html.includes('title="/home/user/projects/empty"'), items[3].html);
+  // Совпало с каталогом по словам — подписи нет вовсе: вторая с тем же
+  // смыслом только отняла бы место (sameWords, session-glyph.js).
+  assert.ok(items[2].html.includes('<div class="name">ccfzf</div>'), items[2].html);
+  assert.ok(!items[2].html.includes('class="sname"'), items[2].html);
+  // Тусклость подписи держат стили страницы, и с именем окна она общая.
+  assert.match(SESSIONS_HTML, /\.name \.wname, \.name \.sname \{[^}]*color: var\(--fg-dim\)/);
   // Тело же basename не повторяет, и не только у этой строки: у
   // snapshot-session имя строки — сам projectBasename(session)
   // (picker-snapshots.js), то есть уже basename каталога; hidesProject видит
