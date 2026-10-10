@@ -399,6 +399,18 @@ test('есть только спека — только её пункт', () => 
   assert.deepStrictEqual(docs, ['spec']);
 });
 
+test('спека, записанная в чужой каталог, даёт пункт по своему пути', () => {
+  // Каталог строки здесь ни при чём: абсолютный путь переводится сам, и пункт
+  // есть, пока его переводит pathMap.
+  const cfg = { pathMap: { remote: '/home/user', local: '/local' }, actions: [] };
+  const spec = '/home/user/grafana/docs/superpowers/specs/a-design.md';
+  const acts = availableActions({ kind: 'session', cwd: '/home/user/otel', spec }, cfg);
+  assert.deepStrictEqual(acts.filter(a => a.id === 'spec').map(a => a.id), ['spec']);
+  const outside = availableActions({ kind: 'session', cwd: '/home/user/otel',
+    spec: '/srv/x/docs/specs/a.md' }, cfg);
+  assert.deepStrictEqual(outside.filter(a => a.id === 'spec'), []);
+});
+
 // --- Сессия приложения и своя строка под Windows --------------------------
 
 test('сессии приложения не предлагают reptyr', () => {

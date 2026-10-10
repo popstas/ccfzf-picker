@@ -3683,19 +3683,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
       return;
     }
     if (id === 'plan' || id === 'spec') {
-      // Каталог переводится на эту машину, а имя файла приклеивается тем же
-      // разделителем, который выбрал сам pathMap: локальный корень бывает и
-      // windows-путём. Форму пути уже проверил агрегатор — регулярка DOC_RE
-      // не пускает туда ни пробела, ни кавычки.
-      //
-      // Применимость проверена в availableActions, но проверяется и здесь:
-      // прямые клавиши — второй вход, и правило «что этой строке можно»
-      // обязано быть одно на оба.
-      const base = window.PathMap.mapRowPath(row, CONFIG.pathMap);
-      const rel = row[id];
-      if (base === null || !rel) return;
-      const sep = window.PathMap.separatorFor(base);
-      const full = `${base}${base.endsWith(sep) ? '' : sep}${rel.split('/').join(sep)}`;
+      // Путь переводит mapRowDoc — то же правило, по которому
+      // availableActions решает, есть ли пункт вовсе: прямые клавиши — второй
+      // вход, и правило «что этой строке можно» обязано быть одно на оба.
+      const full = window.PathMap.mapRowDoc(row, row[id], CONFIG.pathMap);
+      if (full === null) return;
       // Через open_in_editor, а не spawn_detached с готовым argv: как звать
       // редактор, зависит от системы, а страница её не знает и знать не
       // должна. На маке голое имя уходит в `open -a` — CLI редактора там может

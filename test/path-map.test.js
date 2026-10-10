@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { separatorFor, mapPath, mapRowPath, buildActionArgv } = require('../frontend-src/path-map');
+const { separatorFor, mapPath, mapRowPath, mapRowDoc, buildActionArgv } = require('../frontend-src/path-map');
 
 // Корни сетевых дисков Windows пишутся здесь формой UNC, а не буквой диска:
 // буква вместе с разделителем — шаблон из no-private-data.test.js, и фикстура с
@@ -134,4 +134,42 @@ test('каталог строки никто не переводит мимо ma
     });
   }
   assert.deepStrictEqual(offenders, []);
+});
+
+// --- Бумаги строки: спека и план ------------------------------------------
+
+test('относительная бумага клеится к каталогу строки разделителем корня', () => {
+  const row = { cwd: '/home/user/projects/x' };
+  assert.strictEqual(mapRowDoc(row, 'docs/specs/a.md', WIN),
+    '\\\\nas\\home\\projects\\x\\docs\\specs\\a.md');
+  assert.strictEqual(mapRowDoc(row, 'docs/specs/a.md', MAC),
+    '/Volumes/remote-home/projects/x/docs/specs/a.md');
+});
+
+test('абсолютная бумага переводится сама, а не клеится к каталогу', () => {
+  // Сессия написала спеку в соседний репозиторий (2026-10-10, claude-otel →
+  // grafana): агрегатор отдаёт абсолютный путь, и приклеенный к cwd он вёл бы
+  // в несуществующий файл.
+  const row = { cwd: '/home/user/projects/otel' };
+  const abs = '/home/user/projects/grafana/docs/superpowers/specs/a-design.md';
+  assert.strictEqual(mapRowDoc(row, abs, MAC),
+    '/Volumes/remote-home/projects/grafana/docs/superpowers/specs/a-design.md');
+  assert.strictEqual(mapRowDoc(row, abs, WIN),
+    '\\\\nas\\home\\projects\\grafana\\docs\\superpowers\\specs\\a-design.md');
+});
+
+test('абсолютная бумага вне общего дерева — null', () => {
+  const row = { cwd: '/home/user/projects/otel' };
+  assert.strictEqual(mapRowDoc(row, '/srv/other/docs/specs/a.md', MAC), null);
+});
+
+test('у местной строки абсолютная бумага уже местная', () => {
+  const row = { cwd: '/home/user/p', source: 'local' };
+  assert.strictEqual(mapRowDoc(row, '/home/user/q/docs/specs/a.md', {}), '/home/user/q/docs/specs/a.md');
+  assert.strictEqual(mapRowDoc(row, 'docs/specs/a.md', {}), '/home/user/p/docs/specs/a.md');
+});
+
+test('пустая бумага — null', () => {
+  assert.strictEqual(mapRowDoc({ cwd: '/home/user/p' }, '', MAC), null);
+  assert.strictEqual(mapRowDoc({ cwd: '/home/user/p' }, undefined, MAC), null);
 });
