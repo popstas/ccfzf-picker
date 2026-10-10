@@ -107,7 +107,7 @@
 <script src="settings-form.js"></script>
 <script>
 (async function () {
-  const { PAGES, configToFields, fieldsToPatch, validate } = window.SettingsForm;
+  const { PAGES, EDITORS, matchEditor, configToFields, fieldsToPatch, validate } = window.SettingsForm;
   const invoke = (cmd, args) => (window.__TAURI__
     ? window.__TAURI__.core.invoke(cmd, args)
     : Promise.resolve());
@@ -189,6 +189,8 @@
 
   let config = {};
   let fields = {};
+  // Подпись «Auto» в выпадашке редакторов: что нашёл Rust на этой машине.
+  let autoEditorLabel = '';
   let ui = UI_DEFAULTS;
   // Что человек правил именно в этом окне: ключ галки -> набор осей.
   //
@@ -288,6 +290,20 @@
   function fieldHtml(field) {
     const value = fields[field.id];
     const hint = field.hint ? `<div class="hint">${esc(field.hint)}</div>` : '';
+    if (field.type === 'editorPreset') {
+      // Тот же помощник, что пресет терминала: выбор считается по значению
+      // `editor`, а не хранится рядом. У «Auto» в подписи — то, что нашёл
+      // Rust: иначе человек не знал бы, что откроется, не нажав `^O`.
+      const current = matchEditor(fields.editor);
+      const options = [
+        { value: 'auto', label: `Auto (${autoEditorLabel || 'none found'})` },
+        ...EDITORS,
+        { value: 'other', label: 'Other' },
+      ].map(o => `<option value="${esc(o.value)}"${o.value === current ? ' selected' : ''}>`
+        + `${esc(o.label)}</option>`).join('');
+      return `<div class="field"><label>${esc(field.label)}</label>`
+        + `<select data-editor-preset>${options}</select>${hint}</div>`;
+    }
     if (field.type === 'preset') {
       // Что выбрано — считается по содержимому полей, а не хранится рядом:
       // второй источник правды разошёлся бы с тем, что человек правит руками.
@@ -974,6 +990,17 @@
         renderPage();
       });
     }
+    for (const select of page.querySelectorAll('[data-editor-preset]')) {
+      select.addEventListener('change', () => {
+        // «Other» ничего не подставляет — по той же причине, что «Custom» у
+        // терминала: стирать им поле значило бы терять вписанное.
+        if (select.value === 'other') return;
+        fields.editor = select.value === 'auto' ? '' : select.value;
+        dirtyFields.add('editor');
+        scheduleAutosave();
+        renderPage();
+      });
+    }
     for (const select of page.querySelectorAll('[data-preset]')) {
       select.addEventListener('change', () => {
         const preset = window.TerminalPresets.presetById(select.value);
@@ -1285,6 +1312,12 @@
     config = await invoke('load_config') || {};
   } catch (e) {
     config = {};
+  }
+  // Что выберет «Auto» на этой машине — для подписи в выпадашке редакторов.
+  try {
+    autoEditorLabel = ((await invoke('editor_info', { editor: '' })) || {}).label || '';
+  } catch (e) {
+    autoEditorLabel = '';
   }
   fields = configToFields(config);
   applyTheme();

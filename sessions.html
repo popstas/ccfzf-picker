@@ -1111,6 +1111,9 @@
   // Иконки приложений: id действия → data-URI. Заполняется один раз при
   // старте и на config-changed, см. loadActionIcons.
   let actionIcons = {};
+  // Редактор `^O`: `{ label, icon }` от Rust (`editor_info`) или null — не
+  // найден либо ещё не спрошен. Обновляется там же, где иконки.
+  let editorInfo = null;
   let infoOpen = false;
 // Оверлей комментария. `commentRow` держит строку, к которой он открыт: список
 // тикает раз в секунду и к моменту сохранения успевает перерисоваться, а
@@ -3249,7 +3252,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * вовсе.
    */
   function actionsFor(row) {
-    const actions = window.SessionActions.availableActions(row, CONFIG, { os: PICKER_OS });
+    const actions = window.SessionActions.availableActions(row, CONFIG, {
+      os: PICKER_OS, editorLabel: (editorInfo || {}).label,
+    });
     if (window.OpenTransport.canOpenRemote(row, openManagerHere(), CONFIG.windowHost, managerReachable())) {
       actions.push({
         id: 'open-remote',
@@ -3682,6 +3687,17 @@ const infoBackdrop = document.getElementById('info-backdrop');
       openComment(row);
       return;
     }
+    if (id === 'editor') {
+      // Папка сессии — тем же open_in_editor, что спека и план: какой
+      // редактор и как его звать, решает Rust. Путь уже проверен
+      // availableActions — иначе пункта не было бы.
+      const local = window.PathMap.mapRowPath(row, CONFIG.pathMap);
+      if (local === null) return;
+      invoke('open_in_editor', { editor: CONFIG.editor, path: local })
+        .then(() => invoke('hide_picker'))
+        .catch((e) => { error = String(e); render(); });
+      return;
+    }
     if (id === 'plan' || id === 'spec') {
       // Каталог переводится на эту машину, а имя файла приклеивается тем же
       // разделителем, который выбрал сам pathMap: локальный корень бывает и
@@ -4110,6 +4126,20 @@ const infoBackdrop = document.getElementById('info-backdrop');
   }
 
   /**
+   * Какой редактор откроет `^O` — для подписи пункта и его иконки.
+   *
+   * Отказ не событие, как и у иконок: подпись останется общей («Open in
+   * editor»), а причину назовёт сам open_in_editor при нажатии.
+   */
+  async function loadEditorInfo() {
+    try {
+      editorInfo = await invoke('editor_info', { editor: CONFIG.editor }) || null;
+    } catch (e) {
+      editorInfo = null;
+    }
+  }
+
+  /**
    * Иконки приложений для меню.
    *
    * Отказ не событие: пустая карта значит «у всех пунктов глифы», и это
@@ -4118,7 +4148,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
   async function loadActionIcons() {
     try {
       actionIcons = await invoke('action_icons', {
-        specs: window.ActionIcons.iconSpecs(CONFIG),
+        specs: window.ActionIcons.iconSpecs(CONFIG, (editorInfo || {}).icon),
       }) || {};
     } catch (e) {
       actionIcons = {};
@@ -4303,7 +4333,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // обязан ждать похода за иконками, чтобы перерисоваться.
       regroup();
       // Настроенные действия могли смениться вместе с конфигом: иконки от
-      // прежних приложений остались бы висеть у новых пунктов.
+      // прежних приложений остались бы висеть у новых пунктов. Редактор —
+      // первым: иконка его пункта берётся с найденного им файла.
+      await loadEditorInfo();
       await loadActionIcons();
     });
 
@@ -4344,6 +4376,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // этом не нарушается — «меню открывается уже с картинками» про момент
     // первого ^K, а до него заведомо больше времени, чем занимает поход за
     // парой иконок.
+    await loadEditorInfo();
     await loadActionIcons();
   }
 

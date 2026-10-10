@@ -29,8 +29,8 @@ projectsHotkey: ''
 
 # Третий глобальный хоткей: просит оконный трекер этой машины разложить окна
 # плиткой — то же, что пункт `Tile windows` в меню `^K`. Порядок берётся из
-# списка пикера: сессии, чьи окна стоят здесь, в выбранной сортировке (`^O`,
-# по умолчанию recent). Умолчание своё на каждой системе, и это ровно те
+# списка пикера: сессии, чьи окна стоят здесь, в выбранной сортировке (клик по
+# статуслайну, по умолчанию recent). Умолчание своё на каждой системе, и это ровно те
 # клавиши, которые раньше вешали сами трекеры: Ctrl+Win+F10 на Windows,
 # Ctrl+Option+Cmd+C на маке. Пустое значение (и отсутствие ключа) значит
 # «взять встроенное», а не «выключить».
@@ -222,6 +222,16 @@ backgroundRefresh: true
 #            командной строки. Переменные окружения раскрываются.
 #
 # Примеры под разные системы — возьмите те, что подходят вашей:
+# Редактор встроенного пункта `Open in …` (Ctrl+O, в меню Ctrl+K — буква `o`):
+# он открывает папку сессии, а заодно её спеку и план. Как и действия ниже,
+# работает только вместе с pathMap.
+#
+#   (пусто)  — умолчание: первый установленный из Zed, VS Code, Cursor
+#   zed, vscode, cursor — этот редактор, где бы он ни был установлен
+#   иное    — свой вариант: имя приложения (на маке уходит в `open -a`) или
+#             полный путь к программе
+# editor: ''
+
 # actions:
 #   # Windows: проводник и Cursor.
 #   - id: explorer
@@ -231,9 +241,9 @@ backgroundRefresh: true
 #     icon: '%SystemRoot%\explorer.exe'
 #   - id: cursor
 #     label: Open in Cursor
-#     # Ctrl+O is the picker's own sort switch, so this action gets no global
-#     # hotkey. In the Ctrl+K menu it answers to a bare `o`.
-#     menuKey: o
+#     # Ctrl+O and `o` belong to the built-in editor item (`editor` above), so
+#     # this one takes another letter in the Ctrl+K menu.
+#     menuKey: c
 #     argv: ['cursor', '{localPath}']
 #   # macOS: Finder и VS Code.
 #   - id: finder

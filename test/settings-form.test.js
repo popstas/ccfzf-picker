@@ -576,3 +576,33 @@ test('валидация stale-чисел отвергает значения д
     }
   }
 });
+
+test('выпадашка редакторов знает те же редакторы и в том же порядке, что editor.rs', () => {
+  // Порядок — это приоритет автовыбора, и показывать его иначе, чем ищет
+  // Rust, значило бы обещать человеку не тот редактор под «Auto».
+  const { EDITORS } = require('../frontend-src/settings-form');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const rust = fs.readFileSync(path.join(__dirname, '..', 'src-tauri', 'src', 'editor.rs'), 'utf8');
+  const known = rust.slice(rust.indexOf('pub const KNOWN'));
+  const ids = [...known.matchAll(/\bid: "([a-z]+)"/g)].map(m => m[1]);
+  assert.ok(ids.length >= 3, 'KNOWN не найден в editor.rs — тест сторожит не то');
+  assert.deepStrictEqual(EDITORS.map(e => e.value), ids);
+});
+
+test('выбор редактора считается по значению editor', () => {
+  const { matchEditor } = require('../frontend-src/settings-form');
+  assert.strictEqual(matchEditor(''), 'auto');
+  assert.strictEqual(matchEditor(undefined), 'auto');
+  assert.strictEqual(matchEditor(' Zed '), 'zed');
+  assert.strictEqual(matchEditor('code'), 'vscode');
+  assert.strictEqual(matchEditor('cursor'), 'cursor');
+  assert.strictEqual(matchEditor('Sublime Text'), 'other');
+  assert.strictEqual(matchEditor('C:\\Tools\\Cursor.exe'), 'other');
+});
+
+test('выпадашка редакторов в патч не попадает — ключа у неё нет', () => {
+  const patch = fieldsToPatch({ ...configToFields({}), editor: 'zed' }, {});
+  assert.ok(!('editorPreset' in patch), 'выдуманный ключ уехал бы в config.yaml');
+  assert.strictEqual(patch.editor, 'zed');
+});

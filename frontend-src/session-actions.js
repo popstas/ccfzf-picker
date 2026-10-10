@@ -48,10 +48,11 @@
    * Открытия сессии в списке нет намеренно: оно висит на Enter и на клике, а не
    * прячется в меню.
    *
-   * Настроенные действия открытия папки идут первыми: они самые частые, а
-   * встроенные — про случай (есть PR, есть pid). Появляются они только там, где
-   * путь сессии удалось перевести на эту машину: пункт, открывающий несуществующую
-   * папку, хуже отсутствующего.
+   * Действия открытия папки идут первыми: они самые частые, а встроенные —
+   * про случай (есть PR, есть pid). Первым из них — встроенный `editor`
+   * (`^O`, папка в редакторе по умолчанию), следом настроенные. Появляются
+   * они только там, где путь сессии удалось перевести на эту машину: пункт,
+   * открывающий несуществующую папку, хуже отсутствующего.
    *
    * `config` необязателен — без него список прежний. Так вызов остаётся годным
    * и там, где конфига под рукой нет (тесты формы строки).
@@ -62,10 +63,24 @@
    * `isWindowsLocalRow` (open-transport.js), и все пять мест ниже спрашивают
    * именно её, а не пишут по второму условию: факт один, последствий у него
    * два — нет шелла и некому писать комментарий, — и разъехались бы они молча.
+   *
+   * `opts.editorLabel` — имя редактора, который нашёл Rust (`editor_info`),
+   * для подписи «Open in Zed». Не назвали — подпись общая.
    */
   function availableActions(row, config, opts) {
     const actions = [];
     const cfg = config || {};
+    // Один список действий папки на все три ветки ниже: встроенный пункт
+    // редактора и настроенные следом. Три копии разошлись бы — так уже
+    // терялся `menuKey` при пересборке пункта, во всех трёх ветках разом.
+    const folderActions = () => {
+      if (pathApi.mapRowPath(row, cfg.pathMap) === null) return [];
+      const editorLabel = (opts || {}).editorLabel || 'editor';
+      return [
+        { id: 'editor', label: `Open in ${editorLabel}` },
+        ...(cfg.actions || []).map(a => ({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey })),
+      ];
+    };
     // Своя машина на Windows: местная команда пошла бы через `/bin/sh -c`,
     // которого там нет, а `--comment` некому разобрать. Причина у каждого
     // места своя и написана на месте; мерка — одна.
@@ -86,11 +101,7 @@
         // что условия ему, в отличие от общей ветки, не нужно.
         { id: 'terminal', label: 'Open terminal' },
       ];
-      if (pathApi.mapRowPath(row, cfg.pathMap) !== null) {
-        for (const a of cfg.actions || []) {
-          forProject.push({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey });
-        }
-      }
+      forProject.push(...folderActions());
       return forProject;
     }
     // Зелийная сессия — терминал, а не работа агента: записи агента, pid и
@@ -131,12 +142,7 @@
     // добавляет страница (`actionsFor`), и он честен — id настоящий, менеджер
     // найдёт сессию по нему.
     if ((row || {}).kind === 'snapshot-session') {
-      const forSnapshot = [];
-      if (pathApi.mapRowPath(row, cfg.pathMap) !== null) {
-        for (const a of cfg.actions || []) {
-          forSnapshot.push({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey });
-        }
-      }
+      const forSnapshot = folderActions();
       // Та же мерка, что у строки проекта и у общей ветки: копий у этих двух
       // пунктов три, и правило обязано стоять при каждой — иначе оно
       // работало бы через строку.
@@ -146,9 +152,7 @@
       }
       return forSnapshot;
     }
-    if (pathApi.mapRowPath(row, cfg.pathMap) !== null) {
-      for (const a of cfg.actions || []) actions.push({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey });
-    }
+    actions.push(...folderActions());
     const num = prNumber((row || {}).pr_url);
     if (num) actions.push({ id: 'pr', label: `Open PR #${num}` });
     // Спека и план — файлы внутри `cwd`, и открыть их можно только там, где

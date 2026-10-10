@@ -33,8 +33,15 @@ pair of "path there ⇄ path here". With it the picker adds folder-opening
 actions from `actions` to every session: Explorer, Finder, an editor — whatever
 you write there.
 
-The picker knows no applications by name; it substitutes the path into `argv`
-and runs it, and you supply the command and the hotkey. A `^K` menu item can
+One folder action is built in: `^O` (or `o` in the `^K` menu) opens the
+session folder in your editor, and the same editor opens the session's spec and
+plan. Leave `editor` empty to take the first installed of Zed, VS Code and
+Cursor, set it to `zed`, `vscode` or `cursor` to pick one, or write any other
+application name or a full path. The Paths tab of the settings window has the
+same choice as a drop-down.
+
+For everything else the picker knows no applications by name; it substitutes
+the path into `argv` and runs it, and you supply the command and the hotkey. A `^K` menu item can
 additionally be bound to a bare letter with `menuKey`; it only works while the
 menu is open, which is why it can take even the letters the picker keeps for
 itself under Ctrl.

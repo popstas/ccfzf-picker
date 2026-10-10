@@ -54,6 +54,14 @@ test('у pr значок GitHub, а не глиф', () => {
   assert.ok(icon.src.includes('viewBox'), 'в data-URI должен лежать разобранный svg');
 });
 
+test('иконка пункта редактора — с найденного Rust файла', () => {
+  // Путь знает только Rust (`editor_info`): страница не ищет, где что стоит.
+  const specs = iconSpecs({ actions: [] }, 'C:\\Zed\\Zed.exe');
+  assert.ok(specs.some(s => s.id === 'editor' && s.path === 'C:\\Zed\\Zed.exe'));
+  assert.ok(!iconSpecs({ actions: [] }, null).some(s => s.id === 'editor'));
+  assert.ok(GLYPHS.editor, 'без иконки (мак, не найден) пункт получает глиф');
+});
+
 test('icon перевешивает argv[0], а без него берётся argv[0]', () => {
   const specs = iconSpecs({ actions: [
     { id: 'explorer', icon: '%SystemRoot%\\explorer.exe', argv: ['cmd', '/c', 'start'] },

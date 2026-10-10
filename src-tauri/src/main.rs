@@ -14,6 +14,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 mod config_file;
 mod desktop_store;
+mod editor;
 mod icons;
 mod local_ccfzf;
 // `#[macro_use]`, а не `use` по файлам: `ccfzf_log!` зовут четыре модуля из
@@ -2102,32 +2103,21 @@ fn spawn_url(argv: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("failed to spawn {file}: {e}"))
 }
 
-/// Как звать редактор, чтобы он открыл файл.
+/// Как звать редактор, чтобы он открыл файл: что выбрать при этой настройке,
+/// решает `editor::resolve`, здесь к его argv приклеивается путь.
 ///
-/// На macOS голое имя уходит в `open -a`, и это не удобство, а единственная
-/// работающая дорога. Проверено на живом маке (2026-08-18): CLI `cursor` там не
-/// установлен вовсе — `which cursor` пуст даже в логин-шелле, — зато
-/// `/Applications/Cursor.app` на месте, и `open -a` находит приложение по
-/// имени в любом регистре (`id of app "cursor"` и `"Cursor"` дают один и тот же
-/// bundle id). Прямой запуск при этом падал `unable to spawn cursor`, и правкой
-/// PATH это не лечится: программы, о которой идёт речь, на диске нет.
-///
-/// Имя с разделителем каталогов — это путь, и его зовут напрямую: человек
-/// назвал файл, а не приложение, и `open -a` такой строке не обрадуется.
-///
-/// На Windows и Linux ветки нет: там редактор и есть программа в PATH.
-fn editor_argv(editor: &str, path: &str) -> Vec<String> {
-    let editor = editor.trim();
-    #[cfg(target_os = "macos")]
-    if !editor.is_empty() && !editor.contains('/') {
-        return vec![
-            "open".to_string(),
-            "-a".to_string(),
-            editor.to_string(),
-            path.to_string(),
-        ];
-    }
-    vec![editor.to_string(), path.to_string()]
+/// На macOS всё, кроме названного пути, уходит в `open -a`, и это не удобство,
+/// а единственная работающая дорога. Проверено на живом маке (2026-08-18): CLI
+/// `cursor` там не установлен вовсе — `which cursor` пуст даже в логин-шелле, —
+/// зато `/Applications/Cursor.app` на месте. Прямой запуск при этом падал
+/// `unable to spawn cursor`, и правкой PATH это не лечится: программы, о
+/// которой идёт речь, на диске нет.
+fn editor_argv(editor: &str, path: &str) -> Result<Vec<String>, String> {
+    let resolved = editor::resolve_here(editor)
+        .ok_or("no editor found: install Zed, VS Code or Cursor, or name one in Settings")?;
+    let mut argv = resolved.argv;
+    argv.push(path.to_string());
+    Ok(argv)
 }
 
 /// Пускач ли это — то есть программа, которая сама сразу завершится.
@@ -2144,7 +2134,7 @@ fn editor_is_launcher(argv: &[String]) -> bool {
     argv.first().map(String::as_str) == Some("open")
 }
 
-/// Открыть спеку или план в редакторе.
+/// Открыть в редакторе спеку, план или папку сессии (`Ctrl+O`).
 ///
 /// Отдельная команда, а не `spawn_detached` с готовым argv со страницы:
 /// страница системы не знает и знать не должна — то же правило, по которому
@@ -2157,13 +2147,10 @@ fn editor_is_launcher(argv: &[String]) -> bool {
 /// живьём.
 #[tauri::command]
 fn open_in_editor(editor: String, path: String) -> Result<(), String> {
-    if editor.trim().is_empty() {
-        return Err("editor is not set".into());
-    }
     if path.trim().is_empty() {
         return Err("nothing to open".into());
     }
-    let argv = editor_argv(&editor, &path);
+    let argv = editor_argv(&editor, &path)?;
     if !editor_is_launcher(&argv) {
         // spawn_detached_argv, а не команда: открытие спеки в редакторе
         // терминала за собой не оставляет, и всплеск опроса тут гнал бы ssh
@@ -2186,6 +2173,18 @@ fn open_in_editor(editor: String, path: String) -> Result<(), String> {
     } else {
         said
     })
+}
+
+/// Какой редактор откроет `Ctrl+O`: подпись пункта («Open in Zed») и файл для
+/// его иконки. `null` — автовыбор не нашёл ни одного редактора.
+///
+/// Спрашивает страница, а не считает сама: где что установлено, она не знает
+/// и знать не должна — то же правило, что у `open_in_editor`. `async` — по той
+/// же причине, что у `action_icons`: поход в файловую систему.
+#[tauri::command]
+async fn editor_info(editor: String) -> Result<Option<serde_json::Value>, String> {
+    Ok(editor::resolve_here(&editor)
+        .map(|r| serde_json::json!({ "label": r.label, "icon": r.icon })))
 }
 
 /// Утилита, забирающая буфер обмена со стандартного ввода.
@@ -2565,7 +2564,7 @@ fn tile_press(app: &tauri::AppHandle) {
         .and_then(|s| s.get("state").cloned())
         .unwrap_or(serde_json::Value::Null);
 
-    // Режим сортировки — тот, что человек выбрал в пикере (`^O`). Читается из
+    // Режим сортировки — тот, что человек выбрал в пикере (клик по статуслайну). Читается из
     // `ui.json`, а не спрашивается у страницы, по той же причине, что и всё
     // остальное здесь.
     let sort = load_json("ui.json")
@@ -2959,7 +2958,7 @@ fn main() {
             restore_snapshot_mqtt, place_windows_mqtt, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
-            set_comment, open_in_editor, read_log, tracker_signal_status, open_desktop_session, open_folder
+            set_comment, open_in_editor, editor_info, read_log, tracker_signal_status, open_desktop_session, open_folder
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
@@ -3369,31 +3368,6 @@ mod tests {
     }
 
     #[test]
-    fn redaktor_na_make_zovetsya_cherez_open_a() {
-        // Живая проверка на маке (2026-08-18): CLI `cursor` там не установлен
-        // вовсе, а /Applications/Cursor.app есть. Прямой запуск падал
-        // `unable to spawn cursor`, и правкой PATH это не лечится —
-        // программы на диске нет. `open -a` находит приложение по имени.
-        let got = super::editor_argv("cursor", "/x/plan.md");
-        if cfg!(target_os = "macos") {
-            assert_eq!(got, vec!["open", "-a", "cursor", "/x/plan.md"]);
-        } else {
-            assert_eq!(got, vec!["cursor", "/x/plan.md"]);
-        }
-    }
-
-    #[test]
-    fn nazvannyy_put_zovetsya_napryamuyu_na_lyuboy_sisteme() {
-        // Разделитель каталогов значит, что человек назвал файл, а не
-        // приложение: `open -a /usr/local/bin/cursor` такой строке не
-        // обрадуется.
-        assert_eq!(
-            super::editor_argv("/usr/local/bin/cursor", "/x/plan.md"),
-            vec!["/usr/local/bin/cursor", "/x/plan.md"]
-        );
-    }
-
-    #[test]
     fn otkaz_puskacha_dohodit_slovami_a_ne_teryaetsya() {
         // `open` завершается сразу, и отказ у него — код возврата, а не отказ
         // запуска. Не дождись его пикер, он ответил бы Ok на неудачу, страница
@@ -3413,17 +3387,15 @@ mod tests {
         // Тот же вход, каким страница зовёт редактор на маке, — argv обязан
         // опознаваться пускачом, иначе ветка ожидания не включится вовсе.
         assert_eq!(
-            super::editor_is_launcher(&super::editor_argv("cursor", "/x/plan.md")),
+            super::editor_is_launcher(&super::editor_argv("cursor", "/x/plan.md").unwrap()),
             cfg!(target_os = "macos")
         );
     }
 
     #[test]
-    fn pustoy_redaktor_i_pustoy_put_otkazyvayut_slovami() {
-        // Пустой argv[0] превратился бы в попытку запустить пустую строку, а
-        // отказ у неё невнятный. Человеку это видно строкой ошибки в
-        // статуслайне, и она обязана называть причину.
-        assert!(super::open_in_editor("  ".into(), "/x/plan.md".into()).is_err());
+    fn pustoy_put_otkazyvaet_slovami() {
+        // Пустой редактор — не отказ, а автовыбор (editor.rs). Пустой путь
+        // открыл бы редактор ни на чём, а человек ждал конкретного файла.
         assert!(super::open_in_editor("cursor".into(), " ".into()).is_err());
     }
     use super::*;

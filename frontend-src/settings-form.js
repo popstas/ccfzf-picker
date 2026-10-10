@@ -96,6 +96,33 @@
     { value: 'light', label: 'Light' },
   ];
 
+  /**
+   * Редакторы, которые пикер знает по имени, — в порядке автовыбора.
+   *
+   * Список и порядок — у `KNOWN` в editor.rs, он и ищет их на машине; здесь
+   * только подписи для выпадашки. Сверяет их test/settings-form.test.js:
+   * разойдись списки, выпадашка предлагала бы редактор, которого Rust не
+   * знает, и выбор молча уходил бы в «other».
+   */
+  const EDITORS = [
+    { value: 'zed', label: 'Zed' },
+    { value: 'vscode', label: 'VS Code' },
+    { value: 'cursor', label: 'Cursor' },
+  ];
+
+  /**
+   * Какой пункт выпадашки редакторов отвечает значению `editor`: `auto`,
+   * один из `EDITORS` или `other`. Считается по значению, а не хранится
+   * рядом — то же правило, что у пресетов терминала (`matchPreset`).
+   * `code` — имя CLI у VS Code, Rust читает его так же.
+   */
+  function matchEditor(value) {
+    const v = String(value == null ? '' : value).trim().toLowerCase();
+    if (!v) return 'auto';
+    const id = v === 'code' ? 'vscode' : v;
+    return EDITORS.some(e => e.value === id) ? id : 'other';
+  }
+
   const TRAY_ACTIONS = [
     { value: 'sessions', label: 'Show the picker' },
     { value: 'projects', label: 'Show the picker on projects' },
@@ -248,13 +275,19 @@
       fields: [
         { id: 'pathMap.remote', label: 'Directory on the remote host', type: 'text' },
         { id: 'pathMap.local', label: 'The same one here', type: 'text' },
-        // Стоит на этой вкладке, а не на своей: пункты «Open plan» и «Open
-        // spec» работают только вместе с картой путей — файл лежит на
-        // удалённой машине, и без перевода открывать нечего. Рядом человек и
-        // увидит, почему поле есть, а пункты не появляются.
-        { id: 'editor', label: 'Editor for specs and plans', type: 'text',
-          hint: 'Empty means cursor. On macOS a bare name opens the matching '
-            + 'application; write a full path to run a program directly.' },
+        // Стоит на этой вкладке, а не на своей: `^O`, «Open plan» и «Open
+        // spec» работают только вместе с картой путей — папка и файлы лежат
+        // на удалённой машине, и без перевода открывать нечего. Рядом человек
+        // и увидит, почему поле есть, а пункты не появляются.
+        //
+        // Выпадашка — помощник, как пресет терминала: своего ключа у неё нет,
+        // она пишет в `editor` под ней.
+        { id: 'editorPreset', label: 'Editor', type: 'editorPreset',
+          hint: 'Opens the session folder (Ctrl+O), its spec and plan. '
+            + 'Auto takes the first installed of Zed, VS Code, Cursor.' },
+        { id: 'editor', label: 'Editor command', type: 'text',
+          hint: 'Filled by the choice above. For Other, write an application name '
+            + '(on macOS it opens the matching application) or a full path.' },
       ],
     },
     // Полей у неё нет по той же причине, что у `columns` и `panels`: она
@@ -267,10 +300,12 @@
     { id: 'log', title: 'Log', fields: [] },
   ];
 
-  // Помощники (`preset`) в список полей не входят: своего ключа в конфиге у них
-// нет, и `configToFields`/`fieldsToPatch` полезли бы за значением, которого не
-// существует, а патч унёс бы в config.yaml выдуманный ключ.
-const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !== 'preset');
+  // Помощники (`preset`, `editorPreset`) в список полей не входят: своего
+  // ключа в конфиге у них нет, и `configToFields`/`fieldsToPatch` полезли бы
+  // за значением, которого не существует, а патч унёс бы в config.yaml
+  // выдуманный ключ.
+  const FIELDS = PAGES.flatMap(page => page.fields)
+    .filter(field => field.type !== 'preset' && field.type !== 'editorPreset');
 
   // Глобальные хоткеи — те три, что вешает Rust. Список считается из самой
   // страницы, а не пишется вторым рядом: разойдись он с полями, проверка на
@@ -553,5 +588,5 @@ const FIELDS = PAGES.flatMap(page => page.fields).filter(field => field.type !==
     return problems;
   }
 
-  return { PAGES, configToFields, fieldsToPatch, validate };
+  return { PAGES, EDITORS, matchEditor, configToFields, fieldsToPatch, validate };
 });
