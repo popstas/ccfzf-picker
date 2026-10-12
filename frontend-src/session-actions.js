@@ -151,18 +151,16 @@
     }
     const num = prNumber((row || {}).pr_url);
     if (num) actions.push({ id: 'pr', label: `Open PR #${num}` });
-    // Спека и план — файлы внутри `cwd`, и открыть их можно только там, где
-    // путь переводится на эту машину: то же правило и та же проверка, что у
-    // действий с папкой выше. Без pathMap пункт вёл бы в никуда.
+    // Спека и план открываются только там, где путь переводится на эту
+    // машину: то же правило, что у действий с папкой выше. Без pathMap пункт
+    // вёл бы в никуда. Переводит mapRowDoc — у бумаги, записанной в чужой
+    // каталог, путь абсолютный и от `cwd` строки не зависит.
     //
     // План первым: спека отвечает «что решили», план — «где сейчас», и из
     // списка приходят за вторым. Тот же порядок, что и у значка в строке
     // (docKindOf в session-glyph.js).
-    if (pathApi.mapRowPath(row, cfg.pathMap) !== null) {
-      for (const [id, label] of [['plan', 'Open plan'], ['spec', 'Open spec']]) {
-        const rel = (row || {})[id];
-        if (typeof rel === 'string' && rel) actions.push({ id, label });
-      }
+    for (const [id, label] of [['plan', 'Open plan'], ['spec', 'Open spec']]) {
+      if (pathApi.mapRowDoc(row, (row || {})[id], cfg.pathMap) !== null) actions.push({ id, label });
     }
     if (row && row.agentUpdated && row.agentSeen) actions.push({ id: 'unread', label: 'Mark unread' });
     // Зеркало предыдущего, и условие у него зеркальное же: отмечать
