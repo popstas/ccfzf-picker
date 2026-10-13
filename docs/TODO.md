@@ -216,11 +216,6 @@
   открытия, а на маке, где местный дамп пишет сам пикер, другой дороги нет и
   быть не может — трекер звать местный `ccfzf` отказывается сознательно.
 
-- [x] Select default editor
-  - for ctrl+o (now it's cursor, should be default editor)
-  - detect editors: cursor, vscode, zed, other
-  - default priority: zed, vscode, cursor, other
-
 
 # future
 
