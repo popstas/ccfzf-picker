@@ -55,9 +55,29 @@ test('без конфига список действий прежний', () =>
   assert.deepStrictEqual(availableActions(row, {}).map(a => a.id), ['new', 'terminal', 'comment', 'info']);
 });
 
-test('настроенные действия идут первыми, когда путь переводится', () => {
+test('действия папки идут первыми, когда путь переводится', () => {
   const ids = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED).map(a => a.id);
-  assert.deepStrictEqual(ids, ['explorer', 'new', 'terminal', 'comment', 'info']);
+  assert.deepStrictEqual(ids, ['editor', 'explorer', 'new', 'terminal', 'comment', 'info']);
+});
+
+test('Ctrl+O: папка сессии в редакторе — тем же правилом, что действия папки', () => {
+  // Пункт стоит там же, где настроенные действия: открывается путь на этой
+  // машине, и без pathMap открывать нечего.
+  const zed = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED, { editorLabel: 'Zed' });
+  assert.deepStrictEqual(zed[0], { id: 'editor', label: 'Open in Zed' });
+  // Пока Rust не ответил (или не нашёл ни одного редактора), подпись общая:
+  // нажатие всё равно дойдёт до open_in_editor, и отказ тот назовёт словами.
+  const [plain] = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED);
+  assert.strictEqual(plain.label, 'Open in editor');
+  const outside = availableActions({ id: 'a', cwd: '/etc/nginx' }, CONFIGURED).map(a => a.id);
+  assert.ok(!outside.includes('editor'), 'путь не переводится — пункт вёл бы в никуда');
+  for (const row of [
+    { kind: 'project', id: '/home/user/x', cwd: '/home/user/x' },
+    { kind: 'snapshot-session', id: 'a', cwd: '/home/user/x' },
+  ]) {
+    const ids = availableActions(row, CONFIGURED).map(a => a.id);
+    assert.ok(ids.includes('editor'), `у строки kind=${row.kind} нет пункта редактора`);
+  }
 });
 
 test('сессия вне общего дерева настроенных действий не получает', () => {
@@ -67,7 +87,8 @@ test('сессия вне общего дерева настроенных де�
 });
 
 test('настроенное действие доносит до меню свою подпись и клавишу', () => {
-  const [action] = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED);
+  const action = availableActions({ id: 'a', cwd: '/home/user/x' }, CONFIGURED)
+    .find(a => a.id === 'explorer');
   assert.strictEqual(action.label, 'Open in Explorer');
   assert.strictEqual(action.hotkey, 'Ctrl+Shift+E');
 });
@@ -81,7 +102,7 @@ test('настроенное действие доносит до меню св�
 test('буква из config.yaml доезжает до меню всей дорогой: normalizeConfig → availableActions → menuKeys', () => {
   const cfg = normalizeConfig({
     pathMap: { remote: '/home/user', local: '\\\\nas\\home' },
-    actions: [{ id: 'cursor', label: 'Open in Cursor', menuKey: 'o', argv: ['cursor', '{localPath}'] }],
+    actions: [{ id: 'cursor', label: 'Open in Cursor', menuKey: 'y', argv: ['cursor', '{localPath}'] }],
   });
 
   const sessionRow = { id: 'a', cwd: '/home/user/x' };
@@ -94,7 +115,7 @@ test('буква из config.yaml доезжает до меню всей дор
     const index = menuActions.findIndex(a => a.id === 'cursor');
     assert.ok(index >= 0, `настроенное действие пропало у строки kind=${row.kind}`);
     assert.strictEqual(
-      letters[index], 'o',
+      letters[index], 'y',
       `буква настроенного действия не дошла до меню у строки kind=${row.kind}`,
     );
   }
@@ -203,7 +224,7 @@ test('у проекта есть действия папки, когда пут�
     { pathMap: { remote: '/remote', local: '/local' },
       actions: [{ id: 'explorer', label: 'Open in Explorer', hotkey: 'Ctrl+Shift+E' }] },
   ).map(a => a.id);
-  assert.deepStrictEqual(ids, ['new', 'terminal', 'explorer']);
+  assert.deepStrictEqual(ids, ['new', 'terminal', 'editor', 'explorer']);
 });
 
 test('строке зелийной сессии предлагается только информация', () => {
@@ -244,7 +265,7 @@ test('строке внутри снимка предлагают каталог
     kind: 'snapshot-session', id: 'abc123', snapshotId: 'snap-1',
     cwd: '/home/user/x', label: 'x', open: false,
   };
-  assert.deepStrictEqual(availableActions(row, CONFIGURED).map(a => a.id), ['explorer', 'new', 'terminal']);
+  assert.deepStrictEqual(availableActions(row, CONFIGURED).map(a => a.id), ['editor', 'explorer', 'new', 'terminal']);
   assert.deepStrictEqual(availableActions(row).map(a => a.id), ['new', 'terminal']);
 });
 
@@ -282,17 +303,17 @@ test('меню решено для каждого вида строки, а не
     zellij: 'home', snapshotId: 'snap-1',
   };
   const decided = {
-    interactive: ['explorer', 'pr', 'unread', 'attach', 'new', 'terminal', 'comment', 'info'],
+    interactive: ['editor', 'explorer', 'pr', 'unread', 'attach', 'new', 'terminal', 'comment', 'info'],
     // Комментария у зелийной строки нет намеренно: настоящего id сессии у
     // неё не бывает, а комментарий ключуется именно им — общий список на
     // машине агрегатора хранится по id.
     zellij: ['info'],
-    project: ['new', 'terminal', 'explorer'],
+    project: ['new', 'terminal', 'editor', 'explorer'],
     snapshot: ['restore'],
     // Пусто, и это решение, а не пропуск: под днём снимков несколько, и
     // «восстанови их все» никто не просил. Такое меню openMenu не открывает.
     'snapshot-day': [],
-    'snapshot-session': ['explorer', 'new', 'terminal'],
+    'snapshot-session': ['editor', 'explorer', 'new', 'terminal'],
   };
   for (const [kind, ids] of Object.entries(decided)) {
     assert.deepStrictEqual(
@@ -444,7 +465,7 @@ test('под Windows у своей строки не остаётся ни од�
   for (const id of SHELL_ITEMS) assert.ok(!ids.includes(id), `${id} остался: ${ids.join(',')}`);
   // Пустым меню при этом не становится: настроенное действие с папкой и
   // «Session info» работают там как прежде.
-  assert.deepStrictEqual(ids, ['explorer', 'info']);
+  assert.deepStrictEqual(ids, ['editor', 'explorer', 'info']);
 });
 
 test('под Windows строка с ssh-источника пункты сохраняет', () => {
@@ -486,10 +507,10 @@ test('под Windows своя строка проекта и строка сни
     { kind: 'project', id: 'X:\\projects\\demo', cwd: 'X:\\projects\\demo', source: 'local' },
     CONFIGURED, { os: 'windows' },
   ).map(a => a.id);
-  assert.deepStrictEqual(project, ['explorer']);
+  assert.deepStrictEqual(project, ['editor', 'explorer']);
   const snap = availableActions(
     { kind: 'snapshot-session', id: 'abc123', cwd: 'X:\\projects\\demo', source: 'local' },
     CONFIGURED, { os: 'windows' },
   ).map(a => a.id);
-  assert.deepStrictEqual(snap, ['explorer']);
+  assert.deepStrictEqual(snap, ['editor', 'explorer']);
 });

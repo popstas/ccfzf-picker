@@ -22,6 +22,8 @@ and a session opens in the terminal of your choice.
   the age of the last activity.
 - **Enter opens the session** — in a terminal, or back inside Claude Desktop for
   the sessions that came from it.
+- **`^O` opens the folder in your editor** — Zed, VS Code or Cursor, whichever
+  is installed, or the one you pick in settings.
 - **Raises windows instead of opening new ones** — over MQTT, together with the
   [window tracker](https://github.com/popstas/macos-windows-manager).
 - **Tile and cascade layouts** — a global hotkey asks the tracker to arrange the

@@ -19,6 +19,7 @@
     // отвечает «ещё одна», этот «сюда руками».
     terminal: { text: '❯' },
     info: { text: 'ⓘ' },
+    editor: { text: '✎' },
     unread: { text: '●', cls: 'unread' },
     // Пустой кружок против залитого у `unread`: пара читается формой, а не
     // цветом — цвет у «просмотрено» был бы нейтральным и пропал бы в меню.
@@ -97,8 +98,11 @@
    * проводника). Пункт `new` в конфиге не описан, но иконку у него взять
    * есть откуда — у агента; нет агента на машине — встанет глиф.
    */
-  function iconSpecs(config) {
+  function iconSpecs(config, editorIcon) {
     const specs = NEW_ICON_PATHS.map(path => ({ id: 'new', path }));
+    // Файл редактора нашёл Rust (`editor_info`) — он один знает, что стоит
+    // на машине. Нет файла (мак, свой вариант, не найден) — встанет глиф.
+    if (editorIcon) specs.push({ id: 'editor', path: editorIcon });
     for (const action of (config && config.actions) || []) {
       const path = action.icon || (action.argv || [])[0] || '';
       if (path) specs.push({ id: action.id, path });

@@ -432,13 +432,13 @@ test('openOnActiveDisplay принимает булево как есть', () =
   assert.strictEqual(normalizeConfig({ openOnActiveDisplay: false }).openOnActiveDisplay, false);
 });
 
-test('editor: умолчание cursor, пустая строка возвращает его же', () => {
-  // Ключ нужен ради встроенных пунктов «Open plan» / «Open spec»: они обязаны
-  // работать из коробки, иначе значок в строке обещал бы то, чего нет.
-  // Умолчание — cursor: им и открывают.
-  assert.strictEqual(normalizeConfig({}).editor, 'cursor');
-  assert.strictEqual(normalizeConfig({ editor: '   ' }).editor, 'cursor');
-  assert.strictEqual(normalizeConfig({ editor: 42 }).editor, 'cursor');
+test('editor: умолчание пустое — редактор выбирает Rust', () => {
+  // Пусто значит «первый установленный из Zed, VS Code, Cursor» (editor.rs):
+  // какой из них стоит, знает только машина, и прежнее умолчание `cursor`
+  // звало программу, которой там могло не быть.
+  assert.strictEqual(normalizeConfig({}).editor, '');
+  assert.strictEqual(normalizeConfig({ editor: '   ' }).editor, '');
+  assert.strictEqual(normalizeConfig({ editor: 42 }).editor, '');
 });
 
 test('editor: названный редактор доезжает подрезанным', () => {
