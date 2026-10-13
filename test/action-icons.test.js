@@ -56,8 +56,8 @@ test('у pr значок GitHub, а не глиф', () => {
 
 test('иконка пункта редактора — с найденного Rust файла', () => {
   // Путь знает только Rust (`editor_info`): страница не ищет, где что стоит.
-  const specs = iconSpecs({ actions: [] }, 'C:\\Zed\\Zed.exe');
-  assert.ok(specs.some(s => s.id === 'editor' && s.path === 'C:\\Zed\\Zed.exe'));
+  const specs = iconSpecs({ actions: [] }, 'X:\\Zed\\Zed.exe');
+  assert.ok(specs.some(s => s.id === 'editor' && s.path === 'X:\\Zed\\Zed.exe'));
   assert.ok(!iconSpecs({ actions: [] }, null).some(s => s.id === 'editor'));
   assert.ok(GLYPHS.editor, 'без иконки (мак, не найден) пункт получает глиф');
 });

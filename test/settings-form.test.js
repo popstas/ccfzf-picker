@@ -598,7 +598,7 @@ test('выбор редактора считается по значению edi
   assert.strictEqual(matchEditor('code'), 'vscode');
   assert.strictEqual(matchEditor('cursor'), 'cursor');
   assert.strictEqual(matchEditor('Sublime Text'), 'other');
-  assert.strictEqual(matchEditor('C:\\Tools\\Cursor.exe'), 'other');
+  assert.strictEqual(matchEditor('X:\\Tools\\Cursor.exe'), 'other');
 });
 
 test('выпадашка редакторов в патч не попадает — ключа у неё нет', () => {

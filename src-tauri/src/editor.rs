@@ -226,8 +226,8 @@ mod tests {
         Env {
             os,
             home: Some(PathBuf::from("/Users/user")),
-            local_app_data: Some(PathBuf::from(r"C:\Users\user\AppData\Local")),
-            program_files: Some(PathBuf::from(r"C:\Program Files")),
+            local_app_data: Some(PathBuf::from(r"X:\Users\user\AppData\Local")),
+            program_files: Some(PathBuf::from(r"X:\Program Files")),
             path: vec![PathBuf::from("/usr/bin"), PathBuf::from("/home/user/.local/bin")],
         }
     }
@@ -239,25 +239,25 @@ mod tests {
     #[test]
     fn avtovybor_beryot_zed_ranshe_vscode_i_cursor() {
         let all = only(&[
-            r"C:\Users\user\AppData\Local\Programs\Zed\Zed.exe",
-            r"C:\Program Files\Microsoft VS Code\Code.exe",
-            r"C:\Program Files\cursor\Cursor.exe",
+            r"X:\Users\user\AppData\Local\Programs\Zed\Zed.exe",
+            r"X:\Program Files\Microsoft VS Code\Code.exe",
+            r"X:\Program Files\cursor\Cursor.exe",
         ]);
         let got = resolve("", &env(Os::Windows), &all).unwrap();
         assert_eq!(got.label, "Zed");
-        assert_eq!(got.argv, vec![r"C:\Users\user\AppData\Local\Programs\Zed\Zed.exe"]);
-        assert_eq!(got.icon.as_deref(), Some(r"C:\Users\user\AppData\Local\Programs\Zed\Zed.exe"));
+        assert_eq!(got.argv, vec![r"X:\Users\user\AppData\Local\Programs\Zed\Zed.exe"]);
+        assert_eq!(got.icon.as_deref(), Some(r"X:\Users\user\AppData\Local\Programs\Zed\Zed.exe"));
     }
 
     #[test]
     fn avtovybor_idyot_po_spisku_dalshe_esli_pervogo_net() {
         let some = only(&[
-            r"C:\Program Files\cursor\Cursor.exe",
-            r"C:\Users\user\AppData\Local\Programs\Microsoft VS Code\Code.exe",
+            r"X:\Program Files\cursor\Cursor.exe",
+            r"X:\Users\user\AppData\Local\Programs\Microsoft VS Code\Code.exe",
         ]);
         let got = resolve("", &env(Os::Windows), &some).unwrap();
         assert_eq!(got.label, "VS Code");
-        let cursor = only(&[r"C:\Users\user\AppData\Local\Programs\cursor\Cursor.exe"]);
+        let cursor = only(&[r"X:\Users\user\AppData\Local\Programs\cursor\Cursor.exe"]);
         assert_eq!(resolve(" ", &env(Os::Windows), &cursor).unwrap().label, "Cursor");
     }
 
@@ -314,8 +314,8 @@ mod tests {
         let got = resolve("/usr/local/bin/subl", &env(Os::Mac), &|_| false).unwrap();
         assert_eq!(got.argv, vec!["/usr/local/bin/subl"]);
         assert_eq!(got.label, "subl");
-        let got = resolve(r"C:\Tools\notepad++.exe", &env(Os::Windows), &|_| false).unwrap();
-        assert_eq!(got.argv, vec![r"C:\Tools\notepad++.exe"]);
+        let got = resolve(r"X:\Tools\notepad++.exe", &env(Os::Windows), &|_| false).unwrap();
+        assert_eq!(got.argv, vec![r"X:\Tools\notepad++.exe"]);
         assert_eq!(got.label, "notepad++");
     }
 }
