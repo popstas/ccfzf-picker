@@ -75,6 +75,31 @@
   }
 
   /**
+   * Спека или план строки на этой машине; `null` — открыть нечем.
+   *
+   * Форм у бумаги две. Обычная — путь внутри `cwd`, и он клеится к переведённому
+   * каталогу тем разделителем, который выбрал сам pathMap: локальный корень
+   * бывает и windows-путём. Абсолютная — бумага, которую сессия писала в чужой
+   * каталог (`written_doc` в ccfzf, живой случай 2026-10-10: claude-otel →
+   * grafana): к `cwd` её не приклеить, и переводится она сама, по тому же
+   * правилу, что и каталог строки. Удалённая сторона — POSIX, поэтому ведущий
+   * `/` и есть признак.
+   *
+   * Форму пути уже проверил агрегатор — пробела и кавычки в нём не бывает.
+   */
+  function mapRowDoc(row, doc, pathMap) {
+    if (typeof doc !== 'string' || !doc) return null;
+    if (doc.startsWith('/')) {
+      if (String((row || {}).source || '') === 'local') return doc;
+      return mapPath(doc, pathMap);
+    }
+    const base = mapRowPath(row, pathMap);
+    if (base === null) return null;
+    const sep = separatorFor(base);
+    return `${base}${base.endsWith(sep) ? '' : sep}${doc.split('/').join(sep)}`;
+  }
+
+  /**
    * argv действия с подставленными плейсхолдерами.
    *
    * Подстановка идёт внутри каждого элемента, а не заменяет элемент целиком:
@@ -104,5 +129,5 @@
     });
   }
 
-  return { separatorFor, mapPath, mapRowPath, buildActionArgv };
+  return { separatorFor, mapPath, mapRowPath, mapRowDoc, buildActionArgv };
 });
