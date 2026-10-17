@@ -216,7 +216,7 @@
   открытия, а на маке, где местный дамп пишет сам пикер, другой дороги нет и
   быть не может — трекер звать местный `ccfzf` отказывается сознательно.
 
-- [ ] Добавить поддержку mqtts:// в windows11-manager, windows-mqtt и ccfzf-picker
+- [x] Добавить поддержку mqtts:// в windows11-manager, windows-mqtt и ccfzf-picker
 
 # future
 
