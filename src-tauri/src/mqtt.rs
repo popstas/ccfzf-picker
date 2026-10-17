@@ -53,6 +53,12 @@ const LAYOUT_MODES: [&str; 2] = ["tile", "cascade"];
 pub struct Broker {
     pub host: String,
     pub port: u16,
+    /// `mqtts://` в адресе. Голое имя — открытый текст, как было до TLS:
+    /// машина в домашней сети ходит к брокеру напрямую, и ей ничего не меняется.
+    pub tls: bool,
+    /// Путь к PEM-файлу корня, которому одному и доверять. Пусто — набор
+    /// корней Mozilla из `webpki-roots` (см. `transport`).
+    pub ca: String,
     pub user: String,
     pub password: String,
     pub base: String,
@@ -81,17 +87,100 @@ pub fn broker_from_config(raw: &serde_json::Value) -> Broker {
             .trim()
             .to_string()
     };
+    let field_port = block
+        .and_then(|m| m.get("port"))
+        .and_then(|v| v.as_u64())
+        .and_then(|v| u16::try_from(v).ok())
+        .filter(|p| *p != 0);
+    // Непонятый адрес — пустой хост, то есть выключенный брокер (см.
+    // `parse_address`); порт тогда не важен, но остаётся осмысленным.
+    let address = parse_address(&text("host")).unwrap_or_default();
+    let default_port = if address.tls { 8883 } else { 1883 };
     Broker {
-        host: text("host"),
-        port: block
-            .and_then(|m| m.get("port"))
-            .and_then(|v| v.as_u64())
-            .and_then(|v| u16::try_from(v).ok())
-            .unwrap_or(1883),
+        host: address.host,
+        port: address.port.or(field_port).unwrap_or(default_port),
+        tls: address.tls,
+        ca: text("ca"),
         user: text("user"),
         password: text("password"),
         base: text("base").trim_end_matches('/').to_string(),
     }
+}
+
+/// Разобранный `mqtt.host`.
+#[derive(Default)]
+struct Address {
+    host: String,
+    tls: bool,
+    port: Option<u16>,
+}
+
+/// `mqtt.host` → адрес брокера: голое имя, `mqtt://имя[:порт]` или
+/// `mqtts://имя[:порт]`.
+///
+/// Схема нужна ради ноутбука вне дома: брокер выставлен наружу только через
+/// TLS, а у голого имени схемы нет. Правило одно на три программы связки —
+/// пикер, windows11-manager и windows-mqtt, — и расходиться им нельзя: один
+/// конфиг брокера у человека переписывается из одной в другую.
+///
+/// `None` — форма, которую мы не понимаем: чужая схема, логин в адресе, путь,
+/// негодный порт. Брокер тогда выключен, а не подключён «как получилось» —
+/// `ws://` открытым текстом или молча отброшенный логин выглядели бы для
+/// человека как «брокер не отвечает».
+fn parse_address(raw: &str) -> Option<Address> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let (tls, rest) = match raw.find("://") {
+        None => (false, raw),
+        Some(i) => match raw[..i].to_ascii_lowercase().as_str() {
+            "mqtt" => (false, &raw[i + 3..]),
+            "mqtts" => (true, &raw[i + 3..]),
+            _ => return None,
+        },
+    };
+    let rest = rest.strip_suffix('/').unwrap_or(rest);
+    let (host, port) = match rest.rsplit_once(':') {
+        Some((host, port)) => (host, Some(port.parse::<u16>().ok().filter(|p| *p != 0)?)),
+        None => (rest, None),
+    };
+    let bad = |c: char| c.is_whitespace() || "/@?#:[]".contains(c);
+    if host.is_empty() || host.contains(bad) {
+        return None;
+    }
+    Some(Address { host: host.to_string(), tls, port })
+}
+
+/// Транспорт соединения: открытый TCP или TLS.
+///
+/// Для TLS без `ca` — набор корней Mozilla, вшитый в бинарь (`webpki-roots`),
+/// а не системное хранилище, которое берёт `TlsConfiguration::default()`.
+/// Причин две: Windows докладывает корни в хранилище лениво, по первому
+/// обращению своего же CryptoAPI, и ISRG Root X1 (Let's Encrypt) там может не
+/// оказаться вовсе — ровно так падает `mosquitto_pub --tls-use-os-certs` на
+/// ноутбуке; а сбой чтения хранилища там кончается `expect`, то есть паникой.
+///
+/// С `ca` доверяем только ему, и нечитаемый файл — отказ: откат на общий набор
+/// молча отменил бы то, ради чего файл назван.
+fn transport(broker: &Broker) -> Result<rumqttc::Transport, String> {
+    use rumqttc::tokio_rustls::rustls::{ClientConfig, RootCertStore};
+    use rumqttc::{TlsConfiguration, Transport};
+
+    if !broker.tls {
+        return Ok(Transport::Tcp);
+    }
+    if !broker.ca.is_empty() {
+        let ca = std::fs::read(&broker.ca)
+            .map_err(|e| format!("mqtt.ca {}: {e}", broker.ca))?;
+        return Ok(Transport::Tls(TlsConfiguration::Simple { ca, alpn: None, client_auth: None }));
+    }
+    let mut roots = RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(Transport::Tls(TlsConfiguration::Rustls(std::sync::Arc::new(config))))
 }
 
 /// «Чем открывают» → семейное имя терминала.
@@ -512,6 +601,7 @@ fn publish(broker: &Broker, base: &str, tail: &str, payload: &str) -> Result<(),
         broker.port,
     );
     options.set_keep_alive(Duration::from_secs(5));
+    options.set_transport(transport(broker)?);
     if !broker.user.is_empty() {
         options.set_credentials(&broker.user, &broker.password);
     }
@@ -625,6 +715,116 @@ mod tests {
         let broker = broker_from_config(&serde_json::json!({}));
         assert!(!broker.is_configured());
         assert_eq!(broker.port, 1883);
+    }
+
+    fn broker_at(host: serde_json::Value, port: Option<u64>) -> super::Broker {
+        let mut block = serde_json::json!({ "host": host, "base": "home/room/pc" });
+        if let Some(p) = port {
+            block["port"] = serde_json::json!(p);
+        }
+        broker_from_config(&serde_json::json!({ "mqtt": block }))
+    }
+
+    // Голое имя — то, что стоит в каждом живом конфиге до этой правки: машина
+    // в домашней сети обязана ходить к брокеру как прежде, открытым текстом.
+    #[test]
+    fn bare_host_stays_plain_mqtt() {
+        let b = broker_at(serde_json::json!("broker.example"), Some(1884));
+        assert_eq!((b.host.as_str(), b.port, b.tls), ("broker.example", 1884, false));
+        assert!(b.is_configured());
+    }
+
+    #[test]
+    fn mqtts_address_turns_tls_on_with_its_own_default_port() {
+        let b = broker_at(serde_json::json!("mqtts://broker.example"), None);
+        assert_eq!((b.host.as_str(), b.port, b.tls), ("broker.example", 8883, true));
+        let b = broker_at(serde_json::json!("mqtt://broker.example"), None);
+        assert_eq!((b.host.as_str(), b.port, b.tls), ("broker.example", 1883, false));
+    }
+
+    // Старшинство порта: адрес > поле `port` > умолчание схемы. Порт в адресе
+    // набран рядом со схемой и говорит о ней; поле `port` — пережиток голого
+    // имени и стоит в старых конфигах 1883, который TLS-порту не годится.
+    #[test]
+    fn port_in_the_address_beats_the_port_field() {
+        let b = broker_at(serde_json::json!("mqtts://broker.example:9883"), Some(1883));
+        assert_eq!((b.port, b.tls), (9883, true));
+        let b = broker_at(serde_json::json!("mqtts://broker.example"), Some(18883));
+        assert_eq!(b.port, 18883);
+    }
+
+    #[test]
+    fn scheme_case_and_trailing_slash_do_not_matter() {
+        let b = broker_at(serde_json::json!(" MQTTS://broker.example:8883/ "), None);
+        assert_eq!((b.host.as_str(), b.port, b.tls), ("broker.example", 8883, true));
+    }
+
+    // Непонятый адрес выключает брокер, а не уводит соединение куда-то ещё:
+    // `ws://` открытым текстом на чужой порт или логин из адреса, молча
+    // отброшенный, выглядели бы для человека как «брокер не отвечает».
+    #[test]
+    fn unknown_address_forms_disable_the_broker() {
+        for bad in [
+            "ws://broker.example",
+            "mqtts://user:secret@broker.example",
+            "mqtts://broker.example/path",
+            "mqtts://broker.example?x=1",
+            "mqtts://broker.example:99999",
+            "mqtts://broker.example:0",
+            "mqtts://broker.example:port",
+            "mqtts://",
+            "broker example",
+        ] {
+            let b = broker_at(serde_json::json!(bad), None);
+            assert!(!b.is_configured(), "{bad} не должен включать брокер");
+        }
+    }
+
+    #[test]
+    fn ca_path_is_read_only_as_text() {
+        let b = broker_from_config(&serde_json::json!({
+            "mqtt": { "host": "mqtts://broker.example", "base": "home", "ca": " /etc/ca.pem " }
+        }));
+        assert_eq!(b.ca, "/etc/ca.pem");
+    }
+
+    // Без `ca` — набор корней Mozilla, вшитый в бинарь, а не системное
+    // хранилище: Windows докладывает корни в него лениво, и ISRG Root X1 там
+    // может не оказаться вовсе (на этом и падает `mosquitto_pub
+    // --tls-use-os-certs` на ноутбуке).
+    #[test]
+    fn tls_without_ca_trusts_the_bundled_roots() {
+        let b = broker_at(serde_json::json!("mqtts://broker.example"), None);
+        match super::transport(&b).unwrap() {
+            rumqttc::Transport::Tls(rumqttc::TlsConfiguration::Rustls(_)) => {}
+            _ => panic!("ждали TLS со своим набором корней"),
+        }
+        assert!(matches!(
+            super::transport(&broker_at(serde_json::json!("broker.example"), None)).unwrap(),
+            rumqttc::Transport::Tcp
+        ));
+    }
+
+    // С `ca` доверяем только ему, а нечитаемый файл — отказ: откат на общий
+    // набор молча отменил бы то, ради чего файл назван.
+    #[test]
+    fn tls_with_ca_trusts_only_that_file() {
+        let dir = std::env::temp_dir().join(format!("ccfzf-mqtt-ca-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ca = dir.join("ca.pem");
+        std::fs::write(&ca, "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n").unwrap();
+        let mut b = broker_at(serde_json::json!("mqtts://broker.example"), None);
+        b.ca = ca.to_string_lossy().into_owned();
+        match super::transport(&b).unwrap() {
+            rumqttc::Transport::Tls(rumqttc::TlsConfiguration::Simple { ca: pem, .. }) => {
+                assert!(pem.starts_with(b"-----BEGIN CERTIFICATE-----"));
+            }
+            _ => panic!("ждали TLS с корнем из файла"),
+        }
+        b.ca = dir.join("missing.pem").to_string_lossy().into_owned();
+        let err = super::transport(&b).err().expect("нечитаемый ca — отказ");
+        assert!(err.contains("missing.pem"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
