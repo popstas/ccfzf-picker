@@ -261,12 +261,19 @@
       id: 'mqtt',
       title: 'MQTT',
       fields: [
-        { id: 'mqtt.host', label: 'MQTT broker', type: 'text' },
-        { id: 'mqtt.port', label: 'Broker port', type: 'number' },
+        { id: 'mqtt.host', label: 'MQTT broker', type: 'text',
+          hint: 'A host name, or an address: mqtt://host:1883, mqtts://host:8883 for TLS.' },
+        { id: 'mqtt.port', label: 'Broker port', type: 'number',
+          hint: 'A port in the address wins. Without either: 1883, or 8883 for mqtts.' },
         { id: 'mqtt.user', label: 'User', type: 'text' },
         { id: 'mqtt.password', label: 'Password', type: 'password',
           hint: 'Empty means keep the current one.' },
         { id: 'mqtt.base', label: 'Topic prefix', type: 'text' },
+        // Пусто — корни Mozilla, вшитые в пикер (`transport` в mqtt.rs):
+        // Let's Encrypt проходит без файла. Поле — на самоподписанный брокер.
+        { id: 'mqtt.ca', label: 'CA certificate', type: 'text',
+          hint: 'Path to a PEM file, for mqtts only. When set, only it is trusted. '
+            + 'Leave empty for a public certificate such as Let\'s Encrypt.' },
       ],
     },
     {
@@ -520,6 +527,22 @@
    * Отсюда и список — два случая, каждый из которых иначе виден только
    * пальцами: неработающий список, неотзывающаяся клавиша.
    */
+  /** Понятен ли адрес брокера; пустой — да: это «брокера нет», а не ошибка. */
+  function brokerAddressOk(value) {
+    const raw = String(value == null ? '' : value).trim();
+    if (!raw) return true;
+    const m = /^(?:([^:/]*):\/\/)?(.*)$/.exec(raw);
+    if (m[1] !== undefined && !['mqtt', 'mqtts'].includes(m[1].toLowerCase())) return false;
+    const rest = m[2].endsWith('/') ? m[2].slice(0, -1) : m[2];
+    const colon = rest.lastIndexOf(':');
+    const host = colon < 0 ? rest : rest.slice(0, colon);
+    if (colon >= 0) {
+      const port = rest.slice(colon + 1);
+      if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) return false;
+    }
+    return host !== '' && !/[\s/@?#:[\]]/.test(host);
+  }
+
   function validate(fields) {
     const problems = [];
     if (!String(fields.sshHost || '').trim() && !fields.localSource) {
@@ -549,6 +572,13 @@
         if (globals[i].toLowerCase() !== globals[j].toLowerCase()) continue;
         problems.push(`${globals[i]} is set for two hotkeys — only one of them will work`);
       }
+    }
+    // Адрес брокера — по правилу `parse_address` в mqtt.rs, копией: Rust
+    // непонятый адрес молча выключает брокер, и сказать об этом можно только
+    // здесь, пока человек ещё смотрит на поле. Сверяет обе копии один и тот
+    // же список случаев — в тестах mqtt.rs и settings-form.test.js.
+    if (!brokerAddressOk(fields['mqtt.host'])) {
+      problems.push('mqtt.host must be a host name, mqtt://host[:port] or mqtts://host[:port]');
     }
     const validNumber = (id, min, max, message) => {
       // Частичные вызовы validate в тестах старых полей не обязаны знать про

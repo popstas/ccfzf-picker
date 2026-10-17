@@ -30,7 +30,10 @@ a Mac). Tabs on the left, the page on the right.
   and a middle click on the tray icon do — show the list, show projects, or tile
   the windows. The right button opens the tray menu and cannot be rebound.
 - **MQTT** — the broker that carries window raising, layout snapshots and
-  opening a session on the machine with the window tracker.
+  opening a session on the machine with the window tracker. The broker field
+  takes a bare host name or an address: `mqtts://host:8883` connects over TLS,
+  trusting the public roots built into the picker; `CA certificate` replaces
+  them with one PEM file, for a broker with its own certificate.
 - **Paths** — the directory mapping (`pathMap`) between this machine and the
   remote one. Folder-opening actions are shown, but are edited only in
   `config.yaml`.

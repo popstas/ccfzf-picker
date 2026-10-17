@@ -979,7 +979,7 @@ fn config_parts() -> Result<(Option<mqtt::Broker>, String, serde_json::Value), S
 /// Брокер или внятный отказ — для ветки, которая уже выбрала MQTT.
 fn require_broker(broker: Option<mqtt::Broker>) -> Result<mqtt::Broker, String> {
     broker.ok_or_else(|| {
-        "mqtt is not configured: host and base are required in config.yaml".to_string()
+        "mqtt is not configured: base and a host (name, mqtt:// or mqtts:// address) are required in config.yaml".to_string()
     })
 }
 
@@ -1106,7 +1106,7 @@ async fn unread_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), Str
                 None => {
                     if first_err.is_none() {
                         first_err = Some(
-                            "mqtt is not configured: host and base are required in config.yaml"
+                            "mqtt is not configured: base and a host (name, mqtt:// or mqtts:// address) are required in config.yaml"
                                 .to_string(),
                         );
                     }

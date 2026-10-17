@@ -606,3 +606,28 @@ test('выпадашка редакторов в патч не попадает 
   assert.ok(!('editorPreset' in patch), 'выдуманный ключ уехал бы в config.yaml');
   assert.strictEqual(patch.editor, 'zed');
 });
+
+test('адрес брокера: голое имя, mqtt:// и mqtts:// — да, прочее — отказ при сохранении', () => {
+  // Тот же список, что у `parse_address` в mqtt.rs: форма, пропустившая
+  // адрес, который Rust не поймёт, сохранила бы выключенный брокер молча —
+  // и Enter ответил бы «mqtt is not configured» на заполненное поле.
+  const base = configToFields({ sshHost: 'h' });
+  for (const ok of ['', 'broker.example', 'mqtt://broker.example', 'mqtts://broker.example:8883',
+    ' MQTTS://broker.example/ ']) {
+    assert.deepStrictEqual(validate({ ...base, 'mqtt.host': ok }), [], ok);
+  }
+  for (const bad of ['ws://broker.example', 'mqtts://user:secret@broker.example',
+    'mqtts://broker.example/path', 'mqtts://broker.example:99999', 'mqtts://broker.example:0',
+    'mqtts://', 'broker example']) {
+    const problems = validate({ ...base, 'mqtt.host': bad });
+    assert.strictEqual(problems.length, 1, bad);
+    assert.match(problems[0], /mqtts:\/\//);
+  }
+});
+
+test('путь к корню TLS — поле на вкладке MQTT', () => {
+  const ids = PAGES.find(p => p.id === 'mqtt').fields.map(f => f.id);
+  assert.ok(ids.includes('mqtt.ca'));
+  const fields = configToFields({ mqtt: { host: 'mqtts://broker.example', ca: '/etc/ca.pem' } });
+  assert.strictEqual(fields['mqtt.ca'], '/etc/ca.pem');
+});
