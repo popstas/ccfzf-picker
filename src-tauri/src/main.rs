@@ -2561,12 +2561,13 @@ pub(crate) fn tile_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
 ///
 /// Развилка по системам — как у проектного и у плитки, и замена та же: где на
 /// Windows `F10`, на маке `Option+C`, остальные модификаторы как есть. Отсюда
-/// `Ctrl+Alt+Shift+F10` против `Ctrl+Option+Shift+C`: `Alt` и `Option` — одна
-/// клавиша, второй раз она не прибавляется.
+/// `Ctrl+Win+Shift+F10` против `Ctrl+Option+Cmd+Shift+C`. От плитки
+/// (`Ctrl+Win+F10`) отличается одним `Shift` — клавиши соседние и в пальцах
+/// ложатся рядом.
 #[cfg(target_os = "macos")]
 fn default_history_shortcut() -> Shortcut {
     Shortcut::new(
-        Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SHIFT),
+        Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER | Modifiers::SHIFT),
         Code::KeyC,
     )
 }
@@ -2574,7 +2575,7 @@ fn default_history_shortcut() -> Shortcut {
 #[cfg(not(target_os = "macos"))]
 fn default_history_shortcut() -> Shortcut {
     Shortcut::new(
-        Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SHIFT),
+        Some(Modifiers::CONTROL | Modifiers::SUPER | Modifiers::SHIFT),
         Code::F10,
     )
 }
@@ -2583,10 +2584,10 @@ fn default_history_shortcut() -> Shortcut {
 /// модификаторов тот же, что пишет `comboFromEvent`, чтобы набранная заново
 /// комбинация совпала строкой.
 #[cfg(target_os = "macos")]
-const DEFAULT_HISTORY_ACCELERATOR: &str = "Control+Alt+Shift+C";
+const DEFAULT_HISTORY_ACCELERATOR: &str = "Control+Alt+Super+Shift+C";
 
 #[cfg(not(target_os = "macos"))]
-const DEFAULT_HISTORY_ACCELERATOR: &str = "Control+Alt+Shift+F10";
+const DEFAULT_HISTORY_ACCELERATOR: &str = "Control+Super+Shift+F10";
 
 /// Действующий хоткей истории и запись для показа — устройством как
 /// `projects_hotkey`, включая пустую строку («взять встроенное»).

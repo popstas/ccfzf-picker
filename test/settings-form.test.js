@@ -217,7 +217,7 @@ test('хоткей истории попал в ту же проверку на 
   // Тот же сторож, что у третьего: поле, забытое в GLOBAL_HOTKEYS, молчало бы
   // ровно про себя.
   const clash = validate({
-    sshHost: 'host', projectsHotkey: 'Ctrl+Alt+Shift+F10', historyHotkey: 'ctrl+alt+shift+f10',
+    sshHost: 'host', projectsHotkey: 'Ctrl+Super+Shift+F10', historyHotkey: 'ctrl+super+shift+f10',
   });
   assert.strictEqual(clash.length, 1, clash);
   assert.match(clash[0], /two hotkeys/);
