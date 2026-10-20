@@ -106,6 +106,8 @@
             ? [row(formatHotkey(o.projectsHotkey), 'Show the picker on projects')] : []),
           ...(typeof o.tileHotkey === 'string' && o.tileHotkey.trim()
             ? [row(formatHotkey(o.tileHotkey), 'Tile the windows on this machine')] : []),
+          ...(typeof o.historyHotkey === 'string' && o.historyHotkey.trim()
+            ? [row(formatHotkey(o.historyHotkey), 'Show the picker on history')] : []),
           // Проектные хоткеи приезжают ответом агрегатора, а не из конфига:
           // список живёт у windows11-manager. Не вставшая клавиша остаётся в
           // списке зачёркнутой — убери её, и человек не отличит «не

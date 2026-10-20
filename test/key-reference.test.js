@@ -66,6 +66,18 @@ test('глобальные хоткеи названы отдельно — он
   assert.ok(keys.includes('⌘⌥⇧C'), keys.join(' '));
 });
 
+test('хоткеи плитки и истории тоже названы среди глобальных', () => {
+  const sections = buildKeyReference({
+    trackerHere: false,
+    tileHotkey: 'Ctrl+Alt+Cmd+C',
+    historyHotkey: 'Ctrl+Alt+Shift+C',
+  });
+  const global = sections.find(s => /hidden/i.test(s.title));
+  const labels = global.rows.map(r => r.label);
+  assert.ok(labels.includes('Tile the windows on this machine'), labels.join(' | '));
+  assert.ok(labels.includes('Show the picker on history'), labels.join(' | '));
+});
+
 test('пустой projectsHotkey не показывается пустой строкой', () => {
   // Пустое поле значит «взять встроенное», а встроенное живёт в Rust и
   // отсюда не видно. Показать пустую клавишу — соврать точнее, чем промолчать.

@@ -140,6 +140,16 @@ fn toggle_projects(app: &tauri::AppHandle) {
     toggle_window(app, Some(MODE_MENU[0].1));
 }
 
+/// Четвёртый хоткей: то же переключение, что у проектного, но в историю.
+///
+/// Режим берётся из `MODE_MENU` по id пункта, а не индексом: история стоит в
+/// середине таблицы, и вставленный перед ней режим молча увёл бы клавишу в
+/// чужой. Таблица без пункта `show-history` — та же ошибка, что и опечатка, и
+/// ловит обе сторож `history_hotkey_toggles_into_history`.
+fn toggle_history(app: &tauri::AppHandle) {
+    toggle_window(app, mode_for_menu_id(HISTORY_MENU_ID));
+}
+
 /// Показать пикер в названном режиме — без переключения.
 ///
 /// Так ведут себя все четыре пункта-режима в трее, и это не то же, что хоткей.
@@ -1561,6 +1571,8 @@ fn save_config(app: tauri::AppHandle, patch: serde_json::Value) -> Result<serde_
         "projectsHotkeyAccelerator": out.projects_accelerator,
         "tileHotkeyRegistered": out.tile_registered,
         "tileHotkeyAccelerator": out.tile_accelerator,
+        "historyHotkeyRegistered": out.history_registered,
+        "historyHotkeyAccelerator": out.history_accelerator,
     }))
 }
 
@@ -1627,6 +1639,24 @@ fn register_tile_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) -> (
             // стоит дороже прочего: комбинацию только что освободил трекер, и
             // «занята» тут значит «трекер ещё не выкачен».
             ccfzf_log!("cannot register tile hotkey: {e}");
+            false
+        }
+    };
+    (registered, accelerator)
+}
+
+/// Поставить хоткей истории — тем же устройством, что и проектный: обработчик
+/// переключает окно в режим, а отказ не фатален и пишется в журнал.
+fn register_history_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) -> (bool, String) {
+    let (shortcut, accelerator) = history_hotkey(config);
+    let registered = match app.global_shortcut().on_shortcut(shortcut, |app, _sc, event| {
+        if event.state() == ShortcutState::Pressed {
+            toggle_history(app);
+        }
+    }) {
+        Ok(()) => true,
+        Err(e) => {
+            ccfzf_log!("cannot register history hotkey: {e}");
             false
         }
     };
@@ -1700,6 +1730,10 @@ struct ProjectsMenuItem(MenuItem<tauri::Wry>);
 /// обязана переписать и правую колонку, и подпись об отказе.
 struct TileMenuItem(MenuItem<tauri::Wry>);
 
+/// Пункт трея «история» — единственный из трёх нижних режимов с хоткеем, и
+/// потому единственный, чью подпись и колонку правит `apply_config`.
+struct HistoryMenuItem(MenuItem<tauri::Wry>);
+
 /// Подпись и акселератор пункта трея — по тому же правилу, что и на старте:
 /// акселератор — украшение и показывается всегда, а работает ли клавиша на
 /// самом деле, говорит подпись (`show_item_label`).
@@ -1745,6 +1779,8 @@ struct HotkeyOutcome {
     projects_accelerator: String,
     tile_registered: bool,
     tile_accelerator: String,
+    history_registered: bool,
+    history_accelerator: String,
 }
 
 fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
@@ -1808,6 +1844,7 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
     let (registered, accelerator) = register_picker_hotkey(app, &config);
     let (projects_registered, projects_accelerator) = register_projects_hotkey(app, &config);
     let (tile_registered, tile_accelerator) = register_tile_hotkey(app, &config);
+    let (history_registered, history_accelerator) = register_history_hotkey(app, &config);
     project_hotkeys::reapply(app);
 
     if let Some(item) = app.try_state::<ShowMenuItem>() {
@@ -1823,6 +1860,13 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
     if let Some(item) = app.try_state::<TileMenuItem>() {
         update_menu_item(&item.0, tile_item_label(tile_registered), &tile_accelerator);
     }
+    if let Some(item) = app.try_state::<HistoryMenuItem>() {
+        update_menu_item(
+            &item.0,
+            history_item_label(history_registered),
+            &history_accelerator,
+        );
+    }
 
     let _ = app.emit("config-changed", ());
     HotkeyOutcome {
@@ -1832,6 +1876,8 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
         projects_accelerator,
         tile_registered,
         tile_accelerator,
+        history_registered,
+        history_accelerator,
     }
 }
 
@@ -2511,6 +2557,57 @@ pub(crate) fn tile_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
     )
 }
 
+/// Умолчание четвёртого хоткея — открыть пикер сразу на истории.
+///
+/// Развилка по системам — как у проектного и у плитки, и замена та же: где на
+/// Windows `F10`, на маке `Option+C`, остальные модификаторы как есть. Отсюда
+/// `Ctrl+Win+Shift+F10` против `Ctrl+Option+Cmd+Shift+C`. От плитки
+/// (`Ctrl+Win+F10`) отличается одним `Shift` — клавиши соседние и в пальцах
+/// ложатся рядом.
+#[cfg(target_os = "macos")]
+fn default_history_shortcut() -> Shortcut {
+    Shortcut::new(
+        Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER | Modifiers::SHIFT),
+        Code::KeyC,
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn default_history_shortcut() -> Shortcut {
+    Shortcut::new(
+        Some(Modifiers::CONTROL | Modifiers::SUPER | Modifiers::SHIFT),
+        Code::F10,
+    )
+}
+
+/// То же умолчание записью — рядом по той же причине, что у соседей. Порядок
+/// модификаторов тот же, что пишет `comboFromEvent`, чтобы набранная заново
+/// комбинация совпала строкой.
+#[cfg(target_os = "macos")]
+const DEFAULT_HISTORY_ACCELERATOR: &str = "Control+Alt+Super+Shift+C";
+
+#[cfg(not(target_os = "macos"))]
+const DEFAULT_HISTORY_ACCELERATOR: &str = "Control+Super+Shift+F10";
+
+/// Действующий хоткей истории и запись для показа — устройством как
+/// `projects_hotkey`, включая пустую строку («взять встроенное»).
+pub(crate) fn history_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
+    if let Some(s) = config
+        .get("historyHotkey")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+    {
+        match s.parse::<Shortcut>() {
+            Ok(sc) => return (sc, s.to_string()),
+            Err(_) => ccfzf_log!("cannot parse historyHotkey {s}, using default"),
+        }
+    }
+    (
+        default_history_shortcut(),
+        DEFAULT_HISTORY_ACCELERATOR.to_string(),
+    )
+}
+
 /// Нажали хоткей плитки.
 ///
 /// Живёт в Rust, а не на странице, по той же причине, по какой там же живут
@@ -2884,12 +2981,26 @@ const MODE_MENU: [(&str, &str, &str); 4] = [
     ("show-snapshots", "snapshots", "Snapshots"),
 ];
 
+/// Id пункта-режима, у которого есть свой глобальный хоткей, кроме проектов.
+const HISTORY_MENU_ID: &str = "show-history";
+
 /// Режим, который открывает пункт меню с таким id.
 fn mode_for_menu_id(id: &str) -> Option<&'static str> {
     MODE_MENU
         .iter()
         .find(|(item_id, _, _)| *item_id == id)
         .map(|(_, mode, _)| *mode)
+}
+
+/// Подпись пункта-режима по его id — из той же `MODE_MENU`, чтобы пункт с
+/// хоткеем и без него назывался одинаково. Незнакомый id отдаёт сам себя:
+/// подпись странная, но видная, а не пустая строка в меню.
+fn mode_menu_label(id: &'static str) -> &'static str {
+    MODE_MENU
+        .iter()
+        .find(|(item_id, _, _)| *item_id == id)
+        .map(|(_, _, label)| *label)
+        .unwrap_or(id)
 }
 
 /// Подпись пункта «показать» в меню трея.
@@ -2920,6 +3031,17 @@ fn projects_item_label(hotkey_registered: bool) -> &'static str {
         MODE_MENU[0].2
     } else {
         "Projects hotkey is taken, click here"
+    }
+}
+
+/// Подпись пункта «история» — по тому же правилу, что у проектов: отказ
+/// называет подпись, комбинация остаётся в правой колонке, рабочее имя — из
+/// `MODE_MENU`.
+fn history_item_label(hotkey_registered: bool) -> &'static str {
+    if hotkey_registered {
+        mode_menu_label(HISTORY_MENU_ID)
+    } else {
+        "History hotkey is taken, click here"
     }
 }
 
@@ -3048,6 +3170,8 @@ fn main() {
                 register_projects_hotkey(app.handle(), &config);
             let (tile_registered, tile_accelerator) =
                 register_tile_hotkey(app.handle(), &config);
+            let (history_registered, history_accelerator) =
+                register_history_hotkey(app.handle(), &config);
 
             // Меню трея строится здесь, а не в начале setup: ему нужны и
             // хоткей, и то, чем кончилась его регистрация.
@@ -3102,15 +3226,39 @@ fn main() {
                 }
             };
             app.manage(ProjectsMenuItem(projects_item.clone()));
-            // Остальные пункты-режимы — из той же таблицы, что и проектный, но
-            // без акселератора и без подписи об отказе: хоткея у этих трёх
-            // режимов нет вовсе, и отказываться нечему. Строятся циклом, а не
-            // тремя вызовами подряд: список пунктов уже есть в `MODE_MENU`, и
-            // второй, написанный руками здесь, разошёлся бы с ним молча.
-            let mode_items = MODE_MENU[1..]
-                .iter()
-                .map(|(id, _, label)| MenuItem::with_id(app, *id, *label, true, None::<&str>))
-                .collect::<Result<Vec<_>, _>>()?;
+            // Остальные пункты-режимы — из той же таблицы, что и проектный.
+            // У истории свой хоткей, и её пункт строится тем же устройством,
+            // что проектный: подпись говорит об отказе, колонка показывает
+            // комбинацию. У двух прочих хоткея нет — ни колонки, ни подписи
+            // об отказе. Циклом по таблице, а не вызовами подряд: порядок
+            // пунктов — порядок `MODE_MENU`, и второй список, написанный
+            // руками здесь, разошёлся бы с ним молча.
+            let mut history_item = None;
+            let mut mode_items = Vec::new();
+            for (id, _, label) in &MODE_MENU[1..] {
+                if *id != HISTORY_MENU_ID {
+                    mode_items.push(MenuItem::with_id(app, *id, *label, true, None::<&str>)?);
+                    continue;
+                }
+                let (text, accel) = menu_item_parts(
+                    history_item_label(history_registered),
+                    &history_accelerator,
+                );
+                let item = match MenuItem::with_id(app, *id, &text, true, accel.as_deref()) {
+                    Ok(item) => item,
+                    Err(e) => {
+                        ccfzf_log!(
+                            "cannot show hotkey {history_accelerator} in tray menu: {e}"
+                        );
+                        MenuItem::with_id(app, *id, &text, true, None::<&str>)?
+                    }
+                };
+                history_item = Some(item.clone());
+                mode_items.push(item);
+            }
+            if let Some(item) = history_item {
+                app.manage(HistoryMenuItem(item));
+            }
             // Плитка — действие, а не режим, поэтому она не в `MODE_MENU` и
             // стоит под пунктами-режимами: те открывают список, а этот трогает
             // окна на экране и списка не показывает вовсе. Комбинация здесь
@@ -3648,6 +3796,82 @@ mod tests {
     fn three_global_hotkeys_do_not_collide() {
         assert_ne!(default_tile_shortcut(), default_picker_shortcut());
         assert_ne!(default_tile_shortcut(), default_projects_shortcut());
+    }
+
+    /// То же про хоткей истории: умолчаний два, по одному на систему, и
+    /// разъехавшуюся пару увидит лишь та машина, где её и завели.
+    #[test]
+    fn default_history_accelerator_matches_default_shortcut() {
+        assert_eq!(
+            DEFAULT_HISTORY_ACCELERATOR.parse::<Shortcut>().unwrap(),
+            default_history_shortcut()
+        );
+    }
+
+    /// Четыре умолчания попарно различны — по той же причине, что и три:
+    /// вторую регистрацию на ту же комбинацию плагин отвергает молча для
+    /// человека, и какая из функций ему досталась, из отказа не видно.
+    #[test]
+    fn four_global_hotkeys_do_not_collide() {
+        let history = default_history_shortcut();
+        assert_ne!(history, default_picker_shortcut());
+        assert_ne!(history, default_projects_shortcut());
+        assert_ne!(history, default_tile_shortcut());
+    }
+
+    /// Хоткей истории читается из своего ключа и откатывается по тем же
+    /// развилкам, что и соседи; пустая строка — «взять встроенное».
+    #[test]
+    fn history_hotkey_shows_what_is_listened_to() {
+        let own = serde_json::json!({ "historyHotkey": "Cmd+Shift+T" });
+        let (sc, accel) = history_hotkey(&own);
+        assert_eq!(sc, "Cmd+Shift+T".parse::<Shortcut>().unwrap());
+        assert_eq!(accel, "Cmd+Shift+T");
+
+        for config in [
+            serde_json::json!({ "historyHotkey": "не хоткей" }),
+            serde_json::json!({}),
+            serde_json::Value::Null,
+            serde_json::json!({ "historyHotkey": "" }),
+            serde_json::json!({ "historyHotkey": "   " }),
+            // Ключи соседей хоткею истории не указ.
+            serde_json::json!({ "hotkey": "Cmd+Shift+T" }),
+            serde_json::json!({ "projectsHotkey": "Cmd+Shift+T" }),
+            serde_json::json!({ "tileHotkey": "Cmd+Shift+T" }),
+        ] {
+            let (sc, accel) = history_hotkey(&config);
+            assert_eq!(sc, default_history_shortcut(), "конфиг {config}");
+            assert_eq!(accel, DEFAULT_HISTORY_ACCELERATOR, "конфиг {config}");
+        }
+    }
+
+    /// Хоткей истории переключает окно, как и проектный, — и открывает
+    /// именно историю: режим берётся из `MODE_MENU` по id пункта, а не
+    /// индексом, и опечатка в id оставила бы клавишу без режима.
+    #[test]
+    fn history_hotkey_toggles_into_history() {
+        let src = include_str!("main.rs");
+        let body = src
+            .split_once("fn toggle_history(app: &tauri::AppHandle) {")
+            .expect("toggle_history пропал — тест сторожит не то")
+            .1;
+        let (body, _) = body.split_once("\n}").expect("тело toggle_history не закрыто");
+        assert!(
+            body.contains("toggle_window"),
+            "хоткей истории обязан идти через общее переключение"
+        );
+        assert_eq!(mode_for_menu_id(HISTORY_MENU_ID), Some("history"));
+        assert_eq!(mode_menu_label(HISTORY_MENU_ID), "History");
+    }
+
+    /// Подпись об отказе у истории своя: «hotkey is taken» без имени не
+    /// сказало бы, какая из четырёх клавиш не встала.
+    #[test]
+    fn history_label_tells_when_the_hotkey_is_taken() {
+        assert_eq!(history_item_label(true), "History");
+        assert_ne!(history_item_label(false), history_item_label(true));
+        assert_ne!(history_item_label(false), projects_item_label(false));
+        assert_ne!(history_item_label(false), show_item_label(false));
     }
 
     /// Показывается тот хоткей, который слушается на самом деле, — те же три

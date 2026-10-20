@@ -171,7 +171,7 @@ test('все глобальные хоткеи правятся на одной 
   // выпадашки действий мыши, и список, по которому validate ходит проверкой
   // на занятую комбинацию, обязан их не видеть.
   const ids = page.fields.filter(f => f.type === 'hotkey').map(f => f.id);
-  assert.deepStrictEqual(ids, ['hotkey', 'projectsHotkey', 'tileHotkey']);
+  assert.deepStrictEqual(ids, ['hotkey', 'projectsHotkey', 'tileHotkey', 'historyHotkey']);
 });
 
 test('действие мыши не проверяется как хоткей', () => {
@@ -213,6 +213,16 @@ test('третий хоткей проверяется теми же двумя 
   assert.match(reserved[0], /taken by the picker window itself/);
 });
 
+test('хоткей истории попал в ту же проверку на дубли', () => {
+  // Тот же сторож, что у третьего: поле, забытое в GLOBAL_HOTKEYS, молчало бы
+  // ровно про себя.
+  const clash = validate({
+    sshHost: 'host', projectsHotkey: 'Ctrl+Super+Shift+F10', historyHotkey: 'ctrl+super+shift+f10',
+  });
+  assert.strictEqual(clash.length, 1, clash);
+  assert.match(clash[0], /two hotkeys/);
+});
+
 test('разные комбинации возражений не вызывают', () => {
   assert.deepStrictEqual(
     validate({
@@ -220,6 +230,7 @@ test('разные комбинации возражений не вызываю
       hotkey: 'Cmd+Shift+C',
       projectsHotkey: 'Alt+Cmd+Shift+C',
       tileHotkey: 'Ctrl+Alt+Cmd+C',
+      historyHotkey: 'Ctrl+Alt+Shift+C',
     }),
     [],
   );

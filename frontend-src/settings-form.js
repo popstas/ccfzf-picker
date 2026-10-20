@@ -237,6 +237,9 @@
           hint: 'Asks the window tracker for the tile layout, in the order of this list. '
             + 'Leave empty for the built-in one: Ctrl+Win+F10 on Windows, '
             + 'Ctrl+Option+Cmd+C on a Mac.' },
+        { id: 'historyHotkey', label: 'Show the picker on history', type: 'hotkey',
+          hint: 'Leave empty for the built-in one: Ctrl+Win+Shift+F10 on Windows, '
+            + 'Ctrl+Option+Cmd+Shift+C on a Mac.' },
         // Действие проектных клавиш стоит здесь, а не рядом с «Enter on a
         // project» на General, по тому же правилу, по какому здесь же живут
         // жесты мыши: действие принадлежит тому, чем его вызывают. Сами
