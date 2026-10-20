@@ -224,6 +224,18 @@ test('пустая строка второго хоткея остаётся п�
   assert.strictEqual(normalizeConfig({ projectsHotkey: 42 }).projectsHotkey, '');
 });
 
+// ── хоткей истории ─────────────────────────────────────────────────────────
+test('хоткей истории: пусто по умолчанию, заданный проходит как написан', () => {
+  // Умолчание своё на каждой системе и живёт в Rust — как у второго и третьего.
+  assert.strictEqual(normalizeConfig(null).historyHotkey, '');
+  assert.strictEqual(
+    normalizeConfig({ historyHotkey: 'Ctrl+Alt+H' }).historyHotkey,
+    'Ctrl+Alt+H',
+  );
+  assert.strictEqual(normalizeConfig({ historyHotkey: '' }).historyHotkey, '');
+  assert.strictEqual(normalizeConfig({ historyHotkey: 42 }).historyHotkey, '');
+});
+
 // ── Размер окна долями экрана ──────────────────────────────────────────────
 
 test('без ключа размер окна встроенный, а не нулевой процент', () => {

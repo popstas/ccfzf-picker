@@ -37,6 +37,9 @@
     // каждой системе (`Ctrl+Win+F10` против `Ctrl+Option+Cmd+C`) и живёт в
     // Rust. Здесь пустое поле значит «взять встроенное», а не «выключить».
     tileHotkey: '',
+    // Пусто по той же причине: у хоткея истории умолчание своё на каждой
+    // системе (`Ctrl+Alt+Shift+F10` против `Ctrl+Option+Shift+C`) и живёт в Rust.
+    historyHotkey: '',
     // Прямой запуск бинаря, а не `open -na kitty --args`. Обе формы доводят
     // команду до kitty (проверено), но `open -n` каждый раз поднимает новый
     // экземпляр приложения, а --single-instance отдаёт окно уже запущенному
@@ -341,6 +344,8 @@
         ? src.projectsHotkey : DEFAULTS.projectsHotkey,
       tileHotkey: typeof src.tileHotkey === 'string'
         ? src.tileHotkey : DEFAULTS.tileHotkey,
+      historyHotkey: typeof src.historyHotkey === 'string'
+        ? src.historyHotkey : DEFAULTS.historyHotkey,
       terminal: src.terminal && typeof src.terminal === 'object' && src.terminal.file
         ? { file: src.terminal.file, args: Array.isArray(src.terminal.args) ? src.terminal.args : [] }
         : DEFAULTS.terminal,
