@@ -102,6 +102,27 @@ test('сессия находится по имени своего окна, а 
   assert.strictEqual(filterSessions(groups, 'tray-build')[0].sessions.length, 1);
 });
 
+test('сессия внутри zellij находится по имени zellij-сессии', () => {
+  // Подпись `zellij:<имя>` в строке видна, значит и искаться обязана.
+  const groups = [{
+    key: 'live', label: 'Active', sessions: [{
+      id: 'aaaa1111-aaaa-bbbb-cccc-000000000002',
+      label: 'budva-day-5', cwd: '/home/user/home', zellij: 'popstas',
+    }],
+  }];
+  assert.strictEqual(filterSessions(groups, 'popstas').length, 1);
+});
+
+test('строка не в zellij не находится по слову null', () => {
+  const groups = [{
+    key: 'live', label: 'Active', sessions: [{
+      id: 'aaaa1111-aaaa-bbbb-cccc-000000000003',
+      label: 'esm-migration', cwd: '/home/user/x', zellij: null,
+    }],
+  }];
+  assert.strictEqual(filterSessions(groups, 'null').length, 0);
+});
+
 test('строка без окна не находится по слову undefined', () => {
   // Стог собирается склейкой полей, и отсутствующее поле уехало бы в него
   // строкой `undefined`: запрос из этого слова нашёл бы разом все строки без

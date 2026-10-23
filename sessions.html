@@ -397,8 +397,9 @@
            разные, потому что имена разные, и по разметке видно, что читаешь.
            Строка имени у обоих остаётся голым текстом, а не flex: подпись
            здесь дописывается в строку, ей не нужно ни `margin-left: auto`, ни
-           своей колонки, — а flex отнял бы у имени многоточие. */
-        .name .wname, .name .sname {
+           своей колонки, — а flex отнял бы у имени многоточие. Подпись zellij
+           (`.zname`, zellijNameHtml) того же рода и под тем же правилом. */
+        .name .wname, .name .sname, .name .zname {
             margin-left: 6px; font-size: 11px; color: var(--fg-dim); font-weight: normal;
         }
         /* Правые колонки одной группой: статус, id, контекст с деньгами,
@@ -1231,7 +1232,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     projectCountHtml, projectColumnWidths,
     docsBadgeHtml, promptsHtml, commentHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
-    windowNameHtml, snapshotNameHtml,
+    windowNameHtml, zellijNameHtml, snapshotNameHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -1558,6 +1559,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // Второе имя строки — то, которым сессию завёл человек. Рисуется, только
       // когда расходится с первым: см. windowNameHtml.
       `${windowNameHtml(session)}` +
+      // Сессия внутри zellij: Enter на ней присоединяется, а не продолжает
+      // сессию заново, — см. zellijNameHtml.
+      `${zellijNameHtml(session)}` +
       `${prBadgeHtml(session)}` +
       // Значок «есть спека или план» — рядом с PR и той же природы: оба
       // говорят, что у сессии есть бумага снаружи транскрипта, и оба ведут в

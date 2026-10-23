@@ -754,6 +754,23 @@ test('имя окна экранируется: оно приезжает с ч�
   assert.ok(!html.includes('<img'), 'заголовок окна пишет чужой трекер, и в разметку он не уходит');
 });
 
+test('живая сессия внутри zellij подписана именем zellij-сессии', () => {
+  const { zellijNameHtml } = require('../frontend-src/session-glyph');
+  // Enter на такой строке делает `zellij attach`, а не `claude --resume`, и
+  // без подписи строка ничем не отличалась от обычной.
+  assert.match(zellijNameHtml({ live: true, zellij: 'popstas' }), /class="zname"[^>]*>zellij:popstas</);
+  // Не в zellij — молчим.
+  assert.strictEqual(zellijNameHtml({ live: true, zellij: null }), '');
+  // Закрытая сессия в zellij больше не живёт: подпись про attach была бы враньём.
+  assert.strictEqual(zellijNameHtml({ live: false, zellij: 'popstas' }), '');
+  assert.strictEqual(zellijNameHtml(null), '');
+});
+
+test('имя zellij-сессии экранируется: его пишет человек на ssh-машине', () => {
+  const { zellijNameHtml } = require('../frontend-src/session-glyph');
+  assert.ok(!zellijNameHtml({ live: true, zellij: '<img src=x>' }).includes('<img'));
+});
+
 test('имя сессии в строке снимка показывается только при расхождении с проектом', () => {
   const { snapshotNameHtml } = require('../frontend-src/session-glyph');
   // Строка снимка названа каталогом, а сессий одного каталога в снимке бывает
