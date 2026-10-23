@@ -743,6 +743,27 @@
   }
 
   /**
+   * Подпись `zellij:<имя>` у живой сессии агента, которая сидит внутри zellij.
+   *
+   * Такая строка ведёт себя иначе обычной: Enter на ней делает
+   * `zellij attach <имя>`, а не `claude --resume` (chooseOpenStrategy), — а
+   * выглядела она точно так же, и разница узнавалась только по последствию.
+   * Глифом в колонке окна это не сделать: `z` там уже у WezTerm
+   * (TERMINAL_GLYPHS), а колонка отвечает про окно, тогда как zellij-сессия
+   * живёт на ssh-машине и окна может не иметь вовсе. Поэтому подпись, той же
+   * тусклостью и того же рода, что имя окна (windowNameHtml).
+   *
+   * Только у живой: `zellij` приезжает от процесса, и у закрытой строки
+   * подпись звала бы присоединиться к тому, чего уже нет.
+   */
+  function zellijNameHtml(session) {
+    if (!session?.live) return '';
+    const name = String(session?.zellij ?? '').trim();
+    if (!name) return '';
+    return `<span class="zname" title="Inside zellij session ${escapeHtml(name)}: Enter attaches to it">zellij:${escapeHtml(name)}</span>`;
+  }
+
+  /**
    * Имя сессии рядом с именем проекта в строке снимка — и только когда они
    * разошлись.
    *
@@ -856,7 +877,7 @@
     todoHtml, todoText, projectCountHtml, projectCountText, projectColumnWidths, ageText,
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
-    prNumber, prBadgeHtml, wordSet, sameWords, hidesProject, projectLine, windowNameHtml,
+    prNumber, prBadgeHtml, wordSet, sameWords, hidesProject, projectLine, windowNameHtml, zellijNameHtml,
     snapshotNameHtml,
     docsBadgeHtml, docKindOf, promptsHtml, commentHtml,
   };

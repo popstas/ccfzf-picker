@@ -713,8 +713,9 @@ test('строка снимка доезжает с настоящего пут�
   // смыслом только отняла бы место (sameWords, session-glyph.js).
   assert.ok(items[2].html.includes('<div class="name">ccfzf</div>'), items[2].html);
   assert.ok(!items[2].html.includes('class="sname"'), items[2].html);
-  // Тусклость подписи держат стили страницы, и с именем окна она общая.
-  assert.match(SESSIONS_HTML, /\.name \.wname, \.name \.sname \{[^}]*color: var\(--fg-dim\)/);
+  // Тусклость подписи держат стили страницы, и с именем окна (и подписью
+  // zellij) она общая.
+  assert.match(SESSIONS_HTML, /\.name \.wname, \.name \.sname, \.name \.zname \{[^}]*color: var\(--fg-dim\)/);
   // Тело же basename не повторяет, и не только у этой строки: у
   // snapshot-session имя строки — сам projectBasename(session)
   // (picker-snapshots.js), то есть уже basename каталога; hidesProject видит
@@ -1651,6 +1652,7 @@ function renderSessionRows(state, query, toggles, stale) {
     docsBadgeHtml: Glyph.docsBadgeHtml,
     commentHtml: Glyph.commentHtml,
     windowNameHtml: Glyph.windowNameHtml,
+    zellijNameHtml: Glyph.zellijNameHtml,
     windowHtml: Glyph.windowHtml,
     windowHostHtml: Glyph.windowHostHtml,
     stateHtml: Glyph.stateHtml,
@@ -1825,6 +1827,24 @@ test('имя окна доезжает до строки, когда расхо�
   });
   const row = same.find(i => i.key.startsWith('s:'));
   assert.ok(!row.html.includes('wname'), row.html);
+});
+
+// Подпись zellij проверяется на настоящей разметке по той же причине, что имя
+// окна: вызов из шаблона строки не сторожит больше ничто.
+test('сессия внутри zellij доезжает до строки с подписью zellij-сессии', () => {
+  const { items } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({ title: 'budva-day-5', zellij: 'popstas' })],
+  });
+  const session = items.find(i => i.key.startsWith('s:'));
+  assert.ok(session.html.includes('>zellij:popstas</span>'), session.html);
+
+  const { items: plain } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({ title: 'budva-day-5' })],
+  });
+  const row = plain.find(i => i.key.startsWith('s:'));
+  assert.ok(!row.html.includes('zname'), row.html);
 });
 
 // Маркер вида строки — самый хрупкий инвариант широкого режима: карточка в
