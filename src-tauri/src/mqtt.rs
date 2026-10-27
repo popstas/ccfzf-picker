@@ -50,6 +50,11 @@ const PLACE_TOPIC: &str = "/claude-place";
 /// расставить, — поэтому отказ случается на нашей стороне.
 const LAYOUT_MODES: [&str; 2] = ["tile", "cascade"];
 
+/// `Clone` и `PartialEq` — ради сторожа связи (`mqtt_status`): он сверяет
+/// перечитанный конфиг с тем, по которому держит соединение, и пересобирает
+/// его на любую разницу. `Debug` нет намеренно: в структуре пароль, и
+/// `{:?}` в строке лога унёс бы его на вкладку Log.
+#[derive(Clone, PartialEq)]
 pub struct Broker {
     pub host: String,
     pub port: u16,
@@ -163,7 +168,7 @@ fn parse_address(raw: &str) -> Option<Address> {
 ///
 /// С `ca` доверяем только ему, и нечитаемый файл — отказ: откат на общий набор
 /// молча отменил бы то, ради чего файл назван.
-fn transport(broker: &Broker) -> Result<rumqttc::Transport, String> {
+pub(crate) fn transport(broker: &Broker) -> Result<rumqttc::Transport, String> {
     use rumqttc::tokio_rustls::rustls::{ClientConfig, RootCertStore};
     use rumqttc::{TlsConfiguration, Transport};
 

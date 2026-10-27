@@ -24,6 +24,7 @@ mod log;
 mod manager_http;
 mod merge_state;
 mod mqtt;
+mod mqtt_status;
 mod place_order;
 mod poller;
 mod proc;
@@ -840,6 +841,35 @@ fn set_picker_size(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String
 /// `favicon.png` нарисован сразу под 16×16. Вшивается в бинарь на компиляции,
 /// а не читается с диска: иначе иконка зависела бы от рабочего каталога и
 /// пропадала бы в собранном приложении.
+/// Сторож связи с брокером: пункт меню, подсказка и метка на значке.
+///
+/// Обе картинки собираются один раз: метка рисуется по пикселям обычного
+/// значка, а не лежит вторым файлом — руками в `icons/` правится только
+/// `favicon.png`, и второй файл разошёлся бы с ним при первой же перерисовке.
+fn spawn_mqtt_watch(tray: tauri::tray::TrayIcon, item: MenuItem<tauri::Wry>) {
+    let plain = tray_icon();
+    let (width, height) = (plain.width(), plain.height());
+    let badged = mqtt_status::badge(plain.rgba(), width, height);
+    let plain = plain.rgba().to_vec();
+    mqtt_status::spawn(
+        || load_config().map(|raw| mqtt::broker_from_config(&raw)).unwrap_or_else(|_| {
+            mqtt::broker_from_config(&serde_json::Value::Null)
+        }),
+        move |link| {
+            let _ = item.set_text(link.menu_label());
+            let _ = tray.set_tooltip(Some(link.tooltip()));
+            let rgba = if link.badged() { badged.clone() } else { plain.clone() };
+            // Шаблонность заново вместе с картинкой: на маке новая картинка
+            // иначе пришла бы цветной, и белый глиф пропал бы на светлой
+            // строке меню.
+            let _ = tray.set_icon_with_as_template(
+                Some(tauri::image::Image::new_owned(rgba, width, height)),
+                true,
+            );
+        },
+    );
+}
+
 fn tray_icon() -> tauri::image::Image<'static> {
     tauri::image::Image::from_bytes(include_bytes!("../icons/favicon.png"))
         .expect("icons/favicon.png does not parse as an image")
@@ -3301,6 +3331,15 @@ fn main() {
                 false,
                 None::<&str>,
             )?;
+            // Подпись связи с брокером — над версией, по той же причине:
+            // её читают, а не нажимают. Текст правит сторож (`mqtt_status`).
+            let mqtt_item = MenuItem::with_id(
+                app,
+                "mqtt",
+                mqtt_status::Link::Connecting.menu_label(),
+                false,
+                None::<&str>,
+            )?;
             // Порядок пунктов — порядок `MODE_MENU`: сперва общий список, за
             // ним режимы, и лишь потом служебное. Пункты-режимы нажимают
             // каждый день, «Settings…» и «Quit» — редко.
@@ -3314,9 +3353,10 @@ fn main() {
             items.push(&tile_item);
             items.push(&settings_item);
             items.push(&quit_item);
+            items.push(&mqtt_item);
             items.push(&version_item);
             let tray_menu = Menu::with_items(app, &items)?;
-            TrayIconBuilder::new()
+            let tray = TrayIconBuilder::new()
                 .icon(tray_icon())
                 // Иконка одноцветная и просвечивает фоном: система сама красит
                 // её под светлую и тёмную строку меню. Без template-режима
@@ -3381,6 +3421,7 @@ fn main() {
                     }
                 })
                 .build(app)?;
+            spawn_mqtt_watch(tray, mqtt_item);
 
             project_hotkeys::apply_cached(app.handle());
             Ok(())
