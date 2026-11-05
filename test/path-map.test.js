@@ -2,7 +2,10 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { separatorFor, mapPath, mapRowPath, mapRowDoc, buildActionArgv } = require('../frontend-src/path-map');
+const {
+  separatorFor, mapPath, mapRowPath, mapRowDoc, buildActionArgv,
+  sshRemoteUrl, editorFolderTarget, editorDocTarget,
+} = require('../frontend-src/path-map');
 
 // Корни сетевых дисков Windows пишутся здесь формой UNC, а не буквой диска:
 // буква вместе с разделителем — шаблон из no-private-data.test.js, и фикстура с
@@ -172,4 +175,100 @@ test('у местной строки абсолютная бумага уже м
 test('пустая бумага — null', () => {
   assert.strictEqual(mapRowDoc({ cwd: '/home/user/p' }, '', MAC), null);
   assert.strictEqual(mapRowDoc({ cwd: '/home/user/p' }, undefined, MAC), null);
+});
+
+// --- SSH Remote: Zed открывает удалённую папку сам, мимо сетевого диска ------
+//
+// Сетевой диск не сообщает Zed о правках, сделанных на той машине, и при
+// сохранении Zed с диском не сверяется: файл, поправленный агентом, он молча
+// затирает своей копией. По ssh файлы читает и пишет удалённая машина, и Zed
+// видит чужие правки. Хост в фикстурах условный — имена машин в репозиторий не
+// возвращаются (test/no-private-data.test.js).
+
+const SSH = { sshHost: 'build-host.example', editorSshRemote: true, pathMap: WIN };
+
+test('sshRemoteUrl: хост и абсолютный путь склеиваются в ssh://', () => {
+  assert.strictEqual(sshRemoteUrl('build-host.example', '/home/user/projects/x'),
+    'ssh://build-host.example/home/user/projects/x');
+  // Пользователь в хосте — законная форма sshHost, и в адрес она ложится как есть.
+  assert.strictEqual(sshRemoteUrl('user@build-host.example', '/srv/x'),
+    'ssh://user@build-host.example/srv/x');
+});
+
+test('sshRemoteUrl: сегменты пути кодируются, слэши — нет', () => {
+  // Zed раскодирует путь ровно один раз (parse_file_path), а `#`, `?` и `%`
+  // без кодирования адрес обрезали бы или раскодировались бы не в то.
+  assert.strictEqual(sshRemoteUrl('h', '/home/user/my notes/a#b?c%d'),
+    'ssh://h/home/user/my%20notes/a%23b%3Fc%25d');
+  assert.strictEqual(sshRemoteUrl('h', '/home/user/проект'),
+    'ssh://h/home/user/%D0%BF%D1%80%D0%BE%D0%B5%D0%BA%D1%82');
+});
+
+test('sshRemoteUrl: без хоста или с относительным путём — null', () => {
+  assert.strictEqual(sshRemoteUrl('', '/home/user/x'), null);
+  assert.strictEqual(sshRemoteUrl('  ', '/home/user/x'), null);
+  assert.strictEqual(sshRemoteUrl('h', 'home/user/x'), null);
+  assert.strictEqual(sshRemoteUrl('h', ''), null);
+  assert.strictEqual(sshRemoteUrl(undefined, '/x'), null);
+});
+
+test('editorFolderTarget: при Zed и включённой настройке удалённая папка уходит по ssh', () => {
+  const row = { cwd: '/home/user/projects/x', source: 'build-host.example' };
+  assert.strictEqual(editorFolderTarget(row, SSH, 'zed'),
+    'ssh://build-host.example/home/user/projects/x');
+});
+
+test('editorFolderTarget: ssh не нужна карта путей', () => {
+  // Вся затея в том, чтобы обойтись без сетевого диска: каталог вне pathMap
+  // (или pathMap пуст) по ssh открывается всё равно.
+  const row = { cwd: '/srv/elsewhere' };
+  assert.strictEqual(editorFolderTarget(row, { ...SSH, pathMap: {} }, 'zed'),
+    'ssh://build-host.example/srv/elsewhere');
+});
+
+test('editorFolderTarget: без настройки, с другим редактором или без хоста — прежний перевод', () => {
+  const row = { cwd: '/home/user/projects/x' };
+  const local = '\\\\nas\\home\\projects\\x';
+  assert.strictEqual(editorFolderTarget(row, { ...SSH, editorSshRemote: false }, 'zed'), local);
+  assert.strictEqual(editorFolderTarget(row, SSH, 'vscode'), local);
+  assert.strictEqual(editorFolderTarget(row, SSH, undefined), local);
+  assert.strictEqual(editorFolderTarget(row, { ...SSH, sshHost: '' }, 'zed'), local);
+  // Не булево `true` — не включено: конфиг пишет человек руками.
+  assert.strictEqual(editorFolderTarget(row, { ...SSH, editorSshRemote: 'yes' }, 'zed'), local);
+});
+
+test('editorFolderTarget: местная строка открывается своим путём и при включённой настройке', () => {
+  // У своей машины ходить по ssh не к кому: sshHost — это та, другая.
+  const row = { cwd: '/home/user/p', source: 'local' };
+  assert.strictEqual(editorFolderTarget(row, SSH, 'zed'), '/home/user/p');
+});
+
+test('editorFolderTarget: без каталога — null', () => {
+  assert.strictEqual(editorFolderTarget({}, SSH, 'zed'), null);
+  assert.strictEqual(editorFolderTarget({ cwd: '' }, SSH, 'zed'), null);
+});
+
+test('editorDocTarget: бумага по ssh — относительная от каталога, абсолютная сама', () => {
+  const row = { cwd: '/home/user/projects/otel' };
+  assert.strictEqual(editorDocTarget(row, 'docs/specs/a.md', SSH, 'zed'),
+    'ssh://build-host.example/home/user/projects/otel/docs/specs/a.md');
+  assert.strictEqual(editorDocTarget(row, '/home/user/projects/grafana/b.md', SSH, 'zed'),
+    'ssh://build-host.example/home/user/projects/grafana/b.md');
+  assert.strictEqual(editorDocTarget(row, '', SSH, 'zed'), null);
+});
+
+test('editorDocTarget: в остальных случаях — тот же mapRowDoc', () => {
+  const row = { cwd: '/home/user/projects/x' };
+  assert.strictEqual(editorDocTarget(row, 'docs/a.md', SSH, 'cursor'),
+    mapRowDoc(row, 'docs/a.md', WIN));
+  const local = { cwd: '/home/user/p', source: 'local' };
+  assert.strictEqual(editorDocTarget(local, 'docs/a.md', SSH, 'zed'), '/home/user/p/docs/a.md');
+});
+
+test('editorFolderTarget: хост берётся из source строки, sshHost — откат', () => {
+  // Метка ssh-источника — sshHost дословно; у строки без source (тесты, старые
+  // ответы) остаётся сам sshHost.
+  const row = { cwd: '/srv/x', source: 'user@other.example' };
+  assert.strictEqual(editorFolderTarget(row, SSH, 'zed'), 'ssh://user@other.example/srv/x');
+  assert.strictEqual(editorFolderTarget({ cwd: '/srv/x' }, SSH, 'zed'), 'ssh://build-host.example/srv/x');
 });

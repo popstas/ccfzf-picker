@@ -2188,9 +2188,19 @@ fn spawn_url(argv: Vec<String>) -> Result<(), String> {
 /// зато `/Applications/Cursor.app` на месте. Прямой запуск при этом падал
 /// `unable to spawn cursor`, и правкой PATH это не лечится: программы, о
 /// которой идёт речь, на диске нет.
+///
+/// Адрес `ssh://` (настройка SSH Remote, его собирает `editorFolderTarget` в
+/// path-map.js) идёт своей дорогой — `editor::ssh_argv`: понимает его только
+/// Zed, а на маке его надо звать не через `open -a`. Маковский CLI пускачом
+/// (`editor_is_launcher`) не считается и запускается без ожидания: он ждёт,
+/// пока Zed подключится по ssh, а синхронная команда держала бы всё это время
+/// главный поток.
 fn editor_argv(editor: &str, path: &str) -> Result<Vec<String>, String> {
     let resolved = editor::resolve_here(editor)
         .ok_or("no editor found: install Zed, VS Code or Cursor, or name one in Settings")?;
+    if path.starts_with("ssh://") {
+        return editor::ssh_argv(&resolved, editor::Os::current(), path);
+    }
     let mut argv = resolved.argv;
     argv.push(path.to_string());
     Ok(argv)
@@ -2259,8 +2269,9 @@ fn open_in_editor(editor: String, path: String) -> Result<(), String> {
 /// же причине, что у `action_icons`: поход в файловую систему.
 #[tauri::command]
 async fn editor_info(editor: String) -> Result<Option<serde_json::Value>, String> {
+    // `id` страница сверяет с `zed`: открывать ли удалённую папку по ssh.
     Ok(editor::resolve_here(&editor)
-        .map(|r| serde_json::json!({ "label": r.label, "icon": r.icon })))
+        .map(|r| serde_json::json!({ "label": r.label, "icon": r.icon, "id": r.id })))
 }
 
 /// Утилита, забирающая буфер обмена со стандартного ввода.

@@ -107,6 +107,9 @@ pub struct Resolved {
     /// Файл, с которого брать иконку пункта меню. Есть только у найденного
     /// `.exe`: иконки приложений пикер умеет доставать лишь на Windows.
     pub icon: Option<String>,
+    /// Какой из `KNOWN` это (`zed`, `vscode`, `cursor`); у своего варианта —
+    /// `None`. Нужен затем, что адрес `ssh://` понимает только Zed.
+    pub id: Option<&'static str>,
 }
 
 fn known(setting: &str) -> Option<&'static Known> {
@@ -156,16 +159,19 @@ fn found(k: &Known, env: &Env, exists: &dyn Fn(&Path) -> bool) -> Option<Resolve
             label: k.label.to_string(),
             argv: vec!["open".into(), "-a".into(), file],
             icon: None,
+            id: Some(k.id),
         },
         Os::Windows => Resolved {
             label: k.label.to_string(),
             argv: vec![file.clone()],
             icon: Some(file),
+            id: Some(k.id),
         },
         Os::Other => Resolved {
             label: k.label.to_string(),
             argv: vec![file],
             icon: None,
+            id: Some(k.id),
         },
     })
 }
@@ -189,7 +195,7 @@ fn named(setting: &str, os: Os) -> Resolved {
     } else {
         vec![setting.to_string()]
     };
-    Resolved { label, argv, icon: None }
+    Resolved { label, argv, icon: None, id: None }
 }
 
 /// Чем открывать при этой настройке. `None` — только у автовыбора, когда не
@@ -207,10 +213,41 @@ pub fn resolve(setting: &str, env: &Env, exists: &dyn Fn(&Path) -> bool) -> Opti
         // «Open in cursor».
         return Some(found(k, env, exists).unwrap_or_else(|| Resolved {
             label: k.label.to_string(),
+            id: Some(k.id),
             ..named(k.id, env.os)
         }));
     }
     Some(named(setting, env.os))
+}
+
+/// Как отдать редактору адрес `ssh://` (настройка SSH Remote).
+///
+/// Только Zed: VS Code и Cursor такого адреса не понимают и открыли бы файл с
+/// этим именем — молча не то. Отказ словами, а не прежняя дорога.
+///
+/// На маке не `open -a`, а CLI из самого пакета (`Zed.app/Contents/MacOS/cli`
+/// — то, что Zed ставит в PATH как `zed`). `open` с адресом решает, кому его
+/// отдать, по схеме, а схему `ssh://` Zed за собой не регистрирует. Пакет
+/// нужен найденный: у «названного, но не найденного» `zed` пути к CLI нет.
+///
+/// На Windows и Linux адрес уходит тем же файлом, что и путь: основной
+/// `Zed.exe` принимает `ssh://` аргументом (`parse_url_arg` в main.rs Zed) и
+/// передаёт его уже запущенному экземпляру.
+pub fn ssh_argv(resolved: &Resolved, os: Os, url: &str) -> Result<Vec<String>, String> {
+    if resolved.id != Some("zed") {
+        return Err(format!("SSH Remote works only with Zed, not {}", resolved.label));
+    }
+    let mut argv = match (os, resolved.argv.as_slice()) {
+        (Os::Mac, [open, a, app]) if open == "open" && a == "-a" => {
+            if !app.contains('/') {
+                return Err("Zed.app not found: SSH Remote on macOS needs its bundled CLI".into());
+            }
+            vec![format!("{}/Contents/MacOS/cli", app.trim_end_matches('/'))]
+        }
+        _ => resolved.argv.clone(),
+    };
+    argv.push(url.to_string());
+    Ok(argv)
 }
 
 /// То же на этой машине.
@@ -317,5 +354,49 @@ mod tests {
         let got = resolve(r"X:\Tools\notepad++.exe", &env(Os::Windows), &|_| false).unwrap();
         assert_eq!(got.argv, vec![r"X:\Tools\notepad++.exe"]);
         assert_eq!(got.label, "notepad++");
+    }
+
+    #[test]
+    fn id_est_u_izvestnyh_i_net_u_svoego_varianta() {
+        let zed = only(&[r"X:\Users\user\AppData\Local\Programs\Zed\Zed.exe"]);
+        assert_eq!(resolve("", &env(Os::Windows), &zed).unwrap().id, Some("zed"));
+        // Названный, но не найденный — всё тот же редактор.
+        assert_eq!(resolve("cursor", &env(Os::Mac), &|_| false).unwrap().id, Some("cursor"));
+        assert_eq!(resolve("Sublime Text", &env(Os::Mac), &|_| false).unwrap().id, None);
+    }
+
+    const URL: &str = "ssh://build-host.example/srv/x";
+
+    #[test]
+    fn ssh_na_windows_i_linux_idyot_tem_zhe_faylom() {
+        let win = resolve("", &env(Os::Windows), &only(&[r"X:\Users\user\AppData\Local\Programs\Zed\Zed.exe"])).unwrap();
+        assert_eq!(
+            ssh_argv(&win, Os::Windows, URL).unwrap(),
+            vec![r"X:\Users\user\AppData\Local\Programs\Zed\Zed.exe", URL]
+        );
+        let linux = resolve("", &env(Os::Other), &only(&["/usr/bin/zed"])).unwrap();
+        assert_eq!(ssh_argv(&linux, Os::Other, URL).unwrap(), vec!["/usr/bin/zed", URL]);
+    }
+
+    #[test]
+    fn ssh_na_make_zovyot_cli_iz_paketa_a_ne_open() {
+        // `open` отдаёт адрес по схеме, а `ssh://` Zed за собой не регистрирует.
+        let mac = resolve("zed", &env(Os::Mac), &only(&["/Applications/Zed.app"])).unwrap();
+        assert_eq!(
+            ssh_argv(&mac, Os::Mac, URL).unwrap(),
+            vec!["/Applications/Zed.app/Contents/MacOS/cli", URL]
+        );
+        // Пакет не найден — пути к CLI нет, и отказ словами.
+        let lost = resolve("zed", &env(Os::Mac), &|_| false).unwrap();
+        assert!(ssh_argv(&lost, Os::Mac, URL).unwrap_err().contains("Zed.app"));
+    }
+
+    #[test]
+    fn ssh_s_drugim_redaktorom_otkaz_a_ne_fayl_s_imenem_adresa() {
+        let code = resolve("", &env(Os::Windows), &only(&[r"X:\Program Files\Microsoft VS Code\Code.exe"])).unwrap();
+        let err = ssh_argv(&code, Os::Windows, URL).unwrap_err();
+        assert!(err.contains("only with Zed"), "{err}");
+        let other = resolve("Sublime Text", &env(Os::Mac), &|_| false).unwrap();
+        assert!(ssh_argv(&other, Os::Mac, URL).is_err());
     }
 }

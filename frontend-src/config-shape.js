@@ -101,6 +101,13 @@
     // Кому нужна форма посложнее — заводит своё действие в `actions`, там argv
     // свой.
     editor: '',
+    // Открывать папку удалённой сессии в Zed по ssh (`ssh://<sshHost>/<cwd>`),
+    // а не через сетевой диск из pathMap. Сетевой диск не сообщает Zed о
+    // правках с той машины, а при сохранении Zed с диском не сверяется — и
+    // файл, поправленный агентом, молча затирался (2026-11-05). Выключено по
+    // умолчанию: включённое меняет, куда ведёт `^O`. Работает только с Zed и
+    // только у чужих строк — решает `editorFolderTarget` (path-map.js).
+    editorSshRemote: false,
     // Размер окна долями экрана, по стороне на каждую раскладку. Ноль — «взять
     // встроенный размер», и он же умолчание: у большинства ключа нет вовсе.
     //
@@ -371,6 +378,7 @@
       pathMap: normalizePathMap(src.pathMap),
       actions: normalizeActions(src.actions),
       editor: nonEmpty(src.editor) ? src.editor.trim() : DEFAULTS.editor,
+      editorSshRemote: src.editorSshRemote === true,
       pickerSize: normalizePickerSize(src.pickerSize),
       stale: normalizeStale(src.stale),
       scrim: normalizeScrim(src.scrim),

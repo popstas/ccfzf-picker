@@ -275,7 +275,7 @@ Developer ID нет, universal удвоил бы вес ровно в той з�
 | Тема | Файл | Правил | О чём |
 |---|---|---|---|
 | Окна и передний план | [`docs/rules/windows-and-focus.md`](docs/rules/windows-and-focus.md) | 11 | кто видит окна, чьё это окно, кому отдаётся передний план, куда уходит просьба |
-| Открытие сессий и проектов | [`docs/rules/opening-sessions.md`](docs/rules/opening-sessions.md) | 14 | что делает Enter, кто открывает — пикер или менеджер и по какому транспорту (http/mqtt/mqtts, риск незащищённого сервера, корни TLS), Claude Desktop, курсор, редактор `^O` |
+| Открытие сессий и проектов | [`docs/rules/opening-sessions.md`](docs/rules/opening-sessions.md) | 15 | что делает Enter, кто открывает — пикер или менеджер и по какому транспорту (http/mqtt/mqtts, риск незащищённого сервера, корни TLS), Claude Desktop, курсор, редактор `^O` и SSH Remote в Zed |
 | Хоткеи, трей и меню `^K` | [`docs/rules/hotkeys-and-tray.md`](docs/rules/hotkeys-and-tray.md) | 10 | глобальные клавиши, проектные хоткеи, жесты мыши, пункты трея и строки, метка связи с брокером |
 | Строки списка | [`docs/rules/list-rows.md`](docs/rules/list-rows.md) | 9 | что и где рисуется в строке: имена, id, хоткеи, ширины колонок |
 | Настройки и `ui.json` | [`docs/rules/settings-and-ui-state.md`](docs/rules/settings-and-ui-state.md) | 7 | шесть полей `ui.json`, слияние `config.yaml`, создание окна, гашение пикера |

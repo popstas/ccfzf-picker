@@ -3259,7 +3259,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
    */
   function actionsFor(row) {
     const actions = window.SessionActions.availableActions(row, CONFIG, {
-      os: PICKER_OS, editorLabel: (editorInfo || {}).label,
+      os: PICKER_OS, editorLabel: (editorInfo || {}).label, editorId: (editorInfo || {}).id,
     });
     if (window.OpenTransport.canOpenRemote(row, openManagerHere(), CONFIG.windowHost, managerReachable())) {
       actions.push({
@@ -3696,19 +3696,21 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (id === 'editor') {
       // Папка сессии — тем же open_in_editor, что спека и план: какой
       // редактор и как его звать, решает Rust. Путь уже проверен
-      // availableActions — иначе пункта не было бы.
-      const local = window.PathMap.mapRowPath(row, CONFIG.pathMap);
-      if (local === null) return;
-      invoke('open_in_editor', { editor: CONFIG.editor, path: local })
+      // availableActions — иначе пункта не было бы. editorFolderTarget, а не
+      // mapRowPath: при SSH Remote это адрес `ssh://`, и карта путей ему не
+      // нужна.
+      const target = window.PathMap.editorFolderTarget(row, CONFIG, (editorInfo || {}).id);
+      if (target === null) return;
+      invoke('open_in_editor', { editor: CONFIG.editor, path: target })
         .then(() => invoke('hide_picker'))
         .catch((e) => { error = String(e); render(); });
       return;
     }
     if (id === 'plan' || id === 'spec') {
-      // Путь переводит mapRowDoc — то же правило, по которому
+      // Путь (или адрес `ssh://`) даёт editorDocTarget — то же правило, по которому
       // availableActions решает, есть ли пункт вовсе: прямые клавиши — второй
       // вход, и правило «что этой строке можно» обязано быть одно на оба.
-      const full = window.PathMap.mapRowDoc(row, row[id], CONFIG.pathMap);
+      const full = window.PathMap.editorDocTarget(row, row[id], CONFIG, (editorInfo || {}).id);
       if (full === null) return;
       // Через open_in_editor, а не spawn_detached с готовым argv: как звать
       // редактор, зависит от системы, а страница её не знает и знать не

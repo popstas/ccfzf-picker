@@ -23,7 +23,9 @@ and a session opens in the terminal of your choice.
 - **Enter opens the session** — in a terminal, or back inside Claude Desktop for
   the sessions that came from it.
 - **`^O` opens the folder in your editor** — Zed, VS Code or Cursor, whichever
-  is installed, or the one you pick in settings.
+  is installed, or the one you pick in settings. With Zed, **Use SSH Remote**
+  opens remote sessions over SSH instead of a network drive, so Zed notices
+  files the agents change and warns before overwriting them.
 - **Raises windows instead of opening new ones** — over MQTT, together with the
   [window tracker](https://github.com/popstas/macos-windows-manager).
 - **Tile and cascade layouts** — a global hotkey asks the tracker to arrange the

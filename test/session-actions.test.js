@@ -514,3 +514,29 @@ test('под Windows своя строка проекта и строка сни
   ).map(a => a.id);
   assert.deepStrictEqual(snap, ['editor', 'explorer']);
 });
+
+// --- SSH Remote ----------------------------------------------------------------
+
+test('SSH Remote: пункт редактора, план и спека есть без карты путей, настроенные действия — нет', () => {
+  // Zed открывает удалённую папку по ssh сам, и сетевой диск ему не нужен. А
+  // настроенное действие подставляет `{localPath}` — без карты ему открывать
+  // нечего, и пункт вёл бы в никуда.
+  const cfg = {
+    sshHost: 'build-host.example', editorSshRemote: true,
+    actions: CONFIGURED.actions,
+  };
+  const row = { id: 'a', cwd: '/srv/x', plan: 'docs/plan.md', spec: '/srv/y/spec.md' };
+  const ids = availableActions(row, cfg, { editorLabel: 'Zed', editorId: 'zed' }).map(a => a.id);
+  assert.ok(ids.includes('editor'), ids.join(','));
+  assert.ok(ids.includes('plan'), ids.join(','));
+  assert.ok(ids.includes('spec'), ids.join(','));
+  assert.ok(!ids.includes('explorer'), ids.join(','));
+});
+
+test('SSH Remote: с другим редактором пункты держатся за карту путей, как прежде', () => {
+  const cfg = { sshHost: 'build-host.example', editorSshRemote: true };
+  const row = { id: 'a', cwd: '/srv/x', plan: 'docs/plan.md' };
+  const ids = availableActions(row, cfg, { editorLabel: 'VS Code', editorId: 'vscode' }).map(a => a.id);
+  assert.ok(!ids.includes('editor'), ids.join(','));
+  assert.ok(!ids.includes('plan'), ids.join(','));
+});

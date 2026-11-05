@@ -298,6 +298,13 @@
         { id: 'editor', label: 'Editor command', type: 'text',
           hint: 'Filled by the choice above. For Other, write an application name '
             + '(on macOS it opens the matching application) or a full path.' },
+        // Под редактором: галка меняет, чем он открывает удалённую папку.
+        // Зачем она — в config-shape.js у `editorSshRemote`.
+        { id: 'editorSshRemote', label: 'Use SSH Remote', type: 'bool',
+          hint: 'Zed only. Sessions from the remote host open over SSH '
+            + '(ssh://host/path) instead of through the folder above, so Zed sees '
+            + 'what agents change there and warns before overwriting. '
+            + 'Needs no path mapping.' },
       ],
     },
     // Полей у неё нет по той же причине, что у `columns` и `panels`: она

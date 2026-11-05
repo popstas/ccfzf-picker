@@ -65,7 +65,9 @@
    * два — нет шелла и некому писать комментарий, — и разъехались бы они молча.
    *
    * `opts.editorLabel` — имя редактора, который нашёл Rust (`editor_info`),
-   * для подписи «Open in Zed». Не назвали — подпись общая.
+   * для подписи «Open in Zed». Не назвали — подпись общая. `opts.editorId` —
+   * его же id (`zed`, `vscode`, `cursor`, у своего варианта пусто): по нему
+   * решается, открывать ли по ssh (SSH Remote понимает только Zed).
    */
   function availableActions(row, config, opts) {
     const actions = [];
@@ -73,13 +75,22 @@
     // Один список действий папки на все три ветки ниже: встроенный пункт
     // редактора и настроенные следом. Три копии разошлись бы — так уже
     // терялся `menuKey` при пересборке пункта, во всех трёх ветках разом.
+    //
+    // Условия у двух половин разные. Встроенный пункт спрашивает
+    // `editorFolderTarget`: при SSH Remote Zed открывает папку по ssh, и карта
+    // путей ему не нужна. Настроенные действия подставляют `{localPath}` и без
+    // карты открывать им нечего.
+    const editorId = (opts || {}).editorId;
     const folderActions = () => {
-      if (pathApi.mapRowPath(row, cfg.pathMap) === null) return [];
-      const editorLabel = (opts || {}).editorLabel || 'editor';
-      return [
-        { id: 'editor', label: `Open in ${editorLabel}` },
-        ...(cfg.actions || []).map(a => ({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey })),
-      ];
+      const out = [];
+      if (pathApi.editorFolderTarget(row, cfg, editorId) !== null) {
+        const editorLabel = (opts || {}).editorLabel || 'editor';
+        out.push({ id: 'editor', label: `Open in ${editorLabel}` });
+      }
+      if (pathApi.mapRowPath(row, cfg.pathMap) !== null) {
+        out.push(...(cfg.actions || []).map(a => ({ id: a.id, label: a.label, hotkey: a.hotkey, menuKey: a.menuKey })));
+      }
+      return out;
     };
     // Своя машина на Windows: местная команда пошла бы через `/bin/sh -c`,
     // которого там нет, а `--comment` некому разобрать. Причина у каждого
@@ -155,16 +166,16 @@
     actions.push(...folderActions());
     const num = prNumber((row || {}).pr_url);
     if (num) actions.push({ id: 'pr', label: `Open PR #${num}` });
-    // Спека и план открываются только там, где путь переводится на эту
-    // машину: то же правило, что у действий с папкой выше. Без pathMap пункт
-    // вёл бы в никуда. Переводит mapRowDoc — у бумаги, записанной в чужой
+    // Спека и план открываются только там, где их есть чем открыть: то же
+    // правило, что у пункта редактора выше. Без pathMap (и без SSH Remote) пункт
+    // вёл бы в никуда. Решает editorDocTarget — у бумаги, записанной в чужой
     // каталог, путь абсолютный и от `cwd` строки не зависит.
     //
     // План первым: спека отвечает «что решили», план — «где сейчас», и из
     // списка приходят за вторым. Тот же порядок, что и у значка в строке
     // (docKindOf в session-glyph.js).
     for (const [id, label] of [['plan', 'Open plan'], ['spec', 'Open spec']]) {
-      if (pathApi.mapRowDoc(row, (row || {})[id], cfg.pathMap) !== null) actions.push({ id, label });
+      if (pathApi.editorDocTarget(row, (row || {})[id], cfg, editorId) !== null) actions.push({ id, label });
     }
     if (row && row.agentUpdated && row.agentSeen) actions.push({ id: 'unread', label: 'Mark unread' });
     // Зеркало предыдущего, и условие у него зеркальное же: отмечать
