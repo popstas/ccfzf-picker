@@ -226,9 +226,10 @@ pub fn resolve(setting: &str, env: &Env, exists: &dyn Fn(&Path) -> bool) -> Opti
 /// этим именем — молча не то. Отказ словами, а не прежняя дорога.
 ///
 /// На маке не `open -a`, а CLI из самого пакета (`Zed.app/Contents/MacOS/cli`
-/// — то, что Zed ставит в PATH как `zed`). `open` с адресом решает, кому его
-/// отдать, по схеме, а схему `ssh://` Zed за собой не регистрирует. Пакет
-/// нужен найденный: у «названного, но не найденного» `zed` пути к CLI нет.
+/// — то, что Zed ставит в PATH как `zed`): адрес `ssh://` CLI принимает по
+/// документации Zed, а дойдёт ли он до Zed через `open -a` — не проверено
+/// (на 2026-11-05 мак был недоступен). Пакет нужен найденный: у «названного,
+/// но не найденного» `zed` пути к CLI нет.
 ///
 /// На Windows и Linux адрес уходит тем же файлом, что и путь: основной
 /// `Zed.exe` принимает `ssh://` аргументом (`parse_url_arg` в main.rs Zed) и
@@ -380,7 +381,7 @@ mod tests {
 
     #[test]
     fn ssh_na_make_zovyot_cli_iz_paketa_a_ne_open() {
-        // `open` отдаёт адрес по схеме, а `ssh://` Zed за собой не регистрирует.
+        // CLI из пакета, а не `open -a`: тот с адресом `ssh://` не проверен.
         let mac = resolve("zed", &env(Os::Mac), &only(&["/Applications/Zed.app"])).unwrap();
         assert_eq!(
             ssh_argv(&mac, Os::Mac, URL).unwrap(),
