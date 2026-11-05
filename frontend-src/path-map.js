@@ -100,6 +100,81 @@
   }
 
   /**
+   * Адрес `ssh://<хост>/<путь>`, которым Zed открывает папку или файл на
+   * удалённой машине; `null` — хоста нет или путь не абсолютный.
+   *
+   * Сегменты кодируются, слэши между ними — нет: Zed раскодирует путь ровно
+   * один раз (`parse_file_path` в open_listener.rs), и `#`, `?` или `%` без
+   * кодирования обрезали бы адрес или раскодировались бы не в то. Хост
+   * вставляется как есть — форма `user@host` в sshHost законна и в адрес
+   * ложится сама.
+   */
+  function sshRemoteUrl(host, path) {
+    const h = typeof host === 'string' ? host.trim() : '';
+    if (!h || typeof path !== 'string' || !path.startsWith('/')) return null;
+    return `ssh://${h}${path.split('/').map(encodeURIComponent).join('/')}`;
+  }
+
+  /**
+   * Открывать ли эту строку по ssh, а не через сетевой диск.
+   *
+   * Затем и заведено: сетевой диск не сообщает Zed о правках, сделанных на
+   * той машине, а при сохранении Zed с диском не сверяется — файл, который
+   * поправил агент, он молча затирал своей копией (2026-11-05, пропал
+   * TODO.md). По ssh файлы читает и пишет удалённая машина сама.
+   *
+   * Только Zed: адрес `ssh://` понимает он один из трёх, VS Code и Cursor
+   * открыли бы файл с таким именем. Только чужая строка: у своей машины ходить
+   * по ssh не к кому. Включено — только булево `true`: конфиг пишут руками.
+   */
+  function usesSshRemote(row, cfg, editorId) {
+    const c = cfg || {};
+    return c.editorSshRemote === true
+      && editorId === 'zed'
+      && String((row || {}).source || '') !== 'local'
+      && sshHostOf(row, c) !== '';
+  }
+
+  /**
+   * На какую машину идти: `source` строки, а без него — sshHost. Тот же откат,
+   * что у остальных удалённых действий страницы (`row.source || CONFIG.sshHost`):
+   * метка ssh-источника — это sshHost дословно, включая `user@host`
+   * (`Source::label` в state_source.rs).
+   */
+  function sshHostOf(row, cfg) {
+    const source = String((row || {}).source || '').trim();
+    if (source && source !== 'local') return source;
+    return typeof (cfg || {}).sshHost === 'string' ? cfg.sshHost.trim() : '';
+  }
+
+  /**
+   * Что отдать редактору, открывая папку строки: адрес `ssh://` или путь на
+   * этой машине; `null` — открыть нечем.
+   *
+   * Карта путей для ssh не нужна вовсе — обойтись без сетевого диска и есть
+   * цель, — поэтому пункт редактора спрашивает эту функцию, а не `mapRowPath`.
+   * Настроенные действия (`{localPath}`) по-прежнему держатся за карту.
+   */
+  function editorFolderTarget(row, cfg, editorId) {
+    if (usesSshRemote(row, cfg, editorId)) return sshRemoteUrl(sshHostOf(row, cfg), (row || {}).cwd);
+    return mapRowPath(row, (cfg || {}).pathMap);
+  }
+
+  /**
+   * То же для спеки или плана. Удалённая сторона — POSIX, поэтому
+   * относительная бумага клеится к `cwd` через `/`, а абсолютная (`written_doc`
+   * в чужом каталоге) уходит сама — то же правило, что у `mapRowDoc`.
+   */
+  function editorDocTarget(row, doc, cfg, editorId) {
+    if (typeof doc !== 'string' || !doc) return null;
+    if (!usesSshRemote(row, cfg, editorId)) return mapRowDoc(row, doc, (cfg || {}).pathMap);
+    if (doc.startsWith('/')) return sshRemoteUrl(sshHostOf(row, cfg), doc);
+    const cwd = String((row || {}).cwd || '').replace(/\/+$/, '');
+    if (!cwd) return null;
+    return sshRemoteUrl(sshHostOf(row, cfg), `${cwd}/${doc}`);
+  }
+
+  /**
    * argv действия с подставленными плейсхолдерами.
    *
    * Подстановка идёт внутри каждого элемента, а не заменяет элемент целиком:
@@ -129,5 +204,8 @@
     });
   }
 
-  return { separatorFor, mapPath, mapRowPath, mapRowDoc, buildActionArgv };
+  return {
+    separatorFor, mapPath, mapRowPath, mapRowDoc, buildActionArgv,
+    sshRemoteUrl, editorFolderTarget, editorDocTarget,
+  };
 });

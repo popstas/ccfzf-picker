@@ -457,6 +457,14 @@ test('editor: названный редактор доезжает подрез�
   assert.strictEqual(normalizeConfig({ editor: '  code  ' }).editor, 'code');
 });
 
+test('editorSshRemote: выключен по умолчанию, включает только булево true', () => {
+  // Включённый он меняет, куда ведёт `^O`, — угадывать «да» из строки нельзя.
+  assert.strictEqual(normalizeConfig({}).editorSshRemote, false);
+  assert.strictEqual(normalizeConfig({ editorSshRemote: 'yes' }).editorSshRemote, false);
+  assert.strictEqual(normalizeConfig({ editorSshRemote: true }).editorSshRemote, true);
+  assert.strictEqual(normalizeConfig({ editorSshRemote: false }).editorSshRemote, false);
+});
+
 test('localSource — булев флаг с умолчанием true', () => {
   // Умолчание включено: свои сессии человек ждёт в списке, ничего не
   // настраивая, а забытая галка выглядит пропажей сессий, а не настройкой.

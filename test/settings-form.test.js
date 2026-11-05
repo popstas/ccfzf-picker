@@ -601,6 +601,18 @@ test('выпадашка редакторов знает те же редакт�
   assert.deepStrictEqual(EDITORS.map(e => e.value), ids);
 });
 
+test('editorSshRemote — булево поле на странице Paths, сразу за редактором', () => {
+  // Рядом с редактором: галка меняет, чем он открывает удалённую папку, и
+  // работает только с Zed — подсказка обязана это сказать.
+  const page = PAGES.find(p => p.id === 'paths');
+  const ids = page.fields.map(f => f.id);
+  assert.strictEqual(ids.indexOf('editorSshRemote'), ids.indexOf('editor') + 1);
+  const field = page.fields.find(f => f.id === 'editorSshRemote');
+  assert.strictEqual(field.type, 'bool');
+  assert.strictEqual(field.label, 'Use SSH Remote');
+  assert.match(field.hint, /Zed only/);
+});
+
 test('выбор редактора считается по значению editor', () => {
   const { matchEditor } = require('../frontend-src/settings-form');
   assert.strictEqual(matchEditor(''), 'auto');
