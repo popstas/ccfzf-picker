@@ -144,3 +144,18 @@ test('поиск находит сессию по комментарию', () =>
   const got = filterRows(rows, 'окна');
   assert.deepStrictEqual(got.map(r => r.label), ['esm-migration']);
 });
+
+test('дочерняя сессия head находится по имени родителя и по подписи head:', () => {
+  // Подпись `head:<имя>` в строке видна, значит и искаться обязана — тем же
+  // текстом, каким нарисована.
+  const groups = [{
+    key: 'live', label: 'Active', sessions: [
+      { id: 'aaaa1111-aaaa-bbbb-cccc-000000000011', label: 'lead-cup-dashboard', cwd: '/home/user/x', head: 'lead' },
+      { id: 'aaaa1111-aaaa-bbbb-cccc-000000000012', label: 'notes', cwd: '/home/user/y', head: '' },
+    ],
+  }];
+  assert.deepStrictEqual(filterSessions(groups, 'head:').flatMap(g => g.sessions.map(s => s.label)),
+    ['lead-cup-dashboard']);
+  assert.deepStrictEqual(filterSessions(groups, 'head:lead').flatMap(g => g.sessions.map(s => s.label)),
+    ['lead-cup-dashboard']);
+});

@@ -398,8 +398,9 @@
            Строка имени у обоих остаётся голым текстом, а не flex: подпись
            здесь дописывается в строку, ей не нужно ни `margin-left: auto`, ни
            своей колонки, — а flex отнял бы у имени многоточие. Подпись zellij
-           (`.zname`, zellijNameHtml) того же рода и под тем же правилом. */
-        .name .wname, .name .sname, .name .zname {
+           (`.zname`, zellijNameHtml) и подпись head-сессии (`.hname`,
+           headNameHtml) того же рода и под тем же правилом. */
+        .name .wname, .name .sname, .name .zname, .name .hname {
             margin-left: 6px; font-size: 11px; color: var(--fg-dim); font-weight: normal;
         }
         /* Правые колонки одной группой: статус, id, контекст с деньгами,
@@ -1232,7 +1233,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     projectCountHtml, projectColumnWidths,
     docsBadgeHtml, promptsHtml, commentHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
-    windowNameHtml, zellijNameHtml, snapshotNameHtml,
+    windowNameHtml, zellijNameHtml, headNameHtml, snapshotNameHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -1562,6 +1563,8 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // Сессия внутри zellij: Enter на ней присоединяется, а не продолжает
       // сессию заново, — см. zellijNameHtml.
       `${zellijNameHtml(session)}` +
+      // Сессию открыла head-сессия под свою задачу — см. headNameHtml.
+      `${headNameHtml(session)}` +
       `${prBadgeHtml(session)}` +
       // Значок «есть спека или план» — рядом с PR и той же природы: оба
       // говорят, что у сессии есть бумага снаружи транскрипта, и оба ведут в
@@ -3308,9 +3311,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
   /**
    * Имена, которые сейчас нельзя занимать.
    *
-   * Две части. Первая — заголовки живых сессий из последнего ответа: имя
-   * сессии и есть заголовок её окна, по нему оконный трекер привязывает
-   * сессию к слоту, и мешают друг другу именно живые тёзки.
+   * Две части. Первая — имена живых сессий из последнего ответа, и заголовок
+   * транскрипта, и заголовки окон (`liveSessionNames` в session-name.js): по
+   * заголовку окна оконный трекер привязывает сессию к слоту, и мешают друг
+   * другу именно живые тёзки.
    *
    * Вторая — имена, которые пикер выдал сам за последнюю минуту. Без неё два
    * `^N` подряд, быстрее опроса, дали бы одно имя дважды: ответ агрегатора
@@ -3328,10 +3332,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     for (const [name, at] of issuedNames) {
       if (now - at > ISSUED_TTL_MS) issuedNames.delete(name);
     }
-    const live = lastSessions
-      .filter(s => s && s.live)
-      .map(s => s && s.title)
-      .filter(t => typeof t === 'string' && t);
+    const live = window.SessionName.liveSessionNames(lastSessions);
     return live.concat(Array.from(issuedNames.keys()));
   }
 

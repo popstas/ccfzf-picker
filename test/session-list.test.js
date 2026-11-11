@@ -561,3 +561,19 @@ test('источник называет машину только когда и�
   assert.strictEqual(rows[0].windowHost, '', 'единственный источник — атрибуции нет');
   assert.strictEqual(rows[1].windowHost, '');
 });
+
+// Поле `head` пишет ccfzf по реестру дочерних сессий head, то есть чужой
+// репозиторий, — и в строку оно доезжает только строкой. `parent` рядом занят
+// фоновыми форками и в имя родителя не превращается.
+test('имя head-сессии доезжает до строки, а мусор и отсутствие — пустой строкой', () => {
+  const rows = buildSessionList({
+    sessions: [
+      state({ id: 'a', head: ' lead-cup ' }),
+      state({ id: 'b' }),
+      state({ id: 'c', head: 42 }),
+      state({ id: 'd', head: null }),
+    ],
+    seen: {},
+  });
+  assert.deepStrictEqual(rows.map(r => r.head), ['lead-cup', '', '', '']);
+});

@@ -14,7 +14,10 @@
   "",
   "В `taken` здесь только строки: у Rust список типизован, и мусор (null,",
   "число, не-массив) проверяется на стороне страницы, там же, где он и",
-  "бывает — в ответе агрегатора."
+  "бывает — в ответе агрегатора.",
+  "",
+  "`live` — вход для отбора занятых имён из ответа агрегатора: его делят",
+  "liveSessionNames в session-name.js и session_name::live_names в Rust."
  ],
  "cases": [
   {
@@ -76,6 +79,47 @@
    "cwd": "api",
    "taken": ["api"],
    "expected": "api-2"
+  }
+ ],
+ "live": [
+  {
+   "why": "мёртвая тёзка не занимает имени, пустое и отсутствующее имя — тоже",
+   "state": {"sessions": [
+    {"title": "api", "live": true},
+    {"title": "api-2", "live": false},
+    {"title": "   ", "live": true},
+    {"live": true}
+   ]},
+   "expected": ["api"]
+  },
+  {
+   "why": "заголовок окна живой сессии занят, даже когда транскрипт назван иначе: дочернюю сессию head до первой реплики знает только окно",
+   "state": {"sessions": [
+    {"title": "", "live": true, "windows": [
+     {"title": "lead-cup-dashboard", "host": "box-a"},
+     {"title": " lead-cup-dashboard-2 ", "host": "box-b"}
+    ]}
+   ]},
+   "expected": ["lead-cup-dashboard", "lead-cup-dashboard-2"]
+  },
+  {
+   "why": "прежний агрегатор отдаёт одно окно полем window",
+   "state": {"sessions": [
+    {"title": "esm-migration", "live": true, "window": {"title": "tray-build-time"}}
+   ]},
+   "expected": ["esm-migration", "tray-build-time"]
+  },
+  {
+   "why": "окна мёртвой сессии не занимают имени",
+   "state": {"sessions": [
+    {"title": "notes", "live": false, "windows": [{"title": "notes"}]}
+   ]},
+   "expected": []
+  },
+  {
+   "why": "ответ без списка сессий — пустой список, а не отказ",
+   "state": {"sessions": "не список"},
+   "expected": []
   }
  ]
 }

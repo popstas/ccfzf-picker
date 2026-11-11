@@ -74,22 +74,38 @@ pub fn new_session_name(cwd: &str, taken: &[String]) -> String {
 
 /// Имена живых сессий из ответа агрегатора.
 ///
-/// Имя сессии и есть заголовок её окна — по нему оконный трекер привязывает
-/// сессию к слоту, и мешают друг другу именно живые тёзки. Отбор тот же, что
-/// у `takenSessionNames` на странице.
+/// Два имени у каждой: заголовок транскрипта (`title`) и заголовки её окон.
+/// Мешают друг другу именно окна — по заголовку окна трекер привязывает
+/// сессию к слоту, — а `title` у только что открытой сессии бывает ещё пустым
+/// или прежним: так у дочерней сессии head, заведённой по имени `<head>-…` не
+/// из пикера. Окна — `windows` у нового агрегатора, `window` у прежнего, как
+/// у `windowsOf` на странице.
+///
+/// Отбор тот же, что у `liveSessionNames` в `session-name.js`, и держит их
+/// общая фикстура (`live` в `test/fixtures/session-name.json`).
 pub fn live_names(state: &serde_json::Value) -> Vec<String> {
-    state
-        .get("sessions")
-        .and_then(|v| v.as_array())
-        .map(|rows| {
-            rows.iter()
-                .filter(|s| s.get("live").and_then(|v| v.as_bool()).unwrap_or(false))
-                .filter_map(|s| s.get("title").and_then(|v| v.as_str()))
-                .filter(|t| !t.trim().is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+    let Some(rows) = state.get("sessions").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for s in rows {
+        if !s.get("live").and_then(|v| v.as_bool()).unwrap_or(false) {
+            continue;
+        }
+        let windows: Vec<&serde_json::Value> = match s.get("windows").and_then(|v| v.as_array()) {
+            Some(list) if !list.is_empty() => list.iter().collect(),
+            _ => s.get("window").filter(|w| w.is_object()).into_iter().collect(),
+        };
+        let names = std::iter::once(s.get("title"))
+            .chain(windows.into_iter().map(|w| w.get("title")));
+        for name in names.flatten().filter_map(|v| v.as_str()) {
+            let name = name.trim();
+            if !name.is_empty() {
+                out.push(name.to_string());
+            }
+        }
+    }
+    out
 }
 
 /// Сколько имя, выданное хоткеем, считается занятым.
@@ -173,6 +189,25 @@ mod tests {
                 "{}",
                 c["why"].as_str().unwrap_or("")
             );
+        }
+    }
+
+    /// Имена живых — тот же вход, что у `liveSessionNames` на странице:
+    /// разойдись отбор, хоткей при скрытом пикере и `^N` при открытом считали
+    /// бы занятым разное, и одно из них выдало бы имя живого окна.
+    #[test]
+    fn the_shared_fixture_gives_the_live_names_the_page_gives() {
+        let f: Value = serde_json::from_str(FIXTURE).expect("фикстура не разобралась");
+        let cases = f["live"].as_array().expect("в фикстуре нет live");
+        assert!(!cases.is_empty(), "в фикстуре не задано ни одного случая live");
+        for c in cases {
+            let expected: Vec<String> = c["expected"]
+                .as_array()
+                .expect("expected — список строк")
+                .iter()
+                .map(|v| v.as_str().expect("в expected только строки").to_string())
+                .collect();
+            assert_eq!(live_names(&c["state"]), expected, "{}", c["why"].as_str().unwrap_or(""));
         }
     }
 

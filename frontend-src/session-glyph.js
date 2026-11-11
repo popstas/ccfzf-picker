@@ -764,6 +764,24 @@
   }
 
   /**
+   * Подпись `head:<имя>` у сессии, которую открыла head-сессия под задачу.
+   *
+   * Подпись, а не группировка: дочерняя сессия остаётся на своём месте в
+   * списке, а родство — уточнение рядом с именем, того же рода и той же
+   * тусклостью, что имя окна и zellij.
+   *
+   * Мерки `sameWords` здесь нет намеренно: имена дочерних — `<head>-…`, слова
+   * родителя всегда внутри имени строки, и подпись не появилась бы ни разу.
+   * Живость тоже не спрашивается, в отличие от zellij: процесс кончился, а
+   * родство осталось.
+   */
+  function headNameHtml(session) {
+    const name = String(session?.head ?? '').trim();
+    if (!name) return '';
+    return `<span class="hname" title="Opened by head session ${escapeHtml(name)}">head:${escapeHtml(name)}</span>`;
+  }
+
+  /**
    * Имя сессии рядом с именем проекта в строке снимка — и только когда они
    * разошлись.
    *
@@ -877,7 +895,7 @@
     todoHtml, todoText, projectCountHtml, projectCountText, projectColumnWidths, ageText,
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
-    prNumber, prBadgeHtml, wordSet, sameWords, hidesProject, projectLine, windowNameHtml, zellijNameHtml,
+    prNumber, prBadgeHtml, wordSet, sameWords, hidesProject, projectLine, windowNameHtml, zellijNameHtml, headNameHtml,
     snapshotNameHtml,
     docsBadgeHtml, docKindOf, promptsHtml, commentHtml,
   };
