@@ -145,11 +145,13 @@
   // Как назвать человеку не вставший хоткей и по какому ключу спросить о нём
   // ответ `save_config`. Подпись здесь своя, а не поле формы: там она про то,
   // что клавиша делает («Show the picker»), а тут — про то, какая именно из
-  // четырёх не отозвалась.
+  // пяти не отозвалась. Клавиша без комбинации (`none`, или встроенной на
+  // этой системе нет) отвечает `null`, а не `false`, и отказом не считается.
   const HOTKEY_REPORTS = [
     ['hotkey', 'hotkey'],
     ['projects hotkey', 'projectsHotkey'],
     ['tile hotkey', 'tileHotkey'],
+    ['group layout hotkey', 'groupTileHotkey'],
     ['history hotkey', 'historyHotkey'],
   ];
   const UI_DEFAULTS = {

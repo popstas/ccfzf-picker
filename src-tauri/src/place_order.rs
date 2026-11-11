@@ -500,6 +500,7 @@ fn parent_index(rows: &[Row]) -> Vec<Option<usize>> {
 /// Ребёнок → родитель среди строк своей машины, как их видит дерево
 /// страницы. Отдельно от `group_ids` ради общей фикстуры: родителя JS-сторож
 /// может проверить, а группу на странице никто не собирает.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn head_parents(state: &Value, config_host: &str, sort: &str) -> std::collections::BTreeMap<String, String> {
     let rows = sorted_rows(state, config_host, sort, &Stale::OFF);
     parent_index(&rows)

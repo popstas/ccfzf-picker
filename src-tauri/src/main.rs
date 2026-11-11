@@ -1625,6 +1625,8 @@ fn save_config(app: tauri::AppHandle, patch: serde_json::Value) -> Result<serde_
         "projectsHotkeyAccelerator": out.projects_accelerator,
         "tileHotkeyRegistered": out.tile_registered,
         "tileHotkeyAccelerator": out.tile_accelerator,
+        "groupTileHotkeyRegistered": out.group_registered,
+        "groupTileHotkeyAccelerator": out.group_accelerator,
         "historyHotkeyRegistered": out.history_registered,
         "historyHotkeyAccelerator": out.history_accelerator,
     }))
@@ -1679,9 +1681,13 @@ fn register_projects_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) 
 /// Третья такая функция, и третья отдельная по той же причине, что и вторая:
 /// обработчики разные по существу. Этот не показывает окно вовсе — он гасит
 /// пикер и уходит просьбой к трекеру.
-fn register_tile_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) -> (bool, String) {
-    let Some((shortcut, accelerator)) = layout_hotkeys::layout_hotkeys(config).tile else {
-        return (true, String::new());
+fn register_tile_hotkey(
+    app: &tauri::AppHandle,
+    hotkey: Option<layout_hotkeys::Hotkey>,
+) -> (Option<bool>, String) {
+    let Some((shortcut, accelerator)) = hotkey else {
+        // Клавиши нет — не отказ: на Windows так по умолчанию.
+        return (None, String::new());
     };
     let registered = match app.global_shortcut().on_shortcut(shortcut, |app, _sc, event| {
         if event.state() == ShortcutState::Pressed {
@@ -1690,15 +1696,52 @@ fn register_tile_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) -> (
     }) {
         Ok(()) => true,
         Err(e) => {
-            // Отказ не фатален и обязан быть виден — то же правило, что у двух
-            // соседей: молчащая клавиша выглядит сломанным конфигом. Здесь оно
-            // стоит дороже прочего: комбинацию только что освободил трекер, и
-            // «занята» тут значит «трекер ещё не выкачен».
+            // Отказ не фатален и обязан быть виден — то же правило, что у
+            // соседей: молчащая клавиша выглядит сломанным конфигом.
             ccfzf_log!("cannot register tile hotkey: {e}");
             false
         }
     };
-    (registered, accelerator)
+    (Some(registered), accelerator)
+}
+
+/// Поставить хоткей раскладки группы head — тем же устройством, что и
+/// плитку: обработчик гасит пикер и уходит просьбой к менеджеру.
+fn register_group_tile_hotkey(
+    app: &tauri::AppHandle,
+    hotkey: Option<layout_hotkeys::Hotkey>,
+) -> (Option<bool>, String) {
+    let Some((shortcut, accelerator)) = hotkey else {
+        return (None, String::new());
+    };
+    let registered = match app.global_shortcut().on_shortcut(shortcut, |app, _sc, event| {
+        if event.state() == ShortcutState::Pressed {
+            group_press(app);
+        }
+    }) {
+        Ok(()) => true,
+        Err(e) => {
+            ccfzf_log!("cannot register group layout hotkey: {e}");
+            false
+        }
+    };
+    (Some(registered), accelerator)
+}
+
+/// Обе клавиши раскладки по одному разрешению конфига: группа ставится
+/// первой, а плитка, совпавшая с ней, значится не вставшей — с той строкой,
+/// какую человек написал (`tile_lost`).
+fn register_layout_hotkeys(
+    app: &tauri::AppHandle,
+    config: &serde_json::Value,
+) -> ((Option<bool>, String), (Option<bool>, String)) {
+    let hotkeys = layout_hotkeys::layout_hotkeys(config);
+    let group = register_group_tile_hotkey(app, hotkeys.group);
+    let tile = match hotkeys.tile_lost {
+        Some(lost) => (Some(false), lost),
+        None => register_tile_hotkey(app, hotkeys.tile),
+    };
+    (tile, group)
 }
 
 /// Поставить хоткей истории — тем же устройством, что и проектный: обработчик
@@ -1763,6 +1806,11 @@ fn accelerator_text(accelerator: &str) -> String {
 /// На маке ничего не меняется: NSMenuItem рисует ⌘⇧C сам, и табуляция в
 /// заголовке была бы литеральной.
 fn menu_item_parts(label: &str, accelerator: &str) -> (String, Option<String>) {
+    // Клавиши нет — нет и колонки: на Windows пустая комбинация дала бы
+    // подпись с хвостом из табуляции, на маке — отказ разбора у muda.
+    if accelerator.trim().is_empty() {
+        return (label.to_string(), None);
+    }
     #[cfg(windows)]
     {
         (format!("{label}\t{}", accelerator_text(accelerator)), None)
@@ -1833,8 +1881,12 @@ struct HotkeyOutcome {
     picker_accelerator: String,
     projects_registered: bool,
     projects_accelerator: String,
-    tile_registered: bool,
+    /// `None` — клавиши нет вовсе; в отчёте это `null`, и окно настроек не
+    /// называет её не вставшей.
+    tile_registered: Option<bool>,
     tile_accelerator: String,
+    group_registered: Option<bool>,
+    group_accelerator: String,
     history_registered: bool,
     history_accelerator: String,
 }
@@ -1899,7 +1951,8 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
     let _ = app.global_shortcut().unregister_all();
     let (registered, accelerator) = register_picker_hotkey(app, &config);
     let (projects_registered, projects_accelerator) = register_projects_hotkey(app, &config);
-    let (tile_registered, tile_accelerator) = register_tile_hotkey(app, &config);
+    let ((tile_registered, tile_accelerator), (group_registered, group_accelerator)) =
+        register_layout_hotkeys(app, &config);
     let (history_registered, history_accelerator) = register_history_hotkey(app, &config);
     project_hotkeys::reapply(app);
 
@@ -1932,6 +1985,8 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
         projects_accelerator,
         tile_registered,
         tile_accelerator,
+        group_registered,
+        group_accelerator,
         history_registered,
         history_accelerator,
     }
@@ -2649,22 +2704,6 @@ fn tile_press(app: &tauri::AppHandle) {
     // Идемпотентно: уже скрытое окно повторно не гасит.
     hide_window(app);
 
-    // Молчаливый откат на `Null` выглядел бы как «брокер не настроен» и для
-    // битого конфига, и для настоящего отсутствия mqtt. Та же строка, за
-    // которую уже заплачено расследованием занятого `Ctrl+F11`.
-    let raw = match load_config() {
-        Ok(v) => v,
-        Err(e) => {
-            ccfzf_log!("cannot read config, not asking for a tile layout: {e}");
-            return;
-        }
-    };
-
-    let host = raw
-        .get("windowHost")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
     // Ответ агрегатора берётся у поллера — того же, что кормит страницу. На
     // скрытом окне он отстаёт до восьми минут (бэкофф в `poller.rs`), и это
     // приемлемо: окно, открытое минуту назад, разложится следующим нажатием,
@@ -2674,14 +2713,7 @@ fn tile_press(app: &tauri::AppHandle) {
         .map(|p| p.snapshot())
         .and_then(|s| s.get("state").cloned())
         .unwrap_or(serde_json::Value::Null);
-
-    // Режим сортировки — тот, что человек выбрал в пикере (клик по статуслайну). Читается из
-    // `ui.json`, а не спрашивается у страницы, по той же причине, что и всё
-    // остальное здесь.
-    let sort = load_json("ui.json")
-        .ok()
-        .and_then(|ui| ui.get("sort").and_then(|v| v.as_str()).map(str::to_string))
-        .unwrap_or_default();
+    let Some(ctx) = place_context(state, "a tile layout") else { return };
 
     // Затемнение строк — то же, каким его видит страница (`staleSettings`):
     // галка `dim stale` из `ui.json`, а порог — из конфига. Тусклые строки
@@ -2692,7 +2724,7 @@ fn tile_press(app: &tauri::AppHandle) {
     // Галки в `ui.json` может не быть вовсе — пикер ни разу не сохранял
     // состояние, — и тогда решает умолчание из конфига, ровно как
     // `toggleDefaults()` на странице.
-    let stale_config = raw.get("stale").cloned().unwrap_or(serde_json::Value::Null);
+    let stale_config = ctx.raw.get("stale").cloned().unwrap_or(serde_json::Value::Null);
     let stale_default = stale_config
         .get("enabled")
         .and_then(|v| v.as_bool())
@@ -2721,7 +2753,7 @@ fn tile_press(app: &tauri::AppHandle) {
             .unwrap_or(0.0),
     };
 
-    let ids = place_order::tile_ids(&state, &host, &sort, &stale);
+    let ids = place_order::tile_ids(&ctx.state, &ctx.host, &ctx.sort, &stale);
     if ids.is_empty() {
         // Пустой `ids` приёмник читает как «все ведомые окна, порядком той
         // машины» — то самое поведение, ради ухода от которого хоткей и
@@ -2730,47 +2762,170 @@ fn tile_press(app: &tauri::AppHandle) {
         ccfzf_log!("no windows of this machine are known, not asking for a tile layout");
         return;
     }
-
-    // Адрес просьбы — от трекера строки, тем же способом, каким берётся база:
-    // сиблинг `tracker_base`.
-    let endpoint = place_order::tracker_http(&state, &host);
+    let body = match mqtt::place_payload("tile", &ids) {
+        Ok(b) => b,
+        Err(e) => {
+            ccfzf_log!("cannot ask for a tile layout: {e}");
+            return;
+        }
+    };
 
     // Грамота уходит до просьбы: нажатие хоткея — последнее событие ввода, и
     // оно наше. Кому именно — не выбираем, см. `allow_any_foreground`.
     allow_any_foreground();
+    send_place(ctx, body, "a tile layout");
+}
 
+/// То, что нужно обеим раскладкам с хоткея: конфиг, своя машина, ответ
+/// агрегатора и выбранная сортировка.
+struct PlaceContext {
+    raw: serde_json::Value,
+    host: String,
+    state: serde_json::Value,
+    sort: String,
+}
+
+/// Собрать `PlaceContext` вокруг уже добытого ответа агрегатора. `None` —
+/// конфиг не читается, и это уже сказано в журнале.
+fn place_context(state: serde_json::Value, what: &str) -> Option<PlaceContext> {
+    // Молчаливый откат на `Null` выглядел бы как «брокер не настроен» и для
+    // битого конфига, и для настоящего отсутствия mqtt. Та же строка, за
+    // которую уже заплачено расследованием занятого `Ctrl+F11`.
+    let raw = match load_config() {
+        Ok(v) => v,
+        Err(e) => {
+            ccfzf_log!("cannot read config, not asking for {what}: {e}");
+            return None;
+        }
+    };
+    let host = raw
+        .get("windowHost")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    // Режим сортировки — тот, что человек выбрал в пикере (клик по
+    // статуслайну). Читается из `ui.json`, а не спрашивается у страницы:
+    // страница на скрытом окне спит.
+    let sort = load_json("ui.json")
+        .ok()
+        .and_then(|ui| ui.get("sort").and_then(|v| v.as_str()).map(str::to_string))
+        .unwrap_or_default();
+    Some(PlaceContext { raw, host, state, sort })
+}
+
+/// Отправить готовое тело просьбы о раскладке трекеру своей машины.
+///
+/// Транспорт, как и у шести команд, выбирает `transport_for`. Адрес идёт мимо
+/// фронтенда — страница на скрытом окне усыплена целиком, — тем же способом,
+/// каким берётся база: сиблинг `tracker_base` — `place_order::tracker_http`.
+/// Ответа у просьбы нет на ветке MQTT; на ветке http он есть, но попадает в
+/// журнал, а не в статуслайн: хоткей жмут при скрытом окне.
+fn send_place(ctx: PlaceContext, body: String, what: &'static str) {
+    let endpoint = place_order::tracker_http(&ctx.state, &ctx.host);
     match transport_for(&endpoint) {
         Transport::Http => {
             tauri::async_runtime::spawn_blocking(move || {
-                if let Err(e) = manager_http::place(&endpoint, "tile", &ids) {
-                    ccfzf_log!("cannot ask for a tile layout: {e}");
+                if let Err(e) = manager_http::place_body(&endpoint, body) {
+                    ccfzf_log!("cannot ask for {what}: {e}");
                 }
             });
         }
         Transport::Mqtt => {
-            let broker = mqtt::broker_from_config(&raw);
+            let broker = mqtt::broker_from_config(&ctx.raw);
             if !broker.is_configured() {
                 // Запасной дороги у раскладки нет: разложить окна сам пикер не
                 // умеет ни на одной системе — этим занят трекер. Молчать
                 // нельзя, иначе ненастроенный брокер неотличим от сломанной
                 // клавиши.
-                ccfzf_log!("mqtt broker is not configured, cannot ask for a tile layout");
+                ccfzf_log!("mqtt broker is not configured, cannot ask for {what}");
                 return;
             }
             // Адрес называет трекер строки, а не конфиг: у каждой машины свой
             // префикс топиков. Пустое имя откатывает `resolve_base` на
             // `<config.base>/windows` — так пикер вёл себя до появления поля и
             // обязан вести себя со старым трекером.
-            let base = mqtt::resolve_base(&broker, &place_order::tracker_base(&state, &host));
+            let base = mqtt::resolve_base(&broker, &place_order::tracker_base(&ctx.state, &ctx.host));
             // Публикация ждёт подтверждения брокера до пяти секунд — держать
             // на этом потоке, из которого плагин зовёт обработчик, нельзя.
             tauri::async_runtime::spawn_blocking(move || {
-                if let Err(e) = mqtt::place(&broker, &base, "tile", &ids) {
-                    ccfzf_log!("cannot ask for a tile layout: {e}");
+                if let Err(e) = mqtt::place_body(&broker, &base, &body) {
+                    ccfzf_log!("cannot ask for {what}: {e}");
                 }
             });
         }
     }
+}
+
+/// Нажали хоткей раскладки группы head.
+///
+/// Группы считает Rust (`place_order::group_ids`), а не страница, — по той же
+/// причине, что у плитки: страница на скрытом окне спит. Какую из групп
+/// раскладывать, решает менеджер: у него активное окно известно точно, а
+/// снимок пикера на скрытом окне отстаёт. Пикер даёт ему все группы своей
+/// машины и подсвеченную строку, если окно было открыто.
+///
+/// Видимость и выбор читаются **до** гашения: `hide_window` выбор забывает.
+fn group_press(app: &tauri::AppHandle) {
+    let visible = app
+        .get_webview_window("picker")
+        .map(|w| w.is_visible().unwrap_or(false))
+        .unwrap_or(false);
+    let selected = if visible {
+        app.try_state::<PickerSelection>()
+            .and_then(|s| s.0.lock().unwrap().clone())
+    } else {
+        None
+    };
+    hide_window(app);
+
+    // `macos-windows-manager` незнакомый режим отбрасывает молча — без
+    // журнала и без уведомления. Клавиша, заданная на маке явно, выглядела бы
+    // мёртвой; пусть хотя бы журнал пикера скажет почему. Просьба уходит
+    // трекеру своей машины, так что система окон — это система пикера.
+    if cfg!(target_os = "macos") {
+        ccfzf_log!("group layout is not supported on macOS");
+        return;
+    }
+
+    // Грамота уходит, пока нажатие ещё наше: менеджер выводит окна группы
+    // на передний план.
+    allow_any_foreground();
+
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        // Свежий опрос, а не снимок: главный случай — «head только что открыл
+        // детей, жму клавишу», а снимок на скрытом окне отстаёт до восьми минут.
+        let state = app
+            .try_state::<poller::Poller>()
+            .map(|p| p.fresh_state())
+            .unwrap_or(serde_json::Value::Null);
+        let Some(ctx) = place_context(state, "a group layout") else { return };
+        let groups = place_order::group_ids(&ctx.state, &ctx.host, &ctx.sort);
+        if groups.is_empty() {
+            ccfzf_log!("no head session with live children on this machine, not asking for a group layout");
+            return;
+        }
+        // Пикер открыт, а подсвечено не то, что входит в группу (заголовок,
+        // проект, сессия другой машины): откат менеджера на активное окно
+        // здесь врал бы — после гашения пикера активно случайное окно.
+        if visible && !selected.as_ref().is_some_and(|id| groups.iter().any(|g| g.contains(id))) {
+            ccfzf_log!("the highlighted row is not in a head group, not asking for a group layout");
+            return;
+        }
+        let body = match mqtt::group_payload(&groups, selected.as_deref()) {
+            Ok(b) => b,
+            Err(e) => {
+                ccfzf_log!("cannot ask for a group layout: {e}");
+                return;
+            }
+        };
+        ccfzf_log!(
+            "asked for a group layout: {} group(s), selected {}",
+            groups.len(),
+            selected.as_deref().unwrap_or("none")
+        );
+        send_place(ctx, body, "a group layout");
+    });
 }
 
 /// Время сборки этого бинаря, если оно в него вшито.
@@ -3069,11 +3224,11 @@ fn history_item_label(hotkey_registered: bool) -> &'static str {
 ///
 /// Сам пункт от отказа не страдает: раскладку он просит по нажатию, а не по
 /// клавише, — поэтому подпись говорит про хоткей, а не про пункт.
-fn tile_item_label(hotkey_registered: bool) -> &'static str {
-    if hotkey_registered {
-        "Tile windows"
-    } else {
+fn tile_item_label(hotkey_registered: Option<bool>) -> &'static str {
+    if hotkey_registered == Some(false) {
         "Tile windows (hotkey is taken)"
+    } else {
+        "Tile windows"
     }
 }
 
@@ -3183,8 +3338,8 @@ fn main() {
                 register_picker_hotkey(app.handle(), &config);
             let (projects_registered, projects_accelerator) =
                 register_projects_hotkey(app.handle(), &config);
-            let (tile_registered, tile_accelerator) =
-                register_tile_hotkey(app.handle(), &config);
+            let ((tile_registered, tile_accelerator), _group) =
+                register_layout_hotkeys(app.handle(), &config);
             let (history_registered, history_accelerator) =
                 register_history_hotkey(app.handle(), &config);
 
@@ -3804,6 +3959,18 @@ mod tests {
         assert_ne!(default_projects_shortcut(), default_picker_shortcut());
     }
 
+    /// Клавиши у плитки нет — это не отказ: на Windows так по умолчанию, и
+    /// «hotkey is taken» отправил бы человека искать того, кто её занял.
+    /// Правой колонки тоже нет: пустая комбинация на Windows дала бы хвост из
+    /// табуляции.
+    #[test]
+    fn an_unbound_tile_key_is_not_a_taken_one() {
+        assert_eq!(tile_item_label(None), "Tile windows");
+        assert_eq!(tile_item_label(Some(true)), "Tile windows");
+        assert_ne!(tile_item_label(Some(false)), "Tile windows");
+        assert_eq!(menu_item_parts("Tile windows", ""), ("Tile windows".to_string(), None));
+    }
+
     /// Выбор со страницы чистится: пустая строка — «ничего не выбрано».
     #[test]
     fn a_blank_selection_is_no_selection() {
@@ -4338,8 +4505,8 @@ mod tests {
     /// трекера, и «занята» здесь значит «трекер ещё не выкачен».
     #[test]
     fn tile_label_tells_when_the_hotkey_is_taken() {
-        assert_eq!(tile_item_label(true), "Tile windows");
-        assert_ne!(tile_item_label(false), tile_item_label(true));
+        assert_eq!(tile_item_label(Some(true)), "Tile windows");
+        assert_ne!(tile_item_label(Some(false)), tile_item_label(Some(true)));
     }
 
     /// Команда о занятых клавишах обязана быть `async`.
