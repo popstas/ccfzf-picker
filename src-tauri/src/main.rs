@@ -45,6 +45,26 @@ struct LastToggle(Mutex<Option<Instant>>);
 /// Когда окно погасло в последний раз. См. `picker_toggle`.
 struct LastHidden(Mutex<Option<Instant>>);
 
+/// Подсвеченная строка пикера, как её прислала страница (`picker-selection.js`).
+///
+/// Нужна раскладке группы: клавишу обрабатывает Rust, а спросить страницу из
+/// обработчика нельзя. Пусто, пока окно скрыто: `hide_window` выбор забывает,
+/// и на скрытом пикере `selected` уходит `null` — активное окно менеджер
+/// найдёт сам.
+struct PickerSelection(Mutex<Option<String>>);
+
+/// Id из выбора страницы: пустая строка — «ничего не выбрано».
+fn selection_id(id: Option<String>) -> Option<String> {
+    id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+#[tauri::command]
+fn set_picker_selection(app: tauri::AppHandle, id: Option<String>) {
+    if let Some(state) = app.try_state::<PickerSelection>() {
+        *state.0.lock().unwrap() = selection_id(id);
+    }
+}
+
 /// Гасить ли пикер по потере фокуса — текущее значение `hideOnBlur`.
 ///
 /// Живёт в разделяемом состоянии, а не в замыкании обработчика, потому что
@@ -121,6 +141,9 @@ fn hide_window(app: &tauri::AppHandle) {
     let _ = app.emit("picker-hidden", ());
     if let Some(state) = app.try_state::<LastHidden>() {
         *state.0.lock().unwrap() = Some(Instant::now());
+    }
+    if let Some(state) = app.try_state::<PickerSelection>() {
+        *state.0.lock().unwrap() = None;
     }
     if let Some(poller) = app.try_state::<poller::Poller>() {
         poller.hidden();
@@ -3058,6 +3081,7 @@ fn main() {
     tauri::Builder::default()
         .manage(LastToggle(Mutex::new(None)))
         .manage(LastHidden(Mutex::new(None)))
+        .manage(PickerSelection(Mutex::new(None)))
         .plugin(tauri_plugin_shell::init())
         // Без общего with_handler: он зовётся на каждый зарегистрированный
         // хоткей, и одна ветка внутри него разбирала бы, чей это был. Здесь у
@@ -3068,7 +3092,7 @@ fn main() {
             hide_picker, app_version, set_picker_size, poll_now, spawn_detached, load_seen, save_seen, load_config,
             terminal_helper,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
-            restore_snapshot_mqtt, place_windows_mqtt, open_session_mqtt, open_project_mqtt,
+            restore_snapshot_mqtt, place_windows_mqtt, set_picker_selection, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
             set_comment, open_in_editor, editor_info, read_log, tracker_signal_status, open_desktop_session, open_folder
@@ -3778,6 +3802,14 @@ mod tests {
     #[test]
     fn two_global_hotkeys_do_not_collide() {
         assert_ne!(default_projects_shortcut(), default_picker_shortcut());
+    }
+
+    /// Выбор со страницы чистится: пустая строка — «ничего не выбрано».
+    #[test]
+    fn a_blank_selection_is_no_selection() {
+        assert_eq!(selection_id(Some(" abc ".to_string())), Some("abc".to_string()));
+        assert_eq!(selection_id(Some("  ".to_string())), None);
+        assert_eq!(selection_id(None), None);
     }
 
     /// Клавиши раскладки не совпадают с клавишами окна: совпадение стоило бы
