@@ -37,6 +37,7 @@
     // каждой системе (`Ctrl+Win+F10` против `Ctrl+Option+Cmd+C`) и живёт в
     // Rust. Здесь пустое поле значит «взять встроенное», а не «выключить».
     tileHotkey: '',
+    groupTileHotkey: '',
     // Пусто по той же причине: у хоткея истории умолчание своё на каждой
     // системе (`Ctrl+Win+Shift+F10` против `Ctrl+Option+Cmd+Shift+C`) и живёт в Rust.
     historyHotkey: '',
@@ -351,6 +352,8 @@
         ? src.projectsHotkey : DEFAULTS.projectsHotkey,
       tileHotkey: typeof src.tileHotkey === 'string'
         ? src.tileHotkey : DEFAULTS.tileHotkey,
+      groupTileHotkey: typeof src.groupTileHotkey === 'string'
+        ? src.groupTileHotkey : DEFAULTS.groupTileHotkey,
       historyHotkey: typeof src.historyHotkey === 'string'
         ? src.historyHotkey : DEFAULTS.historyHotkey,
       terminal: src.terminal && typeof src.terminal === 'object' && src.terminal.file

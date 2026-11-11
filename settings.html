@@ -359,7 +359,10 @@
       //
       // Показывается строка ровно та, что уходит в `config.yaml`: второй вид
       // (глифами `^⇧C`) пришлось бы сверять с файлом по буквам.
-      const shown = value ? esc(value) : 'Built-in';
+      // `none` — «без клавиши» (кнопка Off): показать его сырым значило бы
+      // выдать слово за комбинацию.
+      const off = String(value).trim().toLowerCase() === 'none';
+      const shown = off ? 'Off' : value ? esc(value) : 'Built-in';
       return `<div class="field"><label>${esc(field.label)}</label>`
         + '<div class="hotkey-row">'
         + `<button type="button" class="hotkey-capture" data-hotkey="${esc(field.id)}">${shown}</button>`
@@ -367,6 +370,12 @@
         // умолчание», своё на каждой системе и живущее только в Rust, и без
         // этой кнопки записать пустоту стало бы нечем.
         + `<button type="button" class="hotkey-clear" data-hotkey-clear="${esc(field.id)}">Clear</button>`
+        // «Выключить» — только у клавиш раскладки (`allowOff`): у них на
+        // одной из систем встроенной нет, и Clear выключить её на другой не
+        // может — пустота там и есть встроенная.
+        + (field.allowOff
+          ? `<button type="button" class="hotkey-clear" data-hotkey-off="${esc(field.id)}">Off</button>`
+          : '')
         + `</div>${hint}</div>`;
     }
     if (field.type === 'range') {
@@ -941,6 +950,9 @@
         // Rust и так читает как «взять встроенное умолчание».
         setHotkey(button.dataset.hotkeyClear, '');
       });
+    }
+    for (const button of page.querySelectorAll('[data-hotkey-off]')) {
+      button.addEventListener('click', () => setHotkey(button.dataset.hotkeyOff, 'none'));
     }
     for (const input of page.querySelectorAll('[data-panel]')) {
       input.addEventListener('change', () => {

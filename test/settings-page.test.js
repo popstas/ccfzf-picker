@@ -631,6 +631,25 @@ test('у каждого типа поля есть своя ветка отри�
 // из пяти, но принцип тот же). Значение вне этого списка — пиксели, вписанные
 // руками или подобранные раньше, — не теряется молча, а видно в соседнем
 // числовом поле, а не как «совпавшая» радиокнопка, которой для него нет.
+test('выключенная клавиша показана словом Off, и выключить её есть чем', () => {
+  // `none` в поле — «без клавиши». Показать его сырым значило бы выдать за
+  // комбинацию; кнопка Off нужна, потому что Clear пишет пустоту, а пустота —
+  // это встроенная клавиша.
+  const { PAGES } = require('../frontend-src/settings-form');
+  const src = sourceOf(/\n {2}function fieldHtml\(field\) \{[\s\S]*?\n {2}\}\n/, 'fieldHtml');
+  const fieldsById = Object.fromEntries(PAGES.flatMap(p => p.fields).map(f => [f.id, f]));
+  const html = (field, value) => {
+    const ctx = { fields: { [field.id]: value }, esc: (s) => String(s), window: {} };
+    vm.createContext(ctx);
+    return vm.runInContext(`${src}\nfieldHtml(${JSON.stringify(field)});`, ctx, { filename: 'settings.html' });
+  };
+  const group = html(fieldsById.groupTileHotkey, 'none');
+  assert.match(group, />Off</);
+  assert.match(group, /data-hotkey-off="groupTileHotkey"/);
+  assert.match(html(fieldsById.groupTileHotkey, ''), />Built-in</);
+  assert.doesNotMatch(html(fieldsById.hotkey, 'Cmd+Shift+C'), /data-hotkey-off/);
+});
+
 test('пиксельный размер виден в числовом поле, а не как радиокнопка', () => {
   const { PAGES } = require('../frontend-src/settings-form');
   const src = sourceOf(/\n {2}function fieldHtml\(field\) \{[\s\S]*?\n {2}\}\n/, 'fieldHtml');
