@@ -22,6 +22,7 @@ const { buildProjectList, markHotkeysTaken } = require('../frontend-src/project-
 const { availableActions } = require('../frontend-src/session-actions');
 const StaleItems = require('../frontend-src/stale-items');
 const SessionWindows = require('../frontend-src/session-windows');
+const SessionTree = require('../frontend-src/session-tree');
 
 // Форма — с живого ответа `ccfzf --state` (см. scripts/check-state.js), поля
 // в том же порядке и с теми же именами.
@@ -1007,7 +1008,7 @@ test('Enter на заголовке секции переключает её, а
 // но и по смене сортировки. Тест вычитывает настоящий saveUi из страницы (тем
 // же приёмом, что renderProjects и choose выше) и проверяет, что сохранённый
 // объект правда двухосный и ось statusline из uiToggles никуда не делась.
-function saveUiWith(uiToggles, fullscreen) {
+function saveUiWith(uiToggles, fullscreen, treeMode) {
   const source = SESSIONS_HTML.match(/\n {2}function saveUi\(\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'saveUi не найден в sessions.html — тест сторожит не то');
   const calls = [];
@@ -1030,6 +1031,8 @@ function saveUiWith(uiToggles, fullscreen) {
     order: { narrow: [], wide: [[], [], []] },
     // Шестой — спрятанные панели, той же формы, что и свёрнутость.
     hidden: { narrow: {}, wide: {} },
+    // Седьмой — режим иерархии head-сессий, кнопка рядом с ^F.
+    tree: Boolean(treeMode),
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nsaveUi();`, ctx, { filename: 'sessions.html' });
@@ -1055,6 +1058,8 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
     // Порядка не назначал — тоже пусто, то есть «как по умолчанию».
     order: { narrow: [], wide: [[], [], [], [], []] },
     hidden: { narrow: {}, wide: {} },
+    // Иерархию не включали — режим выключен.
+    tree: false,
   });
 });
 
@@ -1065,6 +1070,14 @@ test('saveUi запоминает и режим окна, а не только �
   const calls = saveUiWith({ showPrompt: { list: true, statusline: true } }, true);
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(calls[0].ui.fullscreen, true);
+});
+
+test('saveUi запоминает режим иерархии', () => {
+  // Седьмой аргумент. Забудь его saveUi — и кнопка дерева помнилась бы до
+  // первой смены сортировки.
+  const calls = saveUiWith({ showPrompt: { list: true, statusline: true } }, false, true);
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].ui.tree, true);
 });
 
 // ── renderChecks рисует только галки с осью statusline (C2) ─────────────────
@@ -1616,13 +1629,14 @@ test('при открытом меню правый клик ничего не �
  * опустевшая колонка видна только здесь, где строку рисуют настоящей
  * renderSessions из sessions.html, а не вызовом отрисовщика по одному.
  */
-function renderSessionRows(state, query, toggles, stale) {
+function renderSessionRows(state, query, toggles, stale, treeMode) {
   // markToggleId вычитывается из той же страницы, а не подставляется заглушкой:
   // от неё зависит класс `markable`, то есть обещание про Shift+клик, и копия
   // разошлась бы с настоящим правилом молча.
   const source = pageFunctions(
     'markToggleId(row)', 'rowKey(session)', 'sessionItem(session, nowSec)', 'subheadItem(row)',
-    'sectionItem(section)', 'itemsOfSection(section, nowSec)', 'staleSettings()');
+    'sectionItem(section)', 'itemsOfSection(section, nowSec)', 'staleSettings()',
+    'sectionsFor(mode, query)', 'layoutName()');
   const staleConfig = stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 };
   // Та же подстановка умолчания, что и в renderProjectRows: тест, назвавший
   // только stale.enabled, не должен молча получить погашенную галку.
@@ -1635,10 +1649,22 @@ function renderSessionRows(state, query, toggles, stale) {
       PickerSections,
       StaleItems,
       SessionWindows,
+      SessionTree,
     },
     CONFIG: {
       stale: staleConfig,
     },
+    // Режим иерархии. Секции в нём собирает настоящая sectionsFor — перестановка
+    // живёт там, и копия в тесте сторожила бы не её. Без режима — прежний
+    // прямой buildSections, на котором стоят остальные тесты.
+    tree: Boolean(treeMode),
+    fullscreen: false,
+    projectRows: [],
+    snapshotItemsFor: () => [],
+    trackerIsHere: () => false,
+    collapsed: { narrow: { past: false }, wide: {} },
+    order: { narrow: [], wide: [] },
+    hidden: { narrow: {}, wide: {} },
     groups: buildSessionsPayload(state, 'recent').groups,
     rows: [],
     items: [],
@@ -1667,8 +1693,11 @@ function renderSessionRows(state, query, toggles, stale) {
     nowSec: NOW,
   };
   vm.createContext(ctx);
+  const sections = treeMode
+    ? 'sectionsFor(\'sessions\', query)'
+    : "window.PickerSections.buildSections({ groups, mode: 'sessions', query, layout: 'narrow', collapsed: { past: false } })";
   const items = vm.runInContext(`${source}
-    window.PickerSections.buildSections({ groups, mode: 'sessions', query, layout: 'narrow', collapsed: { past: false } })
+    ${sections}
       .flatMap(function (section) { return itemsOfSection(section, nowSec); });`,
   ctx, { filename: 'sessions.html' });
   return { items: Array.from(items), rows: ctx.rows };
@@ -2275,4 +2304,62 @@ test('удалённый источник печатается как есть',
 
 test('без source остаётся откат на CONFIG.sshHost — старые строки этой ветки', () => {
   assert.strictEqual(sourceLabelOf({}, 'remote-host'), 'remote-host');
+});
+
+// ── режим иерархии head-сессий ──────────────────────────────────────────────
+//
+// Перестановка живёт в sectionsFor, отступ и снятая подпись — в sessionItem,
+// и обе проверяются на настоящей разметке: разойдись они, ребёнок встал бы на
+// место без отступа или с отступом, но с подписью — и молча.
+const HEAD_ID = 'aaaa0000-0000-4000-8000-000000000001';
+function headFamily() {
+  return {
+    ok: true,
+    sessions: [
+      aggregatorSession({ id: HEAD_ID, title: 'lead', mtime: 300 }),
+      aggregatorSession({ id: 'aaaa0000-0000-4000-8000-000000000002', title: 'mid', mtime: 250 }),
+      aggregatorSession({ id: 'aaaa0000-0000-4000-8000-000000000003', title: 'zz-child', mtime: 200,
+        head: 'lead', headId: HEAD_ID }),
+    ],
+  };
+}
+const labels = items => items.filter(i => i.key.startsWith('s:'))
+  .map(i => (i.html.match(/<span class="label">([^<]*)</) || [])[1]);
+
+test('в режиме иерархии ребёнок стоит перед родителем с отступом и без подписи', () => {
+  const { items, rows } = renderSessionRows(headFamily(), '', null, null, true);
+  assert.deepStrictEqual(labels(items), ['zz-child', 'lead', 'mid']);
+  const child = items.find(i => i.html.includes('>zz-child<'));
+  assert.ok(child.html.includes('style="margin-left: 20px"'), child.html);
+  assert.ok(child.html.includes(' tree-child'), child.html);
+  assert.ok(!child.html.includes('hname'), child.html);
+  const parent = items.find(i => i.html.includes('>lead<'));
+  assert.ok(!parent.html.includes('margin-left'), parent.html);
+  // Стрелки ходят по `rows`, и порядок в нём — видимый.
+  assert.deepStrictEqual(rows.filter(r => r.id).map(r => r.title), ['zz-child', 'lead', 'mid']);
+});
+
+test('без режима иерархии порядок прежний, и подпись head: на месте', () => {
+  const { items } = renderSessionRows(headFamily());
+  assert.deepStrictEqual(labels(items), ['lead', 'mid', 'zz-child']);
+  const child = items.find(i => i.html.includes('>zz-child<'));
+  assert.ok(child.html.includes('>head:lead</span>'), child.html);
+  assert.ok(!child.html.includes('margin-left'), child.html);
+});
+
+test('ребёнок, чей родитель не прошёл в список, остаётся с подписью и без отступа', () => {
+  const state = headFamily();
+  state.sessions = state.sessions.filter(s => s.id !== HEAD_ID);
+  const { items } = renderSessionRows(state, '', null, null, true);
+  assert.deepStrictEqual(labels(items), ['mid', 'zz-child']);
+  const child = items.find(i => i.html.includes('>zz-child<'));
+  assert.ok(child.html.includes('>head:lead</span>'), child.html);
+  assert.ok(!child.html.includes('margin-left'), child.html);
+});
+
+test('кнопка иерархии стоит между широким режимом и настройками', () => {
+  const wide = SESSIONS_HTML.indexOf('id="wide-button"');
+  const tree = SESSIONS_HTML.indexOf('id="tree-button"');
+  const settings = SESSIONS_HTML.indexOf('id="settings-button"');
+  assert.ok(wide > 0 && tree > wide && settings > tree, `${wide} ${tree} ${settings}`);
 });

@@ -186,6 +186,12 @@
       order: normalizeOrder(src.order),
       // Шестое: спрятанные панели, той же формы, что и свёрнутость.
       hidden: normalizeHidden(src.hidden),
+      // Седьмое: режим иерархии head-сессий — кнопка рядом с `^F`, и по той
+      // же причине поле своё, а не галка: это режим списка, а не колонка, и
+      // ни второй оси, ни чекбокса в статуслайне у него нет. Нелогичное
+      // значение читается как выключенный режим — испорченный файл не должен
+      // переставлять человеку список.
+      tree: src.tree === true,
     };
   }
 
@@ -194,9 +200,9 @@
    * пишет — файл маленький и человекочитаемый, и заглянувший в него не должен
    * гадать, что из этого пикер и правда помнит.
    */
-  function uiStateToSave(sort, toggles, fullscreen, collapsed, order, hidden) {
+  function uiStateToSave(sort, toggles, fullscreen, collapsed, order, hidden, tree) {
     return normalizeUiState(
-      { sort, toggles, fullscreen, collapsed, order, hidden }, { toggles: toggles || {} });
+      { sort, toggles, fullscreen, collapsed, order, hidden, tree }, { toggles: toggles || {} });
   }
 
   /**

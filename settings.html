@@ -1188,7 +1188,7 @@
         await invoke('save_ui', {
           ui: window.UiState.uiStateToSave(
             fresh.sort, fresh.toggles, fresh.fullscreen, fresh.collapsed, fresh.order,
-            fresh.hidden),
+            fresh.hidden, fresh.tree),
         });
         if (window.__TAURI__) await window.__TAURI__.event.emit('ui-changed');
         // Правка, случившаяся, пока мы ждали запись, — уже не в fresh:
@@ -1223,7 +1223,7 @@
         await invoke('save_ui', {
           ui: window.UiState.uiStateToSave(
             fresh.sort, fresh.toggles, fresh.fullscreen, fresh.collapsed, fresh.order,
-            fresh.hidden),
+            fresh.hidden, fresh.tree),
         });
         // Пикер — другое окно, своего ui.json он не перечитает. Событие
         // рассылается всем окнам, и подписан на него только он.

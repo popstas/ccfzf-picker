@@ -421,7 +421,7 @@ test('вкладка UI возвращает в файл всё, чем расп
   const args = call[1].split(',').map(s => s.trim());
   assert.deepStrictEqual(args,
     ['fresh.sort', 'fresh.toggles', 'fresh.fullscreen', 'fresh.collapsed', 'fresh.order',
-      'fresh.hidden']);
+      'fresh.hidden', 'fresh.tree']);
 });
 
 test('пикер тоже зовёт uiStateToSave всеми аргументами', () => {
@@ -432,7 +432,7 @@ test('пикер тоже зовёт uiStateToSave всеми аргумента
   assert.ok(call, 'вызов uiStateToSave не найден в sessions.html — тест сторожит не то');
   const args = call[1].split(',').map(s => s.trim());
   assert.deepStrictEqual(args,
-    ['sortMode', 'uiToggles', 'fullscreen', 'collapsed', 'order', 'hidden']);
+    ['sortMode', 'uiToggles', 'fullscreen', 'collapsed', 'order', 'hidden', 'tree']);
 });
 
 // ── вкладка Panels ─────────────────────────────────────────────────────────

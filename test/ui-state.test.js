@@ -27,6 +27,7 @@ test('пустой файл даёт вид по умолчанию', () => {
     collapsed: { narrow: {}, wide: {} },
     order: { narrow: [], wide: [[], [], [], [], []] },
     hidden: { narrow: {}, wide: {} },
+    tree: false,
   });
   assert.deepStrictEqual(normalizeUiState(null, DEFAULTS), normalizeUiState({}, DEFAULTS));
   assert.deepStrictEqual(normalizeUiState('мусор', DEFAULTS), normalizeUiState({}, DEFAULTS));
@@ -44,6 +45,7 @@ test('сохранённый вид возвращается как был', () 
     collapsed: { narrow: { past: true }, wide: {} },
     order: { narrow: ['past', 'live'], wide: [['live'], [], ['past'], [], []] },
     hidden: { narrow: { projects: true }, wide: {} },
+    tree: true,
   };
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
 });
@@ -153,7 +155,7 @@ test('в файл уходит ровно то, что читается обра
   assert.deepStrictEqual(saved,
     { sort: 'name', toggles, fullscreen: false, collapsed: { narrow: {}, wide: {} },
       order: { narrow: [], wide: [[], [], [], [], []] },
-      hidden: { narrow: {}, wide: {} } });
+      hidden: { narrow: {}, wide: {} }, tree: false });
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
   // Мусорная сортировка не должна попасть даже в файл: перезапуск молча
   // починит её, но человек, заглянувший в ui.json, увидел бы неправду.
@@ -274,4 +276,14 @@ test('порядок доезжает до файла пятым аргумен�
   assert.deepStrictEqual(saved.order, order);
   // И читается обратно тем же: файл пишет и читает одна пара функций.
   assert.deepStrictEqual(normalizeUiState(saved, { toggles: {} }).order, order);
+});
+
+// Режим иерархии — седьмое поле. Включает его только настоящее `true`:
+// испорченный файл не должен переставлять человеку список.
+test('режим иерархии читается только из true', () => {
+  for (const raw of [undefined, null, 'true', 1, {}, false]) {
+    assert.strictEqual(normalizeUiState({ tree: raw }, DEFAULTS).tree, false, String(raw));
+  }
+  assert.strictEqual(normalizeUiState({ tree: true }, DEFAULTS).tree, true);
+  assert.strictEqual(uiStateToSave('name', {}, false, {}, {}, {}, true).tree, true);
 });
