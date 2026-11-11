@@ -520,7 +520,35 @@ pub(crate) fn place_payload(mode: &str, ids: &[String]) -> Result<String, String
 /// Ответа у просьбы нет, как и у подъёма окна: трекер отчитывается своему
 /// человеку строкой в трее. Отказ виден на экране — окна там же.
 pub fn place(broker: &Broker, base: &str, mode: &str, ids: &[String]) -> Result<(), String> {
-    publish(broker, base, PLACE_TOPIC, &place_payload(mode, ids)?)
+    place_body(broker, base, &place_payload(mode, ids)?)
+}
+
+/// Тело просьбы о раскладке группы head: `{"mode": "group", "groups":
+/// [[head, дети...], ...], "selected": id|null}` — контракт с
+/// windows11-manager. Отдельно от `place_payload`: у плитки список один, а
+/// здесь список групп, и `group` в `LAYOUT_MODES` не входит — плитку им не
+/// попросить.
+///
+/// Пустой список групп, группа без детей и пустой id — отказ: менеджер такое
+/// не разложит, а ответа у публикации нет.
+pub(crate) fn group_payload(groups: &[Vec<String>], selected: Option<&str>) -> Result<String, String> {
+    if groups.is_empty() {
+        return Err("no head groups to lay out".to_string());
+    }
+    for g in groups {
+        if g.len() < 2 {
+            return Err(format!("a head group without children: {g:?}"));
+        }
+        if g.iter().any(|id| id.trim().is_empty()) {
+            return Err(format!("an empty session id in a head group: {g:?}"));
+        }
+    }
+    Ok(serde_json::json!({ "mode": "group", "groups": groups, "selected": selected }).to_string())
+}
+
+/// Готовое тело просьбы о раскладке — в тот же топик, что у плитки.
+pub fn place_body(broker: &Broker, base: &str, body: &str) -> Result<(), String> {
+    publish(broker, base, PLACE_TOPIC, body)
 }
 
 /// Полный топик: разрешённая база плюс заданный приёмником хвост.
@@ -648,11 +676,36 @@ fn publish(broker: &Broker, base: &str, tail: &str, payload: &str) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::{
-        broker_from_config, open_new_payload, open_payload, open_project_payload, place_payload,
+        broker_from_config, group_payload, open_new_payload, open_payload, open_project_payload, place_payload,
         resolve_base, restore_payload, terminal_name, topic_of, unread_bases, Placement,
         FOCUS_TOPIC,
         OPEN_TOPIC, PLACE_TOPIC, RESTORE_TOPIC, UNREAD_TOPIC,
     };
+
+    /// Тело просьбы о группе — контракт с windows11-manager дословно:
+    /// `selected` есть всегда, `null` пишется явно — пикер скрыт, и активное
+    /// окно менеджер находит сам.
+    #[test]
+    fn a_group_request_is_the_contract_with_the_manager() {
+        let g = vec![vec!["h".to_string(), "c1".to_string(), "c2".to_string()]];
+        let v: serde_json::Value = serde_json::from_str(&group_payload(&g, None).unwrap()).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({ "mode": "group", "groups": [["h", "c1", "c2"]], "selected": null })
+        );
+        let v: serde_json::Value = serde_json::from_str(&group_payload(&g, Some("c1")).unwrap()).unwrap();
+        assert_eq!(v["selected"], "c1");
+    }
+
+    /// Пустую группу не слать: менеджер её не разложит, а ответа у
+    /// публикации нет — отказ обязан случиться здесь.
+    #[test]
+    fn a_group_request_without_groups_is_refused() {
+        assert!(group_payload(&[], None).is_err());
+        assert!(group_payload(&[vec!["h".to_string()]], None).is_err());
+        assert!(group_payload(&[vec!["h".to_string(), " ".to_string()]], None).is_err());
+        assert!(place_payload("group", &[]).is_err(), "плитка не обязана знать group");
+    }
 
     fn broker(base: &str) -> super::Broker {
         broker_from_config(&serde_json::json!({ "mqtt": { "host": "broker", "base": base } }))
