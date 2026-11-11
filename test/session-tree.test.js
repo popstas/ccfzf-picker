@@ -98,3 +98,20 @@ test('строки не мутируются, строки без id остаю�
 test('отступ одного уровня — в пределах, названных владельцем', () => {
   assert.ok(INDENT_PX >= 15 && INDENT_PX <= 30, INDENT_PX);
 });
+
+// Вкладки Windows Terminal делят один процесс, и `window.pid` у сессий разных
+// вкладок общий. Родитель — строго строка с id == headId, где бы она ни стояла
+// и с кем бы ни делила процесс; окно в поиске не участвует вовсе.
+test('сессии одного процесса терминала не путаются: родитель — по id, не по окну', () => {
+  const tab = pid => ({ host: 'box-a', pid, desktop: 1 });
+  const rows = [
+    { id: 'n1', title: 'neighbour-a', window: tab(30956) },
+    { id: 'p', title: 'lead', window: tab(30956) },
+    { id: 'n2', title: 'neighbour-b', window: tab(30956) },
+    { id: 'c1', title: 'kid-a', headId: 'p', window: tab(30956) },
+    { id: 'c2', title: 'kid-b', headId: 'p', window: tab(30956) },
+  ];
+  const out = nestByHead(rows);
+  assert.deepStrictEqual(ids(out), ['n1', 'c1', 'c2', 'p', 'n2']);
+  assert.deepStrictEqual(depths(out), [0, 1, 1, 0, 0]);
+});
