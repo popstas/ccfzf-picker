@@ -766,6 +766,22 @@ test('живая сессия внутри zellij подписана имене�
   assert.strictEqual(zellijNameHtml(null), '');
 });
 
+test('дочерняя сессия head подписана именем родителя, живая она или нет', () => {
+  const { headNameHtml } = require('../frontend-src/session-glyph');
+  assert.match(headNameHtml({ live: true, head: 'lead' }), /class="hname"[^>]*>head:lead</);
+  // Процесс кончился, а родство осталось: подпись не про живость.
+  assert.match(headNameHtml({ live: false, head: 'lead' }), />head:lead</);
+  // Мерки sameWords здесь нет: имя ребёнка — `<head>-…`, и с ней подпись не
+  // появилась бы никогда.
+  assert.match(headNameHtml({ title: 'lead-cup-dashboard', head: 'lead' }), />head:lead</);
+  assert.strictEqual(headNameHtml({ head: '' }), '');
+  assert.strictEqual(headNameHtml({}), '');
+  assert.strictEqual(headNameHtml(null), '');
+  // Имя пишет чужой репозиторий — экранируется и в тексте, и в подсказке.
+  assert.ok(!headNameHtml({ head: '<img src=x>' }).includes('<img'));
+  assert.ok(!headNameHtml({ head: '"><b>' }).includes('"><b>'));
+});
+
 test('имя zellij-сессии экранируется: его пишет человек на ssh-машине', () => {
   const { zellijNameHtml } = require('../frontend-src/session-glyph');
   assert.ok(!zellijNameHtml({ live: true, zellij: '<img src=x>' }).includes('<img'));

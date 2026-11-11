@@ -237,7 +237,10 @@
         /* Включённый широкий режим: кнопка светлее ряда. Состояние показано
            цветом, а не вторым глифом, — чем меньше разных знаков, тем меньше
            шансов на квадратик-заглушку в чужом системном шрифте. */
-        #wide-button.on { color: var(--fg-strong); }
+        #wide-button.on, #tree-button.on { color: var(--fg-strong); }
+        /* Рисунок в ряду знаков: опускается к базовой линии соседних глифов,
+           иначе стоял бы выше `⛶` и `⚙`. */
+        #tree-button svg { vertical-align: -2px; }
         .status-check {
             display: flex; align-items: center; gap: 6px;
             cursor: pointer; color: var(--fg-dim);
@@ -398,8 +401,9 @@
            Строка имени у обоих остаётся голым текстом, а не flex: подпись
            здесь дописывается в строку, ей не нужно ни `margin-left: auto`, ни
            своей колонки, — а flex отнял бы у имени многоточие. Подпись zellij
-           (`.zname`, zellijNameHtml) того же рода и под тем же правилом. */
-        .name .wname, .name .sname, .name .zname {
+           (`.zname`, zellijNameHtml) и подпись head-сессии (`.hname`,
+           headNameHtml) того же рода и под тем же правилом. */
+        .name .wname, .name .sname, .name .zname, .name .hname {
             margin-left: 6px; font-size: 11px; color: var(--fg-dim); font-weight: normal;
         }
         /* Правые колонки одной группой: статус, id, контекст с деньгами,
@@ -732,6 +736,11 @@
        окна настроек (событие `ui-changed`), и покрась мы кнопку по клику, она
        врала бы после чужой правки. -->
   <span id="wide-button" class="icon-button"><span class="icon">⛶</span></span>
+  <!-- Режим иерархии head-сессий. Знак — рисунок, а не символ шрифта: глифа
+       ветвления нет в половине системных шрифтов, и вместо него вышел бы
+       квадратик. `currentColor` берёт цвет кнопки, то есть и подсветку
+       наведения, и `.on`. Подпись и подсветку ставит paintToggles. -->
+  <span id="tree-button" class="icon-button"><svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="4" cy="3" r="1.7"/><circle cx="4" cy="13" r="1.7"/><circle cx="12" cy="5" r="1.7"/><path d="M4 4.7v6.6M12 6.7c0 3.3-8 2.3-8 4.6"/></svg></span>
   <!-- Справа и последним: это не часть ряда галок, а выход в другое окно. -->
   <span id="settings-button" class="icon-button" title="Settings (Ctrl+,)"><span class="icon">⚙</span></span>
 </div>
@@ -789,6 +798,7 @@
 <!-- session-name до open-strategy: тот берёт из него uniqueSessionName в
      момент загрузки, и в обратном порядке ему достался бы undefined. -->
 <script src="session-name.js"></script>
+<script src="session-tree.js"></script>
 <!-- terminal-presets: страница берёт отсюда osOf — ту же мерку системы,
      какой выбирает пресет окно настроек. Второй разбор navigator.platform
      разошёлся бы с первым. -->
@@ -1094,6 +1104,10 @@
   // клавиши для этого нет намеренно: случайно нажатая убрала бы панель без
   // следа, а вернуть её можно было бы только там же, в настройках.
   let hidden = { narrow: {}, wide: {} };
+  // Режим иерархии head-сессий: дочерние строки стоят после родительской с
+  // отступом (nestByHead в session-tree.js). Седьмое поле ui.json, рядом с
+  // fullscreen и по той же причине — это режим списка, а не колонка.
+  let tree = false;
 
   /** Имя текущей раскладки: им же именуются половинки `collapsed`. */
   function layoutName() {
@@ -1202,6 +1216,7 @@ let commentRow = null;
   const statusChecks = document.getElementById('status-checks');
   const settingsButton = document.getElementById('settings-button');
   const wideButton = document.getElementById('wide-button');
+  const treeButton = document.getElementById('tree-button');
   const menuHint = document.getElementById('menu-hint');
   const actionsBackdrop = document.getElementById('actions-backdrop');
   const actionsTitle = document.getElementById('actions-title');
@@ -1232,7 +1247,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     projectCountHtml, projectColumnWidths,
     docsBadgeHtml, promptsHtml, commentHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
-    windowNameHtml, zellijNameHtml, snapshotNameHtml,
+    windowNameHtml, zellijNameHtml, headNameHtml, snapshotNameHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -1297,12 +1312,24 @@ const infoBackdrop = document.getElementById('info-backdrop');
     toggleFullscreen();
   });
 
+  // Режим иерархии. Кнопку красит paintToggles — по той же причине, что и
+  // широкую: состояние приезжает ещё и событием `ui-changed`.
+  treeButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    tree = !tree;
+    saveUi();
+    paintToggles();
+    render();
+  });
+
   function paintToggles() {
     for (const [key, input] of toggleInputs) input.checked = !!toggles[key];
     // Подпись называет то, что кнопка сделает, а не то, что показано сейчас:
     // так читается всякая кнопка, а состояние видно подсветкой рядом.
     wideButton.title = fullscreen ? 'Narrow view (Ctrl+F)' : 'Wide view (Ctrl+F)';
     wideButton.classList.toggle('on', fullscreen);
+    treeButton.title = tree ? 'Flat list' : 'Hierarchy: child sessions under their head';
+    treeButton.classList.toggle('on', tree);
     // Одна строка на всё окно места не имеет: клавиш стало столько, что
     // подсказка занимала весь статуслайн и всё равно недоговаривала —
     // встроенных действий, настроенных человеком и глобальных в ней не было
@@ -1323,7 +1350,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // uiToggles, не toggles: тот плоский и не помнит ось statusline — запись
     // плоской картой обнулила бы её при первом же save_ui, включая тот, что
     // зовётся сменой сортировки (ниже, не только из чекбокса).
-    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen, collapsed, order, hidden) })
+    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen, collapsed, order, hidden, tree) })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -1549,7 +1576,14 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // имя сессии уже назвало тот же проект (projectLine, Task 11). Полный
     // путь остаётся в titleAttr ниже, через shortPath — подсказка не меняется.
     const sessionCwdLine = toggles.showPaths ? projectLine(session.label, session.cwd) : '';
-    const html = `<div class="row ${rowKind}${session.live ? '' : ' closed'}${markable ? ' markable' : ''}${stale}" data-index="${index}"${titleAttr(session)}>` +
+    // Глубина в дереве head-сессий — только в режиме иерархии и только у
+    // строки, чей родитель стоит в той же секции (nestByHead). У неё подпись
+    // `head:` не рисуется: родство уже сказано местом и отступом. Отступ —
+    // числом из session-tree.js, а не вторым литералом в стилях.
+    const depth = tree ? Number(session.treeDepth) || 0 : 0;
+    const indent = depth > 0
+      ? ` style="margin-left: ${depth * window.SessionTree.INDENT_PX}px"` : '';
+    const html = `<div class="row ${rowKind}${session.live ? '' : ' closed'}${markable ? ' markable' : ''}${depth > 0 ? ' tree-child' : ''}${stale}" data-index="${index}"${indent}${titleAttr(session)}>` +
       statusDotHtml(session) +
       // Имя — своим элементом, а не голым текстом: строка имени здесь flex,
       // и обрезка многоточием держится именно на нём. Безымянный flex-элемент
@@ -1562,6 +1596,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // Сессия внутри zellij: Enter на ней присоединяется, а не продолжает
       // сессию заново, — см. zellijNameHtml.
       `${zellijNameHtml(session)}` +
+      // Сессию открыла head-сессия под свою задачу — см. headNameHtml. В
+      // иерархии у вложенной строки подписи нет: родитель стоит под ней.
+      `${depth > 0 ? '' : headNameHtml(session)}` +
       `${prBadgeHtml(session)}` +
       // Значок «есть спека или план» — рядом с PR и той же природы: оба
       // говорят, что у сессии есть бумага снаружи транскрипта, и оба ведут в
@@ -1724,7 +1761,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
 
   /** Секции текущего режима и раскладки. Один вызов на обе ветки render(). */
   function sectionsFor(mode, query) {
-    return window.PickerSections.buildSections({
+    const sections = window.PickerSections.buildSections({
       groups, projects: projectRows, snapshots: snapshotItemsFor(query),
       mode, query, trackerHere: trackerIsHere(),
       layout: layoutName(), collapsed: collapsed[layoutName()],
@@ -1733,6 +1770,14 @@ const infoBackdrop = document.getElementById('info-backdrop');
       order: order[layoutName()],
       hidden: hidden[layoutName()],
     });
+    // Иерархия переставляет строки внутри секции, уже отобранные запросом:
+    // ребёнок, чей родитель не прошёл фильтр, стоит как обычно, с подписью.
+    // Делается до отрисовки, и потому стрелки ходят по видимому порядку —
+    // `rows` наполняет sessionItem в том же порядке.
+    if (!tree) return sections;
+    return sections.map(s => (s.kind === 'sessions'
+      ? { ...s, rows: window.SessionTree.nestByHead(s.rows) }
+      : s));
   }
 
   /** Узкий список: секции одним потоком, сверху вниз. */
@@ -3308,9 +3353,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
   /**
    * Имена, которые сейчас нельзя занимать.
    *
-   * Две части. Первая — заголовки живых сессий из последнего ответа: имя
-   * сессии и есть заголовок её окна, по нему оконный трекер привязывает
-   * сессию к слоту, и мешают друг другу именно живые тёзки.
+   * Две части. Первая — имена живых сессий из последнего ответа, и заголовок
+   * транскрипта, и заголовки окон (`liveSessionNames` в session-name.js): по
+   * заголовку окна оконный трекер привязывает сессию к слоту, и мешают друг
+   * другу именно живые тёзки.
    *
    * Вторая — имена, которые пикер выдал сам за последнюю минуту. Без неё два
    * `^N` подряд, быстрее опроса, дали бы одно имя дважды: ответ агрегатора
@@ -3328,10 +3374,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     for (const [name, at] of issuedNames) {
       if (now - at > ISSUED_TTL_MS) issuedNames.delete(name);
     }
-    const live = lastSessions
-      .filter(s => s && s.live)
-      .map(s => s && s.title)
-      .filter(t => typeof t === 'string' && t);
+    const live = window.SessionName.liveSessionNames(lastSessions);
     return live.concat(Array.from(issuedNames.keys()));
   }
 
@@ -4221,6 +4264,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       collapsed = ui.collapsed;
       order = ui.order;
       hidden = ui.hidden;
+      tree = ui.tree;
       // Размер просим у Rust сразу: окно открывается с размером из
       // tauri.conf.json, и без этого широкий режим помнился бы, а окно
       // осталось бы узким. Просим безусловно, в обе стороны: узкий режим —
@@ -4303,6 +4347,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
         collapsed = ui.collapsed;
         order = ui.order;
         hidden = ui.hidden;
+        tree = ui.tree;
         // Тот же размер, что и при первой загрузке, и так же безусловно:
         // дорога сюда гоночная (настройки перечитывают ui.json между ^F и
         // записью saveUi), и `if (fullscreen)` приводил бы ровно в то

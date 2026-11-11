@@ -84,12 +84,17 @@
       // Имя zellij-сессии — пятым: оно стоит в строке подписью (zellijNameHtml),
       // а показанное обязано и находиться.
       //
+      // Имя head-сессии — шестым и тем же текстом, каким оно стоит в подписи
+      // (headNameHtml): `head:<имя>`. Запрос `head:` находит тогда всех детей
+      // разом, а имя родителя — детей одного родителя. Без префикса у строки
+      // без родителя: голое `head:` в стоге нашлось бы у каждой.
+      //
       // `?? ''` обязателен у всех: ни окна, ни комментария, ни zellij у строки
       // может не быть вовсе, и undefined уехало бы в стог словом, которое нашло бы
       // разом всю историю.
       .map(g => ({ ...g, sessions: g.sessions.filter(s =>
         matchesText(
-          `${s.label} ${searchableCwd(s.cwd)} ${s.windowTitle ?? ''} ${s.comment ?? ''} ${s.zellij ?? ''}`, q)
+          `${s.label} ${searchableCwd(s.cwd)} ${s.windowTitle ?? ''} ${s.comment ?? ''} ${s.zellij ?? ''} ${s.head ? `head:${s.head}` : ''}`, q)
         || matchesId(s.id, q)) }))
       .filter(g => g.sessions.length > 0);
   }

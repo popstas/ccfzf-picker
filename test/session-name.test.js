@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { uniqueSessionName } = require('../frontend-src/session-name');
+const { uniqueSessionName, liveSessionNames } = require('../frontend-src/session-name');
 
 test('свободное имя берётся как есть', () => {
   assert.strictEqual(uniqueSessionName('ccfzf-picker', []), 'ccfzf-picker');
@@ -63,4 +63,18 @@ test('общая с Rust фикстура даёт те же имена, что 
   for (const c of FIXTURE.cases) {
     assert.strictEqual(newSessionName(c.cwd, c.taken), c.expected, c.why);
   }
+});
+
+// Тот же вход читает `session_name::live_names` в Rust: хоткей при скрытом
+// пикере и `^N` при открытом обязаны считать занятым одно и то же.
+test('общая с Rust фикстура даёт те же занятые имена, что даёт страница', () => {
+  assert.ok(FIXTURE.live.length, 'в фикстуре не задано ни одного случая live');
+  for (const c of FIXTURE.live) {
+    assert.deepStrictEqual(liveSessionNames((c.state || {}).sessions), c.expected, c.why);
+  }
+});
+
+test('мусор в ответе агрегатора не роняет отбор занятых имён', () => {
+  assert.deepStrictEqual(liveSessionNames(null), []);
+  assert.deepStrictEqual(liveSessionNames([null, 5, { live: true, title: 7, windows: [null, { title: 3 }] }]), []);
 });
