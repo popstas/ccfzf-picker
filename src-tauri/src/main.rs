@@ -1625,6 +1625,7 @@ fn save_config(app: tauri::AppHandle, patch: serde_json::Value) -> Result<serde_
         "projectsHotkeyAccelerator": out.projects_accelerator,
         "tileHotkeyRegistered": out.tile_registered,
         "tileHotkeyAccelerator": out.tile_accelerator,
+        "tileHotkeyTakenByGroup": out.tile_lost,
         "groupTileHotkeyRegistered": out.group_registered,
         "groupTileHotkeyAccelerator": out.group_accelerator,
         "historyHotkeyRegistered": out.history_registered,
@@ -1734,14 +1735,15 @@ fn register_group_tile_hotkey(
 fn register_layout_hotkeys(
     app: &tauri::AppHandle,
     config: &serde_json::Value,
-) -> ((Option<bool>, String), (Option<bool>, String)) {
+) -> ((Option<bool>, String), (Option<bool>, String), bool) {
     let hotkeys = layout_hotkeys::layout_hotkeys(config);
     let group = register_group_tile_hotkey(app, hotkeys.group);
+    let lost = hotkeys.tile_lost.is_some();
     let tile = match hotkeys.tile_lost {
         Some(lost) => (Some(false), lost),
         None => register_tile_hotkey(app, hotkeys.tile),
     };
-    (tile, group)
+    (tile, group, lost)
 }
 
 /// Поставить хоткей истории — тем же устройством, что и проектный: обработчик
@@ -1885,6 +1887,9 @@ struct HotkeyOutcome {
     /// называет её не вставшей.
     tile_registered: Option<bool>,
     tile_accelerator: String,
+    /// Клавишу плитки забрала группа: окно настроек называет причину, а не
+    /// «занята другим приложением».
+    tile_lost: bool,
     group_registered: Option<bool>,
     group_accelerator: String,
     history_registered: bool,
@@ -1951,7 +1956,7 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
     let _ = app.global_shortcut().unregister_all();
     let (registered, accelerator) = register_picker_hotkey(app, &config);
     let (projects_registered, projects_accelerator) = register_projects_hotkey(app, &config);
-    let ((tile_registered, tile_accelerator), (group_registered, group_accelerator)) =
+    let ((tile_registered, tile_accelerator), (group_registered, group_accelerator), tile_lost) =
         register_layout_hotkeys(app, &config);
     let (history_registered, history_accelerator) = register_history_hotkey(app, &config);
     project_hotkeys::reapply(app);
@@ -1985,6 +1990,7 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
         projects_accelerator,
         tile_registered,
         tile_accelerator,
+        tile_lost,
         group_registered,
         group_accelerator,
         history_registered,
@@ -3338,7 +3344,7 @@ fn main() {
                 register_picker_hotkey(app.handle(), &config);
             let (projects_registered, projects_accelerator) =
                 register_projects_hotkey(app.handle(), &config);
-            let ((tile_registered, tile_accelerator), _group) =
+            let ((tile_registered, tile_accelerator), _group, _lost) =
                 register_layout_hotkeys(app.handle(), &config);
             let (history_registered, history_accelerator) =
                 register_history_hotkey(app.handle(), &config);

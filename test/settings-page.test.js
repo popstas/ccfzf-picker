@@ -1438,6 +1438,40 @@ test('окно спрашивает про хоткеи теми же ключа
   }
 });
 
+test('клавиша плитки, отданная группе, названа так, а не «занята другим приложением»', async () => {
+  // Совпали tileHotkey и groupTileHotkey — клавишу забрала группа. Сказать
+  // «held by the system or another application» значило бы отправить человека
+  // искать чужую программу, которой нет.
+  const src = persistCoreSrc();
+  const status = { className: '', textContent: '' };
+  const ctx = {
+    document: { getElementById: () => status, documentElement: { dataset: {} } },
+    window: {},
+    invoke: async (cmd) => (cmd === 'save_config'
+      ? { hotkeyRegistered: true, projectsHotkeyRegistered: true,
+          tileHotkeyRegistered: false, tileHotkeyAccelerator: 'Control+Super+F10',
+          tileHotkeyTakenByGroup: true,
+          groupTileHotkeyRegistered: true, groupTileHotkeyAccelerator: 'Control+Super+F10' }
+      : {}),
+    current: 'general',
+    fields: { sshHost: 'host' },
+    config: { sshHost: 'host' },
+    dirtyFields: new Set(),
+    validate: () => [],
+    fieldsToPatch: () => ({}),
+    configToFields: () => ({ sshHost: 'host' }),
+    setTimeout, clearTimeout, console,
+  };
+  vm.createContext(ctx);
+  await vm.runInContext(`${src}\npersist()`, ctx, { filename: 'settings.html' });
+  assert.strictEqual(status.className, 'bad');
+  assert.match(status.textContent, /tile hotkey Control\+Super\+F10 is taken by the group layout hotkey/);
+  assert.doesNotMatch(status.textContent, /another application/);
+  // Имя поля то же, каким отвечает Rust: разойдись они, подпись молча
+  // вернулась бы к «другому приложению».
+  assert.match(MAIN_RS, /"tileHotkeyTakenByGroup":/);
+});
+
 test('не вставший хоткей плитки виден человеком, а не только в журнале', async () => {
   const src = persistCoreSrc();
   const status = { className: '', textContent: '' };

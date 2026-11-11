@@ -1286,13 +1286,24 @@
         // с самого его появления. С третьим клавиша к тому же отбирается у
         // оконного трекера — «занята» там значит «трекер ещё не выкачен», и
         // это ровно тот случай, о котором надо сказать вслух.
+        // Клавиша плитки, совпавшая с клавишей группы, не «занята кем-то»:
+        // её забрала группа (`layout_hotkeys::tile_lost`), и сказать про
+        // чужую программу значило бы отправить искать то, чего нет.
+        const lost = result && result.tileHotkeyTakenByGroup === true;
         const failed = HOTKEY_REPORTS
+          .filter(([, key]) => !(lost && key === 'tileHotkey'))
           .filter(([, key]) => result && result[`${key}Registered`] === false)
           .map(([name, key]) => `${name} ${result[`${key}Accelerator`]}`);
+        const parts = [];
+        if (lost) {
+          parts.push(`tile hotkey ${result.tileHotkeyAccelerator} is taken by the group layout hotkey`);
+        }
         if (failed.length) {
+          parts.push(`${failed.join(', ')} did not take — held by the system or another application`);
+        }
+        if (parts.length) {
           status.className = 'bad';
-          status.textContent = `saved, but ${failed.join(', ')} did not take`
-            + ' — held by the system or another application';
+          status.textContent = `saved, but ${parts.join('; ')}`;
           return;
         }
         status.textContent = 'saved';
