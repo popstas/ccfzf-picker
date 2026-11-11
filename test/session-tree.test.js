@@ -5,7 +5,7 @@ const { nestByHead, INDENT_PX } = require('../frontend-src/session-tree');
 const ids = rows => rows.map(r => r.id || r.key);
 const depths = rows => rows.map(r => r.treeDepth);
 
-test('дети стоят непосредственно перед родителем, в своём порядке', () => {
+test('дети стоят непосредственно после родителя, в своём порядке', () => {
   const rows = [
     { id: 'p', title: 'lead' },
     { id: 'x', title: 'other' },
@@ -13,8 +13,8 @@ test('дети стоят непосредственно перед родите
     { id: 'c2', title: 'lead-b', head: 'lead', headId: 'p' },
   ];
   const out = nestByHead(rows);
-  assert.deepStrictEqual(ids(out), ['c1', 'c2', 'p', 'x']);
-  assert.deepStrictEqual(depths(out), [1, 1, 0, 0]);
+  assert.deepStrictEqual(ids(out), ['p', 'c1', 'c2', 'x']);
+  assert.deepStrictEqual(depths(out), [0, 1, 1, 0]);
 });
 
 test('родитель ищется по headId раньше имени: переименование его не сбивает', () => {
@@ -23,17 +23,17 @@ test('родитель ищется по headId раньше имени: пер�
     { id: 'p', title: 'renamed' },
     { id: 'c', title: 'lead-a', head: 'lead', headId: 'p' },
   ];
-  assert.deepStrictEqual(ids(nestByHead(rows)), ['p-old-name', 'c', 'p']);
+  assert.deepStrictEqual(ids(nestByHead(rows)), ['p-old-name', 'p', 'c']);
 });
 
 test('без headId родитель ищется по имени строки и по имени окна', () => {
   const byTitle = nestByHead([{ id: 'p', title: 'lead' }, { id: 'c', head: 'lead' }]);
-  assert.deepStrictEqual(ids(byTitle), ['c', 'p']);
+  assert.deepStrictEqual(ids(byTitle), ['p', 'c']);
   const byWindow = nestByHead([{ id: 'p', title: 'esm', windowTitle: 'lead' }, { id: 'c', head: 'lead' }]);
-  assert.deepStrictEqual(ids(byWindow), ['c', 'p']);
+  assert.deepStrictEqual(ids(byWindow), ['p', 'c']);
   // headId назван, но такой строки нет — запасной ход по имени.
   const fallback = nestByHead([{ id: 'p', title: 'lead' }, { id: 'c', head: 'lead', headId: 'gone' }]);
-  assert.deepStrictEqual(ids(fallback), ['c', 'p']);
+  assert.deepStrictEqual(ids(fallback), ['p', 'c']);
 });
 
 test('ребёнок без родителя на участке стоит где стоял, с глубиной 0', () => {
@@ -43,18 +43,18 @@ test('ребёнок без родителя на участке стоит гд
   assert.deepStrictEqual(depths(out), [0, 0, 0]);
 });
 
-test('внуки стоят перед своим ребёнком, отступ на уровень', () => {
+test('внуки стоят после своего ребёнка, отступ на уровень', () => {
   const rows = [
     { id: 'p', title: 'lead' },
     { id: 'c', title: 'lead-a', headId: 'p' },
     { id: 'g', title: 'lead-a-x', headId: 'c' },
   ];
   const out = nestByHead(rows);
-  assert.deepStrictEqual(ids(out), ['g', 'c', 'p']);
-  assert.deepStrictEqual(depths(out), [2, 1, 0]);
+  assert.deepStrictEqual(ids(out), ['p', 'c', 'g']);
+  assert.deepStrictEqual(depths(out), [0, 1, 2]);
 });
 
-test('карточки одной сессии ходят вместе, дети — перед первой', () => {
+test('карточки одной сессии ходят вместе, дети — после последней', () => {
   const rows = [
     { id: 'p', title: 'lead', window: { host: 'a' } },
     { id: 'x', title: 'other' },
@@ -62,8 +62,8 @@ test('карточки одной сессии ходят вместе, дети
     { id: 'c', headId: 'p' },
   ];
   const out = nestByHead(rows);
-  assert.deepStrictEqual(ids(out), ['c', 'p', 'p', 'x']);
-  assert.deepStrictEqual(out.slice(1, 3).map(r => r.window.host), ['a', 'b']);
+  assert.deepStrictEqual(ids(out), ['p', 'p', 'c', 'x']);
+  assert.deepStrictEqual(out.slice(0, 2).map(r => r.window.host), ['a', 'b']);
 });
 
 test('цикл в данных разрывается, а не теряет строки', () => {
@@ -90,7 +90,7 @@ test('подзаголовок машины делит участки: роди�
 test('строки не мутируются, строки без id остаются на месте', () => {
   const rows = [{ id: 'p', title: 'lead' }, { kind: 'zellij', title: 'home' }, { id: 'c', headId: 'p' }];
   const out = nestByHead(rows);
-  assert.deepStrictEqual(ids(out).map(String), ['c', 'p', 'undefined']);
+  assert.deepStrictEqual(ids(out).map(String), ['p', 'c', 'undefined']);
   assert.strictEqual(rows[0].treeDepth, undefined);
   assert.deepStrictEqual(nestByHead(null), []);
 });
@@ -112,6 +112,6 @@ test('сессии одного процесса терминала не пут�
     { id: 'c2', title: 'kid-b', headId: 'p', window: tab(30956) },
   ];
   const out = nestByHead(rows);
-  assert.deepStrictEqual(ids(out), ['n1', 'c1', 'c2', 'p', 'n2']);
-  assert.deepStrictEqual(depths(out), [0, 1, 1, 0, 0]);
+  assert.deepStrictEqual(ids(out), ['n1', 'p', 'c1', 'c2', 'n2']);
+  assert.deepStrictEqual(depths(out), [0, 0, 1, 1, 0]);
 });

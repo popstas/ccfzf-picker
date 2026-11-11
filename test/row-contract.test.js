@@ -2326,9 +2326,9 @@ function headFamily() {
 const labels = items => items.filter(i => i.key.startsWith('s:'))
   .map(i => (i.html.match(/<span class="label">([^<]*)</) || [])[1]);
 
-test('в режиме иерархии ребёнок стоит перед родителем с отступом и без подписи', () => {
+test('в режиме иерархии ребёнок стоит после родителя с отступом и без подписи', () => {
   const { items, rows } = renderSessionRows(headFamily(), '', null, null, true);
-  assert.deepStrictEqual(labels(items), ['zz-child', 'lead', 'mid']);
+  assert.deepStrictEqual(labels(items), ['lead', 'zz-child', 'mid']);
   const child = items.find(i => i.html.includes('>zz-child<'));
   assert.ok(child.html.includes('style="margin-left: 20px"'), child.html);
   assert.ok(child.html.includes(' tree-child'), child.html);
@@ -2336,7 +2336,7 @@ test('в режиме иерархии ребёнок стоит перед ро
   const parent = items.find(i => i.html.includes('>lead<'));
   assert.ok(!parent.html.includes('margin-left'), parent.html);
   // Стрелки ходят по `rows`, и порядок в нём — видимый.
-  assert.deepStrictEqual(rows.filter(r => r.id).map(r => r.title), ['zz-child', 'lead', 'mid']);
+  assert.deepStrictEqual(rows.filter(r => r.id).map(r => r.title), ['lead', 'zz-child', 'mid']);
 });
 
 test('без режима иерархии порядок прежний, и подпись head: на месте', () => {

@@ -1104,7 +1104,7 @@
   // клавиши для этого нет намеренно: случайно нажатая убрала бы панель без
   // следа, а вернуть её можно было бы только там же, в настройках.
   let hidden = { narrow: {}, wide: {} };
-  // Режим иерархии head-сессий: дочерние строки стоят перед родительской с
+  // Режим иерархии head-сессий: дочерние строки стоят после родительской с
   // отступом (nestByHead в session-tree.js). Седьмое поле ui.json, рядом с
   // fullscreen и по той же причине — это режим списка, а не колонка.
   let tree = false;
@@ -1328,7 +1328,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // так читается всякая кнопка, а состояние видно подсветкой рядом.
     wideButton.title = fullscreen ? 'Narrow view (Ctrl+F)' : 'Wide view (Ctrl+F)';
     wideButton.classList.toggle('on', fullscreen);
-    treeButton.title = tree ? 'Flat list' : 'Hierarchy: child sessions before their head';
+    treeButton.title = tree ? 'Flat list' : 'Hierarchy: child sessions under their head';
     treeButton.classList.toggle('on', tree);
     // Одна строка на всё окно места не имеет: клавиш стало столько, что
     // подсказка занимала весь статуслайн и всё равно недоговаривала —
