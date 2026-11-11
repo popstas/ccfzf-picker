@@ -21,6 +21,7 @@ mod local_ccfzf;
 // пяти ниже, и все они объявлены после этой строки — макрос виден им всем.
 #[macro_use]
 mod log;
+mod layout_hotkeys;
 mod manager_http;
 mod merge_state;
 mod mqtt;
@@ -1656,7 +1657,9 @@ fn register_projects_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) 
 /// обработчики разные по существу. Этот не показывает окно вовсе — он гасит
 /// пикер и уходит просьбой к трекеру.
 fn register_tile_hotkey(app: &tauri::AppHandle, config: &serde_json::Value) -> (bool, String) {
-    let (shortcut, accelerator) = tile_hotkey(config);
+    let Some((shortcut, accelerator)) = layout_hotkeys::layout_hotkeys(config).tile else {
+        return (true, String::new());
+    };
     let registered = match app.global_shortcut().on_shortcut(shortcut, |app, _sc, event| {
         if event.state() == ShortcutState::Pressed {
             tile_press(app);
@@ -2542,59 +2545,6 @@ pub(crate) fn projects_hotkey(config: &serde_json::Value) -> (Shortcut, String) 
     (
         default_projects_shortcut(),
         DEFAULT_PROJECTS_ACCELERATOR.to_string(),
-    )
-}
-
-/// Умолчание третьего хоткея — попросить трекер разложить окна плиткой.
-///
-/// Развилка по системам есть, как и у второго хоткея, и по той же причине:
-/// объединять нечего, комбинации выбраны разные. Взяты они не с потолка — это
-/// ровно те клавиши, которые освобождают трекеры, отдавая раскладку пикеру:
-/// `Cmd+Alt+Ctrl+C` у `macos-windows-manager` и `Ctrl+Win+F10` у
-/// `windows11-manager`. Клавиша у человека уже в пальцах, и менять её заодно
-/// со сменой владельца значило бы менять две вещи разом.
-#[cfg(target_os = "macos")]
-fn default_tile_shortcut() -> Shortcut {
-    Shortcut::new(
-        Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
-        Code::KeyC,
-    )
-}
-
-#[cfg(not(target_os = "macos"))]
-fn default_tile_shortcut() -> Shortcut {
-    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SUPER), Code::F10)
-}
-
-/// То же умолчание записью — и рядом по той же причине, что у двух соседей:
-/// разойдись они, показано было бы одно, а слушалось другое.
-#[cfg(target_os = "macos")]
-const DEFAULT_TILE_ACCELERATOR: &str = "Control+Alt+Super+C";
-
-#[cfg(not(target_os = "macos"))]
-const DEFAULT_TILE_ACCELERATOR: &str = "Control+Super+F10";
-
-/// Действующий хоткей плитки и запись для показа.
-///
-/// Устройством — как `projects_hotkey`, включая пустую строку: умолчание здесь
-/// тоже своё на каждой системе и живёт только в Rust, поэтому пустое поле в
-/// окне настроек значит «взять встроенное», а не «выключить». Запиши окно
-/// комбинацию строкой — и, сохранённое на другой системе, оно увезло бы в
-/// `config.yaml` чужую клавишу.
-pub(crate) fn tile_hotkey(config: &serde_json::Value) -> (Shortcut, String) {
-    if let Some(s) = config
-        .get("tileHotkey")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.trim().is_empty())
-    {
-        match s.parse::<Shortcut>() {
-            Ok(sc) => return (sc, s.to_string()),
-            Err(_) => ccfzf_log!("cannot parse tileHotkey {s}, using default"),
-        }
-    }
-    (
-        default_tile_shortcut(),
-        DEFAULT_TILE_ACCELERATOR.to_string(),
     )
 }
 
@@ -3830,24 +3780,18 @@ mod tests {
         assert_ne!(default_projects_shortcut(), default_picker_shortcut());
     }
 
-    /// То же про третий хоткей — и сторож ему нужен ровно так же, как
-    /// второму: умолчаний два, по одному на систему, и разъехавшуюся пару
-    /// увидит лишь та машина, где её и завели.
+    /// Клавиши раскладки не совпадают с клавишами окна: совпадение стоило бы
+    /// молчащей клавиши — вторую регистрацию на ту же комбинацию плагин
+    /// отвергает, а какая из двух функций досталась человеку, из отказа не
+    /// видно. Встроенных у плитки и группы по одной на систему.
     #[test]
-    fn default_tile_accelerator_matches_default_shortcut() {
-        assert_eq!(
-            DEFAULT_TILE_ACCELERATOR.parse::<Shortcut>().unwrap(),
-            default_tile_shortcut()
-        );
-    }
-
-    /// Три умолчания попарно различны. Совпадение стоило бы молчащей клавиши:
-    /// вторую регистрацию на ту же комбинацию плагин отвергает, а какая из
-    /// двух функций досталась человеку — из отказа не видно.
-    #[test]
-    fn three_global_hotkeys_do_not_collide() {
-        assert_ne!(default_tile_shortcut(), default_picker_shortcut());
-        assert_ne!(default_tile_shortcut(), default_projects_shortcut());
+    fn layout_hotkeys_do_not_collide_with_the_window_ones() {
+        let defaults = [layout_hotkeys::default_tile(), layout_hotkeys::default_group()];
+        for (sc, _) in defaults.into_iter().flatten() {
+            assert_ne!(sc, default_picker_shortcut());
+            assert_ne!(sc, default_projects_shortcut());
+            assert_ne!(sc, default_history_shortcut());
+        }
     }
 
     /// То же про хоткей истории: умолчаний два, по одному на систему, и
@@ -3868,7 +3812,6 @@ mod tests {
         let history = default_history_shortcut();
         assert_ne!(history, default_picker_shortcut());
         assert_ne!(history, default_projects_shortcut());
-        assert_ne!(history, default_tile_shortcut());
     }
 
     /// Хоткей истории читается из своего ключа и откатывается по тем же
@@ -3924,34 +3867,6 @@ mod tests {
         assert_ne!(history_item_label(false), history_item_label(true));
         assert_ne!(history_item_label(false), projects_item_label(false));
         assert_ne!(history_item_label(false), show_item_label(false));
-    }
-
-    /// Показывается тот хоткей, который слушается на самом деле, — те же три
-    /// развилки, что у соседей: своя строка, откат на мусоре, откат при
-    /// отсутствии ключа. Пустая строка здесь тоже значит «взять встроенное»:
-    /// умолчание своё на каждой системе, и окно настроек его не знает.
-    #[test]
-    fn tile_hotkey_shows_what_is_listened_to() {
-        let own = serde_json::json!({ "tileHotkey": "Cmd+Shift+T" });
-        let (sc, accel) = tile_hotkey(&own);
-        assert_eq!(sc, "Cmd+Shift+T".parse::<Shortcut>().unwrap());
-        assert_eq!(accel, "Cmd+Shift+T");
-
-        for config in [
-            serde_json::json!({ "tileHotkey": "не хоткей" }),
-            serde_json::json!({}),
-            serde_json::Value::Null,
-            serde_json::json!({ "tileHotkey": "" }),
-            serde_json::json!({ "tileHotkey": "   " }),
-            // Ключи соседей третьему хоткею не указ: перепутай их местами — и
-            // два из трёх повисли бы на одной комбинации.
-            serde_json::json!({ "hotkey": "Cmd+Shift+T" }),
-            serde_json::json!({ "projectsHotkey": "Cmd+Shift+T" }),
-        ] {
-            let (sc, accel) = tile_hotkey(&config);
-            assert_eq!(sc, default_tile_shortcut(), "конфиг {config}");
-            assert_eq!(accel, DEFAULT_TILE_ACCELERATOR, "конфиг {config}");
-        }
     }
 
     /// Всё, что записывает контрол хоткея в окне настроек, разбирается здесь.
