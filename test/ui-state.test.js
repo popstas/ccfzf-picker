@@ -28,6 +28,7 @@ test('пустой файл даёт вид по умолчанию', () => {
     order: { narrow: [], wide: [[], [], [], [], []] },
     hidden: { narrow: {}, wide: {} },
     tree: false,
+    wideSplit: 'equal',
   });
   assert.deepStrictEqual(normalizeUiState(null, DEFAULTS), normalizeUiState({}, DEFAULTS));
   assert.deepStrictEqual(normalizeUiState('мусор', DEFAULTS), normalizeUiState({}, DEFAULTS));
@@ -46,6 +47,7 @@ test('сохранённый вид возвращается как был', () 
     order: { narrow: ['past', 'live'], wide: [['live'], [], ['past'], [], []] },
     hidden: { narrow: { projects: true }, wide: {} },
     tree: true,
+    wideSplit: 'twoThirds',
   };
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
 });
@@ -155,7 +157,7 @@ test('в файл уходит ровно то, что читается обра
   assert.deepStrictEqual(saved,
     { sort: 'name', toggles, fullscreen: false, collapsed: { narrow: {}, wide: {} },
       order: { narrow: [], wide: [[], [], [], [], []] },
-      hidden: { narrow: {}, wide: {} }, tree: false });
+      hidden: { narrow: {}, wide: {} }, tree: false, wideSplit: 'equal' });
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
   // Мусорная сортировка не должна попасть даже в файл: перезапуск молча
   // починит её, но человек, заглянувший в ui.json, увидел бы неправду.
@@ -286,4 +288,16 @@ test('режим иерархии читается только из true', () =
   }
   assert.strictEqual(normalizeUiState({ tree: true }, DEFAULTS).tree, true);
   assert.strictEqual(uiStateToSave('name', {}, false, {}, {}, {}, true).tree, true);
+});
+
+// Восьмое поле — доли ширины широкой раскладки. Умолчание — поровну: у тех,
+// кто переключатель не трогал, ничего не меняется.
+test('ширина колонок читается только из известных слов, иначе поровну', () => {
+  assert.strictEqual(normalizeUiState({}, DEFAULTS).wideSplit, 'equal');
+  assert.strictEqual(normalizeUiState({ wideSplit: 'twoThirds' }, DEFAULTS).wideSplit, 'twoThirds');
+  for (const raw of ['2/3', true, 1, null, {}, 'TwoThirds']) {
+    assert.strictEqual(normalizeUiState({ wideSplit: raw }, DEFAULTS).wideSplit, 'equal', String(raw));
+  }
+  assert.strictEqual(uiStateToSave('name', {}, false, {}, {}, {}, false, 'twoThirds').wideSplit, 'twoThirds');
+  assert.deepStrictEqual(require('../frontend-src/ui-state').WIDE_SPLITS, ['equal', 'twoThirds']);
 });

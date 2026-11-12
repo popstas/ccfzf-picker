@@ -642,3 +642,41 @@ test('панель без совпадений отдаёт выбор перв�
   // Список из одних заголовков не оставляет выбора вовсе.
   assert.strictEqual(PickerSections.firstRowInPanel([{ kind: 'section', panel: 'live' }], 'live', HEADERS), 0);
 });
+
+test('при 2/3 колонки 1 и 3 без второй делят ширину 2:1', () => {
+  assert.deepStrictEqual(PickerSections.wideColumnGrow([1, 3], 'twoThirds'), [2, 1]);
+});
+
+test('поровну — колонки 1 и 3 тоже поровну', () => {
+  assert.deepStrictEqual(PickerSections.wideColumnGrow([1, 3], 'equal'), [1, 1]);
+  assert.deepStrictEqual(PickerSections.wideColumnGrow([1, 3], undefined), [1, 1]);
+});
+
+test('при 2/3 три колонки поровну — у третьей та же треть', () => {
+  assert.deepStrictEqual(PickerSections.wideColumnGrow([1, 2, 3], 'twoThirds'), [1, 1, 1]);
+});
+
+test('при 2/3 одна колонка (/p, /s, запрос без своих) — во весь экран', () => {
+  assert.deepStrictEqual(PickerSections.wideColumnGrow([3], 'twoThirds'), [1]);
+  assert.deepStrictEqual(PickerSections.wideColumnGrow([1], 'twoThirds'), [1]);
+});
+
+test('при 2/3 другие пары колонок поровну', () => {
+  // 2/3 сказано только про набор {1, 3}.
+  for (const pair of [[1, 2], [2, 3], [1, 4], [3, 5]]) {
+    assert.deepStrictEqual(PickerSections.wideColumnGrow(pair, 'twoThirds'), [1, 1], String(pair));
+  }
+});
+
+test('пустой набор колонок — пустой ответ', () => {
+  assert.deepStrictEqual(PickerSections.wideColumnGrow([], 'twoThirds'), []);
+});
+
+test('страница знает правило grow-2 и читает долю ширины из ui.json дважды', () => {
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'sessions.html'), 'utf8');
+  assert.match(html, /#list\.blocks \.block-col\.grow-2\s*\{[^}]*flex-grow:\s*2/,
+    'в <style> нет правила для grow-2 — класс ничего не меняет');
+  // Загрузка и `ui-changed`: забудь второе — и переключатель из настроек
+  // доходил бы до пикера только после перезапуска.
+  assert.strictEqual((html.match(/wideSplit = ui\.wideSplit;/g) || []).length, 2);
+});

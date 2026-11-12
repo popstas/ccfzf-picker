@@ -32,6 +32,28 @@
   const COLUMN_PAST = 3;
 
   /**
+   * Доли ширины нарисованных колонок широкой раскладки — веса `flex-grow`.
+   *
+   * На входе номера колонок, которые и правда на экране (пустая колонка не
+   * рисуется), по возрастанию; на выходе вес каждой, той же длины. Правило
+   * одно, и названо оно владельцем (2026-11-12): при доле `twoThirds` и ровно
+   * колонках 1 и 3 первая получает 2/3 ширины, третья 1/3. Во всех прочих
+   * наборах поровну — и при трёх колонках у третьей та же треть, первая лишь
+   * делит свою долю со второй.
+   *
+   * Считается по нарисованным колонкам, а не по записям `ui.json`: «default» в
+   * окне настроек значит «колонку назначает смысл секции», и откуда взялся
+   * номер, рисовальщик не знает и знать не должен. Свои живые по смыслу
+   * стоят в первой — их и имел в виду человек, говоря «default + 3».
+   */
+  function wideColumnGrow(columns, split) {
+    const list = Array.isArray(columns) ? columns : [];
+    const pair = split === 'twoThirds' && list.length === 2
+      && list[0] === COLUMN_LIVE && list[1] === COLUMN_PAST;
+    return list.map((_, i) => (pair && i === 0 ? 2 : 1));
+  }
+
+  /**
    * Заголовок секции: подпись и счёт.
    *
    * Одна функция на обе раскладки. Счёт приписывается здесь, а не в
@@ -434,5 +456,8 @@
     return first === -1 ? 0 : first;
   }
 
-  return { buildSections, sectionHeaderText, moveInBlocks, moveBetweenBlocks, firstRowInPanel };
+  return {
+    buildSections, sectionHeaderText, moveInBlocks, moveBetweenBlocks, firstRowInPanel,
+    wideColumnGrow,
+  };
 });

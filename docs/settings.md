@@ -21,7 +21,10 @@ a Mac). Tabs on the left, the page on the right.
   in the row, `statusline` — whether to put its checkbox in the line at the
   bottom. Space in the status line is limited, and what goes there is your call.
 - **Layout panels** — the order, collapsed state and visibility of the wide-mode
-  (`^F`) panels: which column a panel occupies and along which axes.
+  (`^F`) panels: which column a panel occupies and along which axes. Below the
+  wide table, **Column widths in the wide view** switches between `Equal` and
+  `2/3 and 1/3`: with the latter, when columns 1 and 3 are the only ones on
+  screen, the first takes two thirds of the width.
 - **Hotkeys** — the picker's global hotkey, the projects-mode hotkey, the tile
   hotkey (which asks the window tracker to lay this machine's windows out in the
   order of the list — see [window-layouts.md](window-layouts.md)) and the

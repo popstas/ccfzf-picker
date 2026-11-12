@@ -52,6 +52,13 @@
             flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden;
             display: flex; flex-direction: column; gap: 8px;
         }
+        /* Колонка 1 рядом с одной колонкой 3 — на 2/3 ширины, если человек
+           включил это на вкладке Layout panels (`wideSplit`). Кому давать вес,
+           решает `wideColumnGrow` в picker-sections.js, а здесь только сам
+           вес: доли ширины колонок живут в таблице стилей рядом с остальными,
+           а не инлайн-стилем в разметке. Временная колонка перетаскивания
+           (`.drop-zone`) этого класса не получает никогда — её ширина своя. */
+        #list.blocks .block-col.grow-2 { flex-grow: 2; }
         /* Первая колонка правил себе больше не просит. `flex: 1 1 auto` тут
            стоял с тех пор, когда блок в ней всегда был один: колонку задавал
            смысл секции, и своих живых сессий бывает ровно одна группа. С
@@ -1109,6 +1116,10 @@
   // отступом (nestByHead в session-tree.js). Седьмое поле ui.json, рядом с
   // fullscreen и по той же причине — это режим списка, а не колонка.
   let tree = false;
+  // Доли ширины широкой раскладки: поровну или 2/3 у колонки 1 рядом с
+  // колонкой 3. Восьмое поле ui.json; ставит его вкладка Layout panels, а
+  // пикер только читает — и возвращает в файл при каждом своём saveUi().
+  let wideSplit = 'equal';
 
   /** Имя текущей раскладки: им же именуются половинки `collapsed`. */
   function layoutName() {
@@ -1351,7 +1362,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // uiToggles, не toggles: тот плоский и не помнит ось statusline — запись
     // плоской картой обнулила бы её при первом же save_ui, включая тот, что
     // зовётся сменой сортировки (ниже, не только из чекбокса).
-    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen, collapsed, order, hidden, tree) })
+    invoke('save_ui', { ui: window.UiState.uiStateToSave(sortMode, uiToggles, fullscreen, collapsed, order, hidden, tree, wideSplit) })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -1795,7 +1806,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // хотя показывает один заголовок. Счёта в отпечатке по-прежнему нет: он
     // меняется каждые несколько секунд и пересобирал бы каркас в такт опросу,
     // а свёрнутость меняется только рукой человека.
-    const shape = sections.map(s => `${s.key}|${s.column}|${s.collapsed ? 1 : 0}`).join('\n');
+    //
+    // Доля ширины входит туда же: от неё зависит класс колонки, а меняют её
+    // в настройках при том же наборе секций — без неё в отпечатке колонка
+    // осталась бы с прежним весом до первой перестановки.
+    const shape = `${wideSplit}\n${sections.map(s => `${s.key}|${s.column}|${s.collapsed ? 1 : 0}`).join('\n')}`;
     if (shape !== blocksShape) {
       // Колонки — flex-строка из flex-колонок, а не сетка. Сеткой это не
       // делается: колонка во всю высоту требует охватить все ряды, а
@@ -1810,8 +1825,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
       const byColumn = Array.from({ length: WIDE_COLUMNS }, (_, i) => i + 1)
         .map(column => sections.filter(s => s.column === column))
         .filter(column => column.length);
-      list.innerHTML = byColumn.map(column =>
-        `<div class="block-col col-${column[0].column}">` +
+      const grow = window.PickerSections.wideColumnGrow(
+        byColumn.map(column => column[0].column), wideSplit);
+      list.innerHTML = byColumn.map((column, i) =>
+        `<div class="block-col col-${column[0].column}${grow[i] === 2 ? ' grow-2' : ''}">` +
         column.map(blockCellHtml).join('') + '</div>').join('');
       blocksShape = shape;
       renderedBlocks = new Map();
@@ -4273,6 +4290,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       order = ui.order;
       hidden = ui.hidden;
       tree = ui.tree;
+      wideSplit = ui.wideSplit;
       // Размер просим у Rust сразу: окно открывается с размером из
       // tauri.conf.json, и без этого широкий режим помнился бы, а окно
       // осталось бы узким. Просим безусловно, в обе стороны: узкий режим —
@@ -4356,6 +4374,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
         order = ui.order;
         hidden = ui.hidden;
         tree = ui.tree;
+        wideSplit = ui.wideSplit;
         // Тот же размер, что и при первой загрузке, и так же безусловно:
         // дорога сюда гоночная (настройки перечитывают ui.json между ^F и
         // записью saveUi), и `if (fullscreen)` приводил бы ровно в то

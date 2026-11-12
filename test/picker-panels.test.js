@@ -221,3 +221,10 @@ test('мусор вместо ui не роняет список панелей',
     assert.strictEqual(rows.length, KNOWN_PANELS.length, JSON.stringify(bad));
   }
 });
+
+test('подписи ширины колонок — ровно на те слова, что понимает ui.json', () => {
+  assert.deepStrictEqual(Object.keys(PickerPanels.WIDE_SPLIT_LABELS), UiState.WIDE_SPLITS);
+  for (const label of Object.values(PickerPanels.WIDE_SPLIT_LABELS)) {
+    assert.ok(typeof label === 'string' && label, 'пустая подпись');
+  }
+});

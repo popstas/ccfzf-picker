@@ -13,6 +13,19 @@
   const WIDE_COLUMNS = uiApi.WIDE_COLUMNS;
 
   /**
+   * Подписи переключателя ширины колонок широкой раскладки.
+   *
+   * Слова — у ui-state (`WIDE_SPLITS`): там они и разбираются из ui.json.
+   * Здесь только то, как их назвать человеку, и сторож в
+   * `test/picker-panels.test.js` сверяет ключи с тем списком: новое слово без
+   * подписи было бы значением, которое нечем выбрать.
+   */
+  const WIDE_SPLIT_LABELS = {
+    equal: 'Equal',
+    twoThirds: '2/3 and 1/3',
+  };
+
+  /**
    * Панели с постоянными ключами и их имена для окна настроек.
    *
    * Ключи те же, что у секций (`groupSessions` и `buildSections`), и другими
@@ -216,7 +229,7 @@
   }
 
   return {
-    KNOWN_PANELS, WIDE_COLUMNS, knownPanelsFor, panelRows, withColumn, columnOf,
+    KNOWN_PANELS, WIDE_COLUMNS, WIDE_SPLIT_LABELS, knownPanelsFor, panelRows, withColumn, columnOf,
     labelForUnknown, defaultCollapsedFor,
   };
 });
