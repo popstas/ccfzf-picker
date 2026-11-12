@@ -3762,8 +3762,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (id === 'pr') {
       // Форму ссылки уже проверил availableActions — до сюда доходит только
       // https://github.com/<owner>/<repo>/pull/<число>.
-      // Браузер, а не терминал: всплеска опроса тут не за чем.
-      invoke('spawn_detached', { argv: ['open', row.pr_url], terminal: false });
+      // Браузер, а не терминал: всплеска опроса тут не за чем. Открывашку
+      // системы выбирает Rust (`open_pr` → `url_opener`): прежний argv
+      // `['open', url]` работал только на маке, на Windows молчал.
+      invoke('open_pr', { url: row.pr_url }).catch(e => console.error('open_pr', e));
       invoke('hide_picker');
       return;
     }

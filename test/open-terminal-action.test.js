@@ -111,14 +111,17 @@ test('всплеск опроса заказывают только звонки
   // нечем — они сидят в обработчике меню, а не в своей функции.
   assert.match(SESSIONS_HTML, /invoke\('spawn_detached', \{ argv, terminal: false \}\)/,
     'настроенные действия открывают папку, а не терминал — всплеск тут гонит ssh впустую');
-  assert.match(SESSIONS_HTML,
-    /invoke\('spawn_detached', \{ argv: \['open', row\.pr_url\], terminal: false \}\)/,
-    'ссылка на PR уходит в браузер — состава окон это не меняет');
+  // Ссылка на PR уходит не сюда, а в `open_pr`: `open` есть только на маке, и
+  // на Windows пункт меню молча не делал ничего (2026-11-12).
+  assert.match(SESSIONS_HTML, /invoke\('open_pr', \{ url: row\.pr_url \}\)/,
+    'ссылка на PR открывается командой, знающей открывашку системы');
+  assert.doesNotMatch(SESSIONS_HTML, /argv: \['open',/,
+    '`open` — программа мака; на Windows и Linux её нет, ссылку открывает url_opener');
   // Терминальные звонки флага не несут вовсе: умолчание команды и есть
   // «этим открывается сессия». Пропади он у них — сторож в main.rs
   // (`every_branch_that_ends_in_a_terminal_starts_a_burst`) этого не увидит:
   // он смотрит на Rust, а решает вызов со страницы.
   const withFlag = SESSIONS_HTML.match(/invoke\('spawn_detached'[^)]*terminal: false/g) || [];
-  assert.strictEqual(withFlag.length, 2,
-    `звонков без терминала должно быть два, найдено ${withFlag.length} — новый разбери руками`);
+  assert.strictEqual(withFlag.length, 1,
+    `звонок без терминала должен быть один, найдено ${withFlag.length} — новый разбери руками`);
 });

@@ -2199,6 +2199,46 @@ fn open_desktop_session(id: String) -> Result<(), String> {
     spawn_url(url_opener(&url))
 }
 
+/// Ссылка на PR, годная в аргумент открывашки, или отказ.
+///
+/// Форма — ровно та, которую показывает меню `^K` (`prNumber` в
+/// session-glyph.js): `https://github.com/<owner>/<repo>/pull/<число>`. Строже,
+/// чем там, и это не перестраховка: на Windows ссылку разбирает `cmd /c start`,
+/// а он сам толкует `&`, `|`, `^` и кавычки, — лишний знак превращал бы ссылку
+/// в команду. Поэтому в имени владельца и репозитория пропускаются только
+/// буквы, цифры, `.`, `_` и `-`.
+fn pr_url_target(url: &str) -> Result<String, String> {
+    let rest = url
+        .strip_prefix("https://github.com/")
+        .ok_or_else(|| format!("not a GitHub PR link: {url}"))?;
+    let parts: Vec<&str> = rest.split('/').collect();
+    let name_ok = |p: &str| {
+        !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+    };
+    match parts.as_slice() {
+        [owner, repo, "pull", num]
+            if name_ok(owner)
+                && name_ok(repo)
+                && !num.is_empty()
+                && num.chars().all(|c| c.is_ascii_digit()) =>
+        {
+            Ok(url.to_string())
+        }
+        _ => Err(format!("not a GitHub PR link: {url}")),
+    }
+}
+
+/// Открыть PR в браузере.
+///
+/// Прежде пункт меню звал `spawn_detached` с argv `["open", url]` — а `open`
+/// есть только на маке, и на Windows пункт молча не делал ничего: ошибку
+/// запуска страница не ловила. Открывашку системы знает `url_opener`, и идёт
+/// ссылка через `spawn_url` — без вспышки консоли `cmd`, как и у соседей.
+#[tauri::command]
+fn open_pr(url: String) -> Result<(), String> {
+    spawn_url(url_opener(&pr_url_target(&url)?))
+}
+
 /// Путь папки в том виде, в каком его понимает открывашка этой системы.
 ///
 /// На Windows папку открывают тем же `cmd /c start ""`, что и ссылку, а он
@@ -3250,7 +3290,7 @@ fn main() {
         // шлёт событие, и перепутать их нечем.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            hide_picker, app_version, set_picker_size, poll_now, spawn_detached, load_seen, save_seen, load_config,
+            hide_picker, app_version, set_picker_size, poll_now, spawn_detached, open_pr, load_seen, save_seen, load_config,
             terminal_helper,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, place_windows_mqtt, set_picker_selection, open_session_mqtt, open_project_mqtt,
@@ -3685,6 +3725,28 @@ mod tests {
         // принял бы за поломку пикера.
         for bad in ["", "../../etc/passwd", "8b84d15e-fce9-4847-b3d0-39b37a3c48c1 x"] {
             assert!(super::desktop_session_url(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn ssylka_na_pr_prohodit_tolko_v_forme_github() {
+        // Ссылка уходит аргументом `cmd /c start` на Windows, а `cmd` разбирает
+        // `&`, `|`, `^` и кавычки сам. Пропускается ровно та форма, которую
+        // показывает меню (`prNumber` в session-glyph.js), и ничего сверх.
+        assert_eq!(
+            super::pr_url_target("https://github.com/popstas/ccfzf/pull/20"),
+            Ok("https://github.com/popstas/ccfzf/pull/20".to_string()),
+        );
+        for bad in [
+            "",
+            "http://github.com/o/r/pull/1",
+            "https://evil.example/o/r/pull/1",
+            "https://github.com/o/r/pull/1&calc",
+            "https://github.com/o/r/pull/1\" x",
+            "https://github.com/o/r/issues/1",
+            "https://github.com/o/r/pull/",
+        ] {
+            assert!(super::pr_url_target(bad).is_err(), "{bad}");
         }
     }
 
