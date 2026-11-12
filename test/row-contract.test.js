@@ -1060,6 +1060,8 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
     hidden: { narrow: {}, wide: {} },
     // Иерархию не включали — режим выключен.
     tree: false,
+    // Переключатель ширины не трогали — поровну.
+    wideSplit: 'equal',
   });
 });
 

@@ -107,6 +107,13 @@
   // пустые колонки.
   const WIDE_COLUMNS = 5;
 
+  // Доли ширины широкой раскладки: поровну или 2/3 у первой колонки рядом с
+  // третьей (правило — `wideColumnGrow` в picker-sections.js). Слова, а не
+  // булево: переключатель назван человеком «поровну или 2/3», и третья доля,
+  // если появится, встанет сюда же, не меняя формы файла. Первое слово —
+  // умолчание: у того, кто переключатель не трогал, ширина прежняя.
+  const WIDE_SPLITS = ['equal', 'twoThirds'];
+
   /**
    * Ключи секций из файла: строки, и каждая ровно один раз.
    *
@@ -192,6 +199,9 @@
       // значение читается как выключенный режим — испорченный файл не должен
       // переставлять человеку список.
       tree: src.tree === true,
+      // Восьмое: доли ширины широкой раскладки. Незнакомое слово читается
+      // как «поровну» — испорченный файл не должен менять человеку ширину.
+      wideSplit: WIDE_SPLITS.includes(src.wideSplit) ? src.wideSplit : WIDE_SPLITS[0],
     };
   }
 
@@ -200,9 +210,10 @@
    * пишет — файл маленький и человекочитаемый, и заглянувший в него не должен
    * гадать, что из этого пикер и правда помнит.
    */
-  function uiStateToSave(sort, toggles, fullscreen, collapsed, order, hidden, tree) {
+  function uiStateToSave(sort, toggles, fullscreen, collapsed, order, hidden, tree, wideSplit) {
     return normalizeUiState(
-      { sort, toggles, fullscreen, collapsed, order, hidden, tree }, { toggles: toggles || {} });
+      { sort, toggles, fullscreen, collapsed, order, hidden, tree, wideSplit },
+      { toggles: toggles || {} });
   }
 
   /**
@@ -218,5 +229,5 @@
     return out;
   }
 
-  return { normalizeUiState, uiStateToSave, listColumns, WIDE_COLUMNS };
+  return { normalizeUiState, uiStateToSave, listColumns, WIDE_COLUMNS, WIDE_SPLITS };
 });
