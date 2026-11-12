@@ -577,3 +577,22 @@ test('имя head-сессии доезжает до строки, а мусор
   });
   assert.deepStrictEqual(rows.map(r => r.head), ['lead-cup', '', '', '']);
 });
+
+// ── Метка кеша промпта ─────────────────────────────────────────────────────
+//
+// `cacheAt` — время последнего ответа ассистента, которое агрегатор находит в
+// хвосте транскрипта. Строке она нужна для таймера рядом с долей контекста.
+
+test('метка кеша доезжает до строки', () => {
+  const rows = buildSessionList({
+    sessions: [state({ agent: { state: 'review', updated: 500, cacheAt: 480 } })],
+  });
+  assert.strictEqual(rows[0].agentCacheAt, 480);
+});
+
+test('нет метки кеша — ноль, «не знаем»', () => {
+  const rows = buildSessionList({
+    sessions: [state({ agent: { state: 'review', updated: 500 } })],
+  });
+  assert.strictEqual(rows[0].agentCacheAt, 0);
+});

@@ -453,11 +453,12 @@
         .hk.taken { opacity: .45; text-decoration: line-through; }
         /* Пометка «окно терминала уже открыто». Ширина задана жёстко: у сессий
            без окна элемент пустой, и без ширины колонка дышала бы от строки к
-           строке. Цвет как у живого статуса — это признак того же рода: сессия,
-           до которой можно дотянуться прямо сейчас. */
+           строке. Цвет тусклый, как у соседних колонок: зелёным, как у живого
+           статуса, значок выделялся без смысла — жива ли сессия, уже говорит
+           кружок (решение Стаса, 2026-11-12). */
         .win {
             flex: 0 0 auto; width: 10px; padding-left: 10px;
-            font-size: 11px; color: var(--ok); text-align: center;
+            font-size: 11px; color: var(--fg-dim); text-align: center;
         }
         /* Машина чужого окна. Ширины не задано намеренно, в отличие от `.win`:
            там элемент либо пуст, либо в один знак, а имена машин разной длины,
@@ -500,6 +501,10 @@
            «обрати внимание». Красный — «скоро начнёт забывать начало». */
         .usage .ctx.warn { color: var(--warn); }
         .usage .ctx.hot { color: var(--danger); }
+        /* Остаток кеша промпта. Те же два цвета и тот же смысл: жёлтый —
+           «пора вспомнить», красный — «сейчас или будет дорого». */
+        .usage .cache.warn { color: var(--warn); }
+        .usage .cache.hot { color: var(--danger); }
         .usage .cost { color: var(--fg-dimmer); }
         /* Возраст последней активности, крайняя правая колонка. */
         .age {
@@ -996,6 +1001,8 @@
     { key: 'showEvent', label: 'events', side: 'right' },
     { key: 'showCost', label: 'cost', side: 'right' },
     { key: 'showContext', label: 'context', side: 'right' },
+    // Остаток кеша промпта, третьей величиной в той же колонке `usage`.
+    { key: 'showCache', label: 'cache', side: 'right' },
     // Размер сессии, своя колонка рядом с usage. Отдельная галка, а не часть
     // `context`: величины отвечают на разные вопросы — «сколько осталось до
     // сжатия» против «насколько длинный разговор», — и выключают их порознь.
@@ -1045,6 +1052,9 @@
     showId: { list: false, statusline: true },
     showCost: { list: false, statusline: false },
     showContext: { list: true, statusline: true },
+    // Включён: ради него и заводили — одним взглядом найти сессию, где кеш
+    // вот-вот остынет. В статуслайн не вынесен — место внизу кончилось.
+    showCache: { list: true, statusline: false },
     // Включена: это ответ на вопрос «большая ли сессия», ради которого её и
     // заводили. В статуслайн не вынесена — место внизу кончилось.
     showPrompts: { list: true, statusline: false },
@@ -1651,7 +1661,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // ставит никто — хоткей есть у каталога, а не у разговора, — и колонка
       // была рядом пустых `div` у каждой строки списка. У проекта он теперь
       // подпись в строке имени, а не колонка.
-      usageHtml(session, toggles) +
+      usageHtml(session, toggles, nowSec) +
       promptsHtml(session, toggles.showPrompts) +
       ageHtml(session, nowSec) +
       `</div></div>`;

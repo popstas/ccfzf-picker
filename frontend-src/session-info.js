@@ -27,6 +27,11 @@
     return `${p(d.getHours())}:${p(d.getMinutes())} · ${age}`;
   }
 
+  function cacheCell(s, nowSec) {
+    const left = SessionGlyph.cacheRemainingSec(s, nowSec);
+    return left === null ? '' : SessionGlyph.cacheText(left);
+  }
+
   /**
    * Все поля сессии, которые есть в строке списка, — таблицей.
    *
@@ -55,6 +60,9 @@
       // же решение, что и в строке списка: показанный ноль был бы
       // единственным числом карточки, которое врёт.
       ['context', desktopApi.knowsContext(s) ? `${s.agentContextPct || 0}%` : ''],
+      // Остаток кеша промпта — тем же текстом, что и в строке списка. Нет
+      // таймера там — нет и здесь: пустая клетка выпадает фильтром ниже.
+      ['cache', cacheCell(s, nowSec)],
       ['branch', s.branch ?? ''],
       ['pr_url', s.pr_url ?? ''],
       ['agent', s.agentBackground && s.agentSessionId ? `background · ${s.agentSessionId}` : ''],
