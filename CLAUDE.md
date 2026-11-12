@@ -277,7 +277,7 @@ Developer ID нет, universal удвоил бы вес ровно в той з�
 | Окна и передний план | [`docs/rules/windows-and-focus.md`](docs/rules/windows-and-focus.md) | 11 | кто видит окна, чьё это окно, кому отдаётся передний план, куда уходит просьба |
 | Открытие сессий и проектов | [`docs/rules/opening-sessions.md`](docs/rules/opening-sessions.md) | 15 | что делает Enter, кто открывает — пикер или менеджер и по какому транспорту (http/mqtt/mqtts, риск незащищённого сервера, корни TLS), Claude Desktop, курсор, редактор `^O` и SSH Remote в Zed |
 | Хоткеи, трей и меню `^K` | [`docs/rules/hotkeys-and-tray.md`](docs/rules/hotkeys-and-tray.md) | 11 | глобальные клавиши и `none` у клавиш раскладки, проектные хоткеи, жесты мыши, пункты трея и строки, метка связи с брокером |
-| Строки списка | [`docs/rules/list-rows.md`](docs/rules/list-rows.md) | 11 | что и где рисуется в строке: имена, id, хоткеи, подпись head-сессии и режим иерархии, ширины колонок |
+| Строки списка | [`docs/rules/list-rows.md`](docs/rules/list-rows.md) | 12 | что и где рисуется в строке: имена, id, хоткеи, подпись head-сессии и режим иерархии, ширины колонок, таймер кеша |
 | Настройки и `ui.json` | [`docs/rules/settings-and-ui-state.md`](docs/rules/settings-and-ui-state.md) | 7 | восемь полей `ui.json`, слияние `config.yaml`, создание окна, гашение пикера |
 | Терминалы | [`docs/rules/terminals.md`](docs/rules/terminals.md) | 6 | argv, пресеты, подстановки `{command}` и `{helper}`, iTerm2, папки |
 | Источники состояния | [`docs/rules/state-sources.md`](docs/rules/state-sources.md) | 8 | откуда берётся список, местный и ssh-источник, состояние агента, бэкофф, сигнал трекера, простой машины |
