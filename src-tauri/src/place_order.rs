@@ -731,9 +731,15 @@ mod tests {
     #[test]
     fn a_session_sits_in_at_most_two_groups() {
         let f: Value = serde_json::from_str(include_str!("../../test/fixtures/head-groups.json")).unwrap();
+        // Машина и сортировка — из фикстуры, как у соседнего теста: смени их
+        // там, и тест с зашитыми словами молча проверял бы пустые группы.
+        let host = f["host"].as_str().unwrap();
+        let sort = f["sort"].as_str().unwrap();
         for case in f["cases"].as_array().unwrap() {
             let state = json!({ "sessions": case["sessions"] });
-            let groups = group_ids(&state, "pc", "recent");
+            let groups = group_ids(&state, host, sort);
+            assert!(case["groups"].as_array().unwrap().is_empty() || !groups.is_empty(),
+                "{}: групп нет — тест ничего бы не проверил", case["name"]);
             let mut seen: HashMap<&str, usize> = HashMap::new();
             for g in &groups {
                 for id in g {
