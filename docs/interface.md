@@ -16,7 +16,8 @@
 
 Panel headers can be dragged between columns with the mouse, and the order
 survives a restart. Wide mode has three columns by default, and up to five by
-dragging.
+dragging. Columns share the width equally; the Layout panels tab in settings
+can give the first column two thirds when only columns 1 and 3 are on screen.
 
 **Hovering or selecting a project row dims the rows that do not belong to it** —
 across every panel at once, so what belongs to the project and what does not is
