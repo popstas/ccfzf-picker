@@ -23,6 +23,8 @@
   "  chain            — три уровня: каждая сессия посередине — своя группа;",
   "  mid-without-live-children — у x нет живых детей: своей группы нет,",
   "                     x остаётся ребёнком в группе h;",
+  "  two-mids         — две сессии посередине на одной глубине: их группы",
+  "                     идут порядком пикера (сортировка обязана быть стабильной);",
   "  cycle            — a и b ссылаются друг на друга; корнем остаётся",
   "                     первый в порядке, как в nestByHead."
  ],
@@ -691,6 +693,140 @@
      "group": [
       "h",
       "x"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "two-mids",
+   "sessions": [
+    {
+     "id": "h",
+     "title": "lead",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 600000
+     }
+    },
+    {
+     "id": "x",
+     "title": "x-mid",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 590000
+     },
+     "head": "lead",
+     "headId": "h"
+    },
+    {
+     "id": "y",
+     "title": "y-mid",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 580000
+     },
+     "head": "lead",
+     "headId": "h"
+    },
+    {
+     "id": "x1",
+     "title": "x-leaf",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 570000
+     },
+     "head": "x-mid",
+     "headId": "x"
+    },
+    {
+     "id": "y1",
+     "title": "y-leaf",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 560000
+     },
+     "head": "y-mid",
+     "headId": "y"
+    }
+   ],
+   "order": [
+    "h",
+    "x",
+    "y",
+    "x1",
+    "y1"
+   ],
+   "parents": {
+    "x": "h",
+    "y": "h",
+    "x1": "x",
+    "y1": "y"
+   },
+   "groups": [
+    [
+     "x",
+     "x1"
+    ],
+    [
+     "y",
+     "y1"
+    ],
+    [
+     "h",
+     "x",
+     "y"
+    ]
+   ],
+   "picks": [
+    {
+     "selected": "x1",
+     "group": [
+      "x",
+      "x1"
+     ]
+    },
+    {
+     "selected": "y1",
+     "group": [
+      "y",
+      "y1"
+     ]
+    },
+    {
+     "selected": "y",
+     "group": [
+      "y",
+      "y1"
      ]
     }
    ]
