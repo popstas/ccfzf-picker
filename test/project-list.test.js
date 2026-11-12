@@ -27,6 +27,23 @@ test('проекты идут по свежести, а не в том поря�
   assert.deepStrictEqual(rows.map(r => r.label), ['fresh', 'old', 'never']);
 });
 
+test('проекты с живыми сессиями идут первыми, даже если закрытый свежее', () => {
+  // Стас: «сортируются по времени последней сессии, даже если сессия
+  // закрыта. Надо в начале выводить проекты с активными сессиями». Живой
+  // проект — тот, куда возвращаются; закрытый, тронутый минуту назад, над ним
+  // только мешает. Внутри каждой половины порядок прежний — по свежести.
+  const rows = buildProjectList({
+    projects: [
+      { path: '/p/closed-fresh', name: 'closed-fresh', live: 0, mtime: NOON },
+      { path: '/p/live-old', name: 'live-old', live: 1, mtime: NOON - 7200 },
+      { path: '/p/live-fresh', name: 'live-fresh', live: 3, mtime: NOON - 600 },
+      { path: '/p/closed-old', name: 'closed-old', live: 0, mtime: NOON - 3600 },
+    ],
+  });
+  assert.deepStrictEqual(rows.map(r => r.label),
+    ['live-fresh', 'live-old', 'closed-fresh', 'closed-old']);
+});
+
 test('порядок проектов не скачет от секунд', () => {
   // Та же беда, ради которой у сессий заведён recentKey: mtime двигают
   // записи в каталоге, подача тикает раз в секунду, и два почти одинаково

@@ -10,7 +10,8 @@
   terminal in the project directory, bypassing the picker) and how long ago it
   was last worked on. The circle on the left distinguishes three states: green —
   there are live sessions, grey — there were, transparent — there never were
-  any.
+  any. Projects with live sessions come first, then the rest; each half is
+  ordered by freshness.
 - **Snapshots** and **History** are collapsed by default (`Snapshots - 20`,
   `History - 92`) — the count is visible anyway.
 
