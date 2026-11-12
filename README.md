@@ -18,8 +18,9 @@ and a session opens in the terminal of your choice.
 - **Projects panel** — favourites, session counts, per-project hotkeys, and a
   dim of everything that does not belong to the project you point at.
 - **Status at a glance** — a colored circle per session (working, asking,
-  finished-unread, idle, closed), the terminal it is open in, context used, and
-  the age of the last activity.
+  finished-unread, idle, closed), the terminal it is open in, context used,
+  minutes left on the prompt cache (yellow under 30, red under 15), and the age
+  of the last activity.
 - **Enter opens the session** — in a terminal, or back inside Claude Desktop for
   the sessions that came from it.
 - **`^O` opens the folder in your editor** — Zed, VS Code or Cursor, whichever

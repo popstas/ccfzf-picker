@@ -47,7 +47,9 @@ transparent: the session is closed.
 
 **Row columns** — the letter of the terminal the window is open in (`k` — kitty,
 `i` — iTerm2, `z` — WezTerm), the machine, the short session id, the share of
-context used, the age of the last activity. Which columns to draw is a setting.
+context used, the minutes left on the one-hour prompt cache (yellow under 30, red
+under 15; empty while the agent works and once the cache is cold), the age of the
+last activity. Which columns to draw is a setting.
 
 **PR link** — `↗ #19` on the session it was opened from.
 
