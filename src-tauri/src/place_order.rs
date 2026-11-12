@@ -213,6 +213,13 @@ struct Row {
     cost: f64,
     started: f64,
     last_activity: f64,
+    /// Имя и id head-сессии, открывшей эту (`~/.ccfzf/children`); пусто у
+    /// всех, кроме детей.
+    head: String,
+    head_id: String,
+    /// Заголовки своих окон на этой машине — второе имя строки для поиска
+    /// родителя по `head`, как `windowTitle` у дерева страницы.
+    window_titles: Vec<String>,
 }
 
 /// Пустой и нулевой ключ тонут в конце — порт `missingLast`. Ноль здесь и
@@ -290,6 +297,9 @@ pub struct Stale {
 }
 
 impl Stale {
+    /// Затемнение выключено: раскладка группы берёт строки без отсева.
+    pub const OFF: Stale = Stale { enabled: false, session_hours: 0.0, now_s: 0.0 };
+
     /// Тускла ли строка: свёрнута здесь или молчит дольше порога.
     ///
     /// Порт `StaleItems.isStale`, и порядок проверок тот же: свёрнутость —
@@ -334,6 +344,18 @@ fn minimized_here(windows: &[Value], mine: &str) -> bool {
 /// молчащему окну, ужимает те, на которые человек смотрит. Согласие двух
 /// реализаций держит общая фикстура — см. `test/place-order.test.js`.
 pub fn tile_ids(state: &Value, config_host: &str, sort: &str, stale: &Stale) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for r in sorted_rows(state, config_host, sort, stale) {
+        if !out.contains(&r.id) {
+            out.push(r.id);
+        }
+    }
+    out
+}
+
+/// Строки своей машины в порядке выбранной сортировки — общее у плитки и у
+/// группы. Отбор и сортировка описаны у `tile_ids`.
+fn sorted_rows(state: &Value, config_host: &str, sort: &str, stale: &Stale) -> Vec<Row> {
     let mine = config_host.trim().to_lowercase();
     if mine.is_empty() {
         return Vec::new();
@@ -404,17 +426,121 @@ pub fn tile_ids(state: &Value, config_host: &str, sort: &str, stale: &Stale) -> 
                 "started",
             ),
             last_activity: last_activity_of(s, &active.agent),
+            head: trimmed(s, "head"),
+            head_id: trimmed(s, "headId"),
+            window_titles: windows
+                .iter()
+                .filter(|w| norm_host(w.get("host")) == mine)
+                .filter_map(|w| w.get("title").and_then(|v| v.as_str()))
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect(),
         });
     }
 
     let mode = normalize_sort(sort);
     rows.sort_by(|a, b| compare(a, b, mode));
+    rows
+}
 
-    let mut out: Vec<String> = Vec::new();
-    for r in rows {
-        if !out.contains(&r.id) {
-            out.push(r.id);
+fn trimmed(src: &Value, key: &str) -> String {
+    src.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+/// Индекс родителя для каждой строки — порт `nestSegment` из
+/// `frontend-src/session-tree.js`, тот же порядок поиска и тот же разрыв
+/// циклов, в том же порядке обхода. Иначе хоткей нашёл бы не того родителя,
+/// которого нарисовало дерево. Согласие держит `test/fixtures/head-groups.json`.
+///
+/// Сперва `headId` среди id строк; затем `head` против `title`, затем против
+/// заголовков своих окон. При тёзках берётся первый в порядке строк.
+fn parent_index(rows: &[Row]) -> Vec<Option<usize>> {
+    let mut by_id: HashMap<&str, usize> = HashMap::new();
+    let mut by_name: HashMap<&str, usize> = HashMap::new();
+    for (i, r) in rows.iter().enumerate() {
+        by_id.entry(r.id.as_str()).or_insert(i);
+        let title = r.name.trim();
+        let names = std::iter::once(title).chain(r.window_titles.iter().map(|t| t.as_str()));
+        for n in names.filter(|n| !n.is_empty()) {
+            by_name.entry(n).or_insert(i);
         }
+    }
+    let mut parent: Vec<Option<usize>> = rows
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let by_head_id = if r.head_id.is_empty() { None } else { by_id.get(r.head_id.as_str()).copied() };
+            let found = by_head_id.or_else(|| {
+                if r.head.is_empty() { None } else { by_name.get(r.head.as_str()).copied() }
+            });
+            found.filter(|&p| p != i)
+        })
+        .collect();
+    // Поднимаемся по предкам; встреча с собой — данные противоречат друг
+    // другу, и узел остаётся корнем. Правка видна следующим узлам — как в JS.
+    for i in 0..rows.len() {
+        let mut seen = vec![i];
+        let mut up = parent[i];
+        while let Some(u) = up {
+            if seen.contains(&u) {
+                parent[i] = None;
+                break;
+            }
+            seen.push(u);
+            up = parent[u];
+        }
+    }
+    parent
+}
+
+/// Ребёнок → родитель среди строк своей машины, как их видит дерево
+/// страницы. Отдельно от `group_ids` ради общей фикстуры: родителя JS-сторож
+/// может проверить, а группу на странице никто не собирает.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn head_parents(state: &Value, config_host: &str, sort: &str) -> std::collections::BTreeMap<String, String> {
+    let rows = sorted_rows(state, config_host, sort, &Stale::OFF);
+    parent_index(&rows)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, p)| p.map(|p| (rows[i].id.clone(), rows[p].id.clone())))
+        .collect()
+}
+
+/// Группы для раскладки `mode: "group"`: `[head, его живые прямые дети...]`
+/// порядком пикера, группы — порядком head.
+///
+/// Head — строка своей машины без своего родителя: по решению владельца
+/// ребёнок head не становится, и вложенность здесь только сторож — сессия с
+/// родителем группы не образует, даже если на неё кто-то ссылается. Так
+/// ни один id не попадает в две группы. Живость самого head не спрашивается:
+/// окно его стоит здесь, и раскладывать его есть что.
+///
+/// Тусклые строки не отсеваются: head, молчавший дольше порога, пропал бы
+/// из своей же группы. Свёрнутые окна менеджер пропускает сам.
+pub fn group_ids(state: &Value, config_host: &str, sort: &str) -> Vec<Vec<String>> {
+    let rows = sorted_rows(state, config_host, sort, &Stale::OFF);
+    let parent = parent_index(&rows);
+    let mut out = Vec::new();
+    for (h, head) in rows.iter().enumerate() {
+        if parent[h].is_some() {
+            continue;
+        }
+        let children: Vec<String> = rows
+            .iter()
+            .enumerate()
+            .filter(|(c, row)| parent[*c] == Some(h) && row.live)
+            .map(|(_, row)| row.id.clone())
+            .collect();
+        if children.is_empty() {
+            continue;
+        }
+        let mut group = vec![head.id.clone()];
+        group.extend(children);
+        out.push(group);
     }
     out
 }
@@ -551,6 +677,39 @@ mod tests {
             tracker_base(state, host),
             f["expectedBase"].as_str().unwrap()
         );
+    }
+
+    /// Правило «чей ребёнок» — то же, что у дерева страницы. Вход общий с
+    /// JS-сторожем `test/head-groups.test.js`, файл один по той же причине,
+    /// что и у `place-order.json`.
+    #[test]
+    fn head_groups_match_the_shared_fixture() {
+        const GROUPS: &str = include_str!("../../test/fixtures/head-groups.json");
+        let f: Value = serde_json::from_str(GROUPS).expect("фикстура не разобралась");
+        let host = f["host"].as_str().unwrap();
+        let sort = f["sort"].as_str().unwrap();
+        let cases = f["cases"].as_array().unwrap();
+        assert!(!cases.is_empty(), "в фикстуре нет ни одного случая");
+        for case in cases {
+            let name = &case["name"];
+            let state = json!({ "sessions": case["sessions"] });
+            assert_eq!(json!(tile_ids(&state, host, sort, &OFF)), case["order"], "{name}: порядок");
+            assert_eq!(json!(head_parents(&state, host, sort)), case["parents"], "{name}: родители");
+            assert_eq!(json!(group_ids(&state, host, sort)), case["groups"], "{name}: группы");
+        }
+    }
+
+    /// Тусклые строки из группы не выпадают: head, молчавший дольше порога,
+    /// иначе пропал бы из своей же группы. Свёрнутые окна пропускает менеджер.
+    #[test]
+    fn stale_rows_stay_in_their_group() {
+        let f: Value = serde_json::from_str(include_str!("../../test/fixtures/head-groups.json")).unwrap();
+        let basic = f["cases"].as_array().unwrap().iter().find(|c| c["name"] == "basic").unwrap();
+        let state = json!({ "sessions": basic["sessions"] });
+        // Сутки спустя все строки фикстуры тусклые.
+        let stale = Stale { enabled: true, session_hours: 2.0, now_s: 600000.0 + 86400.0 };
+        assert!(tile_ids(&state, "pc", "recent", &stale).is_empty(), "плитка тусклые отсевает");
+        assert_eq!(json!(group_ids(&state, "pc", "recent")), basic["groups"]);
     }
 
     #[test]

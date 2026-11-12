@@ -145,11 +145,13 @@
   // Как назвать человеку не вставший хоткей и по какому ключу спросить о нём
   // ответ `save_config`. Подпись здесь своя, а не поле формы: там она про то,
   // что клавиша делает («Show the picker»), а тут — про то, какая именно из
-  // четырёх не отозвалась.
+  // пяти не отозвалась. Клавиша без комбинации (`none`, или встроенной на
+  // этой системе нет) отвечает `null`, а не `false`, и отказом не считается.
   const HOTKEY_REPORTS = [
     ['hotkey', 'hotkey'],
     ['projects hotkey', 'projectsHotkey'],
     ['tile hotkey', 'tileHotkey'],
+    ['group layout hotkey', 'groupTileHotkey'],
     ['history hotkey', 'historyHotkey'],
   ];
   const UI_DEFAULTS = {
@@ -357,7 +359,10 @@
       //
       // Показывается строка ровно та, что уходит в `config.yaml`: второй вид
       // (глифами `^⇧C`) пришлось бы сверять с файлом по буквам.
-      const shown = value ? esc(value) : 'Built-in';
+      // `none` — «без клавиши» (кнопка Off): показать его сырым значило бы
+      // выдать слово за комбинацию.
+      const off = String(value).trim().toLowerCase() === 'none';
+      const shown = off ? 'Off' : value ? esc(value) : 'Built-in';
       return `<div class="field"><label>${esc(field.label)}</label>`
         + '<div class="hotkey-row">'
         + `<button type="button" class="hotkey-capture" data-hotkey="${esc(field.id)}">${shown}</button>`
@@ -365,6 +370,12 @@
         // умолчание», своё на каждой системе и живущее только в Rust, и без
         // этой кнопки записать пустоту стало бы нечем.
         + `<button type="button" class="hotkey-clear" data-hotkey-clear="${esc(field.id)}">Clear</button>`
+        // «Выключить» — только у клавиш раскладки (`allowOff`): у них на
+        // одной из систем встроенной нет, и Clear выключить её на другой не
+        // может — пустота там и есть встроенная.
+        + (field.allowOff
+          ? `<button type="button" class="hotkey-clear" data-hotkey-off="${esc(field.id)}">Off</button>`
+          : '')
         + `</div>${hint}</div>`;
     }
     if (field.type === 'range') {
@@ -940,6 +951,9 @@
         setHotkey(button.dataset.hotkeyClear, '');
       });
     }
+    for (const button of page.querySelectorAll('[data-hotkey-off]')) {
+      button.addEventListener('click', () => setHotkey(button.dataset.hotkeyOff, 'none'));
+    }
     for (const input of page.querySelectorAll('[data-panel]')) {
       input.addEventListener('change', () => {
         const key = input.dataset.panel;
@@ -1272,13 +1286,24 @@
         // с самого его появления. С третьим клавиша к тому же отбирается у
         // оконного трекера — «занята» там значит «трекер ещё не выкачен», и
         // это ровно тот случай, о котором надо сказать вслух.
+        // Клавиша плитки, совпавшая с клавишей группы, не «занята кем-то»:
+        // её забрала группа (`layout_hotkeys::tile_lost`), и сказать про
+        // чужую программу значило бы отправить искать то, чего нет.
+        const lost = result && result.tileHotkeyTakenByGroup === true;
         const failed = HOTKEY_REPORTS
+          .filter(([, key]) => !(lost && key === 'tileHotkey'))
           .filter(([, key]) => result && result[`${key}Registered`] === false)
           .map(([name, key]) => `${name} ${result[`${key}Accelerator`]}`);
+        const parts = [];
+        if (lost) {
+          parts.push(`tile hotkey ${result.tileHotkeyAccelerator} is taken by the group layout hotkey`);
+        }
         if (failed.length) {
+          parts.push(`${failed.join(', ')} did not take — held by the system or another application`);
+        }
+        if (parts.length) {
           status.className = 'bad';
-          status.textContent = `saved, but ${failed.join(', ')} did not take`
-            + ' — held by the system or another application';
+          status.textContent = `saved, but ${parts.join('; ')}`;
           return;
         }
         status.textContent = 'saved';

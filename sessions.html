@@ -799,6 +799,7 @@
      момент загрузки, и в обратном порядке ему достался бы undefined. -->
 <script src="session-name.js"></script>
 <script src="session-tree.js"></script>
+<script src="picker-selection.js"></script>
 <!-- terminal-presets: страница берёт отсюда osOf — ту же мерку системы,
      какой выбирает пресет окно настроек. Второй разбор navigator.platform
      разошёлся бы с первым. -->
@@ -2214,6 +2215,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
   // приходят туда же событиями picker-shown/picker-hidden — они меняют такт,
   // а не включают и выключают опрос.
 
+  const selectionSync = window.PickerSelection.createSelectionSync(
+    id => invoke('set_picker_selection', { id }).catch(() => {}));
+
   function paint() {
     const nodes = list.querySelectorAll('.row');
     nodes.forEach((node, i) => node.classList.toggle('active', i === active));
@@ -2222,6 +2226,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // себя, разошлись бы, а забытый шестой дал бы прыжок через экран — ровно
     // тот, ради которого всё затевалось.
     activePanel = (rows[active] || {}).panel || '';
+    // Выбор нужен Rust: хоткей раскладки группы при открытом пикере берёт
+    // подсвеченную строку, а спросить страницу из обработчика клавиши нельзя.
+    selectionSync.sync((rows[active] || {}).id);
     // Здесь же и гашение: оно зависит от того, где стоит выбор, а стрелки
     // render не зовут вовсе — с вызовом в render гашение по фокусу отставало
     // бы до секунды, до следующего ответа агрегатора. Подсветка держится
@@ -3213,6 +3220,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       hotkey: CONFIG.hotkey,
       projectsHotkey: CONFIG.projectsHotkey,
       tileHotkey: CONFIG.tileHotkey,
+      groupTileHotkey: CONFIG.groupTileHotkey,
       historyHotkey: CONFIG.historyHotkey,
       projects: projectRows,
       hotkeysTaken,
@@ -4390,6 +4398,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
     await listen('picker-hidden', () => {
       closeMenu();
       closeInfo();
+      // Rust забыл выбор вместе с гашением — на следующем показе он уйдёт
+      // заново, даже если строка та же.
+      selectionSync.reset();
     });
 
     // Подписка готова — забрать то, что поток успел узнать до неё, и

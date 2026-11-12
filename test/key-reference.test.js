@@ -78,6 +78,20 @@ test('хоткеи плитки и истории тоже названы сре
   assert.ok(labels.includes('Show the picker on history'), labels.join(' | '));
 });
 
+test('клавиша группы названа среди глобальных, а выключенная плитка — нет', () => {
+  const sections = buildKeyReference({
+    trackerHere: false,
+    tileHotkey: 'none',
+    groupTileHotkey: 'Ctrl+Win+F10',
+  });
+  const global = sections.find(s => /hidden/i.test(s.title));
+  const labels = global.rows.map(r => r.label);
+  assert.ok(labels.includes('Lay out the head session group'), labels.join(' | '));
+  assert.ok(!labels.includes('Tile the windows on this machine'), labels.join(' | '));
+  const off = buildKeyReference({ trackerHere: false, groupTileHotkey: 'None' });
+  assert.ok(!flat(off).some(r => r.label === 'Lay out the head session group'));
+});
+
 test('пустой projectsHotkey не показывается пустой строкой', () => {
   // Пустое поле значит «взять встроенное», а встроенное живёт в Rust и
   // отсюда не видно. Показать пустую клавишу — соврать точнее, чем промолчать.

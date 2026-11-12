@@ -52,6 +52,11 @@
     return { key, label, taken: taken === true };
   }
 
+  /** Задана ли клавиша: пусто — встроенная (её отсюда не видно), `none` — выключена. */
+  function bound(value) {
+    return typeof value === 'string' && value.trim() !== '' && value.trim().toLowerCase() !== 'none';
+  }
+
   /**
    * Секции справочника.
    *
@@ -104,8 +109,11 @@
             ? [row(formatHotkey(o.hotkey), 'Show the picker')] : []),
           ...(typeof o.projectsHotkey === 'string' && o.projectsHotkey.trim()
             ? [row(formatHotkey(o.projectsHotkey), 'Show the picker on projects')] : []),
-          ...(typeof o.tileHotkey === 'string' && o.tileHotkey.trim()
+          // `none` — клавиша выключена: строки про неё нет, как и про пустую.
+          ...(bound(o.tileHotkey)
             ? [row(formatHotkey(o.tileHotkey), 'Tile the windows on this machine')] : []),
+          ...(bound(o.groupTileHotkey)
+            ? [row(formatHotkey(o.groupTileHotkey), 'Lay out the head session group')] : []),
           ...(typeof o.historyHotkey === 'string' && o.historyHotkey.trim()
             ? [row(formatHotkey(o.historyHotkey), 'Show the picker on history')] : []),
           // Проектные хоткеи приезжают ответом агрегатора, а не из конфига:

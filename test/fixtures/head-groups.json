@@ -1,0 +1,442 @@
+{
+ "comment": [
+  "Общий вход для двух сторожей правила «чей ребёнок»: Rust-теста",
+  "head_groups_match_the_shared_fixture в src-tauri/src/place_order.rs и",
+  "JS-теста test/head-groups.test.js над SessionTree.nestByHead.",
+  "Дерево страницы и хоткей группы обязаны находить одного и того же",
+  "родителя: разойдись они, группа разложилась бы не та, что нарисована.",
+  "",
+  "order    — порядок строк своей машины (tile_ids, сортировка recent);",
+  "parents  — ребёнок → родитель, как его видит дерево страницы;",
+  "groups   — что уходит менеджеру: [head, живые прямые дети...].",
+  "",
+  "  basic            — c3 не живой (родитель есть, в группу не идёт),",
+  "                     c4 на соседней машине (строки здесь нет);",
+  "  no-live-children — head без живых детей группой не считается;",
+  "  by-name          — у ребёнка нет headId, родитель по имени;",
+  "  by-window-title  — имя родителя — заголовок его окна, а не title;",
+  "  head-elsewhere   — окно head на другой машине: группы нет;",
+  "  nested           — сторож: ребёнок не бывает head (решение владельца),",
+  "                     у x группы нет, хотя x1 на него ссылается;",
+  "  cycle            — a и b ссылаются друг на друга; корнем остаётся",
+  "                     первый в порядке, как в nestByHead."
+ ],
+ "host": "pc",
+ "sort": "recent",
+ "cases": [
+  {
+   "name": "basic",
+   "sessions": [
+    {
+     "id": "h",
+     "title": "lead",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 600000
+     }
+    },
+    {
+     "id": "c1",
+     "title": "c-one",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 540000
+     },
+     "head": "lead",
+     "headId": "h"
+    },
+    {
+     "id": "c2",
+     "title": "c-two",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 570000
+     },
+     "head": "lead",
+     "headId": "h"
+    },
+    {
+     "id": "c3",
+     "title": "c-three",
+     "live": false,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 599000
+     },
+     "head": "lead",
+     "headId": "h"
+    },
+    {
+     "id": "c4",
+     "title": "c-four",
+     "live": true,
+     "windows": [
+      {
+       "host": "other",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 599500
+     },
+     "head": "lead",
+     "headId": "h"
+    }
+   ],
+   "order": [
+    "h",
+    "c2",
+    "c1",
+    "c3"
+   ],
+   "parents": {
+    "c1": "h",
+    "c2": "h",
+    "c3": "h"
+   },
+   "groups": [
+    [
+     "h",
+     "c2",
+     "c1"
+    ]
+   ]
+  },
+  {
+   "name": "no-live-children",
+   "sessions": [
+    {
+     "id": "h",
+     "title": "lead",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 600000
+     }
+    },
+    {
+     "id": "c1",
+     "title": "c-one",
+     "live": false,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 540000
+     },
+     "head": "lead",
+     "headId": "h"
+    }
+   ],
+   "order": [
+    "h",
+    "c1"
+   ],
+   "parents": {
+    "c1": "h"
+   },
+   "groups": []
+  },
+  {
+   "name": "by-name",
+   "sessions": [
+    {
+     "id": "h",
+     "title": "lead",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 600000
+     }
+    },
+    {
+     "id": "c1",
+     "title": "c-one",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 540000
+     },
+     "head": "lead"
+    }
+   ],
+   "order": [
+    "h",
+    "c1"
+   ],
+   "parents": {
+    "c1": "h"
+   },
+   "groups": [
+    [
+     "h",
+     "c1"
+    ]
+   ]
+  },
+  {
+   "name": "by-window-title",
+   "sessions": [
+    {
+     "id": "h",
+     "title": "lead-title",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1,
+       "title": "lead-win"
+      }
+     ],
+     "agent": {
+      "updated": 600000
+     }
+    },
+    {
+     "id": "c1",
+     "title": "c-one",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 540000
+     },
+     "head": "lead-win"
+    }
+   ],
+   "order": [
+    "h",
+    "c1"
+   ],
+   "parents": {
+    "c1": "h"
+   },
+   "groups": [
+    [
+     "h",
+     "c1"
+    ]
+   ]
+  },
+  {
+   "name": "head-elsewhere",
+   "sessions": [
+    {
+     "id": "h",
+     "title": "lead",
+     "live": true,
+     "windows": [
+      {
+       "host": "other",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 600000
+     }
+    },
+    {
+     "id": "c1",
+     "title": "c-one",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 540000
+     },
+     "head": "lead",
+     "headId": "h"
+    }
+   ],
+   "order": [
+    "c1"
+   ],
+   "parents": {},
+   "groups": []
+  },
+  {
+   "name": "nested",
+   "sessions": [
+    {
+     "id": "h",
+     "title": "lead",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 600000
+     }
+    },
+    {
+     "id": "x",
+     "title": "x-mid",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 590000
+     },
+     "head": "lead",
+     "headId": "h"
+    },
+    {
+     "id": "y",
+     "title": "y-side",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 580000
+     },
+     "head": "lead",
+     "headId": "h"
+    },
+    {
+     "id": "x1",
+     "title": "x-leaf",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 570000
+     },
+     "head": "x-mid",
+     "headId": "x"
+    }
+   ],
+   "order": [
+    "h",
+    "x",
+    "y",
+    "x1"
+   ],
+   "parents": {
+    "x": "h",
+    "y": "h",
+    "x1": "x"
+   },
+   "groups": [
+    [
+     "h",
+     "x",
+     "y"
+    ]
+   ]
+  },
+  {
+   "name": "cycle",
+   "sessions": [
+    {
+     "id": "a",
+     "title": "aa",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 600000
+     },
+     "head": "bb",
+     "headId": "b"
+    },
+    {
+     "id": "b",
+     "title": "bb",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 590000
+     },
+     "head": "aa",
+     "headId": "a"
+    }
+   ],
+   "order": [
+    "a",
+    "b"
+   ],
+   "parents": {
+    "b": "a"
+   },
+   "groups": [
+    [
+     "a",
+     "b"
+    ]
+   ]
+  }
+ ]
+}

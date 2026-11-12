@@ -171,7 +171,7 @@ test('все глобальные хоткеи правятся на одной 
   // выпадашки действий мыши, и список, по которому validate ходит проверкой
   // на занятую комбинацию, обязан их не видеть.
   const ids = page.fields.filter(f => f.type === 'hotkey').map(f => f.id);
-  assert.deepStrictEqual(ids, ['hotkey', 'projectsHotkey', 'tileHotkey', 'historyHotkey']);
+  assert.deepStrictEqual(ids, ['hotkey', 'projectsHotkey', 'tileHotkey', 'groupTileHotkey', 'historyHotkey']);
 });
 
 test('действие мыши не проверяется как хоткей', () => {
@@ -211,6 +211,28 @@ test('третий хоткей проверяется теми же двумя 
   const reserved = validate({ sshHost: 'host', tileHotkey: 'Ctrl+F' });
   assert.strictEqual(reserved.length, 1, reserved);
   assert.match(reserved[0], /taken by the picker window itself/);
+});
+
+test('none выключает клавишу и не считается ни занятой, ни дублем', () => {
+  // `none` — не комбинация: разбирать её как клавишу N значило бы ругаться
+  // на клавишу, которой человек не задавал, а два `none` — не две клавиши.
+  assert.deepStrictEqual(
+    validate({ sshHost: 'host', tileHotkey: 'none', groupTileHotkey: ' NONE ' }),
+    [],
+  );
+});
+
+test('клавиша группы попала в ту же проверку на дубли', () => {
+  const clash = validate({ sshHost: 'host', tileHotkey: 'Ctrl+Win+F9', groupTileHotkey: 'ctrl+win+f9' });
+  assert.strictEqual(clash.length, 1, clash);
+  assert.match(clash[0], /two hotkeys/);
+});
+
+test('кнопка Off есть только у двух клавиш раскладки', () => {
+  // У остальных выключать нечего: без клавиши пикера пикер не открыть.
+  const page = PAGES.find(p => p.id === 'hotkeys');
+  const off = page.fields.filter(f => f.allowOff).map(f => f.id);
+  assert.deepStrictEqual(off, ['tileHotkey', 'groupTileHotkey']);
 });
 
 test('хоткей истории попал в ту же проверку на дубли', () => {

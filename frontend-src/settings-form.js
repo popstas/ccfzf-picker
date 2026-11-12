@@ -233,10 +233,17 @@
         { id: 'projectsHotkey', label: 'Show the picker on projects', type: 'hotkey',
           hint: 'Leave empty for the built-in one: Win+Shift+F10 on Windows, '
             + 'Option+Cmd+Shift+C on a Mac.' },
-        { id: 'tileHotkey', label: 'Tile the windows on this machine', type: 'hotkey',
+        // `allowOff` — третья кнопка `Off`, пишет `none`. Только у двух клавиш
+        // раскладки: у каждой на одной из систем встроенной нет, и выключить
+        // её на другой иначе было бы нечем (Clear значит «встроенная»).
+        { id: 'tileHotkey', label: 'Tile the windows on this machine', type: 'hotkey', allowOff: true,
           hint: 'Asks the window tracker for the tile layout, in the order of this list. '
-            + 'Leave empty for the built-in one: Ctrl+Win+F10 on Windows, '
+            + 'Leave empty for the built-in one: none on Windows, '
             + 'Ctrl+Option+Cmd+C on a Mac.' },
+        { id: 'groupTileHotkey', label: 'Lay out the head session group', type: 'hotkey', allowOff: true,
+          hint: 'Asks the window manager to put a head session and its children into their zones. '
+            + 'Leave empty for the built-in one: Ctrl+Win+F10 on Windows, none on a Mac. '
+            + 'Not supported on a Mac.' },
         { id: 'historyHotkey', label: 'Show the picker on history', type: 'hotkey',
           hint: 'Leave empty for the built-in one: Ctrl+Win+Shift+F10 on Windows, '
             + 'Ctrl+Option+Cmd+Shift+C on a Mac.' },
@@ -335,6 +342,11 @@
   // занятую комбинацию и на совпадение с хоткеем.
   const GLOBAL_HOTKEYS = (PAGES.find(page => page.id === 'hotkeys') || { fields: [] })
     .fields.filter(field => field.type === 'hotkey').map(field => field.id);
+
+  /** `none` в поле хоткея — «выключить». */
+  function isOff(value) {
+    return String(value ?? '').trim().toLowerCase() === 'none';
+  }
 
   function at(source, path) {
     return path.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), source);
@@ -564,7 +576,10 @@
     // Три глобальных хоткея проверяются одним проходом, а не тремя копиями
     // подряд: копий было две, и с третьей клавишей забыть одну из них стало
     // делом времени — а забытая молчит.
-    const globals = GLOBAL_HOTKEYS.map(id => String(fields[id] || '').trim());
+    // `none` — «без клавиши», а не комбинация: ни занятой, ни дублем она
+    // быть не может. Та же формула, что `is_off` в `layout_hotkeys.rs`.
+    const globals = GLOBAL_HOTKEYS.map(id => String(fields[id] || '').trim())
+      .map(combo => (isOff(combo) ? '' : combo));
     for (const combo of globals) {
       // isReserved, а не свой разбор строки: комбинации, которые окно пикера
       // забирает себе, перечислены там, и второй список разошёлся бы с первым.
@@ -628,5 +643,5 @@
     return problems;
   }
 
-  return { PAGES, EDITORS, matchEditor, configToFields, fieldsToPatch, validate };
+  return { PAGES, EDITORS, matchEditor, configToFields, fieldsToPatch, validate, isOff };
 });

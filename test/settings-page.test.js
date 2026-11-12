@@ -631,6 +631,25 @@ test('у каждого типа поля есть своя ветка отри�
 // из пяти, но принцип тот же). Значение вне этого списка — пиксели, вписанные
 // руками или подобранные раньше, — не теряется молча, а видно в соседнем
 // числовом поле, а не как «совпавшая» радиокнопка, которой для него нет.
+test('выключенная клавиша показана словом Off, и выключить её есть чем', () => {
+  // `none` в поле — «без клавиши». Показать его сырым значило бы выдать за
+  // комбинацию; кнопка Off нужна, потому что Clear пишет пустоту, а пустота —
+  // это встроенная клавиша.
+  const { PAGES } = require('../frontend-src/settings-form');
+  const src = sourceOf(/\n {2}function fieldHtml\(field\) \{[\s\S]*?\n {2}\}\n/, 'fieldHtml');
+  const fieldsById = Object.fromEntries(PAGES.flatMap(p => p.fields).map(f => [f.id, f]));
+  const html = (field, value) => {
+    const ctx = { fields: { [field.id]: value }, esc: (s) => String(s), window: {} };
+    vm.createContext(ctx);
+    return vm.runInContext(`${src}\nfieldHtml(${JSON.stringify(field)});`, ctx, { filename: 'settings.html' });
+  };
+  const group = html(fieldsById.groupTileHotkey, 'none');
+  assert.match(group, />Off</);
+  assert.match(group, /data-hotkey-off="groupTileHotkey"/);
+  assert.match(html(fieldsById.groupTileHotkey, ''), />Built-in</);
+  assert.doesNotMatch(html(fieldsById.hotkey, 'Cmd+Shift+C'), /data-hotkey-off/);
+});
+
 test('пиксельный размер виден в числовом поле, а не как радиокнопка', () => {
   const { PAGES } = require('../frontend-src/settings-form');
   const src = sourceOf(/\n {2}function fieldHtml\(field\) \{[\s\S]*?\n {2}\}\n/, 'fieldHtml');
@@ -1417,6 +1436,40 @@ test('окно спрашивает про хоткеи теми же ключа
       `${key}: Rust не отдаёт комбинацию — в подписи об отказе её нечем назвать`,
     );
   }
+});
+
+test('клавиша плитки, отданная группе, названа так, а не «занята другим приложением»', async () => {
+  // Совпали tileHotkey и groupTileHotkey — клавишу забрала группа. Сказать
+  // «held by the system or another application» значило бы отправить человека
+  // искать чужую программу, которой нет.
+  const src = persistCoreSrc();
+  const status = { className: '', textContent: '' };
+  const ctx = {
+    document: { getElementById: () => status, documentElement: { dataset: {} } },
+    window: {},
+    invoke: async (cmd) => (cmd === 'save_config'
+      ? { hotkeyRegistered: true, projectsHotkeyRegistered: true,
+          tileHotkeyRegistered: false, tileHotkeyAccelerator: 'Control+Super+F10',
+          tileHotkeyTakenByGroup: true,
+          groupTileHotkeyRegistered: true, groupTileHotkeyAccelerator: 'Control+Super+F10' }
+      : {}),
+    current: 'general',
+    fields: { sshHost: 'host' },
+    config: { sshHost: 'host' },
+    dirtyFields: new Set(),
+    validate: () => [],
+    fieldsToPatch: () => ({}),
+    configToFields: () => ({ sshHost: 'host' }),
+    setTimeout, clearTimeout, console,
+  };
+  vm.createContext(ctx);
+  await vm.runInContext(`${src}\npersist()`, ctx, { filename: 'settings.html' });
+  assert.strictEqual(status.className, 'bad');
+  assert.match(status.textContent, /tile hotkey Control\+Super\+F10 is taken by the group layout hotkey/);
+  assert.doesNotMatch(status.textContent, /another application/);
+  // Имя поля то же, каким отвечает Rust: разойдись они, подпись молча
+  // вернулась бы к «другому приложению».
+  assert.match(MAIN_RS, /"tileHotkeyTakenByGroup":/);
 });
 
 test('не вставший хоткей плитки виден человеком, а не только в журнале', async () => {

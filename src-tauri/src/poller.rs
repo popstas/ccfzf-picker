@@ -491,11 +491,54 @@ impl Poller {
     pub fn snapshot(&self) -> serde_json::Value {
         payload(&self.cache.lock().unwrap())
     }
+
+    /// Ответ агрегатора, опрошенного прямо сейчас, — для раскладки группы.
+    ///
+    /// Снимок на скрытом окне отстаёт до восьми минут (бэкофф), а главный
+    /// случай — «head только что открыл троих детей, жму клавишу»: без
+    /// свежего опроса группа ушла бы без них. Отказ опроса откатывает на
+    /// снимок и пишет об этом в журнал. Блокирует на время ssh — звать из
+    /// `spawn_blocking`. Кэш не трогает: его держит поток поллера.
+    pub fn fresh_state(&self) -> serde_json::Value {
+        let sources = self.settings.lock().unwrap().0.clone();
+        let (fresh, error) = poll_once(&sources, false);
+        let cached = self.snapshot().get("state").cloned().unwrap_or(serde_json::Value::Null);
+        let (state, fell_back) = state_or_snapshot(fresh, cached);
+        if fell_back {
+            ccfzf_log!("cannot poll before the group layout, using the cached state: {error}");
+        }
+        state
+    }
+}
+
+/// Свежий ответ, если он есть, иначе снимок; второе значение — «откатились».
+pub fn state_or_snapshot(
+    fresh: Option<serde_json::Value>,
+    cached: serde_json::Value,
+) -> (serde_json::Value, bool) {
+    match fresh {
+        Some(s) => (s, false),
+        None => (cached, true),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Свежий ответ главнее кэша: на скрытом окне снимок отстаёт до восьми
+    /// минут, а раскладку группы жмут сразу после того, как head открыл детей.
+    /// Отказ опроса откатывает на кэш и говорит об этом вторым значением.
+    #[test]
+    fn a_fresh_answer_beats_the_cache() {
+        let (s, fell_back) =
+            state_or_snapshot(Some(serde_json::json!({"sessions": [1]})), serde_json::json!({"sessions": []}));
+        assert_eq!(s, serde_json::json!({"sessions": [1]}));
+        assert!(!fell_back);
+        let (s, fell_back) = state_or_snapshot(None, serde_json::json!({"sessions": []}));
+        assert_eq!(s, serde_json::json!({"sessions": []}));
+        assert!(fell_back);
+    }
 
     /// Два ответа, отличающиеся только временем, — одно и то же состояние.
     ///

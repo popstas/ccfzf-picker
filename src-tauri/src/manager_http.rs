@@ -139,7 +139,14 @@ pub fn restore(endpoint: &str, id: &str, session_ids: &[String]) -> Result<(), S
 
 /// Попросить разложить окна на машине менеджера.
 pub fn place(endpoint: &str, mode: &str, ids: &[String]) -> Result<(), String> {
-    post(endpoint, "/claude-place", place_payload(mode, ids)?)
+    place_body(endpoint, place_payload(mode, ids)?)
+}
+
+/// Готовое тело просьбы о раскладке — тем же путём, что у плитки. Им уходит
+/// и раскладка группы (`mqtt::group_payload`): приёмник разбирает оба тела
+/// одним роутером.
+pub fn place_body(endpoint: &str, body: String) -> Result<(), String> {
+    post(endpoint, "/claude-place", body)
 }
 
 #[cfg(test)]
