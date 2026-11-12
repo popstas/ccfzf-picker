@@ -1008,7 +1008,7 @@ test('Enter на заголовке секции переключает её, а
 // но и по смене сортировки. Тест вычитывает настоящий saveUi из страницы (тем
 // же приёмом, что renderProjects и choose выше) и проверяет, что сохранённый
 // объект правда двухосный и ось statusline из uiToggles никуда не делась.
-function saveUiWith(uiToggles, fullscreen, treeMode) {
+function saveUiWith(uiToggles, fullscreen, treeMode, wideSplit) {
   const source = SESSIONS_HTML.match(/\n {2}function saveUi\(\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'saveUi не найден в sessions.html — тест сторожит не то');
   const calls = [];
@@ -1033,6 +1033,9 @@ function saveUiWith(uiToggles, fullscreen, treeMode) {
     hidden: { narrow: {}, wide: {} },
     // Седьмой — режим иерархии head-сессий, кнопка рядом с ^F.
     tree: Boolean(treeMode),
+    // Восьмой — доли ширины широкой раскладки; ставят его настройки, а пишет
+    // и пикер — при каждой смене сортировки.
+    wideSplit: wideSplit || 'equal',
   };
   vm.createContext(ctx);
   vm.runInContext(`${source[0]}\nsaveUi();`, ctx, { filename: 'sessions.html' });
@@ -1072,6 +1075,14 @@ test('saveUi запоминает и режим окна, а не только �
   const calls = saveUiWith({ showPrompt: { list: true, statusline: true } }, true);
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(calls[0].ui.fullscreen, true);
+});
+
+test('saveUi не сбрасывает ширину колонок', () => {
+  // Восьмой аргумент. Забудь его saveUi — и включённые в настройках 2/3
+  // сбрасывались бы на «поровну» первой же сменой сортировки в пикере.
+  const calls = saveUiWith({ showPrompt: { list: true, statusline: true } }, true, false, 'twoThirds');
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].ui.wideSplit, 'twoThirds');
 });
 
 test('saveUi запоминает режим иерархии', () => {
@@ -1966,7 +1977,9 @@ test('renderWide: номер строки в разметке совпадает
     // вовсе, и двойник DOM нужен только на тела секций.
     // Тот же вид отпечатка, что и в renderWide: свёрнутость входит в него,
     // потому что от неё зависит класс блока.
-    blocksShape: SECTIONS.map(s => `${s.key}|${s.column}|${s.collapsed ? 1 : 0}`).join('\n'),
+    // Доля ширины тоже входит: от неё зависит класс колонки.
+    wideSplit: 'equal',
+    blocksShape: `equal\n${SECTIONS.map(s => `${s.key}|${s.column}|${s.collapsed ? 1 : 0}`).join('\n')}`,
     renderedBlocks: new Map(),
     blockBodies: new Map(SECTIONS.map(s => [s.key, { children: [] }])),
     applyPlan: () => {},
@@ -1992,6 +2005,73 @@ test('renderWide: номер строки в разметке совпадает
     rows.filter(r => r.kind === 'section').map(r => r.sectionKey),
     ['live', 'remote'],
   );
+});
+
+/**
+ * Прогнать настоящий renderWide с пересборкой каркаса и вернуть разметку
+ * колонок. Двойник `#list` помнит последнюю `innerHTML` и отдаёт по блоку на
+ * секцию — ровно то, что renderWide у него спрашивает после пересборки.
+ */
+function wideColumnsHtml(columns, wideSplit, ctxBase) {
+  const SECTIONS = columns.map(column => ({
+    key: `k${column}`, label: `L${column}`, kind: 'sessions',
+    count: 0, lastAt: 0, collapsed: false, foldable: true, column, rows: [],
+  }));
+  const list = {
+    html: '',
+    set innerHTML(v) { this.html = v; this.builds = (this.builds || 0) + 1; },
+    querySelectorAll: () => SECTIONS.map(s => ({
+      getAttribute: () => s.key,
+      querySelector: () => ({ children: [] }),
+    })),
+  };
+  const ctx = ctxBase || vm.createContext({
+    rows: [],
+    escapeHtml: (x) => String(x),
+    window: {
+      PickerSections,
+      PickerListSync: { planListSync: () => ({ mode: 'rebuild', keys: [], html: [] }) },
+    },
+    WIDE_COLUMNS: 5,
+    list,
+    blocksShape: '',
+    renderedBlocks: new Map(),
+    blockBodies: new Map(),
+    applyPlan: () => {},
+    sessionItem: () => ({ key: 'x', html: '' }),
+    projectItem: () => ({ key: 'x', html: '' }),
+    snapshotItem: () => ({ key: 'x', html: '' }),
+    subheadItem: () => ({ key: 'x', html: '' }),
+  });
+  ctx.SECTIONS = SECTIONS;
+  ctx.wideSplit = wideSplit;
+  vm.runInContext(
+    `${pageFunctions('blockCellHtml(section)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)', 'renderWide(sections, nowSec)')}
+     renderWide(SECTIONS, 0);`,
+    ctx, { filename: 'sessions.html' });
+  return { html: ctx.list.html, ctx };
+}
+
+test('renderWide: при 2/3 колонке 1 рядом с одной третьей — класс grow-2', () => {
+  const { html } = wideColumnsHtml([1, 3], 'twoThirds');
+  assert.match(html, /class="block-col col-1 grow-2"/);
+  assert.match(html, /class="block-col col-3"/);
+});
+
+test('renderWide: поровну и при трёх колонках grow-2 нет', () => {
+  assert.ok(!wideColumnsHtml([1, 3], 'equal').html.includes('grow-2'));
+  assert.ok(!wideColumnsHtml([1, 2, 3], 'twoThirds').html.includes('grow-2'));
+});
+
+test('renderWide: смена доли ширины пересобирает каркас при том же наборе колонок', () => {
+  // Переключатель правят в настройках, пока пикер открыт в ^F, и набор
+  // колонок при этом прежний. Не входи доля в отпечаток каркаса — колонка
+  // осталась бы со старым классом до первой смены набора секций.
+  const first = wideColumnsHtml([1, 3], 'equal');
+  assert.ok(!first.html.includes('grow-2'));
+  const second = wideColumnsHtml([1, 3], 'twoThirds', first.ctx);
+  assert.match(second.html, /col-1 grow-2/);
+  assert.strictEqual(second.ctx.list.builds, 2, 'каркас не пересобран');
 });
 
 test('свёрнутая секция отдаёт один заголовок, но счёт в нём полный', () => {

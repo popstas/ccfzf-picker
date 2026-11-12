@@ -671,3 +671,12 @@ test('при 2/3 другие пары колонок поровну', () => {
 test('пустой набор колонок — пустой ответ', () => {
   assert.deepStrictEqual(PickerSections.wideColumnGrow([], 'twoThirds'), []);
 });
+
+test('страница знает правило grow-2 и читает долю ширины из ui.json дважды', () => {
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'sessions.html'), 'utf8');
+  assert.match(html, /#list\.blocks \.block-col\.grow-2\s*\{[^}]*flex-grow:\s*2/,
+    'в <style> нет правила для grow-2 — класс ничего не меняет');
+  // Загрузка и `ui-changed`: забудь второе — и переключатель из настроек
+  // доходил бы до пикера только после перезапуска.
+  assert.strictEqual((html.match(/wideSplit = ui\.wideSplit;/g) || []).length, 2);
+});
