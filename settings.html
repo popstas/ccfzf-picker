@@ -752,10 +752,24 @@
    * бы дороже, чем эта задержка.
    */
   function panelsTableHtml() {
+    // Ширина колонок — свойство широкой раскладки, а не панели, поэтому это
+    // не столбец таблицы, а своё поле сразу под ней. Слова и подписи — у
+    // PickerPanels, а не литералами здесь: значение, которого не понимает
+    // ui-state, при чтении файла молча стало бы «поровну».
+    const labels = window.PickerPanels.WIDE_SPLIT_LABELS;
+    const split = '<div class="field"><label>Column widths in the wide view</label>'
+      + '<select data-wide-split>'
+      + Object.keys(labels).map(value => `<option value="${esc(value)}"`
+        + `${ui.wideSplit === value ? ' selected' : ''}>${esc(labels[value])}</option>`).join('')
+      + '</select><div class="hint">'
+      + esc('2/3 applies only when columns 1 and 3 are the only ones on screen: the first takes '
+        + 'two thirds of the width. Any other set of columns is split equally.')
+      + '</div></div>';
     return panelTableHtml('wide', 'Panels in the wide view (Ctrl+F)',
       'Order inside a column is set by dragging a section header in the picker. '
       + 'A hidden panel stays hidden while searching, but a mode prefix '
       + '(Ctrl+H, Ctrl+P, Ctrl+S) still shows it.')
+      + split
       + panelTableHtml('narrow', 'Panels in the narrow view',
         'There are no columns here; order is set by dragging a section header in '
         + 'the picker. Remote machines and history desktops show up in this list '
@@ -979,6 +993,15 @@
         scheduleAutosave();
       });
     }
+    for (const select of page.querySelectorAll('[data-wide-split]')) {
+      select.addEventListener('change', () => {
+        ui.wideSplit = select.value;
+        // Пометка без двоеточия: с пометками панелей («раскладка:ключ») она
+        // не совпадёт, и overlayDirtyPanels разбирает её первой.
+        dirtyPanels.add('wideSplit');
+        scheduleAutosave();
+      });
+    }
     for (const input of page.querySelectorAll('[data-axis]')) {
       // recommended-all — псевдоключ заголовка, не строка ui.toggles: эта
       // генерическая ветка вписала бы в файл мусорную галку под его именем,
@@ -1128,6 +1151,8 @@
    */
   function overlayDirtyPanels(fresh) {
     for (const mark of dirtyPanels) {
+      // Ширина колонок — не панель, и в половинки она не кладётся.
+      if (mark === 'wideSplit') { fresh.wideSplit = ui.wideSplit; continue; }
       // Помечено «раскладка:ключ», а в ключе своё двоеточие бывает
       // (`past:2`) — поэтому режется по длине известного
       // имени раскладки, а не по первому попавшемуся разделителю.
@@ -1202,7 +1227,7 @@
         await invoke('save_ui', {
           ui: window.UiState.uiStateToSave(
             fresh.sort, fresh.toggles, fresh.fullscreen, fresh.collapsed, fresh.order,
-            fresh.hidden, fresh.tree),
+            fresh.hidden, fresh.tree, fresh.wideSplit),
         });
         if (window.__TAURI__) await window.__TAURI__.event.emit('ui-changed');
         // Правка, случившаяся, пока мы ждали запись, — уже не в fresh:
@@ -1237,7 +1262,7 @@
         await invoke('save_ui', {
           ui: window.UiState.uiStateToSave(
             fresh.sort, fresh.toggles, fresh.fullscreen, fresh.collapsed, fresh.order,
-            fresh.hidden, fresh.tree),
+            fresh.hidden, fresh.tree, fresh.wideSplit),
         });
         // Пикер — другое окно, своего ui.json он не перечитает. Событие
         // рассылается всем окнам, и подписан на него только он.

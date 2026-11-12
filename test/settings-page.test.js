@@ -421,7 +421,19 @@ test('вкладка UI возвращает в файл всё, чем расп
   const args = call[1].split(',').map(s => s.trim());
   assert.deepStrictEqual(args,
     ['fresh.sort', 'fresh.toggles', 'fresh.fullscreen', 'fresh.collapsed', 'fresh.order',
-      'fresh.hidden', 'fresh.tree']);
+      'fresh.hidden', 'fresh.tree', 'fresh.wideSplit']);
+});
+
+test('оба сохранения окна настроек зовут uiStateToSave всеми аргументами', () => {
+  // Вызовов два — вкладка Panels и вкладка UI, — а сторож выше видит только
+  // первый. Забудь второй восьмой аргумент — и сохранение вкладки UI молча
+  // сбрасывало бы ширину колонок на «поровну».
+  const source = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  const calls = [...source.matchAll(/uiStateToSave\(([^)]*)\)/g)]
+    .map(m => m[1].split(',').map(s => s.trim()))
+    .filter(args => args[0] === 'fresh.sort');
+  assert.strictEqual(calls.length, 2, `вызовов uiStateToSave не два: ${calls.length}`);
+  for (const args of calls) assert.strictEqual(args[7], 'fresh.wideSplit', args.join(', '));
 });
 
 test('пикер тоже зовёт uiStateToSave всеми аргументами', () => {
@@ -432,7 +444,7 @@ test('пикер тоже зовёт uiStateToSave всеми аргумента
   assert.ok(call, 'вызов uiStateToSave не найден в sessions.html — тест сторожит не то');
   const args = call[1].split(',').map(s => s.trim());
   assert.deepStrictEqual(args,
-    ['sortMode', 'uiToggles', 'fullscreen', 'collapsed', 'order', 'hidden', 'tree']);
+    ['sortMode', 'uiToggles', 'fullscreen', 'collapsed', 'order', 'hidden', 'tree', 'wideSplit']);
 });
 
 // ── вкладка Panels ─────────────────────────────────────────────────────────
@@ -599,6 +611,48 @@ test('счёт правок вкладки Panels начинается зано�
   const { dirtyPanels } = await savePanelsTab(
     { onDisk: defaults(), snapshot, dirty: ['wide:past'] });
   assert.strictEqual(dirtyPanels.size, 0);
+});
+
+test('переключатель ширины колонок рисуется между широкой и узкой таблицами', () => {
+  const ui = defaults();
+  ui.wideSplit = 'twoThirds';
+  const html = panelsHtml(ui);
+  const at = html.indexOf('data-wide-split');
+  assert.ok(at !== -1, 'переключателя ширины нет');
+  assert.ok(at > html.indexOf('Panels in the wide view') && at < html.indexOf('Panels in the narrow view'),
+    'переключатель не между таблицами');
+  const select = html.slice(html.lastIndexOf('<select', at), html.indexOf('</select>', at));
+  for (const value of UiState.WIDE_SPLITS) {
+    assert.ok(select.includes(`value="${value}"`), `нет значения ${value}`);
+  }
+  assert.match(select, /value="twoThirds" selected/, 'выбрано не значение из ui.json');
+  assert.ok(!/value="equal" selected/.test(select), 'выбрано два значения');
+});
+
+test('правка ширины колонок записывается, перетаскивание пикера цело', async () => {
+  const onDisk = defaults();
+  onDisk.order = { narrow: [], wide: [['snapshots'], [], []] };
+  const snapshot = defaults();
+  snapshot.wideSplit = 'twoThirds';
+
+  const { saved } = await savePanelsTab({ onDisk, snapshot, dirty: ['wideSplit'] });
+
+  assert.strictEqual(saved.wideSplit, 'twoThirds', 'правка окна записана');
+  assert.deepStrictEqual(saved.order.wide[0], ['snapshots'], 'перетаскивание пикера не откатилось');
+  // Пометка ширины — не панель: в половинки она не просочилась.
+  assert.strictEqual(saved.hidden.wide.wideSplit, undefined);
+  assert.strictEqual(saved.collapsed.wide.wideSplit, undefined);
+});
+
+test('нетронутая ширина колонок берётся из файла, а не из снимка загрузки', async () => {
+  const onDisk = defaults();
+  onDisk.wideSplit = 'twoThirds';
+  const snapshot = defaults();
+  snapshot.hidden = { narrow: {}, wide: { past: true } };
+
+  const { saved } = await savePanelsTab({ onDisk, snapshot, dirty: ['wide:past'] });
+
+  assert.strictEqual(saved.wideSplit, 'twoThirds');
 });
 
 // ── Новый тип поля не должен молча приезжать текстовым ──────────────────────
