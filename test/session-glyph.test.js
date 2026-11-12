@@ -6,6 +6,7 @@ const {
   shortPath, rowTitle, titleAttr, windowHostHtml, windowHtml,
   prNumber, prBadgeHtml, wordSet, hidesProject, projectLine, todoHtml, docsBadgeHtml, promptsHtml, commentHtml,
   todoText, projectCountHtml, projectCountText, projectColumnWidths,
+  cacheRemainingSec, cacheLevel, cacheText,
 } = require('../frontend-src/session-glyph');
 
 test('shortPath collapses the agent home directory, and survives a missing path', () => {
@@ -349,7 +350,78 @@ test('выключенный чекбокс по-прежнему убирает
   const noCost = usageHtml({ agentCostUsd: 0, agentContextPct: 0 }, { showCost: false });
   assert.doesNotMatch(noCost, /\$/);
   assert.match(noCost, /0%/);
-  assert.strictEqual(usageHtml({}, { showCost: false, showContext: false }), '');
+  assert.strictEqual(usageHtml({}, { showCost: false, showContext: false, showCache: false }), '');
+});
+
+// ── Таймер кеша промпта ────────────────────────────────────────────────────
+//
+// Кеш живёт час от последнего ответа ассистента. Запас в 5 секунд — как у
+// виджета cache-timer в ccstatusline: вызов, ушедший в последнюю секунду,
+// кеш уже не застанет.
+
+test('cacheRemainingSec считает остаток от метки ответа', () => {
+  assert.strictEqual(cacheRemainingSec({ agentCacheAt: 1000 }, 1600), 3600 - 5 - 600);
+});
+
+test('cacheRemainingSec молчит у работающей сессии: кеш освежает каждый вызов', () => {
+  assert.strictEqual(cacheRemainingSec({ agentCacheAt: 1000, agentState: 'active' }, 1600), null);
+});
+
+test('cacheRemainingSec идёт и пока сессия ждёт человека', () => {
+  // Вопрос и разрешение — ровно то время, когда кеш остывает незаметно.
+  assert.strictEqual(cacheRemainingSec({ agentCacheAt: 1000, agentState: 'question' }, 1600), 2995);
+  assert.strictEqual(cacheRemainingSec({ agentCacheAt: 1000, agentState: 'review' }, 1600), 2995);
+});
+
+test('cacheRemainingSec молчит без метки и у истёкшего кеша', () => {
+  assert.strictEqual(cacheRemainingSec({}, 1600), null);
+  assert.strictEqual(cacheRemainingSec(undefined, 1600), null);
+  assert.strictEqual(cacheRemainingSec({ agentCacheAt: 1000 }, 1000 + 3595), null);
+});
+
+test('cacheRemainingSec не поднимается выше часа, если часы машин разошлись', () => {
+  // Метка приезжает с машины агента, `now` — с машины пикера.
+  assert.strictEqual(cacheRemainingSec({ agentCacheAt: 1120 }, 1000), 3595);
+});
+
+test('cacheLevel: серый, жёлтый меньше 30 минут, красный меньше 15', () => {
+  assert.strictEqual(cacheLevel(1801), '');
+  assert.strictEqual(cacheLevel(1800), '');
+  assert.strictEqual(cacheLevel(1799), 'warn');
+  assert.strictEqual(cacheLevel(900), 'warn');
+  assert.strictEqual(cacheLevel(899), 'hot');
+});
+
+test('cacheText: целые минуты вверх, последняя минута — 1m, а не 0m', () => {
+  assert.strictEqual(cacheText(3595), '60m');
+  // Больше 59 минут — уже 60: свежий кеш читается «полным часом» (Стас).
+  assert.strictEqual(cacheText(59 * 60 + 1), '60m');
+  assert.strictEqual(cacheText(59 * 60), '59m');
+  assert.strictEqual(cacheText(30), '1m');
+});
+
+test('usageHtml ставит таймер кеша третьим, после контекста', () => {
+  assert.strictEqual(
+    usageHtml({ agentContextPct: 13, agentCostUsd: 2, agentCacheAt: 1000 }, {}, 3000),
+    '<div class="usage"><span class="cost">$2</span> · <span class="ctx">13%</span>'
+      + ' · <span class="cache warn">27m</span></div>'
+  );
+});
+
+test('usageHtml без метки кеша рисует то же, что и раньше', () => {
+  assert.strictEqual(usageHtml({ agentContextPct: 13, agentCostUsd: 2 }, {}, 3000),
+    '<div class="usage"><span class="cost">$2</span> · <span class="ctx">13%</span></div>');
+});
+
+test('выключенный таймер кеша убирает свою величину, все три — колонку', () => {
+  const html = usageHtml({ agentCacheAt: 1000 }, { showCache: false }, 1600);
+  assert.doesNotMatch(html, /class="cache/);
+  assert.strictEqual(
+    usageHtml({ agentCacheAt: 1000 }, { showCost: false, showContext: false, showCache: false }, 1600), '');
+  // Одна галка таймера держит колонку сама.
+  assert.strictEqual(
+    usageHtml({ agentCacheAt: 1000 }, { showCost: false, showContext: false }, 1600),
+    '<div class="usage"><span class="cache">50m</span></div>');
 });
 
 test('stateText shows the state and the event that produced it', () => {
@@ -422,7 +494,7 @@ test('sessionIdHtml is its own toggle, independent of the event one', () => {
 test('a toggled-off column leaves no element behind', () => {
   const session = { live: true, agentState: 'active', agentContextPct: 13, agentCostUsd: 2 };
   assert.strictEqual(stateHtml(session, false), '');
-  assert.strictEqual(usageHtml(session, { showCost: false, showContext: false }), '');
+  assert.strictEqual(usageHtml(session, { showCost: false, showContext: false, showCache: false }), '');
   assert.strictEqual(
     usageHtml(session, { showCost: false, showContext: true }),
     '<div class="usage"><span class="ctx">13%</span></div>'

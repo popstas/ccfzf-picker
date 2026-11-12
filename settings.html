@@ -122,7 +122,7 @@
     // answer.
     showComment: 'comment',
     showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
-    showCost: 'cost', showContext: 'context', showWindow: 'window',
+    showCost: 'cost', showContext: 'context', showCache: 'cache', showWindow: 'window',
     showWindowHost: 'window host', showTerminalIcon: 'terminal icon',
     // Размер сессии: сколько раз человек в ней писал.
     showPrompts: 'prompts',
@@ -166,6 +166,7 @@
       showId: { list: false, statusline: true },
       showCost: { list: false, statusline: false },
       showContext: { list: true, statusline: true },
+      showCache: { list: true, statusline: false },
       showWindow: { list: true, statusline: false },
       showWindowHost: { list: true, statusline: false },
       showPrompts: { list: true, statusline: false },
@@ -453,6 +454,10 @@
     showComment: '✎',
     showCost: '$',
     showContext: '≡',
+    // Секундомер с просьбой о текстовом начертании (U+FE0E) — по той же
+    // причине, что у пузыря `showPrompts`: без неё Windows тянула бы цветной
+    // эмодзи к монохромным соседям.
+    showCache: '\u23F1\uFE0E',
     // Тот же глиф, каким сам список помечает открытое окно (session-glyph.js,
     // класс `.win.open`) — совпадение чисто визуальное, окно строки не
     // спрашивает.
@@ -479,6 +484,10 @@
     showWindowHost: 'The name of the machine that owns the open window',
     showComment: 'Your own note about the session, three or four words. Shared '
       + 'across machines and searchable; Ctrl+M edits it',
+    // «cache» само по себе не говорит ни что считается, ни почему у части
+    // строк пусто — а пусто у большинства.
+    showCache: 'Minutes left on the one-hour prompt cache since the last reply. '
+      + 'Yellow under 30, red under 15. Hidden while the agent works and once the cache is cold',
     showPrompts: 'How many times a human wrote in this session. Unlike the context '
       + 'percentage it only grows, and it compares across sessions',
     showTodo: 'Checkbox progress from docs/TODO.md in the row\u2019s directory: the '

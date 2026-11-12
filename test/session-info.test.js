@@ -152,3 +152,14 @@ test('в карточке терминальной сессии контекст
   const rows = buildSessionInfoRows({ entrypoint: 'cli', agentContextPct: 0 }, 1785870000);
   assert.deepStrictEqual(rows.find(r => r.label === 'context'), { label: 'context', value: '0%' });
 });
+
+test('карточка показывает остаток кеша тем же текстом, что и строка', () => {
+  // 3460 − 3000 = 460 с прошло, из 3595 осталось 3135 с — 53 минуты с хвостом.
+  const rows = buildSessionInfoRows({ ...session, agentCacheAt: 3000 }, 3460);
+  assert.strictEqual(valueOf(rows, 'cache'), '53m');
+});
+
+test('карточка без метки кеша строки cache не рисует', () => {
+  const labels = buildSessionInfoRows(session, 3460).map(r => r.label);
+  assert.ok(!labels.includes('cache'));
+});

@@ -358,8 +358,55 @@
     return '';
   }
 
+  // Кеш промпта живёт час от последнего ответа ассистента (TTL у Claude Code
+  // на подписке). Запас в пять секунд — тот же, что у виджета cache-timer в
+  // ccstatusline: вызов, ушедший в последние секунды, кеш уже не застанет.
+  // Пороги — решение Стаса: полчаса это «пора вспомнить», четверть часа —
+  // «сейчас или будет дорого».
+  const CACHE_TTL_SEC = 3600;
+  const CACHE_SAFETY_SEC = 5;
+  const CACHE_WARN_SEC = 1800;
+  const CACHE_HOT_SEC = 900;
+
   /**
-   * Деньги и контекст: «$2 13%».
+   * Сколько секунд осталось кешу промпта, или `null` — таймера нет.
+   *
+   * Нет его в трёх случаях, и все три про одно: таймер нужен, чтобы одним
+   * взглядом найти сессию, где следующий вызов скоро пойдёт без кеша.
+   * Работающей сессии это не грозит — кеш освежает каждый её вызов. Истёкший
+   * кеш уже не «скоро», а таких сессий в списке большинство, и `0m` у каждой
+   * забил бы колонку шумом. Метки нет — сказать нечего.
+   *
+   * Ждущая человека сессия (вопрос, разрешение, готовый ответ) таймер
+   * держит: ровно в это время кеш и остывает незаметно.
+   *
+   * Сверху остаток ограничен часом. Метку ставит машина агента, `nowSec` —
+   * машина пикера, и часы у них расходятся; `61m` читалось бы поломкой.
+   */
+  function cacheRemainingSec(session, nowSec) {
+    const at = Number(session?.agentCacheAt) || 0;
+    if (!at || session?.agentState === 'active') return null;
+    const full = CACHE_TTL_SEC - CACHE_SAFETY_SEC;
+    const left = Math.min(full, full - (nowSec - at));
+    return left > 0 ? left : null;
+  }
+
+  // Границы строгие: ровно тридцать минут — ещё спокойно. Обратно
+  // contextLevel, где растёт заполненность, а здесь убывает запас.
+  function cacheLevel(remainingSec) {
+    if (remainingSec < CACHE_HOT_SEC) return 'hot';
+    if (remainingSec < CACHE_WARN_SEC) return 'warn';
+    return '';
+  }
+
+  // Целые минуты вверх: последняя минута — `1m`, а не `0m`, который читался бы
+  // как «уже истёк», хотя вызов ещё успевает.
+  function cacheText(remainingSec) {
+    return `${Math.ceil(remainingSec / 60)}m`;
+  }
+
+  /**
+   * Деньги, контекст и кеш: «$2 · 13% · 42m».
    *
    * Сначала стоимость, потом контекст — тот же порядок, что и в карточке
    * сессии (session-info.js): две колонки об одном и том же, и разный порядок
@@ -372,10 +419,11 @@
    * а как поломка отрисовки: у соседних строк цифры есть, у этой пусто.
    * Различать два случая всё равно нечем, и «0%» честнее пустоты.
    */
-  function usageHtml(session, { showCost = true, showContext = true } = {}) {
-    // Обе величины выключены — колонки нет вовсе; см. stateHtml о том, почему
+  function usageHtml(session, { showCost = true, showContext = true, showCache = true } = {},
+    nowSec = Date.now() / 1000) {
+    // Все величины выключены — колонки нет вовсе; см. stateHtml о том, почему
     // выключенный чекбокс не оставляет за собой пустой элемент.
-    if (!showCost && !showContext) return '';
+    if (!showCost && !showContext && !showCache) return '';
     const pct = Number.isFinite(session?.agentContextPct) ? session.agentContextPct : 0;
     const cost = Number.isFinite(session?.agentCostUsd) ? session.agentCostUsd : 0;
     const parts = [];
@@ -386,6 +434,13 @@
     const knowsContext = showContext && listApi.knowsContext(session);
     if (showCost) parts.push(`<span class="cost">$${cost}</span>`);
     if (knowsContext) parts.push(`<span class="ctx${level ? ` ${level}` : ''}">${pct}%</span>`);
+    // Таймер кеша — третьим: по контексту решают «не пора ли заново», по
+    // кешу — «не пора ли вернуться», и читаются они рядом.
+    const left = showCache ? cacheRemainingSec(session, nowSec) : null;
+    if (left !== null) {
+      const cacheLvl = cacheLevel(left);
+      parts.push(`<span class="cache${cacheLvl ? ` ${cacheLvl}` : ''}">${cacheText(left)}</span>`);
+    }
     // Разделитель тот же, что у stateText: это две независимые величины, а не
     // одно число из двух частей, и пробела для такого мало.
     //
@@ -891,7 +946,8 @@
 
   return {
     statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
-    sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml, windowHtml, windowHostHtml,
+    sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
+    cacheRemainingSec, cacheLevel, cacheText, windowHtml, windowHostHtml,
     todoHtml, todoText, projectCountHtml, projectCountText, projectColumnWidths, ageText,
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
