@@ -510,25 +510,37 @@ pub fn head_parents(state: &Value, config_host: &str, sort: &str) -> std::collec
         .collect()
 }
 
-/// Группы для раскладки `mode: "group"`: `[head, его живые прямые дети...]`
-/// порядком пикера, группы — порядком head.
+/// Группы для раскладки `mode: "group"`: `[head, его живые прямые дети...]`,
+/// от самого глубокого head к корню, при равной глубине — порядком пикера.
 ///
-/// Head — строка своей машины без своего родителя: по решению владельца
-/// ребёнок head не становится, и вложенность здесь только сторож — сессия с
-/// родителем группы не образует, даже если на неё кто-то ссылается. Так
-/// ни один id не попадает в две группы. Живость самого head не спрашивается:
-/// окно его стоит здесь, и раскладывать его есть что.
+/// Группа есть у каждой строки своей машины, у которой есть живые прямые
+/// дети: ребёнок может сам быть head (решение владельца 2026-11-12). Сессия
+/// посередине входит в две группы — ребёнком в группу родителя и head-ом в
+/// свою, — и порядок здесь значим. Менеджер берёт первую группу, где есть
+/// `selected`, а без него — первую, где есть сессия активного окна
+/// (`pickGroup` в windows11-manager). Глубокий head первым даёт ему обе
+/// развилки одним правилом: сессия посередине раскладывает свою группу, лист
+/// — группу родителя. Слать одну нужную группу нельзя: на скрытом пикере
+/// `selected` пуст, а активного окна пикер не знает.
 ///
-/// Тусклые строки не отсеваются: head, молчавший дольше порога, пропал бы
-/// из своей же группы. Свёрнутые окна менеджер пропускает сам.
+/// Живость самого head не спрашивается: окно его стоит здесь, и раскладывать
+/// его есть что. Тусклые строки не отсеваются: head, молчавший дольше порога,
+/// пропал бы из своей же группы. Свёрнутые окна менеджер пропускает сам.
 pub fn group_ids(state: &Value, config_host: &str, sort: &str) -> Vec<Vec<String>> {
     let rows = sorted_rows(state, config_host, sort, &Stale::OFF);
     let parent = parent_index(&rows);
-    let mut out = Vec::new();
-    for (h, head) in rows.iter().enumerate() {
-        if parent[h].is_some() {
-            continue;
+    // Глубина — число предков. После `parent_index` циклов нет, и подъём
+    // конечен.
+    let depth = |mut i: usize| {
+        let mut d = 0;
+        while let Some(p) = parent[i] {
+            d += 1;
+            i = p;
         }
+        d
+    };
+    let mut out: Vec<(usize, Vec<String>)> = Vec::new();
+    for (h, head) in rows.iter().enumerate() {
         let children: Vec<String> = rows
             .iter()
             .enumerate()
@@ -540,9 +552,11 @@ pub fn group_ids(state: &Value, config_host: &str, sort: &str) -> Vec<Vec<String
         }
         let mut group = vec![head.id.clone()];
         group.extend(children);
-        out.push(group);
+        out.push((depth(h), group));
     }
-    out
+    // Стабильная: при равной глубине остаётся порядок строк.
+    out.sort_by(|a, b| b.0.cmp(&a.0));
+    out.into_iter().map(|(_, g)| g).collect()
 }
 
 /// Запись **своей** машины в списке трекеров — общий поиск для `tracker_base`
@@ -695,7 +709,40 @@ mod tests {
             let state = json!({ "sessions": case["sessions"] });
             assert_eq!(json!(tile_ids(&state, host, sort, &OFF)), case["order"], "{name}: порядок");
             assert_eq!(json!(head_parents(&state, host, sort)), case["parents"], "{name}: родители");
-            assert_eq!(json!(group_ids(&state, host, sort)), case["groups"], "{name}: группы");
+            let groups = group_ids(&state, host, sort);
+            assert_eq!(json!(groups), case["groups"], "{name}: группы");
+            for p in case["picks"].as_array().into_iter().flatten() {
+                let id = p["selected"].as_str().unwrap();
+                assert_eq!(json!(pick(&groups, id)), p["group"], "{name}: выбор {id}");
+            }
+        }
+    }
+
+    /// Какую группу возьмёт менеджер: первую, где есть id. Копия `pickGroup`
+    /// из windows11-manager (`src/claude-wt/head-zones-helpers.js:294`) — тем
+    /// же правилом он ищет и `selected`, и сессию активного окна. От него и
+    /// зависит, что порядок групп значим.
+    fn pick<'a>(groups: &'a [Vec<String>], id: &str) -> Option<&'a Vec<String>> {
+        groups.iter().find(|g| g.iter().any(|x| x == id))
+    }
+
+    /// Сессия встречается не больше чем в двух группах: своей и родителя.
+    /// Третья значила бы, что дети посчитаны дважды.
+    #[test]
+    fn a_session_sits_in_at_most_two_groups() {
+        let f: Value = serde_json::from_str(include_str!("../../test/fixtures/head-groups.json")).unwrap();
+        for case in f["cases"].as_array().unwrap() {
+            let state = json!({ "sessions": case["sessions"] });
+            let groups = group_ids(&state, "pc", "recent");
+            let mut seen: HashMap<&str, usize> = HashMap::new();
+            for g in &groups {
+                for id in g {
+                    *seen.entry(id.as_str()).or_default() += 1;
+                }
+            }
+            for (id, n) in seen {
+                assert!(n <= 2, "{}: {id} в {n} группах", case["name"]);
+            }
         }
     }
 

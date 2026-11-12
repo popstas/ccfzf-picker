@@ -9,6 +9,8 @@
   "order    — порядок строк своей машины (tile_ids, сортировка recent);",
   "parents  — ребёнок → родитель, как его видит дерево страницы;",
   "groups   — что уходит менеджеру: [head, живые прямые дети...].",
+  "picks    — какую группу выберет менеджер: первую в groups, где есть",
+  "           selected (pickGroup в windows11-manager).",
   "",
   "  basic            — c3 не живой (родитель есть, в группу не идёт),",
   "                     c4 на соседней машине (строки здесь нет);",
@@ -16,8 +18,13 @@
   "  by-name          — у ребёнка нет headId, родитель по имени;",
   "  by-window-title  — имя родителя — заголовок его окна, а не title;",
   "  head-elsewhere   — окно head на другой машине: группы нет;",
-  "  nested           — сторож: ребёнок не бывает head (решение владельца),",
-  "                     у x группы нет, хотя x1 на него ссылается;",
+  "  nested           — ребёнок может быть head (решение владельца 2026-11-12):",
+  "                     у x своя группа, и стоит она раньше группы родителя;",
+  "  chain            — три уровня: каждая сессия посередине — своя группа;",
+  "  mid-without-live-children — у x нет живых детей: своей группы нет,",
+  "                     x остаётся ребёнком в группе h;",
+  "  two-mids         — две сессии посередине на одной глубине: их группы",
+  "                     идут порядком пикера (сортировка обязана быть стабильной);",
   "  cycle            — a и b ссылаются друг на друга; корнем остаётся",
   "                     первый в порядке, как в nestByHead."
  ],
@@ -123,6 +130,16 @@
      "c2",
      "c1"
     ]
+   ],
+   "picks": [
+    {
+     "selected": "c1",
+     "group": [
+      "h",
+      "c2",
+      "c1"
+     ]
+    }
    ]
   },
   {
@@ -382,10 +399,46 @@
    },
    "groups": [
     [
+     "x",
+     "x1"
+    ],
+    [
      "h",
      "x",
      "y"
     ]
+   ],
+   "picks": [
+    {
+     "selected": "x",
+     "group": [
+      "x",
+      "x1"
+     ]
+    },
+    {
+     "selected": "x1",
+     "group": [
+      "x",
+      "x1"
+     ]
+    },
+    {
+     "selected": "y",
+     "group": [
+      "h",
+      "x",
+      "y"
+     ]
+    },
+    {
+     "selected": "h",
+     "group": [
+      "h",
+      "x",
+      "y"
+     ]
+    }
    ]
   },
   {
@@ -436,6 +489,346 @@
      "a",
      "b"
     ]
+   ],
+   "picks": [
+    {
+     "selected": "b",
+     "group": [
+      "a",
+      "b"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "chain",
+   "sessions": [
+    {
+     "id": "h",
+     "title": "lead",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 600000
+     }
+    },
+    {
+     "id": "x",
+     "title": "x-mid",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 590000
+     },
+     "head": "lead",
+     "headId": "h"
+    },
+    {
+     "id": "x1",
+     "title": "x-low",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 580000
+     },
+     "head": "x-mid",
+     "headId": "x"
+    },
+    {
+     "id": "x2",
+     "title": "x-leaf",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 570000
+     },
+     "head": "x-low",
+     "headId": "x1"
+    }
+   ],
+   "order": [
+    "h",
+    "x",
+    "x1",
+    "x2"
+   ],
+   "parents": {
+    "x": "h",
+    "x1": "x",
+    "x2": "x1"
+   },
+   "groups": [
+    [
+     "x1",
+     "x2"
+    ],
+    [
+     "x",
+     "x1"
+    ],
+    [
+     "h",
+     "x"
+    ]
+   ],
+   "picks": [
+    {
+     "selected": "h",
+     "group": [
+      "h",
+      "x"
+     ]
+    },
+    {
+     "selected": "x",
+     "group": [
+      "x",
+      "x1"
+     ]
+    },
+    {
+     "selected": "x1",
+     "group": [
+      "x1",
+      "x2"
+     ]
+    },
+    {
+     "selected": "x2",
+     "group": [
+      "x1",
+      "x2"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mid-without-live-children",
+   "sessions": [
+    {
+     "id": "h",
+     "title": "lead",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 600000
+     }
+    },
+    {
+     "id": "x",
+     "title": "x-mid",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 590000
+     },
+     "head": "lead",
+     "headId": "h"
+    },
+    {
+     "id": "x1",
+     "title": "x-leaf",
+     "live": false,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 580000
+     },
+     "head": "x-mid",
+     "headId": "x"
+    }
+   ],
+   "order": [
+    "h",
+    "x",
+    "x1"
+   ],
+   "parents": {
+    "x": "h",
+    "x1": "x"
+   },
+   "groups": [
+    [
+     "h",
+     "x"
+    ]
+   ],
+   "picks": [
+    {
+     "selected": "x",
+     "group": [
+      "h",
+      "x"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "two-mids",
+   "sessions": [
+    {
+     "id": "h",
+     "title": "lead",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 600000
+     }
+    },
+    {
+     "id": "x",
+     "title": "x-mid",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 590000
+     },
+     "head": "lead",
+     "headId": "h"
+    },
+    {
+     "id": "y",
+     "title": "y-mid",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 580000
+     },
+     "head": "lead",
+     "headId": "h"
+    },
+    {
+     "id": "x1",
+     "title": "x-leaf",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 570000
+     },
+     "head": "x-mid",
+     "headId": "x"
+    },
+    {
+     "id": "y1",
+     "title": "y-leaf",
+     "live": true,
+     "windows": [
+      {
+       "host": "pc",
+       "pid": 1
+      }
+     ],
+     "agent": {
+      "updated": 560000
+     },
+     "head": "y-mid",
+     "headId": "y"
+    }
+   ],
+   "order": [
+    "h",
+    "x",
+    "y",
+    "x1",
+    "y1"
+   ],
+   "parents": {
+    "x": "h",
+    "y": "h",
+    "x1": "x",
+    "y1": "y"
+   },
+   "groups": [
+    [
+     "x",
+     "x1"
+    ],
+    [
+     "y",
+     "y1"
+    ],
+    [
+     "h",
+     "x",
+     "y"
+    ]
+   ],
+   "picks": [
+    {
+     "selected": "x1",
+     "group": [
+      "x",
+      "x1"
+     ]
+    },
+    {
+     "selected": "y1",
+     "group": [
+      "y",
+      "y1"
+     ]
+    },
+    {
+     "selected": "y",
+     "group": [
+      "y",
+      "y1"
+     ]
+    }
    ]
   }
  ]
