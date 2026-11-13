@@ -3,7 +3,7 @@ const assert = require('node:assert');
 
 const {
   buildSnapshotRows, snapshotCount, openIdsFromState, formatSnapshotTime,
-  snapshotDay, dayLabel, snapshotsHere, snapshotBase,
+  snapshotDay, dayLabel, snapshotsHere, snapshotBase, snapshotsUnavailable,
 } = require('../frontend-src/picker-snapshots.js');
 
 const SNAP = {
@@ -309,4 +309,44 @@ test('снимки ищутся и в русской раскладке', () => 
   const found = rowsUnderDays([SNAP], undefined, 'зшслук')
     .filter(r => r.kind === 'snapshot-session');
   assert.deepEqual(found.map(r => r.id), ['aaa']);
+});
+
+// Ответ агрегатора в момент поломки 2026-11-13: файл трекера протух
+// (не переподключился сетевой диск), и машины в windowHosts не осталось вовсе.
+const OUTAGE = { sessions: [], windowHosts: [], snapshots: [] };
+const ALIVE = { sessions: [], windowHosts: [{ host: 'alpha-host', pid: 22444, canFocus: true }], snapshots: [] };
+
+test('snapshotsUnavailable: до первого ответа — загрузка, а не «нет данных»', () => {
+  // Винить трекер, который ещё не успели спросить, нечестно.
+  assert.deepStrictEqual(snapshotsUnavailable({}, 'alpha-host', true), { count: '…', note: 'Loading…' });
+  assert.deepStrictEqual(snapshotsUnavailable(null, 'alpha-host', true), { count: '…', note: 'Loading…' });
+});
+
+test('snapshotsUnavailable: без windowHost в конфиге своей машины нет', () => {
+  const r = snapshotsUnavailable(OUTAGE, '', true);
+  assert.strictEqual(r.count, 'no data');
+  assert.match(r.note, /windowHost/);
+});
+
+test('snapshotsUnavailable: машины нет в windowHosts — трекер молчит, и он назван', () => {
+  const r = snapshotsUnavailable(OUTAGE, 'alpha-host', true);
+  assert.strictEqual(r.count, 'no data');
+  assert.match(r.note, /window tracker on alpha-host/);
+});
+
+test('snapshotsUnavailable: трекер есть, но окна не поднимает', () => {
+  const state = { ...ALIVE, windowHosts: [{ host: 'ALPHA-HOST', pid: 22444, canFocus: false }] };
+  const r = snapshotsUnavailable(state, 'alpha-host', true);
+  assert.strictEqual(r.count, 'unavailable');
+  assert.match(r.note, /can't raise windows/);
+});
+
+test('snapshotsUnavailable: трекер жив, но дороги до машины нет', () => {
+  const r = snapshotsUnavailable(ALIVE, 'alpha-host', false);
+  assert.strictEqual(r.count, 'no route');
+  assert.match(r.note, /http or MQTT/);
+});
+
+test('snapshotsUnavailable: трекер жив и достижим — причины нет', () => {
+  assert.strictEqual(snapshotsUnavailable(ALIVE, ' Alpha-Host ', true), null);
 });

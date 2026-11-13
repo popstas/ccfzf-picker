@@ -1766,7 +1766,12 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (section.kind === 'projects') {
       for (const row of section.rows) items.push(projectItem(row, nowSec));
     } else if (section.kind === 'snapshots') {
-      for (const row of section.rows) items.push(snapshotItem(row, nowSec));
+      // Подпись пустой секции («нет данных», «снимков ещё нет») — мимо
+      // snapshotItem: тот кладёт в `rows` всё, что ему дали, и подпись стала
+      // бы выбираемой строкой, на которой Enter молчит.
+      for (const row of section.rows) {
+        items.push(row.kind === 'block-subhead' ? subheadItem(row) : snapshotItem(row, nowSec));
+      }
     } else {
       for (const row of section.rows) {
         items.push(row.kind === 'block-subhead' ? subheadItem(row) : sessionItem(row, nowSec));
@@ -1786,6 +1791,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     const sections = window.PickerSections.buildSections({
       groups, projects: projectRows, snapshots: snapshotItemsFor(query),
       mode, query, trackerHere: trackerIsHere(),
+      snapshotsUnavailable: snapshotsUnavailableHere(),
       layout: layoutName(), collapsed: collapsed[layoutName()],
       // Половинка своей раскладки, как и у collapsed: формы у них разные, и
       // выбирать нужную обязан тот, кто знает раскладку.
@@ -2084,6 +2090,18 @@ const infoBackdrop = document.getElementById('info-backdrop');
   function trackerIsHere() {
     return machineReachable(CONFIG.windowHost)
       && !!window.SessionWindows.trackerHere(lastState, CONFIG.windowHost);
+  }
+
+  /**
+   * Почему снимков этой машины нет — для подписи пустой секции, или `null`.
+   *
+   * Соседка `trackerIsHere` и отвечает на тот же вопрос подробнее: та — «да
+   * или нет», эта — «что именно сломалось». Достижимость спрашивается здесь,
+   * а не в picker-snapshots.js: про брокер знает только страница.
+   */
+  function snapshotsUnavailableHere() {
+    return window.PickerSnapshots.snapshotsUnavailable(
+      lastState, CONFIG.windowHost, machineReachable(CONFIG.windowHost));
   }
 
   /**

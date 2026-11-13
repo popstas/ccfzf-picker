@@ -32,7 +32,9 @@ and a session opens in the terminal of your choice.
 - **Tile and cascade layouts** — a global hotkey asks the tracker to arrange the
   windows in the order you see in the list.
 - **Layout snapshots** — `^S` restores a whole remembered arrangement of
-  sessions, or one window out of it.
+  sessions, or one window out of it. When there is nothing to show, the
+  Snapshots block stays and says why — `no data` while this machine's tracker
+  is silent, `0` when it simply hasn't taken any yet.
 - **Wide mode** — `^F` turns the list into a dashboard: a session card next to
   blocks of groups, projects and snapshots, each with its own scroll.
 - **Configurable without editing files** — a settings window for hotkeys,

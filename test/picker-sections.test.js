@@ -91,7 +91,9 @@ test('склейка идёт по пометке группы, а не по е�
     { key: 'live', label: 'Active on ghost-host', sessions: [session('g')] },
     { key: 'remote:alpha-host', label: 'Active on alpha-host', sessions: [session('x')], remote: true, host: 'alpha-host' },
   ];
-  const blocks = buildSections(base({ groups, projects: [], snapshots: [] }));
+  // Снимки спрятаны, а не обнулены: пустая секция снимков теперь стоит с
+  // подписью «нет данных», а этот тест не про неё.
+  const blocks = buildSections(base({ groups, projects: [], hidden: { snapshots: true } }));
   assert.deepStrictEqual(blocks.map(b => b.label),
     ['Active on ghost-host', 'Active remote sessions']);
 });
@@ -100,7 +102,7 @@ test('единственная чужая машина тоже становит
   // Колонка одна на все машины, и её заголовок не может называть одну из них:
   // с приездом второй он молча стал бы враньём.
   const groups = REMOTE_GROUPS.filter(g => g.host !== 'zeta-host');
-  const blocks = buildSections(base({ groups, projects: [], snapshots: [] }));
+  const blocks = buildSections(base({ groups, projects: [], hidden: { snapshots: true } }));
   assert.deepStrictEqual(blocks.map(b => b.label),
     ['Active local sessions', 'Active remote sessions', 'History']);
 });
@@ -113,7 +115,7 @@ test('колонку истории выбирает пометка группы
     { key: 'live', label: 'Active local sessions', sessions: [session('a')], remote: false },
     { key: 'past', label: 'Что угодно', past: true, sessions: [session('old', { live: false })] },
   ];
-  const blocks = buildSections(base({ groups: renamed, projects: [], snapshots: [] }));
+  const blocks = buildSections(base({ groups: renamed, projects: [], hidden: { snapshots: true } }));
   assert.deepStrictEqual(blocks.map(b => [b.label, b.column]), [
     ['Active local sessions', 1],
     ['Что угодно', 3],
@@ -129,16 +131,78 @@ test('ключ склеенной секции не зависит от набо
   assert.strictEqual(one.key, few.key);
 });
 
-test('пустая секция не заводится', () => {
-  // Правило то же, по которому не заводится пустая половина живых сессий:
-  // секция без строк — это заголовок, обещающий содержимое, которого нет.
-  const blocks = buildSections(base({ projects: [], snapshots: [] }));
-  assert.deepStrictEqual(blocks.map(b => b.kind), ['sessions', 'sessions']);
+test('пустая секция проектов не заводится', () => {
+  // Секция без строк — это заголовок, обещающий содержимое, которого нет.
+  // Снимков это не касается: у них своё правило, тесты ниже.
+  const blocks = buildSections(base({ projects: [] }));
+  assert.ok(!blocks.some(b => b.kind === 'projects'));
 });
 
-test('снимков нет там, где восстанавливать их нечем', () => {
-  // То же условие, что у ^S: секция, чей Enter молчит, хуже отсутствующей.
-  const blocks = buildSections(base({ trackerHere: false }));
+/** Строки секции, которые попали бы в `rows` страницы, то есть выбираемые. */
+function selectable(section) {
+  return section.rows.filter(r => r.kind !== 'block-subhead');
+}
+
+test('снимки без трекера: секция стоит, но говорит «нет данных» и выбрать в ней нечего', () => {
+  // Слепок настоящей поломки 2026-11-13: на одной из машин не переподключился сетевой диск,
+  // трекер писать файл перестал, агрегатор отбросил протухший файл, и в
+  // ответе не осталось ни машины, ни снимков. Секция пропадала вовсе, и
+  // отличить поломку от «снимков здесь не бывает» было нечем.
+  const blocks = buildSections(base({
+    trackerHere: false, snapshots: [],
+    snapshotsUnavailable: { count: 'no data', note: 'No data from the window tracker on alpha-host.' },
+  }));
+  const snap = blocks.find(b => b.kind === 'snapshots');
+  assert.ok(snap, 'секция снимков обязана стоять и без трекера');
+  assert.strictEqual(sectionHeaderText(snap), 'Snapshots - no data');
+  assert.deepStrictEqual(selectable(snap), []);
+  assert.deepStrictEqual(snap.rows.map(r => r.label), ['No data from the window tracker on alpha-host.']);
+});
+
+test('снимки без трекера не показываются строками, даже если приехали', () => {
+  // Трекер есть, но поднимать окна не умеет или до машины нет дороги:
+  // восстановление невыполнимо, и строка, чей Enter молчит, хуже подписи.
+  const blocks = buildSections(base({
+    trackerHere: false,
+    snapshotsUnavailable: { count: 'no route', note: 'Can\'t restore here.' },
+  }));
+  const snap = blocks.find(b => b.kind === 'snapshots');
+  assert.deepStrictEqual(selectable(snap), []);
+  assert.strictEqual(sectionHeaderText(snap), 'Snapshots - no route');
+});
+
+test('снимки без трекера и без объяснения причины — всё равно «нет данных»', () => {
+  // Зовущий, который про причину не знает, не должен получать пустую секцию
+  // с нулём: ноль значит «снимков нет», а тут неизвестно, есть ли они.
+  const snap = buildSections(base({ trackerHere: false })).find(b => b.kind === 'snapshots');
+  assert.strictEqual(sectionHeaderText(snap), 'Snapshots - no data');
+  assert.strictEqual(snap.rows.length, 1);
+});
+
+test('живой трекер без единого снимка: ноль и подпись, а не «нет данных»', () => {
+  // Трекер отвечает, снимков он просто ещё не снимал — это факт, а не поломка,
+  // и называться он обязан иначе.
+  const snap = buildSections(base({ snapshots: [] })).find(b => b.kind === 'snapshots');
+  assert.strictEqual(sectionHeaderText(snap), 'Snapshots - 0');
+  assert.deepStrictEqual(selectable(snap), []);
+  assert.deepStrictEqual(snap.rows.map(r => r.label), ['No snapshots yet.']);
+});
+
+test('пустая секция снимков под запросом и под префиксом не заводится', () => {
+  // Правило то же, что у пустой панели живых сессий: под запросом секция без
+  // совпадений исчезает у всех одинаково, а под `/s` про пустоту говорит
+  // подпись страницы, и вторая такая же в секции была бы повтором.
+  const off = { trackerHere: false, snapshots: [] };
+  assert.ok(!buildSections(base({ ...off, query: 'zzz' })).some(b => b.kind === 'snapshots'));
+  assert.ok(!buildSections(base({ snapshots: [], query: 'zzz' })).some(b => b.kind === 'snapshots'));
+  assert.deepStrictEqual(buildSections(base({ snapshots: [], mode: 'snapshots' })), []);
+  assert.deepStrictEqual(buildSections(base({ ...off, mode: 'snapshots' })), []);
+});
+
+test('спрятанная секция снимков остаётся спрятанной и без трекера', () => {
+  // Прятать — просьба человека, и «нет данных» её не перебивает: кому снимки
+  // не нужны, тому и подпись о них не нужна.
+  const blocks = buildSections(base({ trackerHere: false, hidden: { snapshots: true } }));
   assert.ok(!blocks.some(b => b.kind === 'snapshots'));
 });
 
