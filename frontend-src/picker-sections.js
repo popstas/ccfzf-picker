@@ -248,20 +248,50 @@
     }
     // Снимки уже отобраны запросом на стороне buildSnapshotRows: у них своя
     // пара «заголовок раскладки и её сессии», и отбор строкой порознь порвал
-    // бы её. trackerHere — то же условие, что у ^S.
+    // бы её. Строками они идут только при `trackerHere` — то же условие, что
+    // у ^S: строка, чей Enter молчит, хуже отсутствующей.
     //
     // Счёт здесь — не длина списка строк, а число снимков: строки идут тремя
     // видами (день, снимок, сессия), и день можно свернуть — `rows.length`
     // менялся бы на каждое сворачивание, будто снимки исчезают.
-    if ((mode === 'sessions' || mode === 'snapshots') && o.trackerHere) {
-      const rows = o.snapshots || [];
-      if (rows.length) {
-        sections.push({
-          key: 'snapshots', label: 'Snapshots', kind: 'snapshots',
-          rows, count: snapshotsApi.snapshotCount(rows), past: false,
-          ...(wide ? { column: COLUMN_PAST } : {}),
-        });
-      }
+    const snapshotRows = o.trackerHere ? (o.snapshots || []) : [];
+    if ((mode === 'sessions' || mode === 'snapshots') && snapshotRows.length) {
+      sections.push({
+        key: 'snapshots', label: 'Snapshots', kind: 'snapshots',
+        rows: snapshotRows, count: snapshotsApi.snapshotCount(snapshotRows), past: false,
+        ...(wide ? { column: COLUMN_PAST } : {}),
+      });
+    } else if (mode === 'sessions' && !String(query).trim()) {
+      // Пустая секция снимков стоит всё равно — с подписью, почему пусто.
+      //
+      // Пропадала она молча, и поломку от «снимков здесь не бывает» было не
+      // отличить: 2026-11-13 на одной из машин не переподключился сетевой
+      // диск, трекер перестал доносить свой файл до агрегатора, и секция
+      // исчезла без единого слова.
+      // Причин пустоты две, и называются они по-разному: «нет данных» — трекер
+      // молчит или восстанавливать нечем, «0» — трекер отвечает, но снимков
+      // ещё не снимал. Ноль на поломке врал бы так же, как пропажа.
+      //
+      // «Нет данных» — в самом заголовке, а не только подписью внутри: в узком
+      // списке снимки по умолчанию свёрнуты (`defaultCollapsed`), и подпись под
+      // свёрнутым заголовком никто не увидел бы.
+      //
+      // Подпись — `block-subhead`, как у пустой панели живых сессий выше, и по
+      // той же причине: выбрать её нельзя, в `rows` страницы она не попадает.
+      // Под запросом и под `/s` пустая секция не заводится — то же правило,
+      // что у живых: под запросом пустое исчезает у всех, под `/s` про пустоту
+      // говорит подпись страницы.
+      const why = o.trackerHere ? null
+        : (o.snapshotsUnavailable || { count: 'no data', note: 'No data from the window tracker.' });
+      sections.push({
+        key: 'snapshots', label: 'Snapshots', kind: 'snapshots',
+        rows: [{
+          kind: 'block-subhead', key: 'snapshots:none',
+          label: why ? why.note : 'No snapshots yet.',
+        }],
+        count: why ? why.count : 0, past: false,
+        ...(wide ? { column: COLUMN_PAST } : {}),
+      });
     }
 
     // Спрятанные панели уходят до всего остального: их нет на экране вовсе,

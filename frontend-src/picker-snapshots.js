@@ -13,7 +13,10 @@
   // считался бы своим в одном месте и чужим в соседнем. Загрузка это
   // выдерживает: session-windows.js стоит в sessions.html раньше (447 против
   // 473) и в prepare-frontend.js тоже.
-  const { normHost } = typeof module === 'object' && module.exports
+  // `trackerHosts` и `focusPid` — оттуда же и по той же причине: «жив ли
+  // трекер машины» обязан решаться одним правилом с `trackerHere`, иначе
+  // подпись «нет данных» и молчащий ^S разошлись бы.
+  const { normHost, trackerHosts, focusPid } = typeof module === 'object' && module.exports
     ? require('./session-windows')
     : globalThis.SessionWindows;
 
@@ -124,6 +127,46 @@
       const host = normHost(s.host);
       return host ? host === mine : true;
     });
+  }
+
+  /**
+   * Почему снимков этой машины нет на экране — или `null`, если причины нет.
+   *
+   * Ответ — две строки: `count` встаёт в заголовок секции вместо числа,
+   * `note` — подписью внутри. Число здесь врало бы: ноль значит «снимков не
+   * снимали», а при молчащем трекере неизвестно, есть ли они вообще.
+   *
+   * Причины перебираются в том порядке, в каком их чинит человек: сперва
+   * конфиг, потом трекер, потом дорога до него. Протухший файл трекера
+   * агрегатор отбрасывает сам (WINDOWS_TTL в ccfzf), и машина тогда просто
+   * пропадает из `windowHosts` — отличить «трекер не запущен» от «файл не
+   * доезжает» отсюда нечем, и подпись честно называет обе.
+   *
+   * `reachable` спрашивает страница: достижимость зависит от конфига брокера,
+   * которого у этого модуля нет.
+   */
+  function snapshotsUnavailable(state, configHost, reachable) {
+    // Признак ответа тот же, что у подписей страницы: непустой `sessions`.
+    if (!state || !state.sessions) return { count: '…', note: 'Loading…' };
+    const mine = normHost(configHost);
+    if (!mine) {
+      return { count: 'no data', note: 'No data: windowHost is not set in the config.' };
+    }
+    const entry = trackerHosts(state).find(e => normHost(e.host) === mine);
+    const name = String(configHost).trim();
+    if (!entry) {
+      return {
+        count: 'no data',
+        note: `No data from the window tracker on ${name}: it is not running, or its file no longer reaches the ccfzf host.`,
+      };
+    }
+    if (entry.canFocus === false || !focusPid(entry)) {
+      return { count: 'unavailable', note: `The window tracker on ${name} can't raise windows.` };
+    }
+    if (!reachable) {
+      return { count: 'no route', note: `Can't restore here: no http or MQTT route to ${name}.` };
+    }
+    return null;
   }
 
   /**
@@ -274,5 +317,6 @@
   return {
     buildSnapshotRows, snapshotCount, openIdsFromState, formatSnapshotTime,
     snapshotDay, dayLabel, projectBasename, snapshotsHere, snapshotBase,
+    snapshotsUnavailable,
   };
 });

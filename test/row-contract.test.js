@@ -662,6 +662,33 @@ function renderSnapshotRows(snapshots, query, options) {
   return withoutHeader(items, ctx.rows);
 }
 
+test('подпись пустой секции снимков рисуется подписью, а не строкой', () => {
+  // Без трекера секция снимков стоит с «нет данных» внутри. Рисует её
+  // настоящая itemsOfSection: отдай она подпись в snapshotItem, та положила бы
+  // её в `rows`, и на строке без действия встал бы выбор с молчащим Enter.
+  const source = pageFunctions(
+    'snapshotItem(row, nowSec)', 'subheadItem(row)',
+    'sectionItem(section)', 'itemsOfSection(section, nowSec)');
+  const ctx = {
+    window: { PickerSections },
+    rows: [], toggles: { showPaths: true },
+    escapeHtml: Glyph.escapeHtml, nowSec: PROJECTS_NOW,
+  };
+  vm.createContext(ctx);
+  const items = vm.runInContext(`${source}
+    var section = window.PickerSections.buildSections({
+      snapshots: [], mode: 'sessions', query: '', trackerHere: false, layout: 'wide',
+      snapshotsUnavailable: { count: 'no data', note: 'No data from the window tracker on alpha-host.' },
+    }).find(function (s) { return s.kind === 'snapshots'; });
+    itemsOfSection(section, nowSec);`, ctx, { filename: 'sessions.html' });
+  const rows = Array.from(ctx.rows);
+  // Единственная строка `rows` — заголовок секции: его можно свернуть.
+  assert.deepStrictEqual(rows.map(r => r.kind), ['section']);
+  assert.match(items[0].html, /Snapshots - no data/);
+  assert.match(items[1].html, /class="group-label block-subhead">No data from the window tracker on alpha-host\./);
+  assert.doesNotMatch(items[1].html, /data-index/);
+});
+
 test('строка снимка доезжает с настоящего пути до разметки списка', () => {
   const { items, rows } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '', { open: ['aaa'] });
   // День, заголовок снимка и две сессии одним потоком, все четыре — строки
@@ -1675,6 +1702,7 @@ function renderSessionRows(state, query, toggles, stale, treeMode) {
     projectRows: [],
     snapshotItemsFor: () => [],
     trackerIsHere: () => false,
+    snapshotsUnavailableHere: () => ({ count: 'no data', note: 'No data.' }),
     collapsed: { narrow: { past: false }, wide: {} },
     order: { narrow: [], wide: [] },
     hidden: { narrow: {}, wide: {} },
