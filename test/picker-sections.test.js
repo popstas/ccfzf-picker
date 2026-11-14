@@ -782,3 +782,38 @@ test('пустая своя панель при живых без окна не 
   assert.strictEqual(live.rows[0].label, 'No local sessions with a window.');
   assert.strictEqual(live.count, 0);
 });
+
+test('живые без окна идут за своими живыми и поверх записанного порядка', () => {
+  // Секция появляется редко, и в `order` из ui.json её почти никогда нет. По
+  // общему правилу неназванная уезжает в конец узкого списка — под историю,
+  // проекты и снимки, — и сессия, ждущая ответа, пропадала бы с глаз снова.
+  const groups = [GROUPS[0], NOWINDOW_GROUP, GROUPS[1]];
+  const narrow = buildSections(base({
+    groups, layout: 'narrow',
+    order: ['projects', 'live', 'remote', 'past', 'zellij', 'snapshots'],
+  })).map(s => s.key);
+  assert.deepStrictEqual(narrow.slice(0, 3), ['projects', 'live', 'nowindow'], narrow.join(' '));
+  // Названная в файле — стоит, где назвали.
+  const named = buildSections(base({
+    groups, layout: 'narrow', order: ['nowindow', 'past', 'live'],
+  })).map(s => s.key);
+  assert.deepStrictEqual(named.slice(0, 3), ['nowindow', 'past', 'live'], named.join(' '));
+});
+
+test('в широкой живые без окна идут за своими живыми и в их колонку', () => {
+  // Своих живых перенесли в третью колонку — секция без окна едет за ними, а
+  // не остаётся одна в первой.
+  const groups = [GROUPS[0], NOWINDOW_GROUP, GROUPS[1]];
+  const sections = buildSections(base({
+    groups, layout: 'wide', order: [['projects'], [], ['live', 'past']],
+  }));
+  const byKey = Object.fromEntries(sections.map(s => [s.key, s.column]));
+  assert.strictEqual(byKey.nowindow, 3);
+  const third = sections.filter(s => s.column === 3).map(s => s.key);
+  assert.deepStrictEqual(third.slice(0, 2), ['live', 'nowindow'], third.join(' '));
+  // Названная в другой колонке остаётся там.
+  const moved = buildSections(base({
+    groups, layout: 'wide', order: [['nowindow'], [], ['live']],
+  }));
+  assert.strictEqual(moved.find(s => s.key === 'nowindow').column, 1);
+});

@@ -281,7 +281,11 @@
 
     if (!open.length) return [...bare, ...past, ...tail];
     sortGroupSessions(open, mode);
-    return [...activeGroups(open), ...bare, ...past, ...tail];
+    // Сразу под своими живыми, раньше чужих машин: окна нет — значит, и
+    // машины окна нет, и сессия почти всегда своя (`windowlessGroup`).
+    const active = activeGroups(open);
+    active.splice(active[0].key === 'live' ? 1 : 0, 0, ...bare);
+    return [...active, ...past, ...tail];
   }
 
   /**
@@ -311,6 +315,9 @@
    * списка — Enter, `^K`, глиф агента, свёрнутость и место в `ui.json` даром,
    * по тем же правилам, что у `zellij`. Строка-подпись вдобавок не может
    * быть выбрана (`block-subhead`), то есть Enter на счётчике молчал бы.
+   *
+   * Стоит сразу под своими живыми, раньше чужих машин, — и там же поверх
+   * порядка из `ui.json`, где её обычно нет (`FOLLOWS` в picker-sections.js).
    *
    * Ключ постоянный, `nowindow`: по нему помнятся свёрнутость, колонка и
    * спрятанность. Чужая машина такой строки (`windowHost` при нескольких

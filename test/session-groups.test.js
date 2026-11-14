@@ -579,6 +579,16 @@ test('секция живых без окна стоит между живыми
   assert.deepStrictEqual(out.groups.map(g => g.key), ['live', 'nowindow', 'past']);
 });
 
+test('при чужих машинах секция без окна стоит под своими, раньше чужих', () => {
+  const res = {
+    ...ORPHAN_STATE,
+    sessions: [...ORPHAN_STATE.sessions, { id: 'far', title: 'Там', cwd: '/home/user/d', live: true,
+      window: { title: 'Там', host: 'other-box', pid: 9, canFocus: false, lastSeen: 1 } }],
+  };
+  const out = buildSessionsPayload(res, 'name', { onlyWindow: true, configHost: HERE });
+  assert.deepStrictEqual(out.groups.map(g => g.key), ['live', 'nowindow', 'remote:other-box', 'past']);
+});
+
 test('без onlyWindow секции живых без окна нет, сессия стоит среди живых', () => {
   // Нынешнее поведение галки снятой: делить не на что, вопрос «есть ли окно»
   // никто не задавал.
