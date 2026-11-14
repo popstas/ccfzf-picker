@@ -20,6 +20,17 @@ function idsOf(payload) {
   return payload.groups.flatMap(g => g.sessions).map(s => s.id).sort();
 }
 
+// Строки с окном: всё, кроме секции живых без окна (`windowlessGroup`).
+function windowedIdsOf(payload) {
+  return payload.groups.filter(g => g.key !== 'nowindow')
+    .flatMap(g => g.sessions).map(s => s.id).sort();
+}
+
+function windowlessIdsOf(payload) {
+  const g = payload.groups.find(g => g.key === 'nowindow');
+  return g ? g.sessions.map(s => s.id).sort() : [];
+}
+
 test('без onlyLive в списке остаются все сессии', () => {
   assert.deepStrictEqual(idsOf(buildSessionsPayload(RAW, 'name')), ['dead-1', 'live-1', 'live-2']);
 });
@@ -425,10 +436,9 @@ test('onlyWindow считает окном и окно на соседней м�
       { id: 'none-1', title: 'Без окна', cwd: '/home/user/c', live: true },
     ],
   };
-  assert.deepStrictEqual(
-    idsOf(buildSessionsPayload(raw, 'name', { onlyWindow: true })),
-    ['mac-1', 'win-1'],
-  );
+  const out = buildSessionsPayload(raw, 'name', { onlyWindow: true });
+  assert.deepStrictEqual(windowedIdsOf(out), ['mac-1', 'win-1']);
+  assert.deepStrictEqual(windowlessIdsOf(out), ['none-1']);
 });
 
 test('onlyWindow считает окном и само приложение Claude Desktop', () => {
@@ -445,10 +455,9 @@ test('onlyWindow считает окном и само приложение Clau
         entrypoint: 'cli' },
     ],
   };
-  assert.deepStrictEqual(
-    idsOf(buildSessionsPayload(raw, 'name', { onlyWindow: true })),
-    ['app-1'],
-  );
+  const out = buildSessionsPayload(raw, 'name', { onlyWindow: true });
+  assert.deepStrictEqual(windowedIdsOf(out), ['app-1']);
+  assert.deepStrictEqual(windowlessIdsOf(out), ['cli-1']);
 });
 
 test('hideDesktop убирает сессии приложения Claude Desktop, и только их', () => {
@@ -525,7 +534,98 @@ test('onlyWindow историю не трогает: окна у неё не б�
     ],
   };
   const out = buildSessionsPayload(res, 'name', { onlyWindow: true });
-  assert.deepStrictEqual(idsOf(out), ['live-win', 'past-1']);
+  assert.deepStrictEqual(windowedIdsOf(out), ['live-win', 'past-1']);
+  const past = out.groups.find(g => g.key === 'past');
+  assert.deepStrictEqual(past.sessions.map(s => s.id), ['past-1']);
+});
+
+// Случай 2026-11-14: wifi оборвался, окно терминала закрыли, а sshd держал
+// мёртвое соединение, и агент жил, ожидая ответа на вопрос. В `--state` у
+// сессии `live: true`, `window: null`, и при «only windowed» её не было в
+// пикере нигде: живые без окна выбрасывались, история берёт только неживые.
+// Окно `live-win` — на своей машине: иначе оно уехало бы в чужую группу.
+const HERE = 'desktop-box';
+const ORPHAN_STATE = {
+  ok: true,
+  seen: {},
+  sessions: [
+    { id: 'live-win', title: 'С окном', cwd: '/home/user/a', live: true,
+      window: { title: 'С окном', host: 'desktop-box', pid: 42, canFocus: true, lastSeen: 1 } },
+    { id: 'orphan', title: 'Ждёт ответа', cwd: '/home/user/b', live: true, window: null,
+      agent: { state: 'question', updated: 100 } },
+    { id: 'past-1', title: 'Закрытая', cwd: '/home/user/c', live: false },
+  ],
+};
+
+test('onlyWindow не прячет живую без окна, а уводит её в свою секцию', () => {
+  const out = buildSessionsPayload(ORPHAN_STATE, 'name', { onlyWindow: true, configHost: HERE });
+  const group = out.groups.find(g => g.key === 'nowindow');
+  assert.ok(group, out.groups.map(g => g.key).join(' '));
+  assert.strictEqual(group.label, 'Live without window');
+  assert.deepStrictEqual(group.sessions.map(s => s.id), ['orphan']);
+  // Строка та же, что была бы в «Active sessions»: имя для поиска и показа,
+  // состояние агента для глифа вопроса.
+  assert.strictEqual(group.sessions[0].label, 'Ждёт ответа');
+  assert.ok(group.sessions[0].live);
+  // Из живых она ушла, в историю не попала.
+  const live = out.groups.find(g => g.key === 'live');
+  assert.deepStrictEqual(live.sessions.map(s => s.id), ['live-win']);
+  const past = out.groups.find(g => g.key === 'past');
+  assert.deepStrictEqual(past.sessions.map(s => s.id), ['past-1']);
+});
+
+test('секция живых без окна стоит между живыми и историей', () => {
+  const out = buildSessionsPayload(ORPHAN_STATE, 'name', { onlyWindow: true, configHost: HERE });
+  assert.deepStrictEqual(out.groups.map(g => g.key), ['live', 'nowindow', 'past']);
+});
+
+test('при чужих машинах секция без окна стоит под своими, раньше чужих', () => {
+  const res = {
+    ...ORPHAN_STATE,
+    sessions: [...ORPHAN_STATE.sessions, { id: 'far', title: 'Там', cwd: '/home/user/d', live: true,
+      window: { title: 'Там', host: 'other-box', pid: 9, canFocus: false, lastSeen: 1 } }],
+  };
+  const out = buildSessionsPayload(res, 'name', { onlyWindow: true, configHost: HERE });
+  assert.deepStrictEqual(out.groups.map(g => g.key), ['live', 'nowindow', 'remote:other-box', 'past']);
+});
+
+test('без onlyWindow секции живых без окна нет, сессия стоит среди живых', () => {
+  // Нынешнее поведение галки снятой: делить не на что, вопрос «есть ли окно»
+  // никто не задавал.
+  const out = buildSessionsPayload(ORPHAN_STATE, 'name', { configHost: HERE });
+  assert.ok(!out.groups.some(g => g.key === 'nowindow'));
+  const live = out.groups.find(g => g.key === 'live');
+  assert.deepStrictEqual(live.sessions.map(s => s.id).sort(), ['live-win', 'orphan']);
+});
+
+test('секции живых без окна нет, когда таких сессий нет', () => {
+  // Пустая группа не заводится — то же правило, что у истории и зелия.
+  const res = { ...ORPHAN_STATE, sessions: ORPHAN_STATE.sessions.filter(s => s.id !== 'orphan') };
+  const out = buildSessionsPayload(res, 'name', { onlyWindow: true, configHost: HERE });
+  assert.ok(!out.groups.some(g => g.key === 'nowindow'));
+});
+
+test('живые без окна — и когда окон нет ни у кого', () => {
+  // Группы «Active sessions» тогда нет вовсе, а секция без окна остаётся.
+  const res = { ...ORPHAN_STATE, sessions: ORPHAN_STATE.sessions.filter(s => s.id !== 'live-win') };
+  const out = buildSessionsPayload(res, 'name', { onlyWindow: true, configHost: HERE });
+  assert.deepStrictEqual(out.groups.map(g => g.key), ['nowindow', 'past']);
+});
+
+test('Claude Desktop и зелий в секцию без окна не уходят', () => {
+  // Приложение считается окном (глиф `c`), у зелия окна не бывает никогда и
+  // своя группа — поведение обоих не меняется.
+  const res = {
+    ok: true,
+    sessions: [
+      { id: 'app-1', title: 'В приложении', cwd: '/home/user/a', live: true, entrypoint: 'claude-desktop' },
+    ],
+    zellij: [{ name: 'home', created: 50 }],
+  };
+  const out = buildSessionsPayload(res, 'name', { onlyWindow: true });
+  assert.ok(!out.groups.some(g => g.key === 'nowindow'), out.groups.map(g => g.key).join(' '));
+  assert.deepStrictEqual(out.groups.find(g => g.key === 'live').sessions.map(s => s.id), ['app-1']);
+  assert.ok(out.groups.some(g => g.key === 'zellij'));
 });
 
 test('зелийные сессии идут своей группой, и она последняя', () => {

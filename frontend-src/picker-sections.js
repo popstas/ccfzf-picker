@@ -20,7 +20,8 @@
   // Колонки широкого режима. Раскладка задана человеком и держится на смысле
   // строк, а не на их числе:
   //
-  //   1 — свои живые сессии (и зелий): главный список, ему отдана вся высота;
+  //   1 — свои живые сессии, под ними живые без окна (и зелий): главный
+  //       список, ему отдана вся высота;
   //   2 — чужие живые сессии, под ними проекты;
   //   3 — история, под ней снимки.
   //
@@ -82,6 +83,8 @@
   // и написанный вторым литералом ключ разошёлся бы с первым молча: панель
   // помнила бы свёрнутость и колонку под чужим именем.
   const LIVE_KEY = 'live';
+  // Живые без окна при «only windowed» — `windowlessGroup` в session-groups.js.
+  const NOWINDOW_KEY = 'nowindow';
 
   /**
    * Подзаголовок машины внутри склеенной секции чужих сессий.
@@ -221,6 +224,9 @@
       && !sections.some(s => s.key === LIVE_KEY)) {
       // Ключ один на все машины в обеих раскладках, поэтому и вопрос один.
       const hasRemote = sections.some(s => s.key === REMOTE_KEY);
+      // При «only windowed» живые без окна стоят своей секцией ниже, и
+      // «No local sessions.» над ней было бы неправдой: сессии есть, нет окон.
+      const windowless = sections.some(s => s.key === NOWINDOW_KEY);
       sections.unshift({
         key: LIVE_KEY, label: hasRemote ? 'Active local sessions' : 'Active sessions',
         kind: 'sessions',
@@ -228,7 +234,10 @@
         // ни класса `row`, поэтому ни стрелки, ни клик её не видят, и Enter на
         // ней невозможен. Тот же приём, что у подзаголовка машины внутри
         // склеенного блока, — и по той же причине она не входит в `count`.
-        rows: [{ kind: 'block-subhead', key: 'live:none', label: 'No local sessions.' }],
+        rows: [{
+          kind: 'block-subhead', key: 'live:none',
+          label: windowless ? 'No local sessions with a window.' : 'No local sessions.',
+        }],
         count: 0, past: false,
         ...(wide ? { column: COLUMN_LIVE } : {}),
       });
@@ -329,8 +338,8 @@
           : defaultCollapsed(section, wide ? 'wide' : 'narrow')),
     }));
 
-    // Порядок секций в узкой раскладке — порядок сборки: живые, чужие,
-    // история, зелий, проекты, снимки. В широкой он пересчитывается по
+    // Порядок секций в узкой раскладке — порядок сборки: живые, живые без
+    // окна, чужие, история, зелий, проекты, снимки. В широкой он пересчитывается по
     // колонкам: колонка за колонкой, сверху вниз внутри колонки. По этому же
     // порядку ходят `←/→` (moveBetweenBlocks), и разъедься он с видимым,
     // стрелка уводила бы не туда, куда смотрит глаз. Сортировка устойчива,
@@ -349,6 +358,40 @@
   // сравнивать. Большое конечное число сравнивается честно и даёт ноль,
   // отправляя пару в запасное сравнение по порядку сборки.
   const UNPLACED = Number.MAX_SAFE_INTEGER;
+
+  /**
+   * Секции, которые без назначенного места идут следом за другой, а не в конец.
+   *
+   * `nowindow` появляется только при галке «only windowed» и только пока есть
+   * живая сессия без окна, то есть в `order` из ui.json её почти никогда нет:
+   * место секции, которой не было на экране при перетаскивании, не
+   * записывается. По общему правилу она уезжала бы в конец узкого списка —
+   * под историю, проекты и снимки, — и сессия, ждущая ответа, пропадала бы с
+   * глаз ровно так же, как до появления секции. Названная в файле — стоит, где
+   * назвали.
+   */
+  const FOLLOWS = { [NOWINDOW_KEY]: LIVE_KEY };
+
+  /** Ключи порядка с неназванными ведомыми, вставленными сразу за ведущим. */
+  function withFollowers(keys) {
+    let out = keys.slice();
+    for (const [follower, leader] of Object.entries(FOLLOWS)) {
+      if (out.includes(follower)) continue;
+      const at = out.indexOf(leader);
+      if (at !== -1) out = [...out.slice(0, at + 1), follower, ...out.slice(at + 1)];
+    }
+    return out;
+  }
+
+  /**
+   * То же для колонок широкой раскладки: ведомый, не названный ни в одной,
+   * встаёт в колонку ведущего сразу за ним — туда, куда человек ведущего
+   * перенёс.
+   */
+  function withFollowerColumns(columns) {
+    const named = new Set(columns.flat());
+    return columns.map(keys => withFollowers(keys).filter(k => keys.includes(k) || !named.has(k)));
+  }
 
   /** Место ключа в списке; неназванный — в конец. */
   function placeOf(keys, key) {
@@ -371,7 +414,7 @@
    * времён, когда узкий список делил чужие машины по одной.
    */
   function applyNarrowOrder(sections, order) {
-    const keys = Array.isArray(order) ? order : [];
+    const keys = withFollowers(Array.isArray(order) ? order : []);
     if (!keys.length) return sections;
     return sections
       .map((section, at) => ({ section, at }))
@@ -393,7 +436,7 @@
    * есть ровно порядок чтения, по которому ходят `←/→`.
    */
   function applyWideOrder(sections, order) {
-    const columns = Array.isArray(order) ? order.filter(Array.isArray) : [];
+    const columns = withFollowerColumns(Array.isArray(order) ? order.filter(Array.isArray) : []);
     const placed = sections.map((section, at) => {
       // Колонка из файла главнее колонки по смыслу — но только для той
       // секции, которую в файле назвали.

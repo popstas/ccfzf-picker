@@ -49,6 +49,9 @@
   const KNOWN_PANELS = [
     { key: 'live', label: 'Local sessions' },
     { key: 'remote', label: 'Remote sessions' },
+    // Появляется только при галке «only windowed»: живые сессии без окна
+    // (`windowlessGroup` в session-groups.js).
+    { key: 'nowindow', label: 'Live without window' },
     { key: 'past', label: 'History' },
     { key: 'zellij', label: 'Zellij' },
     { key: 'projects', label: 'Projects' },
