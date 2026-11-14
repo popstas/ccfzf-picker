@@ -744,3 +744,41 @@ test('страница знает правило grow-2 и читает долю
   // доходил бы до пикера только после перезапуска.
   assert.strictEqual((html.match(/wideSplit = ui\.wideSplit;/g) || []).length, 2);
 });
+
+// ── живые без окна при «only windowed» ─────────────────────────────────────
+
+const NOWINDOW_GROUP = {
+  key: 'nowindow', label: 'Live without window', remote: false, host: '',
+  sessions: [session('orphan', { agent: { state: 'question' } })],
+};
+
+test('живые без окна — своя секция в первой колонке, под своими живыми', () => {
+  // Это живые сессии, а не справочник: место им рядом с работающими, а не в
+  // колонке истории.
+  const sections = buildSections(base({ groups: [GROUPS[0], NOWINDOW_GROUP, GROUPS[1]], layout: 'wide' }));
+  const keys = sections.map(s => s.key);
+  assert.strictEqual(keys.indexOf('nowindow'), keys.indexOf('live') + 1, keys.join(' '));
+  const section = sections.find(s => s.key === 'nowindow');
+  assert.strictEqual(section.column, 1);
+  assert.strictEqual(section.count, 1);
+  // Строки — обычные строки сессий: Enter, ^K и глиф агента у них свои.
+  assert.deepStrictEqual(section.rows.map(r => r.id), ['orphan']);
+});
+
+test('живые без окна не свёрнуты по умолчанию ни в одной раскладке', () => {
+  // Секция и заведена затем, чтобы сессию, ждущую ответа, было видно; свёрнутая
+  // по умолчанию, она показала бы ровно тот счётчик, от которого отказались.
+  for (const layout of ['narrow', 'wide']) {
+    const sections = buildSections(base({ groups: [GROUPS[0], NOWINDOW_GROUP], layout }));
+    assert.strictEqual(sections.find(s => s.key === 'nowindow').collapsed, false, layout);
+  }
+});
+
+test('пустая своя панель при живых без окна не говорит «сессий нет»', () => {
+  // Сессии есть, нет окон: «No local sessions.» над секцией с ними было бы
+  // неправдой.
+  const live = buildSections(base({ ...NO_GROUPS, groups: [NOWINDOW_GROUP], layout: 'narrow' }))
+    .find(s => s.key === 'live');
+  assert.strictEqual(live.rows[0].label, 'No local sessions with a window.');
+  assert.strictEqual(live.count, 0);
+});

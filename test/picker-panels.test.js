@@ -100,6 +100,7 @@ test('умолчание свёрнутости совпадает с тем, п
   const groups = [
     { key: 'live', label: 'Active sessions', sessions: [], remote: false },
     { key: 'remote:alpha-host', label: 'Active on alpha-host', sessions: [], remote: true, host: 'alpha-host' },
+    { key: 'nowindow', label: 'Live without window', sessions: [], remote: false },
     { key: 'past', label: 'History', past: true, sessions: [] },
     { key: 'past:2', label: 'History - desktop 2', past: true, sessions: [] },
     { key: 'zellij', label: 'Zellij', sessions: [] },

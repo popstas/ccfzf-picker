@@ -82,6 +82,8 @@
   // и написанный вторым литералом ключ разошёлся бы с первым молча: панель
   // помнила бы свёрнутость и колонку под чужим именем.
   const LIVE_KEY = 'live';
+  // Живые без окна при «only windowed» — `windowlessGroup` в session-groups.js.
+  const NOWINDOW_KEY = 'nowindow';
 
   /**
    * Подзаголовок машины внутри склеенной секции чужих сессий.
@@ -221,6 +223,9 @@
       && !sections.some(s => s.key === LIVE_KEY)) {
       // Ключ один на все машины в обеих раскладках, поэтому и вопрос один.
       const hasRemote = sections.some(s => s.key === REMOTE_KEY);
+      // При «only windowed» живые без окна стоят своей секцией ниже, и
+      // «No local sessions.» над ней было бы неправдой: сессии есть, нет окон.
+      const windowless = sections.some(s => s.key === NOWINDOW_KEY);
       sections.unshift({
         key: LIVE_KEY, label: hasRemote ? 'Active local sessions' : 'Active sessions',
         kind: 'sessions',
@@ -228,7 +233,10 @@
         // ни класса `row`, поэтому ни стрелки, ни клик её не видят, и Enter на
         // ней невозможен. Тот же приём, что у подзаголовка машины внутри
         // склеенного блока, — и по той же причине она не входит в `count`.
-        rows: [{ kind: 'block-subhead', key: 'live:none', label: 'No local sessions.' }],
+        rows: [{
+          kind: 'block-subhead', key: 'live:none',
+          label: windowless ? 'No local sessions with a window.' : 'No local sessions.',
+        }],
         count: 0, past: false,
         ...(wide ? { column: COLUMN_LIVE } : {}),
       });
