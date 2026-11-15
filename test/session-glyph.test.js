@@ -1142,3 +1142,35 @@ test('у сессии приложения без цены колонка ост
     '<div class="usage"></div>',
   );
 });
+
+// Иконка окна перед именем: картинку даёт Rust, сюда приезжает готовая карта.
+test('иконка окна рисуется только по data URL из карты', () => {
+  const { windowIconHtml } = require('../frontend-src/session-glyph');
+  const url = 'data:image/png;base64,AAAA';
+  const row = { windowIcon: 'X:\\icons\\a.ico' };
+  assert.strictEqual(windowIconHtml(row, new Map([[row.windowIcon, url]])),
+    `<img class="winicon" src="${url}" width="16" height="16" alt="">`);
+  assert.strictEqual(windowIconHtml(row, { [row.windowIcon]: url }),
+    `<img class="winicon" src="${url}" width="16" height="16" alt="">`, 'и обычный объект');
+  // Пути нет, картинки нет, ответа ещё нет — ничего, а не пустой квадрат.
+  assert.strictEqual(windowIconHtml({ windowIcon: '' }, new Map([['', url]])), '');
+  assert.strictEqual(windowIconHtml(row, new Map()), '');
+  assert.strictEqual(windowIconHtml(row, new Map([[row.windowIcon, '']])), '');
+  assert.strictEqual(windowIconHtml(row, null), '');
+  assert.strictEqual(windowIconHtml(null, new Map()), '');
+  // Не data URL — не рисуется: путь с диска или чужой адрес в `src` значил бы
+  // походы webview туда, куда страница не просила.
+  assert.strictEqual(windowIconHtml(row, new Map([[row.windowIcon, 'file:///x.ico']])), '');
+  assert.strictEqual(windowIconHtml(row, new Map([[row.windowIcon, 'https://x/a.png']])), '');
+});
+
+test('путь иконки берётся только у окна своей машины', () => {
+  const { windowIconOf } = require('../frontend-src/session-list');
+  const win = { host: 'Win-Host', icon: ' X:\\icons\\a.ico ' };
+  assert.strictEqual(windowIconOf(win, 'win-host'), 'X:\\icons\\a.ico', 'регистр имени не значит ничего');
+  assert.strictEqual(windowIconOf(win, 'other-host'), '', 'чужой путь здесь не прочитается');
+  assert.strictEqual(windowIconOf(win, ''), '', 'своя машина не названа');
+  assert.strictEqual(windowIconOf({ host: 'win-host' }, 'win-host'), '', 'трекер иконку не назвал');
+  assert.strictEqual(windowIconOf({ host: 'win-host', icon: 42 }, 'win-host'), '', 'мусор вместо пути');
+  assert.strictEqual(windowIconOf(null, 'win-host'), '');
+});

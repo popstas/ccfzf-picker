@@ -798,6 +798,26 @@
   }
 
   /**
+   * Иконка окна 16×16 перед именем строки — или ничего.
+   *
+   * Путь (`windowIcon`) строка несёт только у окна этой машины
+   * (`windowIconOf` в session-list.js), а картинку по нему читает Rust
+   * (`window_icons`) и кладёт в `icons` — путь → data URL. Нет пути, Rust его
+   * не прочитал или ответ ещё не пришёл — пустая строка, а не пустой
+   * квадрат: имя не должно сдвигаться ради иконки, которой нет.
+   *
+   * Только data URL: `src` уходит в разметку, и путь с диска или чужой адрес
+   * в нём означал бы походы webview туда, куда страница не просила.
+   */
+  function windowIconHtml(session, icons) {
+    const path = String(session?.windowIcon ?? '').trim();
+    if (!path || !icons) return '';
+    const url = typeof icons.get === 'function' ? icons.get(path) : icons[path];
+    if (typeof url !== 'string' || !url.startsWith('data:image/')) return '';
+    return `<img class="winicon" src="${escapeHtml(url)}" width="16" height="16" alt="">`;
+  }
+
+  /**
    * Подпись `zellij:<имя>` у живой сессии агента, которая сидит внутри zellij.
    *
    * Такая строка ведёт себя иначе обычной: Enter на ней делает
@@ -951,7 +971,7 @@
     todoHtml, todoText, projectCountHtml, projectCountText, projectColumnWidths, ageText,
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
-    prNumber, prBadgeHtml, wordSet, sameWords, hidesProject, projectLine, windowNameHtml, zellijNameHtml, headNameHtml,
+    prNumber, prBadgeHtml, wordSet, sameWords, hidesProject, projectLine, windowNameHtml, windowIconHtml, zellijNameHtml, headNameHtml,
     snapshotNameHtml,
     docsBadgeHtml, docKindOf, promptsHtml, commentHtml,
   };

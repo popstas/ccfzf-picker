@@ -1669,7 +1669,7 @@ test('при открытом меню правый клик ничего не �
  * опустевшая колонка видна только здесь, где строку рисуют настоящей
  * renderSessions из sessions.html, а не вызовом отрисовщика по одному.
  */
-function renderSessionRows(state, query, toggles, stale, treeMode) {
+function renderSessionRows(state, query, toggles, stale, treeMode, extra = {}) {
   // markToggleId вычитывается из той же страницы, а не подставляется заглушкой:
   // от неё зависит класс `markable`, то есть обещание про Shift+клик, и копия
   // разошлась бы с настоящим правилом молча.
@@ -1706,7 +1706,10 @@ function renderSessionRows(state, query, toggles, stale, treeMode) {
     collapsed: { narrow: { past: false }, wide: {} },
     order: { narrow: [], wide: [] },
     hidden: { narrow: {}, wide: {} },
-    groups: buildSessionsPayload(state, 'recent').groups,
+    // Своя машина — только когда тест её назвал: остальные тесты стоят на
+    // прежнем «машина не названа», и отказ от неё их не касается.
+    groups: buildSessionsPayload(state, 'recent',
+      extra.configHost ? { configHost: extra.configHost } : undefined).groups,
     rows: [],
     items: [],
     toggles: toggleState,
@@ -1719,6 +1722,8 @@ function renderSessionRows(state, query, toggles, stale, treeMode) {
     docsBadgeHtml: Glyph.docsBadgeHtml,
     commentHtml: Glyph.commentHtml,
     windowNameHtml: Glyph.windowNameHtml,
+    windowIconHtml: Glyph.windowIconHtml,
+    windowIcons: extra.windowIcons || new Map(),
     zellijNameHtml: Glyph.zellijNameHtml,
     headNameHtml: Glyph.headNameHtml,
     windowHtml: Glyph.windowHtml,
@@ -1898,6 +1903,54 @@ test('имя окна доезжает до строки, когда расхо�
   });
   const row = same.find(i => i.key.startsWith('s:'));
   assert.ok(!row.html.includes('wname'), row.html);
+});
+
+// Иконка окна — решение владельца 15.11.2026: 16×16 перед именем строки.
+// Путь трекер пишет на своей машине, поэтому читается он только у окна этой
+// машины; картинку по пути даёт Rust (`window_icons`), здесь — готовая карта.
+test('иконка окна своей машины встаёт перед именем, чужой — нет', () => {
+  const ICON = 'X:\\icons\\proj.ico';
+  const URL = 'data:image/png;base64,AAAA';
+  const icons = new Map([[ICON, URL]]);
+  const stateWith = host => ({
+    ok: true,
+    sessions: [aggregatorSession({
+      title: 'tray-build-time',
+      windows: [{ title: 'tray-build-time', host, icon: ICON, lastSeen: 2, focusedAt: 2 }],
+    })],
+    windowHosts: [{ host: 'win-host', pid: 7, canFocus: true }, { host: 'other-host', pid: 8, canFocus: true }],
+  });
+  const sessionHtml = (state, extra) => renderSessionRows(state, '', null, null, false, extra)
+    .items.find(i => i.key.startsWith('s:')).html;
+
+  // Своё окно с иконкой — картинка первой в строке имени, перед самим именем.
+  const own = sessionHtml(stateWith('win-host'), { configHost: 'win-host', windowIcons: icons });
+  assert.ok(own.includes(`<div class="name"><img class="winicon" src="${URL}" width="16" height="16" alt=""><span class="label">`), own);
+
+  // Окно соседней машины: её путь здесь не прочитается — картинки нет.
+  const foreign = sessionHtml(stateWith('other-host'), { configHost: 'win-host', windowIcons: icons });
+  assert.ok(!foreign.includes('winicon'), foreign);
+
+  // Своя машина не названа — своё окно от чужого не отличить, картинки нет.
+  assert.ok(!sessionHtml(stateWith('win-host'), { windowIcons: icons }).includes('winicon'));
+
+  // Rust картинку не дал (нет файла, не читается, ответа ещё нет) — строка
+  // как прежде, без пустого места под иконку.
+  const none = sessionHtml(stateWith('win-host'), { configHost: 'win-host', windowIcons: new Map([[ICON, '']]) });
+  assert.ok(none.includes('<div class="name"><span class="label">'), none);
+});
+
+test('окно без иконки рисуется как прежде', () => {
+  const { items } = renderSessionRows({
+    ok: true,
+    sessions: [aggregatorSession({
+      title: 'tray-build-time',
+      windows: [{ title: 'tray-build-time', host: 'win-host', lastSeen: 2, focusedAt: 2 }],
+    })],
+    windowHosts: [{ host: 'win-host', pid: 7, canFocus: true }],
+  }, '', null, null, false, { configHost: 'win-host' });
+  const html = items.find(i => i.key.startsWith('s:')).html;
+  assert.ok(html.includes('<div class="name"><span class="label">'), html);
 });
 
 // Подпись zellij проверяется на настоящей разметке по той же причине, что имя

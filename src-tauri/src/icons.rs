@@ -156,6 +156,130 @@ pub fn icons_for(specs: &[IconSpec], cache: &Cache) -> HashMap<String, String> {
     out
 }
 
+/// Кеш иконок окон — отдельный от кеша меню.
+///
+/// Ключ тот же (путь плюс mtime), а способ чтения другой: меню спрашивает у
+/// оболочки иконку **файла** (`SHGetFileInfoW`), окно — саму картинку, лежащую
+/// по пути. Общий кеш вернул бы на один и тот же путь то одно, то другое — в
+/// зависимости от того, кто спросил первым.
+#[derive(Default)]
+pub struct WindowCache(pub Cache);
+
+/// Самый большой файл картинки, который читаем. Иконки весят килобайты;
+/// мегабайты по пути значат не иконку, и тащить их в строку списка, которую
+/// страница сравнивает каждый тик, незачем.
+const WINDOW_ICON_MAX_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Сторона картинки, которую отдаём странице, — 32: строка рисует её 16×16, и
+/// вдвое больше нужно экрану с масштабом 200%.
+#[cfg_attr(not(windows), allow(dead_code))]
+const WINDOW_ICON_PX: i32 = 32;
+
+/// Что лежит в файле — по первым байтам, а не по расширению: путь пишет
+/// чужой процесс (трекер), и `.ico` у него может оказаться чем угодно.
+#[derive(Debug, PartialEq)]
+pub enum ImageKind {
+    Png,
+    Ico,
+}
+
+pub fn sniff(bytes: &[u8]) -> Option<ImageKind> {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return Some(ImageKind::Png);
+    }
+    // ICONDIR: reserved = 0, type = 1 (иконка; 2 — курсор), число картинок > 0.
+    if bytes.len() >= 6 && bytes[..4] == [0, 0, 1, 0] && (bytes[4] != 0 || bytes[5] != 0) {
+        return Some(ImageKind::Ico);
+    }
+    None
+}
+
+fn data_url(mime: &str, bytes: &[u8]) -> String {
+    use base64::Engine;
+    format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+/// Картинка по пути — в data URL, либо `None`.
+///
+/// PNG уходит как есть. ICO на Windows пересобирается в PNG нужной стороны
+/// (`LoadImageW` сам выбирает подходящий размер из набора): многоразмерный
+/// `.ico` весит сотни килобайт, а строка списка с ним сравнивается каждый тик.
+/// Вне Windows ICO уходит байтами — браузерный движок разбирает его сам, а
+/// путей к иконкам там сегодня не пишет никто.
+fn window_image(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > WINDOW_ICON_MAX_BYTES {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    match sniff(&bytes)? {
+        ImageKind::Png => Some(data_url("image/png", &bytes)),
+        ImageKind::Ico => ico_image(path, &bytes),
+    }
+}
+
+#[cfg(not(windows))]
+fn ico_image(_path: &Path, bytes: &[u8]) -> Option<String> {
+    Some(data_url("image/x-icon", bytes))
+}
+
+#[cfg(windows)]
+fn ico_image(path: &Path, _bytes: &[u8]) -> Option<String> {
+    use windows::Win32::UI::WindowsAndMessaging::{LoadImageW, IMAGE_ICON, LR_LOADFROMFILE};
+    let name = wide(&path.to_string_lossy());
+    let handle = unsafe {
+        LoadImageW(None, PCWSTR(name.as_ptr()), IMAGE_ICON, WINDOW_ICON_PX, WINDOW_ICON_PX, LR_LOADFROMFILE)
+    }
+    .ok()?;
+    let icon = HICON(handle.0);
+    let png = icon_png(icon);
+    // Как и у `extract`: хендл наш, и без DestroyIcon утекает GDI-объект.
+    unsafe {
+        let _ = DestroyIcon(icon);
+    }
+    png
+}
+
+/// Иконки окон по путям трекера: путь → data URL. Чего нет — нет в ответе.
+///
+/// Путь берётся буквально: ни `PATH`, ни переменных окружения — его пишет
+/// трекер этой машины, и пишет абсолютным. Относительный отвергается: он
+/// разрешился бы от рабочего каталога пикера, то есть ни от чего.
+pub fn window_icons(paths: &[String], cache: &WindowCache) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for raw in paths {
+        let text = raw.trim();
+        if text.is_empty() || out.contains_key(raw) {
+            continue;
+        }
+        let path = PathBuf::from(text);
+        if !path.is_absolute() {
+            continue;
+        }
+        let Ok(meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        let key = (path.clone(), meta.modified().ok());
+        let cached = cache.0 .0.lock().unwrap().get(&key).cloned();
+        let value = match cached {
+            Some(value) => value,
+            None => {
+                let value = window_image(&path);
+                let mut map = cache.0 .0.lock().unwrap();
+                // Тот же выброс прежнего mtime, что у `icons_for`: иконку
+                // перерисовали — старая запись больше не понадобится.
+                map.retain(|(seen, _), _| seen != &path);
+                map.insert(key, value.clone());
+                value
+            }
+        };
+        if let Some(uri) = value {
+            out.insert(raw.clone(), uri);
+        }
+    }
+    out
+}
+
 /// Путь с `*` в одном сегменте — в существующий путь.
 ///
 /// Заведено ради агента: установщик кладёт его в каталог, у которого версия
@@ -485,6 +609,67 @@ fn read_dib(bitmap: HBITMAP) -> Option<(u32, u32, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PNG_HEAD: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+    /// Каталог под тест — свой у каждого, чтобы параллельные тесты не делили файлы.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ccfzf-window-icons-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Вид картинки — по байтам, а не по расширению: путь пишет трекер.
+    #[test]
+    fn window_icon_kind_is_sniffed_from_bytes() {
+        assert_eq!(sniff(&PNG_HEAD), Some(ImageKind::Png));
+        assert_eq!(sniff(&[0, 0, 1, 0, 1, 0, 16, 16]), Some(ImageKind::Ico));
+        assert_eq!(sniff(&[0, 0, 2, 0, 1, 0]), None, "курсор — не иконка");
+        assert_eq!(sniff(&[0, 0, 1, 0, 0, 0]), None, "иконка без единой картинки");
+        assert_eq!(sniff(b"GIF89a"), None);
+        assert_eq!(sniff(&[]), None);
+    }
+
+    /// Есть картинка — data URL под тем же путём, каким спросили; нет файла,
+    /// мусор вместо картинки, относительный путь — в ответе ничего.
+    #[test]
+    fn window_icons_answer_only_for_readable_images() {
+        let dir = scratch("answer");
+        let png = dir.join("a.png");
+        std::fs::write(&png, PNG_HEAD).unwrap();
+        let junk = dir.join("b.ico");
+        std::fs::write(&junk, b"not an icon").unwrap();
+        let png_key = png.to_string_lossy().to_string();
+        let paths = vec![
+            png_key.clone(),
+            junk.to_string_lossy().to_string(),
+            dir.join("missing.ico").to_string_lossy().to_string(),
+            "relative.ico".to_string(),
+            String::new(),
+        ];
+        let got = window_icons(&paths, &WindowCache::default());
+        assert_eq!(got.len(), 1, "{:?}", got.keys().collect::<Vec<_>>());
+        assert!(got[&png_key].starts_with("data:image/png;base64,"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Неудача тоже кешируется, но по mtime: файл переписали — читается заново.
+    #[test]
+    fn window_icon_is_reread_when_the_file_changes() {
+        let dir = scratch("reread");
+        let path = dir.join("c.png");
+        std::fs::write(&path, b"junk").unwrap();
+        let key = path.to_string_lossy().to_string();
+        let cache = WindowCache::default();
+        assert!(window_icons(&[key.clone()], &cache).is_empty());
+        std::fs::write(&path, PNG_HEAD).unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(later).unwrap();
+        assert!(window_icons(&[key.clone()], &cache).contains_key(&key));
+        assert_eq!(cache.0 .0.lock().unwrap().len(), 1, "прежний mtime выброшен");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Буфер AppExecLink — как его отдаёт FSCTL_GET_REPARSE_POINT.
     fn appexec_buf(strings: &[&str]) -> Vec<u8> {
