@@ -195,6 +195,11 @@
   let fields = {};
   // Подпись «Auto» в выпадашке редакторов: что нашёл Rust на этой машине.
   let autoEditorLabel = '';
+  // Ответ `manager_terminal`: терминал, выбранный у windows11-manager этой
+  // машины, или `null`. Есть он — пресет ниже действует только тогда, когда
+  // менеджера нет, и выпадашка обязана это сказать: иначе выбор в ней
+  // выглядел бы проигнорированным.
+  let managerTerminalReply = null;
   let ui = UI_DEFAULTS;
   // Что человек правил именно в этом окне: ключ галки -> набор осей.
   //
@@ -315,7 +320,13 @@
       const options = window.TerminalPresets.presetsFor(platform())
         .map(p => `<option value="${esc(p.id)}"${p.id === current ? ' selected' : ''}>`
           + `${esc(p.label)}</option>`).join('');
-      return `<div class="field"><label>${esc(field.label)}</label>`
+      // На машине с windows11-manager терминал берётся у него, и пресет
+      // остаётся запасным: строка над выпадашкой называет, что действует
+      // сейчас, а подпись у самой выпадашки — когда действует она.
+      const note = window.TerminalPresets.managerTerminalNote(managerTerminalReply);
+      const label = note ? `${field.label} (used when windows11-manager is absent)` : field.label;
+      const noteHtml = note ? `<div class="field" data-manager-terminal>${esc(note)}</div>` : '';
+      return `${noteHtml}<div class="field"><label>${esc(label)}</label>`
         + `<select data-preset>${options}</select>${hint}</div>`;
     }
     if (field.type === 'size') {
@@ -1378,6 +1389,13 @@
     autoEditorLabel = ((await invoke('editor_info', { editor: '' })) || {}).label || '';
   } catch (e) {
     autoEditorLabel = '';
+  }
+  // Какой терминал выбран у windows11-manager этой машины — для строки над
+  // пресетом. Нет ответа — пресет действует, и строки нет.
+  try {
+    managerTerminalReply = await invoke('manager_terminal');
+  } catch (e) {
+    managerTerminalReply = null;
   }
   fields = configToFields(config);
   applyTheme();

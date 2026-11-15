@@ -146,6 +146,84 @@ pub fn place_body(endpoint: &str, body: String) -> Result<(), String> {
     post(endpoint, "/claude-place", body)
 }
 
+/// Путь вопроса «какой терминал выбран у менеджера».
+///
+/// Не в `ROUTES`: там пары «хвост топика → путь», а у этого вопроса топика
+/// нет — по MQTT ответа не бывает, и спрашивать там некого. Слушает его
+/// `ROUTES` в `windows11-manager/src/http-server.js`, сверяет — тот же
+/// `test/manager-routes.test.js`.
+pub const TERMINAL_ROUTE: &str = "/claude-wt/terminal";
+
+/// Потолок вопроса о терминале — секунда, а не общие пять.
+///
+/// Вопрос стоит перед каждым запуском терминала, и менеджер у него на своей же
+/// машине: ответ приходит за миллисекунды, а молчание дольше секунды значит,
+/// что менеджера нет, — тогда терминал берётся из пресета, и ждать его пять
+/// секунд перед открытием окна незачем.
+const TERMINAL_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Терминал, выбранный у менеджера, в форме пресета пикера.
+///
+/// Поля названы как у `terminal` в `config.yaml` (`file`, `args`), а не как в
+/// ответе менеджера (`command`): страница подставляет это значение на место
+/// пресета, и вторая форма того же самого потребовала бы перевода в каждом
+/// месте, где терминал встречается с командой.
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+pub struct ManagerTerminal {
+    /// Имя записи в `claudeWt.terminals` (`wt`, `wezterm`, своё) — для подписи
+    /// в настройках, а не для запуска.
+    pub name: String,
+    pub file: String,
+    pub args: Vec<String>,
+}
+
+/// Разобрать ответ менеджера. `None` — «терминала не назвал».
+///
+/// Разбор строгий: любое отступление от формы — пресет, а не догадка. Менеджер
+/// отвечает без `command`, когда терминала у него нет (старый конфиг с
+/// `claudeWt.launch.command`), и это законный ответ, а не поломка. А
+/// полузапись вроде «команда без аргументов» запустила бы WezTerm без
+/// `start --`, и тот принял бы `ssh` за свою подкоманду — молча, окно просто
+/// не открылось бы.
+pub fn parse_terminal(body: &str) -> Option<ManagerTerminal> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    let name = v.get("name")?.as_str()?.trim();
+    let file = v.get("command")?.as_str()?.trim();
+    if name.is_empty() || file.is_empty() {
+        return None;
+    }
+    let args = v
+        .get("args")?
+        .as_array()?
+        .iter()
+        .map(|a| a.as_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()?;
+    Some(ManagerTerminal { name: name.to_string(), file: file.to_string(), args })
+}
+
+/// Спросить менеджер своей машины, какой терминал у него выбран.
+///
+/// `Ok(None)` — менеджер ответил, но терминала не назвал. `Err` — не ответил
+/// вовсе; зовущий в обоих случаях берёт пресет, а разница нужна логу.
+///
+/// Кеша нет намеренно: переключатель терминала должен остаться один —
+/// `claudeWt.terminal`, — и правка там обязана менять следующее же окно, а не
+/// окно после истечения срока кеша.
+pub fn terminal(endpoint: &str) -> Result<Option<ManagerTerminal>, String> {
+    let (host, port) = parse_endpoint(endpoint)
+        .ok_or_else(|| format!("manager address is malformed: {endpoint} (route {TERMINAL_ROUTE})"))?;
+    let url = format!("http://{host}:{port}{TERMINAL_ROUTE}");
+    let agent = ureq::AgentBuilder::new().timeout(TERMINAL_TIMEOUT).build();
+    let body = agent
+        .post(&url)
+        .set("Content-Type", "application/json")
+        .send_string("{}")
+        .map_err(|e| format!("manager at {host}:{port} refused {TERMINAL_ROUTE}: {e}"))?
+        .into_string()
+        .map_err(|e| format!("manager at {host}:{port} sent an unreadable {TERMINAL_ROUTE} reply: {e}"))?;
+    Ok(parse_terminal(&body))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,5 +302,53 @@ mod tests {
             let want = format!("manager address is malformed: bad (route {route})");
             assert_eq!(result, Err(want), "маршрут просьбы к {route} разошёлся с текстом отказа");
         }
+    }
+
+    /// Ответ менеджера по контракту — терминал в форме пресета пикера.
+    #[test]
+    fn manager_terminal_is_parsed_into_preset_shape() {
+        assert_eq!(
+            parse_terminal(r#"{"ok":true,"name":"wezterm","command":"wezterm-gui.exe","args":["start","--"]}"#),
+            Some(ManagerTerminal {
+                name: "wezterm".into(),
+                file: "wezterm-gui.exe".into(),
+                args: vec!["start".into(), "--".into()],
+            }),
+        );
+        assert_eq!(
+            parse_terminal(r#"{"ok":true,"name":"wt","command":"wt.exe","args":["-w","-1"]}"#)
+                .map(|t| t.file),
+            Some("wt.exe".to_string()),
+        );
+    }
+
+    /// Всё, что не по форме, — «терминала не назвал», и зовущий берёт пресет.
+    /// Полузапись тут опаснее отказа: WezTerm без `start --` принял бы `ssh`
+    /// за свою подкоманду, и окно не открылось бы вовсе.
+    #[test]
+    fn anything_off_contract_means_no_manager_terminal() {
+        for body in [
+            r#"{"ok":true}"#,
+            r#"{"ok":true,"name":"wezterm","command":"","args":[]}"#,
+            r#"{"ok":true,"name":"","command":"wezterm-gui.exe","args":[]}"#,
+            r#"{"ok":true,"name":"wezterm","command":"wezterm-gui.exe"}"#,
+            r#"{"ok":true,"name":"wezterm","command":"wezterm-gui.exe","args":"start --"}"#,
+            r#"{"ok":true,"name":"wezterm","command":"wezterm-gui.exe","args":["start",1]}"#,
+            r#"{"ok":true,"name":"wezterm","command":7,"args":[]}"#,
+            r#"{"error":"Not found"}"#,
+            "not json",
+            "",
+        ] {
+            assert_eq!(parse_terminal(body), None, "ответ {body:?} принят за терминал");
+        }
+    }
+
+    /// Кривой адрес — отказ до сети, и маршрут назван в тексте, как у просьб.
+    #[test]
+    fn terminal_question_refuses_a_malformed_address_before_any_network() {
+        assert_eq!(
+            terminal("bad"),
+            Err("manager address is malformed: bad (route /claude-wt/terminal)".to_string()),
+        );
     }
 }

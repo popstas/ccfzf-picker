@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const strategy = require('../frontend-src/open-strategy');
+const presets = require('../frontend-src/terminal-presets');
 
 const SESSIONS_HTML = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
 
@@ -22,16 +23,24 @@ function sourceOf(name) {
 
 const TERMINAL = { file: '/usr/bin/kitty', args: ['--single-instance', '--hold'] };
 
-/** Прогнать `openTerminalHere` с настоящей OpenStrategy и подставным invoke. */
-function run(row, extra = {}) {
+/**
+ * Прогнать `openTerminalHere` с настоящей OpenStrategy и подставным invoke.
+ *
+ * `managerReply` — что ответит `manager_terminal`: `null` — менеджера нет, и
+ * терминал берётся из пресета. `currentTerminal` — настоящая, из страницы.
+ */
+function run(row, extra = {}, managerReply = null) {
   const calls = [];
   const ctx = {
-    invoke: (cmd, args) => { calls.push({ cmd, args }); return Promise.resolve(); },
+    invoke: (cmd, args) => {
+      calls.push({ cmd, args });
+      return Promise.resolve(cmd === 'manager_terminal' ? managerReply : undefined);
+    },
     CONFIG: { terminal: TERMINAL, sshHost: 'work-host' },
     // Настоящая сборка команды и argv: подстановки терминала — ровно то, ради
     // чего страница обязана ходить через terminalArgv, и подменять их здесь
     // значило бы сторожить заглушку.
-    window: { OpenStrategy: strategy },
+    window: { OpenStrategy: strategy, TerminalPresets: presets },
     noSources: () => false,
     helperPath: () => Promise.resolve('/home/user/.config/ccfzf-picker/open-terminal.sh'),
     helperError: '',
@@ -41,7 +50,8 @@ function run(row, extra = {}) {
     ...extra,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${sourceOf('openTerminalHere')}\nresult = openTerminalHere(row);`,
+  vm.runInContext(
+    `${sourceOf('currentTerminal')}\n${sourceOf('openTerminalHere')}\nresult = openTerminalHere(row);`,
     ctx, { filename: 'sessions.html' });
   return ctx.result.then(() => ({ calls, ctx }));
 }
@@ -59,6 +69,30 @@ test('терминал открывается выбранным пресето�
   assert.match(argv[6], /cd -- .*projects\/x.* && exec \$SHELL -i/);
 });
 
+test('на машине с менеджером терминал берётся у него, а не из пресета', async () => {
+  // Решение владельца 15.11.2026: переключатель терминала один —
+  // `claudeWt.terminal`. Пресет здесь kitty, менеджер называет WezTerm.
+  const reply = { name: 'wezterm', file: 'wezterm-gui.exe', args: ['start', '--'] };
+  const { calls } = await run({ cwd: '/home/user/projects/x', source: 'work-host' }, {}, reply);
+  const argv = calls.find(c => c.cmd === 'spawn_detached').args.argv;
+  assert.deepStrictEqual(argv.slice(0, 6),
+    ['wezterm-gui.exe', 'start', '--', 'ssh', '-t', 'work-host'], argv.join(' '));
+});
+
+test('менеджер терминала не назвал или упал — остаётся пресет', async () => {
+  for (const extra of [{}, { invoke: (cmd) => (cmd === 'manager_terminal'
+    ? Promise.reject(new Error('boom')) : Promise.resolve()) }]) {
+    const calls = [];
+    const wrapped = extra.invoke
+      ? { invoke: (cmd, args) => { calls.push({ cmd, args }); return extra.invoke(cmd, args); } }
+      : {};
+    const res = await run({ cwd: '/home/user/projects/x', source: 'work-host' }, wrapped, { ok: true });
+    const all = wrapped.invoke ? calls : res.calls;
+    const argv = all.find(c => c.cmd === 'spawn_detached').args.argv;
+    assert.strictEqual(argv[0], TERMINAL.file, argv.join(' '));
+  }
+});
+
 test('местная строка идёт без ssh, а не с пустым хостом', async () => {
   // `ssh -t ''` не работает никогда: у местного источника второго адресата
   // взяться неоткуда, и команду исполняет `sh -c` здесь же.
@@ -73,7 +107,9 @@ test('пикер гасится после запуска, а не до', async 
   // было бы обещанием окна, которого может и не случиться.
   const { calls } = await run({ cwd: '/home/user/projects/x', source: 'work-host' });
   const order = calls.map(c => c.cmd);
-  assert.deepStrictEqual(order, ['spawn_detached', 'hide_picker'], order.join(', '));
+  // Первым — вопрос менеджеру о терминале: он стоит перед запуском, а не
+  // после, иначе окно открылось бы пресетом.
+  assert.deepStrictEqual(order, ['manager_terminal', 'spawn_detached', 'hide_picker'], order.join(', '));
 });
 
 test('менеджера этот пункт не просит вовсе', async () => {

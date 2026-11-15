@@ -818,7 +818,7 @@ test('renderPage знает columns и paths, а не ui и integrations', () =>
 const TerminalPresets = require('../frontend-src/terminal-presets');
 const { PAGES: FORM_PAGES, configToFields, validate, fieldsToPatch } = require('../frontend-src/settings-form');
 
-function generalHtml(overrides) {
+function generalHtml(overrides, managerTerminalReply = null) {
   const src = ['function platform', 'function linesToArgs', 'function currentPreset']
     .map(name => sourceOf(new RegExp(`\\n {2}${name}\\([^)]*\\) \\{[\\s\\S]*?\\n {2}\\}\\n`), name))
     .join('\n')
@@ -830,6 +830,7 @@ function generalHtml(overrides) {
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
     window: { TerminalPresets },
     fields,
+    managerTerminalReply,
   };
   vm.createContext(ctx);
   const generalFields = FORM_PAGES.find(p => p.id === 'general').fields;
@@ -852,6 +853,24 @@ test('путь и аргументы, совпавшие с пресетом, о
   });
   assert.match(html, /<details>/);
   assert.doesNotMatch(html, /<details open>/);
+});
+
+// ── Терминал от windows11-manager ────────────────────────────────────────────
+//
+// На машине с менеджером терминал берётся у него, и пресет остаётся запасным
+// (решение владельца 15.11.2026). Выпадашка обязана это сказать: иначе выбор в
+// ней выглядел бы проигнорированным.
+test('на машине с менеджером настройки называют его терминал, а пресет — запасным', () => {
+  const html = generalHtml({}, { name: 'wezterm', file: 'wezterm-gui.exe', args: ['start', '--'] });
+  assert.match(html, /Terminal: from windows11-manager \(wezterm\)/);
+  assert.match(html, /Terminal preset \(used when windows11-manager is absent\)/);
+});
+
+test('без менеджера настройки показывают пресет как прежде', () => {
+  const html = generalHtml({});
+  assert.doesNotMatch(html, /from windows11-manager/);
+  assert.doesNotMatch(html, /used when windows11-manager is absent/);
+  assert.match(html, /<label>Terminal preset<\/label>/);
 });
 
 // ── Task 6: автосохранение и Save зовут одну persist ─────────────────────────
