@@ -2604,6 +2604,20 @@ async fn action_icons(
     Ok(icons::icons_for(&specs, &cache))
 }
 
+/// Иконки окон по путям, которые назвал трекер этой машины.
+///
+/// `async` и мимо цикла событий — по той же причине, что `action_icons`:
+/// поход в файловую систему, и путей бывает столько, сколько открыто окон.
+/// Какие пути спрашивать (только окна своей машины), решает страница: чужой
+/// путь здесь просто не прочитался бы.
+#[tauri::command]
+async fn window_icons(
+    paths: Vec<String>,
+    cache: tauri::State<'_, icons::WindowCache>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    Ok(icons::window_icons(&paths, &cache))
+}
+
 /// Вид списка: сортировка и чекбоксы statusline.
 ///
 /// Отдельным файлом, а не в config.yaml: конфиг пишет человек, а это пикер
@@ -3335,7 +3349,7 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             hide_picker, app_version, set_picker_size, poll_now, spawn_detached, open_pr, load_seen, save_seen, load_config,
-            terminal_helper, manager_terminal,
+            terminal_helper, manager_terminal, window_icons,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, place_windows_mqtt, set_picker_selection, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
@@ -3398,6 +3412,7 @@ fn main() {
             // перезапуска: ключ кеша знает mtime, так что обновившийся exe
             // перечитается сам.
             app.manage(icons::Cache::default());
+            app.manage(icons::WindowCache::default());
             if let Some(window) = app.get_webview_window("picker") {
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
@@ -4657,6 +4672,11 @@ mod tests {
         assert!(
             src.contains(&needle),
             "action_icons должна быть async — иначе извлечение держит цикл событий"
+        );
+        let needle = format!("async fn {}", "window_icons");
+        assert!(
+            src.contains(&needle),
+            "window_icons должна быть async — чтение иконок окон держало бы цикл событий"
         );
     }
 

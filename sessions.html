@@ -392,6 +392,13 @@
         .row.session .name .label, .row.zellij .name .label, .row.project .name .label {
             min-width: 0; overflow: hidden; text-overflow: ellipsis;
         }
+        /* Иконка окна перед именем (windowIconHtml). `align-self: center`, а
+           не общий `baseline` строки: у картинки базовая линия — её нижний
+           край, и она встала бы выше текста на высоту спуска. Не сжимается:
+           ужимать при узком окне надо имя, у него есть многоточие. */
+        .name .winicon {
+            flex: 0 0 auto; align-self: center; width: 16px; height: 16px; margin-right: 6px;
+        }
         .cwd { font-size: 11px; color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         /* Чем сессия закончила / что спросили. Тусклее пути: это подсказка, а
            не опознание — строку ищут глазами по названию и каталогу. */
@@ -1174,6 +1181,15 @@
   // Иконки приложений: id действия → data-URI. Заполняется один раз при
   // старте и на config-changed, см. loadActionIcons.
   let actionIcons = {};
+  // Иконки окон: путь из `windowIcon` строки → data URL от Rust
+  // (`window_icons`). Пустая строка — «спрошено, картинки нет»: такой путь не
+  // переспрашивается до общей перепроверки. См. requestWindowIcons.
+  const windowIcons = new Map();
+  let windowIconsPending = false;
+  let windowIconsCheckedAt = 0;
+  // Раз в минуту переспрашиваются все пути: Rust перечитывает файл по mtime,
+  // и перерисованная трекером иконка без этого не доехала бы до перезапуска.
+  const WINDOW_ICONS_RECHECK_MS = 60000;
   // Редактор `^O`: `{ label, icon }` от Rust (`editor_info`) или null — не
   // найден либо ещё не спрошен. Обновляется там же, где иконки.
   let editorInfo = null;
@@ -1295,7 +1311,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     projectCountHtml, projectColumnWidths,
     docsBadgeHtml, promptsHtml, commentHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
-    windowNameHtml, zellijNameHtml, headNameHtml, snapshotNameHtml,
+    windowNameHtml, windowIconHtml, zellijNameHtml, headNameHtml, snapshotNameHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -1637,7 +1653,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // и обрезка многоточием держится именно на нём. Безымянный flex-элемент
       // (текстовый узел) обрезался бы без многоточия, а прижать id вправо было
       // бы нечем.
-      `<div class="text"><div class="name"><span class="label">${escapeHtml(session.label)}</span>` +
+      `<div class="text"><div class="name">` +
+      // Иконка окна этой машины — 16×16 перед именем; нет её — ничего, имя
+      // не сдвигается. См. windowIconHtml и requestWindowIcons.
+      windowIconHtml(session, windowIcons) +
+      `<span class="label">${escapeHtml(session.label)}</span>` +
       // Второе имя строки — то, которым сессию завёл человек. Рисуется, только
       // когда расходится с первым: см. windowNameHtml.
       `${windowNameHtml(session)}` +
@@ -2017,6 +2037,42 @@ const infoBackdrop = document.getElementById('info-backdrop');
     }
     if (active >= rows.length) active = Math.max(0, rows.length - 1);
     paint();
+    requestWindowIcons();
+  }
+
+  /**
+   * Дозаказать картинки к путям иконок окон, которые сейчас в списке.
+   *
+   * Зовётся в конце каждой отрисовки, а спрашивает Rust только про новые пути
+   * (и раз в WINDOW_ICONS_RECHECK_MS — про все). Ответ приходит позже кадра,
+   * поэтому первый кадр рисуется без иконки, а следующий — с ней; перерисовка
+   * заказывается, только если что-то поменялось, иначе render звал бы сам
+   * себя по кругу. Один запрос за раз: тики опроса не должны копить очередь
+   * походов в файловую систему.
+   *
+   * Отказ команды запоминается как «картинки нет»: иначе каждый кадр
+   * спрашивал бы заново то, что не читается.
+   */
+  function requestWindowIcons() {
+    if (windowIconsPending) return;
+    const paths = [...new Set(rows.map(r => String((r || {}).windowIcon || '')).filter(Boolean))];
+    if (!paths.length) return;
+    const recheck = Date.now() - windowIconsCheckedAt > WINDOW_ICONS_RECHECK_MS;
+    const ask = recheck ? paths : paths.filter(p => !windowIcons.has(p));
+    if (!ask.length) return;
+    windowIconsPending = true;
+    const apply = (found) => {
+      let changed = false;
+      for (const p of ask) {
+        const url = typeof (found || {})[p] === 'string' ? found[p] : '';
+        if ((windowIcons.get(p) ?? null) !== url) changed = true;
+        windowIcons.set(p, url);
+      }
+      if (recheck) windowIconsCheckedAt = Date.now();
+      windowIconsPending = false;
+      if (changed) render();
+    };
+    invoke('window_icons', { paths: ask }).then(apply, () => apply({}));
   }
 
   /**
