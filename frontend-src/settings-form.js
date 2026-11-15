@@ -146,7 +146,9 @@
         // считается обратно по содержимому полей (`matchPreset`).
         { id: 'terminalPreset', label: 'Terminal preset', type: 'preset',
           hint: 'Fills in the path and the arguments below. '
-            + 'The arguments differ per terminal, so pick one before editing by hand.' },
+            + 'The arguments differ per terminal, so pick one before editing by hand. '
+            + 'On Windows, claude-wt sessions are opened by windows11-manager: '
+            + 'its terminal is set by claudeWt.terminal in its config.' },
         { id: 'terminal.file', label: 'Terminal', type: 'text' },
         { id: 'terminal.args', label: 'Terminal arguments', type: 'lines',
           hint: 'One per line — a comma occurs inside the arguments themselves.' },
