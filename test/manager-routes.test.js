@@ -67,3 +67,25 @@ test('пять просьб — пять путей, и все разные', ()
   assert.equal(routes.length, 5, 'просьб к менеджеру пять');
   assert.equal(new Set(routes.map(r => r.route)).size, 5, 'два топика уехали на один путь');
 });
+
+/** Путь вопроса о терминале — отдельной константой: топика у него нет. */
+function ourTerminalRoute() {
+  const src = fs.readFileSync(MANAGER_HTTP_RS, 'utf8');
+  const m = src.match(/pub const TERMINAL_ROUTE: &str = "([^"]+)";/);
+  assert.ok(m, 'TERMINAL_ROUTE не найден в manager_http.rs');
+  return m[1];
+}
+
+test('вопрос о терминале приёмник слушает', (t) => {
+  // Разойдись путь — менеджер ответил бы 404, и пикер молча остался бы на
+  // пресете: окно открылось бы, только не тем терминалом, что выбран в
+  // `claudeWt.terminal`.
+  const route = ourTerminalRoute();
+  assert.strictEqual(route, '/claude-wt/terminal');
+  assert.ok(!ourRoutes().some(r => r.route === route), 'вопрос о терминале — не просьба из ROUTES');
+  if (!fs.existsSync(RECEIVER)) {
+    t.skip('windows11-manager рядом нет — сверять не с чем');
+    return;
+  }
+  assert.ok(receiverRoutes().has(route), `путь ${route} приёмник не слушает`);
+});

@@ -248,3 +248,88 @@ test('у каждого пресета есть и путь, и подпись',
     assert.ok(['macos', 'windows', 'linux'].includes(p.os), `у ${p.id} чужая система`);
   }
 });
+
+// Терминал windows11-manager своей машины (решение владельца 15.11.2026):
+// на машине с менеджером переключатель терминала один — `claudeWt.terminal`, —
+// и пикер берёт его и для окон, которые открывает сам.
+const {
+  managerTerminal, effectiveTerminal, managerTerminalNote,
+} = require('../frontend-src/terminal-presets');
+const { terminalArgv, commandParts, terminalCommand } = require('../frontend-src/open-strategy');
+
+const PRESET_WT = { file: 'wt.exe', args: [] };
+const WEZTERM_REPLY = { name: 'wezterm', file: 'wezterm-gui.exe', args: ['start', '--'] };
+
+test('на машине с менеджером терминал берётся у него, а не из пресета', () => {
+  assert.deepStrictEqual(
+    effectiveTerminal(PRESET_WT, WEZTERM_REPLY),
+    { file: 'wezterm-gui.exe', args: ['start', '--'] },
+  );
+});
+
+test('менеджер терминала не назвал — остаётся пресет', () => {
+  // null — своего трекера нет (мак), менеджер не ответил или ответил без
+  // command; всё прочее — мусор, который в argv процесса пускать нельзя.
+  for (const reply of [
+    null, undefined, {},
+    { name: 'wezterm', file: '', args: [] },
+    { name: '', file: 'wezterm-gui.exe', args: [] },
+    { name: 'wezterm', file: 'wezterm-gui.exe' },
+    { name: 'wezterm', file: 'wezterm-gui.exe', args: 'start --' },
+    { name: 'wezterm', file: 'wezterm-gui.exe', args: ['start', 1] },
+  ]) {
+    assert.strictEqual(effectiveTerminal(PRESET_WT, reply), PRESET_WT, JSON.stringify(reply));
+    assert.strictEqual(managerTerminal(reply), null, JSON.stringify(reply));
+  }
+});
+
+test('ответ менеджера не делит массив аргументов с вызывающим', () => {
+  const reply = { name: 'wezterm', file: 'wezterm-gui.exe', args: ['start', '--'] };
+  const got = effectiveTerminal(PRESET_WT, reply);
+  got.args.push('x');
+  assert.deepStrictEqual(reply.args, ['start', '--']);
+});
+
+test('Open terminal на машине с менеджером собирает argv его терминала', () => {
+  // Тот же путь, каким argv собирает openTerminalHere: terminalArgv поверх
+  // effectiveTerminal. Пресет нарочно другой (wt.exe) — иначе тест не отличил
+  // бы, откуда взялся терминал.
+  const parts = commandParts(terminalCommand('/home/user/proj'), 'dev-box');
+  const argv = terminalArgv(effectiveTerminal(PRESET_WT, WEZTERM_REPLY), parts, {});
+  assert.deepStrictEqual(argv.slice(0, 6), ['wezterm-gui.exe', 'start', '--', 'ssh', '-t', 'dev-box']);
+  const fallback = terminalArgv(effectiveTerminal(PRESET_WT, null), parts, {});
+  assert.deepStrictEqual(fallback.slice(0, 4), ['wt.exe', 'ssh', '-t', 'dev-box']);
+});
+
+test('Resume in terminal на машине с менеджером идёт его терминалом', () => {
+  const row = { kind: 'interactive', id: 'aaa', cwd: '/home/user/proj', source: 'dev-box' };
+  const cmd = buildOpenCommand(row, 'resume', {
+    sshHost: 'dev-box', terminal: effectiveTerminal(PRESET_WT, WEZTERM_REPLY),
+  });
+  assert.deepStrictEqual(cmd.argv.slice(0, 4), ['wezterm-gui.exe', 'start', '--', 'ssh']);
+});
+
+test('строка в настройках называет терминал менеджера', () => {
+  assert.strictEqual(managerTerminalNote(WEZTERM_REPLY), 'Terminal: from windows11-manager (wezterm)');
+  assert.strictEqual(managerTerminalNote({ name: 'wt', file: 'wt.exe', args: ['-w', '-1'] }),
+    'Terminal: from windows11-manager (wt)');
+  assert.strictEqual(managerTerminalNote(null), '', 'без менеджера строки нет');
+});
+
+// Текстовый сторож: поведением не поймать, что одно из мест запуска взяло
+// `CONFIG.terminal` мимо currentTerminal, — там, где пресет совпал с
+// терминалом менеджера (на nb оба сейчас WezTerm), argv выходит тот же.
+test('страница берёт терминал только через currentTerminal', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const page = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+  const code = page.split('\n').filter(l => !/^\s*(\/\/|\*)/.test(l)).join('\n');
+  const uses = code.match(/CONFIG\.terminal\b/g) || [];
+  assert.strictEqual(uses.length, 1, 'CONFIG.terminal вне currentTerminal');
+  assert.match(code, /effectiveTerminal\(CONFIG\.terminal,/);
+  assert.match(code, /invoke\('manager_terminal'\)/);
+  const settings = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  assert.match(settings, /invoke\('manager_terminal'\)/, 'окно настроек не спрашивает менеджер');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src-tauri', 'src', 'main.rs'), 'utf8');
+  assert.match(main, /generate_handler!\[[\s\S]*\bmanager_terminal\b[\s\S]*\]/, 'команда не зарегистрирована');
+});

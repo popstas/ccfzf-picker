@@ -2489,6 +2489,49 @@ eval "$(printf %s "$1" | base64 -d)"
 exec "${SHELL:-/bin/sh}" -i
 "#;
 
+/// Адрес менеджера, у которого спрашивать терминал, — или пусто.
+///
+/// Только **своей** машины: `tracker_http` ищет запись по `windowHost` из
+/// конфига, с живым pid и правом на подъём. Спроси пикер менеджер «машины,
+/// которая открывает сессии» (`openManager` на странице), и на машине без
+/// своего трекера он получил бы терминал чужой машины — тот самый промах, на
+/// котором уже ловили `placeWindows`. Своего трекера нет — пусто, и терминал
+/// берётся из пресета: это мак и любая машина без windows11-manager.
+fn manager_terminal_endpoint(raw: &serde_json::Value, state: &serde_json::Value) -> String {
+    let own = raw.get("windowHost").and_then(|v| v.as_str()).unwrap_or_default();
+    place_order::tracker_http(state, own)
+}
+
+/// Терминал, выбранный у windows11-manager этой машины, или `null`.
+///
+/// Решение владельца 15.11.2026: на машине с менеджером переключатель
+/// терминала один — `claudeWt.terminal`, — и пикер берёт его и для окон,
+/// которые открывает сам (Open terminal, Resume in terminal, New session мимо
+/// менеджера). `null` — «бери пресет»: своего трекера нет, менеджер не
+/// ответил или терминала не назвал. Отказ сюда не доезжает ошибкой: окно
+/// обязано открыться и без менеджера, — он уходит строкой в лог.
+#[tauri::command]
+async fn manager_terminal(
+    poller: tauri::State<'_, poller::Poller>,
+) -> Result<Option<manager_http::ManagerTerminal>, String> {
+    let raw = load_config()?;
+    let state = poller.snapshot().get("state").cloned().unwrap_or(serde_json::Value::Null);
+    let endpoint = manager_terminal_endpoint(&raw, &state);
+    if endpoint.is_empty() {
+        return Ok(None);
+    }
+    let reply = tauri::async_runtime::spawn_blocking(move || manager_http::terminal(&endpoint))
+        .await
+        .map_err(|e| format!("manager_terminal task failed: {e}"))?;
+    match reply {
+        Ok(found) => Ok(found),
+        Err(e) => {
+            ccfzf_log!("{e}; using the picker's terminal preset");
+            Ok(None)
+        }
+    }
+}
+
 /// Положить помощника на место и назвать путь.
 ///
 /// Переписывается на каждый спрос, а не только при отсутствии: файл этот —
@@ -3292,7 +3335,7 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             hide_picker, app_version, set_picker_size, poll_now, spawn_detached, open_pr, load_seen, save_seen, load_config,
-            terminal_helper,
+            terminal_helper, manager_terminal,
             copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
             restore_snapshot_mqtt, place_windows_mqtt, set_picker_selection, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
@@ -4714,6 +4757,43 @@ actions:
         let conf: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         assert_eq!(conf["build"]["frontendDist"].as_str().unwrap(), "../frontend");
+    }
+
+    /// Терминал спрашивается у менеджера **своей** машины и только у неё.
+    ///
+    /// На машине с трекером — его адрес; без своего трекера (мак, машина без
+    /// windows11-manager) — пусто, и страница берёт пресет. Чужая машина с
+    /// адресом в списке — тоже пусто: её терминал не наш, а просьба ушла бы
+    /// туда так же тихо, как когда-то уходила `placeWindows`.
+    #[test]
+    fn manager_terminal_is_asked_only_of_this_machine() {
+        let state = serde_json::json!({
+            "windowHosts": [
+                {"host": "windows-box", "pid": 42, "canFocus": true, "http": {"port": 9722}},
+                {"host": "other-box", "pid": 7, "canFocus": true, "http": {"port": 9722}},
+            ],
+        });
+        let here = serde_json::json!({"windowHost": "windows-box"});
+        assert_eq!(manager_terminal_endpoint(&here, &state), "windows-box:9722");
+
+        let foreign = serde_json::json!({
+            "windowHosts": [{"host": "other-box", "pid": 7, "canFocus": true, "http": {"port": 9722}}],
+        });
+        assert_eq!(manager_terminal_endpoint(&here, &foreign), "", "адрес чужой машины");
+
+        let no_http = serde_json::json!({
+            "windowHosts": [{"host": "windows-box", "pid": 42, "canFocus": true}],
+        });
+        assert_eq!(manager_terminal_endpoint(&here, &no_http), "", "трекер без http — пресет");
+
+        assert_eq!(
+            manager_terminal_endpoint(&serde_json::json!({}), &state), "",
+            "своя машина не названа в конфиге",
+        );
+        assert_eq!(
+            manager_terminal_endpoint(&here, &serde_json::Value::Null), "",
+            "ответа поллера ещё не было",
+        );
     }
 
     /// Помощник обязан разворачивать base64 и держать окно после сессии.

@@ -178,5 +178,51 @@
     return found ? found.id : CUSTOM;
   }
 
-  return { PRESETS, CUSTOM, osOf, presetsFor, presetById, matchPreset };
+  /**
+   * Терминал, который сообщил windows11-manager своей машины, — или `null`.
+   *
+   * Ответ приезжает от Rust (`manager_terminal`, `{name, file, args}`), и
+   * разобран он там же строго; здесь — вторая проверка формы, потому что
+   * значение уходит прямиком в argv процесса: полузапись запустила бы WezTerm
+   * без `start --`, и тот принял бы `ssh` за свою подкоманду.
+   */
+  function managerTerminal(reply) {
+    const r = reply || {};
+    const name = typeof r.name === 'string' ? r.name.trim() : '';
+    const file = typeof r.file === 'string' ? r.file.trim() : '';
+    if (!name || !file || !Array.isArray(r.args) || !r.args.every(a => typeof a === 'string')) {
+      return null;
+    }
+    return { name, file, args: [...r.args] };
+  }
+
+  /**
+   * Каким терминалом пикер открывает окна сам.
+   *
+   * Решение владельца 15.11.2026: на машине с windows11-manager переключатель
+   * терминала один — `claudeWt.terminal`, — и пикер берёт его и для своих
+   * запусков (Open terminal, Resume in terminal, New session мимо менеджера).
+   * Менеджер терминала не сообщил (его нет, он не ответил, это мак) —
+   * пресет из `config.yaml`, как было.
+   *
+   * Реестра терминалов здесь нет: менеджер присылает готовые `command` и
+   * `args` своей записи, и сопоставлять имя `wezterm` с пресетом пикера не
+   * нужно — иначе реестр жил бы в двух местах и разошёлся бы на первом своём
+   * терминале из `claudeWt.terminals`.
+   */
+  function effectiveTerminal(configTerminal, reply) {
+    const manager = managerTerminal(reply);
+    return manager ? { file: manager.file, args: manager.args } : configTerminal;
+  }
+
+  /** Строка в настройках: откуда сейчас берётся терминал. */
+  function managerTerminalNote(reply) {
+    const manager = managerTerminal(reply);
+    return manager ? `Terminal: from windows11-manager (${manager.name})` : '';
+  }
+
+  return {
+    PRESETS, CUSTOM, osOf, presetsFor, presetById, matchPreset,
+    managerTerminal, effectiveTerminal, managerTerminalNote,
+  };
 });

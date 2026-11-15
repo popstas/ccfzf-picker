@@ -954,12 +954,12 @@
   // делать это на каждое открытие сессии незачем.
   let helperCache = null;
   let helperError = '';
-  function helperNeeded() {
-    return ((CONFIG.terminal || {}).args || [])
+  function helperNeeded(terminal) {
+    return ((terminal || {}).args || [])
       .some(a => String(a).includes(window.OpenStrategy.HELPER_PLACEHOLDER));
   }
-  async function helperPath() {
-    if (!helperNeeded()) return '';
+  async function helperPath(terminal) {
+    if (!helperNeeded(terminal)) return '';
     if (helperCache) return helperCache;
     try {
       helperCache = await invoke('terminal_helper');
@@ -969,6 +969,32 @@
       helperError = String(e);
     }
     return helperCache || '';
+  }
+
+  /**
+   * Терминал для окон, которые пикер открывает сам, — единственная дорога к
+   * нему на этой странице.
+   *
+   * На машине с windows11-manager — тот, что выбран там (`claudeWt.terminal`):
+   * решение владельца 15.11.2026, переключатель терминала один. Менеджер
+   * терминала не назвал, не ответил или его нет вовсе (мак) — пресет из
+   * `config.yaml`. Спрашивается на каждое открытие, без кеша: правка
+   * `claudeWt.terminal` обязана менять следующее же окно. Ответ приходит с
+   * той же машины за миллисекунды, а молчание Rust обрывает через секунду.
+   *
+   * `CONFIG.terminal` мимо этой функции в argv не попадает — сторож
+   * «страница берёт терминал только через currentTerminal» в
+   * `test/terminal-presets.test.js`: поведением этого не поймать там, где
+   * пресет совпал с терминалом менеджера.
+   */
+  async function currentTerminal() {
+    let reply = null;
+    try {
+      reply = await invoke('manager_terminal');
+    } catch (e) {
+      reply = null;
+    }
+    return window.TerminalPresets.effectiveTerminal(CONFIG.terminal, reply);
   }
 
   // Чекбоксы statusline. Набор ключей задаётся здесь и только здесь: его же
@@ -2701,8 +2727,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // здесь команда его теряет.
     if (action === 'manager') return openViaManager(row, opts);
     if (noSources()) return;
+    const terminal = await currentTerminal();
     const cmd = window.OpenStrategy.buildOpenCommand(row, strategy, {
-      sshHost: CONFIG.sshHost, terminal: CONFIG.terminal, helperPath: await helperPath(),
+      sshHost: CONFIG.sshHost, terminal, helperPath: await helperPath(terminal),
       // Система — той же меркой, что и выбор пресета терминала в окне
       // настроек: второй разбор `navigator.platform` разошёлся бы с первым.
       os: PICKER_OS,
@@ -2710,7 +2737,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (!cmd) {
       // Пустая команда у терминала с помощником значит, что путь не приехал:
       // молчать нельзя, иначе Enter не сработал бы без единого слова.
-      if (helperNeeded()) { error = helperError || 'terminal helper is not available'; render(); }
+      if (helperNeeded(terminal)) { error = helperError || 'terminal helper is not available'; render(); }
       return;
     }
     if (cmd.destructive) {
@@ -3464,10 +3491,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // `[file, ...args, 'ssh', …]` про подстановку не знал вовсе: у iTerm2 это
     // давало окно, в которое печатается литеральный `{command}`, а ssh с
     // аргументами уезжал osascript в никуда. Поймано живьём 2026-08-15.
+    const terminal = await currentTerminal();
     const argv = window.OpenStrategy.terminalArgv(
-      CONFIG.terminal,
+      terminal,
       window.OpenStrategy.commandParts(remote, source || CONFIG.sshHost),
-      { helperPath: await helperPath() },
+      { helperPath: await helperPath(terminal) },
     );
     if (!argv) {
       error = helperError || 'terminal helper is not available';
@@ -3491,8 +3519,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
   /**
    * «Open terminal» — шелл в каталоге строки, без агента.
    *
-   * Терминал берётся выбранный в настройках, и берётся он единственной
-   * дорогой — `terminalArgv`: у неё три развилки (хвост argv, `{command}`
+   * Терминал — `currentTerminal()`: на машине с windows11-manager тот, что
+   * выбран там, иначе пресет из настроек. С командой он встречается
+   * единственной дорогой — `terminalArgv`: у неё три развилки (хвост argv, `{command}`
    * одной строкой, `{helper}` с base64), и собранный здесь руками
    * `[file, ...args, 'ssh', …]` был бы верен для kitty и молча неверен для
    * iTerm2. На этой мине уже подорвался `newSession`, и сторож
@@ -3519,10 +3548,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
       render();
       return;
     }
+    const terminal = await currentTerminal();
     const argv = window.OpenStrategy.terminalArgv(
-      CONFIG.terminal,
+      terminal,
       window.OpenStrategy.commandParts(remote, row.source || CONFIG.sshHost),
-      { helperPath: await helperPath() },
+      { helperPath: await helperPath(terminal) },
     );
     if (!argv) {
       error = helperError || 'terminal helper is not available';
