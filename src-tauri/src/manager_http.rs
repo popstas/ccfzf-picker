@@ -97,23 +97,21 @@ pub fn open(
     endpoint: &str,
     id: &str,
     cwd: &str,
-    terminal: &str,
     place: Placement,
 ) -> Result<(), String> {
-    post(endpoint, "/claude-session-open", open_payload(id, cwd, terminal, place))
+    post(endpoint, "/claude-session-open", open_payload(id, cwd, place))
 }
 
 /// Попросить открыть проект по каталогу — какую сессию, решит менеджер.
 pub fn open_project(
     endpoint: &str,
     cwd: &str,
-    terminal: &str,
     place: Placement,
 ) -> Result<(), String> {
     post(
         endpoint,
         "/claude-session-open",
-        open_project_payload(cwd, terminal, place),
+        open_project_payload(cwd, place),
     )
 }
 
@@ -122,13 +120,12 @@ pub fn open_new(
     endpoint: &str,
     cwd: &str,
     name: &str,
-    terminal: &str,
     place: Placement,
 ) -> Result<(), String> {
     post(
         endpoint,
         "/claude-session-open",
-        open_new_payload(cwd, name, terminal, place),
+        open_new_payload(cwd, name, place),
     )
 }
 
@@ -217,9 +214,9 @@ mod tests {
         let cases: [(&str, Result<(), String>); 7] = [
             ("/claude-wt/focus", focus("bad", "id")),
             ("/claude-wt/session-unread", unread("bad", "id")),
-            ("/claude-wt/session-open", open("bad", "id", "cwd", "wt", placement)),
-            ("/claude-wt/session-open", open_project("bad", "cwd", "wt", placement)),
-            ("/claude-wt/session-open", open_new("bad", "cwd", "name", "wt", placement)),
+            ("/claude-wt/session-open", open("bad", "id", "cwd", placement)),
+            ("/claude-wt/session-open", open_project("bad", "cwd", placement)),
+            ("/claude-wt/session-open", open_new("bad", "cwd", "name", placement)),
             ("/claude-wt/snapshot-restore", restore("bad", "id", &[])),
             ("/claude-wt/place", place("bad", "tile", &[])),
         ];

@@ -190,16 +190,18 @@ pub(crate) fn transport(broker: &Broker) -> Result<rumqttc::Transport, String> {
 
 /// «Чем открывают» → семейное имя терминала.
 ///
-/// Имя уезжает в теле просьбы к менеджеру окон, чтобы выбранное в пикере
-/// главенствовало и на машине, где терминал открывает не пикер. Словарь общий с
-/// реестром менеджера (`claudeWt.terminals` в windows11-manager); источник
-/// правды — таблица `PRESETS` в `frontend-src/terminal-presets.js`, здесь её
-/// копия, и сверяет их `test/terminal-name.test.js`.
+/// **В просьбы к менеджеру имя больше не уезжает** (решение владельца
+/// 15.11.2026): на Windows терминал для claude-wt выбирает windows11-manager по
+/// `claudeWt.terminal` своего конфига, и одна правка там должна переключать все
+/// окна. Уезжавшее имя перебивало её всякий раз, когда пресет пикера стоял
+/// другой. Сторожит это `the_pickers_terminal_does_not_reach_the_manager`.
 ///
-/// Копия эта неизбежна: ту же просьбу шлёт проектный хоткей
-/// (`project_hotkeys.rs`), а у него webview спит и спросить страницу не у кого.
-/// Своего ключа в конфиге у пресета нет намеренно (см. `matchPreset`), поэтому
-/// имя и считается от полей, а не читается готовым.
+/// Таблица и `terminal_name` оставлены вместе со сторожем
+/// `test/terminal-name.test.js`: словарь общий с реестром менеджера
+/// (`claudeWt.terminals`), и дизайн перехода оставляет дорогу для терминала,
+/// явно выбранного человеком для одного открытия. Вызывающих вне тестов у
+/// функции сейчас нет — отсюда атрибут у неё. Источник правды —
+/// `PRESETS` в `frontend-src/terminal-presets.js`, здесь копия.
 ///
 /// **Ключ — имя файла без каталога, а не путь целиком и не путь с
 /// аргументами.** У `matchPreset` в окне настроек правило строже, и разница
@@ -207,8 +209,7 @@ pub(crate) fn transport(broker: &Broker) -> Result<rumqttc::Transport, String> {
 /// дописанный руками флаг обязан честно дать Custom; здесь вопрос другой —
 /// «какой это терминал», и на него дописанный флаг не влияет. Путь целиком не
 /// годится по той же причине: у msi, portable-распаковки и scoop он разный, а
-/// терминал один. Незнакомое имя — пустая строка: поля в просьбе не будет
-/// вовсе, и менеджер возьмёт свой дефолт.
+/// терминал один. Незнакомое имя — пустая строка.
 ///
 /// `osascript` здесь стоит за iTerm2, и это единственная неточная запись:
 /// AppleScript сам по себе терминала не называет. Другого признака у пресета
@@ -223,11 +224,12 @@ const TERMINAL_NAMES: &[(&str, &str)] = &[
     ("osascript", "iterm2"),
 ];
 
-/// Имя терминала из сырого конфига — то, что поедет в теле просьбы.
+/// Семейное имя терминала из сырого конфига.
 ///
 /// Пустая строка значит «назвать нечем»: терминал не настроен вовсе либо
-/// набран руками («Custom»). Врать тут нельзя — назови мы чужое имя, менеджер
-/// открыл бы не то, что стоит у человека в поле.
+/// набран руками («Custom»). Врать тут нельзя — чужое имя назвало бы не то, что
+/// стоит у человека в поле.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn terminal_name(raw: &serde_json::Value) -> String {
     let file = raw
         .get("terminal")
@@ -291,15 +293,14 @@ pub fn open(
     base: &str,
     id: &str,
     cwd: &str,
-    terminal: &str,
     place: Placement,
 ) -> Result<(), String> {
-    publish(broker, base, OPEN_TOPIC, &open_payload(id, cwd, terminal, place))
+    publish(broker, base, OPEN_TOPIC, &open_payload(id, cwd, place))
 }
 
 /// Необязательный ключ: пустое значение в тело не кладётся вовсе.
 ///
-/// Правило одно на `cwd`, `terminal` и `sessionIds`: приёмник читает пустую
+/// Правило одно на `cwd` и `sessionIds`: приёмник читает пустую
 /// строку как «не знаем», а отсутствие ключа говорит то же самое честнее — и
 /// проверка `!== undefined` на той стороне на пустой строке сломалась бы молча.
 fn put_if_set(body: &mut serde_json::Map<String, serde_json::Value>, key: &str, value: &str) {
@@ -371,16 +372,15 @@ fn put_placement(body: &mut serde_json::Map<String, serde_json::Value>, place: P
 /// поднимает терминал с профилем из `claudeWt.projects` — то, чего собранная
 /// в пикере команда `wt.exe` не умеет.
 ///
-/// `terminal` — семейное имя выбранного в пикере терминала (`terminal_name`).
-/// Оно тут главнее дефолта менеджера: настройку пикера человек видит, а конфиг
-/// менеджера — нет, и молча открытый чужой терминал выглядит проигнорированной
-/// настройкой. Незнакомый пикеру терминал имени не имеет, и тогда ключа в теле
-/// нет — менеджер берёт свой.
+/// Ключа `terminal` в теле нет: терминал выбирает менеджер по
+/// `claudeWt.terminal` (`resolveTerminal` у windows11-manager), а пресет пикера
+/// действует только там, где окно открывает сам пикер. Так у всех трёх
+/// просьб — `open`, `open_project`, `open_new`.
 ///
 /// Пустого ключа в теле нет вовсе: приёмник читает пустую строку как «каталога
 /// не знаем», а отсутствие ключа говорит то же самое честнее — то же правило,
 /// что у `restore_payload`.
-pub(crate) fn open_payload(id: &str, cwd: &str, terminal: &str, place: Placement) -> String {
+pub(crate) fn open_payload(id: &str, cwd: &str, place: Placement) -> String {
     let mut body = serde_json::Map::new();
     body.insert("id".to_string(), serde_json::Value::String(id.to_string()));
     body.insert(
@@ -388,7 +388,6 @@ pub(crate) fn open_payload(id: &str, cwd: &str, terminal: &str, place: Placement
         serde_json::Value::String("terminal".to_string()),
     );
     put_if_set(&mut body, "cwd", cwd);
-    put_if_set(&mut body, "terminal", terminal);
     put_placement(&mut body, place);
     serde_json::Value::Object(body).to_string()
 }
@@ -404,10 +403,9 @@ pub fn open_project(
     broker: &Broker,
     base: &str,
     cwd: &str,
-    terminal: &str,
     place: Placement,
 ) -> Result<(), String> {
-    publish(broker, base, OPEN_TOPIC, &open_project_payload(cwd, terminal, place))
+    publish(broker, base, OPEN_TOPIC, &open_project_payload(cwd, place))
 }
 
 /// Тело просьбы об открытии проекта: действие и каталог, без `id`.
@@ -415,14 +413,13 @@ pub fn open_project(
 /// Пустой `id` сюда класть не надо, хотя приёмник его и переживёт: ключ без
 /// значения — это тело, которое врёт о том, что знает. Ровно по этому правилу
 /// здесь же выброшен пустой `cwd` в `open_payload`.
-pub(crate) fn open_project_payload(cwd: &str, terminal: &str, place: Placement) -> String {
+pub(crate) fn open_project_payload(cwd: &str, place: Placement) -> String {
     let mut body = serde_json::Map::new();
     body.insert(
         "action".to_string(),
         serde_json::Value::String("terminal".to_string()),
     );
     body.insert("cwd".to_string(), serde_json::Value::String(cwd.to_string()));
-    put_if_set(&mut body, "terminal", terminal);
     put_placement(&mut body, place);
     serde_json::Value::Object(body).to_string()
 }
@@ -444,10 +441,9 @@ pub fn open_new(
     base: &str,
     cwd: &str,
     name: &str,
-    terminal: &str,
     place: Placement,
 ) -> Result<(), String> {
-    publish(broker, base, OPEN_TOPIC, &open_new_payload(cwd, name, terminal, place))
+    publish(broker, base, OPEN_TOPIC, &open_new_payload(cwd, name, place))
 }
 
 /// Тело просьбы о новой сессии: действие, каталог и имя.
@@ -456,7 +452,7 @@ pub fn open_new(
 /// каталога — то самое имя, которое уже занято открытой сессией. Пустую строку
 /// сюда класть нельзя по тому же правилу, по которому её нет в `open_payload`:
 /// ключ без значения — это тело, которое врёт о том, что знает.
-pub(crate) fn open_new_payload(cwd: &str, name: &str, terminal: &str, place: Placement) -> String {
+pub(crate) fn open_new_payload(cwd: &str, name: &str, place: Placement) -> String {
     let mut body = serde_json::Map::new();
     body.insert(
         "action".to_string(),
@@ -464,7 +460,6 @@ pub(crate) fn open_new_payload(cwd: &str, name: &str, terminal: &str, place: Pla
     );
     body.insert("cwd".to_string(), serde_json::Value::String(cwd.to_string()));
     body.insert("name".to_string(), serde_json::Value::String(name.to_string()));
-    put_if_set(&mut body, "terminal", terminal);
     put_placement(&mut body, place);
     serde_json::Value::Object(body).to_string()
 }
@@ -931,52 +926,74 @@ mod tests {
     #[test]
     fn open_body_carries_the_project_dir() {
         assert_eq!(
-            open_payload("s1", "/p/site", "", NOWHERE),
+            open_payload("s1", "/p/site", NOWHERE),
             r#"{"action":"terminal","cwd":"/p/site","id":"s1"}"#
         );
     }
 
-    // Выбранный в пикере терминал главнее дефолта менеджера, и уезжает он
-    // именем в теле. Без этого поля на машине с менеджером настройка пикера не
-    // читается вовсе: терминал открывает не пикер, и `terminal` из
-    // `config.yaml` остаётся только на запасной местной дороге.
+    // Терминал на Windows выбирает менеджер, по `claudeWt.terminal` своего
+    // конфига, и имени от пикера в теле нет ни при каком `terminal.file`.
+    // Раньше имя уезжало и перебивало менеджер: тогда одна правка
+    // `claudeWt.terminal` не переключала окна, пока в пикере стоял другой
+    // пресет. Конфиги здесь те, при которых имя бы и уехало, — `wt.exe` и
+    // `wezterm-gui.exe`: `terminal_name` их узнаёт, а в тело они не попадают.
     #[test]
-    fn open_body_names_the_terminal() {
-        assert_eq!(
-            open_payload("s1", "/p/site", "wezterm", NOWHERE),
-            r#"{"action":"terminal","cwd":"/p/site","id":"s1","terminal":"wezterm"}"#
-        );
+    fn no_open_request_names_the_pickers_terminal() {
+        for file in ["wt.exe", "wezterm-gui.exe"] {
+            let raw = serde_json::json!({ "terminal": { "file": file } });
+            assert_ne!(terminal_name(&raw), "", "{file}: конфиг обязан называть терминал, иначе тест пуст");
+            for body in [
+                open_payload("s1", "/p/site", NOWHERE),
+                open_project_payload("/p/site", NOWHERE),
+                open_new_payload("/p/site", "site-2", NOWHERE),
+            ] {
+                let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+                assert!(v.get("terminal").is_none(), "{file}: имя терминала уехало менеджеру: {body}");
+            }
+        }
     }
 
-    // «Custom» имени не имеет: набранное руками нам неизвестно, и назови мы его
-    // чужим именем — менеджер открыл бы не то, что стоит в поле. Тогда ключа в
-    // теле нет вовсе, и менеджер берёт свой дефолт — то же правило, что у
-    // пустого `cwd`.
+    // Сборщики тела общие для MQTT и http, но имя могло бы вернуться и мимо
+    // них — тем, что кто-то снова посчитает его у вызывающего. Поведением это
+    // не поймать: просьба пройдёт, окно откроется, только не тем терминалом,
+    // что в `claudeWt.terminal`. Поэтому сторож текстовый: вне тестов
+    // `terminal_name(` не зовут ни команды Enter и `^N` (`main.rs`), ни
+    // проектный хоткей, ни http-транспорт.
     #[test]
-    fn a_nameless_terminal_carries_no_key() {
+    fn the_pickers_terminal_does_not_reach_the_manager() {
+        for (name, src) in [
+            ("main.rs", include_str!("main.rs")),
+            ("project_hotkeys.rs", include_str!("project_hotkeys.rs")),
+            ("manager_http.rs", include_str!("manager_http.rs")),
+        ] {
+            let (code, _) = src
+                .split_once("#[cfg(test)]\nmod tests")
+                .unwrap_or_else(|| panic!("{name}: модуль тестов не найден — сторож смотрит не туда"));
+            let calls: Vec<&str> = code
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//"))
+                .filter(|l| l.contains("terminal_name("))
+                .collect();
+            assert!(calls.is_empty(), "{name} снова считает имя терминала для менеджера: {calls:?}");
+        }
+    }
+
+    // Тела трёх просьб целиком: ключа `terminal` нет ни в одном, и менеджер
+    // берёт `claudeWt.terminal`.
+    #[test]
+    fn open_bodies_leave_the_terminal_to_the_manager() {
         assert_eq!(
-            open_payload("s1", "", "", NOWHERE),
+            open_payload("s1", "", NOWHERE),
             r#"{"action":"terminal","id":"s1"}"#
         );
         assert_eq!(
-            open_project_payload("/p/site", "", NOWHERE),
+            open_project_payload("/p/site", NOWHERE),
             r#"{"action":"terminal","cwd":"/p/site"}"#
         );
         assert_eq!(
-            open_new_payload("/p/site", "site-2", "", NOWHERE),
+            open_new_payload("/p/site", "site-2", NOWHERE),
             r#"{"action":"terminal-new","cwd":"/p/site","name":"site-2"}"#
         );
-    }
-
-    // Все три просьбы, кончающиеся терминалом, обязаны нести имя: Enter на
-    // сессии, Enter на строке проекта (та же дорога у проектного хоткея) и
-    // `^N`. Забудь любую — выбор пикера действовал бы через раз, и объяснить
-    // это человеку было бы нечем.
-    #[test]
-    fn every_terminal_request_names_it() {
-        assert!(open_payload("s1", "/p/site", "wt", NOWHERE).contains(r#""terminal":"wt""#));
-        assert!(open_project_payload("/p/site", "wt", NOWHERE).contains(r#""terminal":"wt""#));
-        assert!(open_new_payload("/p/site", "site-2", "wt", NOWHERE).contains(r#""terminal":"wt""#));
     }
 
     /// Просьба без единой оговорки про место: как ставили, так и ставьте.
@@ -1008,15 +1025,15 @@ mod tests {
     #[test]
     fn the_cursor_point_rides_along_when_asked() {
         assert_eq!(
-            open_payload("s1", "", "", at(2560.0, 300.0)),
+            open_payload("s1", "", at(2560.0, 300.0)),
             r#"{"action":"terminal","cursor":{"x":2560,"y":300},"id":"s1"}"#
         );
         assert_eq!(
-            open_project_payload("/p/site", "", at(-1920.0, 12.0)),
+            open_project_payload("/p/site", at(-1920.0, 12.0)),
             r#"{"action":"terminal","cursor":{"x":-1920,"y":12},"cwd":"/p/site"}"#
         );
         assert_eq!(
-            open_new_payload("/p/site", "site-2", "", at(0.0, 0.0)),
+            open_new_payload("/p/site", "site-2", at(0.0, 0.0)),
             r#"{"action":"terminal-new","cursor":{"x":0,"y":0},"cwd":"/p/site","name":"site-2"}"#
         );
     }
@@ -1027,7 +1044,7 @@ mod tests {
     // отрицательную точку, и усечение уводило бы её от края наружу.
     #[test]
     fn the_cursor_point_is_whole_pixels() {
-        assert!(open_payload("s1", "", "", at(2559.6, -0.4))
+        assert!(open_payload("s1", "", at(2559.6, -0.4))
             .contains(r#""cursor":{"x":2560,"y":0}"#));
     }
 
@@ -1038,18 +1055,18 @@ mod tests {
     #[test]
     fn every_terminal_request_can_carry_the_cursor() {
         let point = at(10.0, 20.0);
-        assert!(open_payload("s1", "/p/site", "wt", point).contains(r#""cursor""#));
-        assert!(open_project_payload("/p/site", "wt", point).contains(r#""cursor""#));
-        assert!(open_new_payload("/p/site", "site-2", "wt", point).contains(r#""cursor""#));
+        assert!(open_payload("s1", "/p/site", point).contains(r#""cursor""#));
+        assert!(open_project_payload("/p/site", point).contains(r#""cursor""#));
+        assert!(open_new_payload("/p/site", "site-2", point).contains(r#""cursor""#));
     }
 
     // Выключенная галка не должна отличаться от пикера прежней версии ни одним
     // знаком: приёмник читает отсутствие ключа как «ставь как ставил».
     #[test]
     fn no_cursor_means_no_key() {
-        assert!(!open_payload("s1", "/p/site", "wt", NOWHERE).contains("cursor"));
-        assert!(!open_project_payload("/p/site", "wt", NOWHERE).contains("cursor"));
-        assert!(!open_new_payload("/p/site", "s-2", "wt", NOWHERE).contains("cursor"));
+        assert!(!open_payload("s1", "/p/site", NOWHERE).contains("cursor"));
+        assert!(!open_project_payload("/p/site", NOWHERE).contains("cursor"));
+        assert!(!open_new_payload("/p/site", "s-2", NOWHERE).contains("cursor"));
     }
 
     // Ctrl на строке списка: окно встаёт под курсором и остаётся там. Ключ
@@ -1059,12 +1076,12 @@ mod tests {
     #[test]
     fn every_terminal_request_can_ask_to_skip_autoplacement() {
         assert_eq!(
-            open_payload("s1", "", "", pinned(2560.0, 300.0)),
+            open_payload("s1", "", pinned(2560.0, 300.0)),
             r#"{"action":"terminal","cursor":{"x":2560,"y":300},"id":"s1","noAutoplace":true}"#
         );
-        assert!(open_project_payload("/p/site", "wt", pinned(10.0, 20.0)).contains(r#""noAutoplace":true"#));
+        assert!(open_project_payload("/p/site", pinned(10.0, 20.0)).contains(r#""noAutoplace":true"#));
         assert!(
-            open_new_payload("/p/site", "site-2", "wt", pinned(10.0, 20.0))
+            open_new_payload("/p/site", "site-2", pinned(10.0, 20.0))
                 .contains(r#""noAutoplace":true"#)
         );
     }
@@ -1074,10 +1091,10 @@ mod tests {
     // ровно так же, как у пикера прежней версии.
     #[test]
     fn no_mark_means_no_key() {
-        assert!(!open_payload("s1", "/p/site", "wt", NOWHERE).contains("noAutoplace"));
-        assert!(!open_payload("s1", "/p/site", "wt", at(10.0, 20.0)).contains("noAutoplace"));
-        assert!(!open_project_payload("/p/site", "wt", at(10.0, 20.0)).contains("noAutoplace"));
-        assert!(!open_new_payload("/p/site", "s-2", "wt", at(10.0, 20.0)).contains("noAutoplace"));
+        assert!(!open_payload("s1", "/p/site", NOWHERE).contains("noAutoplace"));
+        assert!(!open_payload("s1", "/p/site", at(10.0, 20.0)).contains("noAutoplace"));
+        assert!(!open_project_payload("/p/site", at(10.0, 20.0)).contains("noAutoplace"));
+        assert!(!open_new_payload("/p/site", "s-2", at(10.0, 20.0)).contains("noAutoplace"));
     }
 
     // Имя считается от `terminal.file` в конфиге — по имени файла без каталога:
@@ -1119,7 +1136,7 @@ mod tests {
     // отсутствие каталога отличает от «каталог — пустая строка».
     #[test]
     fn open_body_without_a_dir_carries_no_key() {
-        assert_eq!(open_payload("s1", "", "", NOWHERE), r#"{"action":"terminal","id":"s1"}"#);
+        assert_eq!(open_payload("s1", "", NOWHERE), r#"{"action":"terminal","id":"s1"}"#);
     }
 
     // Тело просьбы проектного хоткея: каталог есть, `id` нет вовсе. Пустую
@@ -1130,7 +1147,7 @@ mod tests {
     #[test]
     fn open_project_body_carries_no_id() {
         assert_eq!(
-            open_project_payload("/p/site", "", NOWHERE),
+            open_project_payload("/p/site", NOWHERE),
             r#"{"action":"terminal","cwd":"/p/site"}"#
         );
     }
@@ -1146,7 +1163,7 @@ mod tests {
     #[test]
     fn open_new_body_names_the_session() {
         assert_eq!(
-            open_new_payload("/p/site", "site-2", "", NOWHERE),
+            open_new_payload("/p/site", "site-2", NOWHERE),
             r#"{"action":"terminal-new","cwd":"/p/site","name":"site-2"}"#
         );
     }

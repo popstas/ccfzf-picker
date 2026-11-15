@@ -606,13 +606,11 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
     // Ответа агрегатора здесь нет — только конфиг, поэтому просимый адрес
     // всегда пуст, и `resolve_base` откатывается на базу из конфига.
     let base = crate::mqtt::resolve_base(&broker, "");
-    // Имя терминала считается здесь же, из того же прочитанного конфига:
-    // спросить страницу нельзя — у скрытого пикера webview усыплён целиком, а
-    // хоткей нажимают ровно тогда, когда пикер скрыт. Ради этого имя и живёт в
-    // Rust, а не в `settings-form.js`.
-    let terminal = crate::mqtt::terminal_name(&raw);
-    // Точка курсора — оттуда же и по той же причине, что имя терминала: галка
-    // `openOnActiveDisplay` живёт в конфиге, а спросить страницу нельзя. Своя
+    // Имени терминала в просьбе нет: терминал выбирает менеджер по
+    // `claudeWt.terminal` (см. `TERMINAL_NAMES` в `mqtt.rs`).
+    // Точка курсора — из того же прочитанного конфига: галка
+    // `openOnActiveDisplay` живёт в конфиге, а спросить страницу нельзя — у
+    // скрытого пикера webview усыплён целиком, а хоткей нажимают ровно тогда. Своя
     // ли это машина, здесь не спрашивают: до этой строки доезжает только та,
     // чей менеджер сам и принимает просьбу (`manager_takes_open` выше).
     // Ctrl у клавиши нет: нажимают её вслепую, при скрытом пикере, — то есть
@@ -652,16 +650,16 @@ pub fn press(app: &tauri::AppHandle, cwd: &str) {
         let sent = match transport {
             crate::Transport::Http => {
                 if name.is_empty() {
-                    crate::manager_http::open_project(&endpoint, &cwd, &terminal, place)
+                    crate::manager_http::open_project(&endpoint, &cwd, place)
                 } else {
-                    crate::manager_http::open_new(&endpoint, &cwd, &name, &terminal, place)
+                    crate::manager_http::open_new(&endpoint, &cwd, &name, place)
                 }
             }
             crate::Transport::Mqtt => {
                 if name.is_empty() {
-                    crate::mqtt::open_project(&broker, &base, &cwd, &terminal, place)
+                    crate::mqtt::open_project(&broker, &base, &cwd, place)
                 } else {
-                    crate::mqtt::open_new(&broker, &base, &cwd, &name, &terminal, place)
+                    crate::mqtt::open_new(&broker, &base, &cwd, &name, place)
                 }
             }
         };

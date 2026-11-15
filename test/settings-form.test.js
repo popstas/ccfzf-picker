@@ -283,6 +283,16 @@ test('поля терминала пресет не отменяет, а зап�
   assert.ok(ids.indexOf('terminalPreset') < ids.indexOf('terminal.file'));
 });
 
+test('подпись пресета говорит, что на Windows терминал выбирает менеджер', () => {
+  // Пикер больше не шлёт своё имя терминала в claude-session-open, и на
+  // машине с windows11-manager пресет для сессий claude-wt не действует. Без
+  // подписи это выглядит проигнорированной настройкой: выбран WezTerm, а
+  // открывается wt. Значение из менеджера не показываем — хватит подписи.
+  const preset = PAGES.find(p => p.id === 'general').fields.find(f => f.id === 'terminalPreset');
+  assert.match(preset.hint, /windows11-manager/);
+  assert.match(preset.hint, /claudeWt\.terminal/);
+});
+
 // Выпадашка размера — первый тип поля, у которого значение не строка и не
 // булево, и круг «конфиг → поле → патч» на нём проверяется отдельно: строка из
 // DOM (`<select>` отдаёт её всегда) обязана сравняться с числом из конфига,

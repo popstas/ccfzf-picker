@@ -1022,22 +1022,23 @@ fn transport_for(http: &str) -> Transport {
 // она проверяет ровно то место, где транспорт для нескольких целей выбирается
 // руками, а не единственным `match`, — и падает на опечатке в предикате.
 
-/// Конфиг для просьбы: брокер только если он есть, плюс имя терминала и сырой
-/// конфиг.
+/// Конфиг для просьбы: брокер только если он есть, плюс сырой конфиг.
+///
+/// Имени терминала здесь нет: терминал выбирает менеджер по
+/// `claudeWt.terminal`, см. `TERMINAL_NAMES` в `mqtt.rs`.
 ///
 /// Брокер стал необязательным, и это суть правки: до неё каждая из команд
 /// первым делом требовала его и отвечала «mqtt is not configured» — на
 /// машине, где брокер не нужен вовсе, потому что менеджер достижим напрямую.
-fn config_parts() -> Result<(Option<mqtt::Broker>, String, serde_json::Value), String> {
+fn config_parts() -> Result<(Option<mqtt::Broker>, serde_json::Value), String> {
     let raw = load_config()?;
     let broker = mqtt::broker_from_config(&raw);
     let broker = if broker.is_configured() { Some(broker) } else { None };
-    let terminal = mqtt::terminal_name(&raw);
-    // Сырой конфиг отдаётся третьим, а не читается вторым разом: кроме брокера
-    // и терминала из него же спрашивается `openOnActiveDisplay` (`cursor_hint`),
+    // Сырой конфиг отдаётся вторым, а не читается вторым разом: кроме брокера
+    // из него же спрашивается `openOnActiveDisplay` (`cursor_hint`),
     // и два чтения одного файла на одно нажатие разошлись бы ровно тогда, когда
     // человек правит настройки при открытом пикере.
-    Ok((broker, terminal, raw))
+    Ok((broker, raw))
 }
 
 /// Брокер или внятный отказ — для ветки, которая уже выбрала MQTT.
@@ -1328,7 +1329,7 @@ async fn open_session_mqtt(
     // Брокер читается на общей дороге, даже когда его нет: терминал и
     // `openOnActiveDisplay` нужны обеим ветками, а требовать брокер обязана
     // только та из них, что его действительно спрашивает.
-    let (broker, terminal, raw) = config_parts()?;
+    let (broker, raw) = config_parts()?;
     let cwd = cwd.unwrap_or_default().trim().to_string();
     let place = if same_machine.unwrap_or(false) {
         placement(&app, &raw, no_autoplace.unwrap_or(false))
@@ -1338,7 +1339,7 @@ async fn open_session_mqtt(
     let endpoint = http.unwrap_or_default();
     let result = match transport_for(&endpoint) {
         Transport::Http => tauri::async_runtime::spawn_blocking(move || {
-            manager_http::open(&endpoint, &id, &cwd, &terminal, place)
+            manager_http::open(&endpoint, &id, &cwd, place)
         })
         .await
         .map_err(|e| format!("open_session_mqtt task failed: {e}"))?,
@@ -1348,7 +1349,7 @@ async fn open_session_mqtt(
             // конфига — запасной ход для трекера прежней версии.
             let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
             tauri::async_runtime::spawn_blocking(move || {
-                mqtt::open(&broker, &base, &id, &cwd, &terminal, place)
+                mqtt::open(&broker, &base, &id, &cwd, place)
             })
             .await
             .map_err(|e| format!("open_session_mqtt task failed: {e}"))?
@@ -1384,14 +1385,14 @@ async fn open_project_mqtt(
     poller: tauri::State<'_, poller::Poller>,
 ) -> Result<(), String> {
     allow_any_foreground();
-    let (broker, terminal, raw) = config_parts()?;
+    let (broker, raw) = config_parts()?;
     // Оговорки «своя ли машина» здесь нет и не нужно: `chooseProjectOpenAction`
     // отдаёт ветку менеджера только на машине самого менеджера.
     let place = placement(&app, &raw, no_autoplace.unwrap_or(false));
     let endpoint = http.unwrap_or_default();
     let result = match transport_for(&endpoint) {
         Transport::Http => tauri::async_runtime::spawn_blocking(move || {
-            manager_http::open_project(&endpoint, &cwd, &terminal, place)
+            manager_http::open_project(&endpoint, &cwd, place)
         })
         .await
         .map_err(|e| format!("open_project_mqtt task failed: {e}"))?,
@@ -1402,7 +1403,7 @@ async fn open_project_mqtt(
             // трекера прежней версии.
             let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
             tauri::async_runtime::spawn_blocking(move || {
-                mqtt::open_project(&broker, &base, &cwd, &terminal, place)
+                mqtt::open_project(&broker, &base, &cwd, place)
             })
             .await
             .map_err(|e| format!("open_project_mqtt task failed: {e}"))?
@@ -1435,14 +1436,14 @@ async fn new_session_mqtt(
     poller: tauri::State<'_, poller::Poller>,
 ) -> Result<(), String> {
     allow_any_foreground();
-    let (broker, terminal, raw) = config_parts()?;
+    let (broker, raw) = config_parts()?;
     // Как и у `open_project_mqtt`: до этой команды доходят только со своей
     // машины — ветку выбирает `chooseProjectOpenAction`.
     let place = placement(&app, &raw, no_autoplace.unwrap_or(false));
     let endpoint = http.unwrap_or_default();
     let result = match transport_for(&endpoint) {
         Transport::Http => tauri::async_runtime::spawn_blocking(move || {
-            manager_http::open_new(&endpoint, &cwd, &name, &terminal, place)
+            manager_http::open_new(&endpoint, &cwd, &name, place)
         })
         .await
         .map_err(|e| format!("new_session_mqtt task failed: {e}"))?,
@@ -1453,7 +1454,7 @@ async fn new_session_mqtt(
             // ход для трекера прежней версии.
             let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
             tauri::async_runtime::spawn_blocking(move || {
-                mqtt::open_new(&broker, &base, &cwd, &name, &terminal, place)
+                mqtt::open_new(&broker, &base, &cwd, &name, place)
             })
             .await
             .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
