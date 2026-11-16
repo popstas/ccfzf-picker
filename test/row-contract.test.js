@@ -406,11 +406,11 @@ const PROJECTS_NOW = 1786045920; // минута после mtime первого
  * внутри buildProjectList — она про ответ агрегатора, а занятость клавиши
  * знает только эта машина.
  */
-function renderProjectRows(projects, query, toggles, taken, stale) {
+function renderProjectRows(projects, query, toggles, taken, stale, extra = {}) {
   const source = pageFunctions(
     'projectItem(project, nowSec)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)',
     'staleSettings()');
-  const projectRows = buildProjectList({ projects });
+  const projectRows = buildProjectList({ projects, windowHost: extra.windowHost }, extra.configHost);
   markHotkeysTaken(projectRows, taken || []);
   const staleConfig = stale || { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 };
   // Галка dimStale — как в normalizeUiState на живой странице: если тест её
@@ -436,6 +436,8 @@ function renderProjectRows(projects, query, toggles, taken, stale) {
     hotkeyHtml: Glyph.hotkeyHtml,
     todoHtml: Glyph.todoHtml,
     projectCountHtml: Glyph.projectCountHtml,
+    windowIconHtml: Glyph.windowIconHtml,
+    windowIcons: extra.windowIcons || new Map(),
     titleAttr: Glyph.titleAttr,
     query: query || '',
     nowSec: PROJECTS_NOW,
@@ -2525,4 +2527,18 @@ test('кнопка иерархии стоит между широким реж�
   const tree = SESSIONS_HTML.indexOf('id="tree-button"');
   const settings = SESSIONS_HTML.indexOf('id="settings-button"');
   assert.ok(wide > 0 && tree > wide && settings > tree, `${wide} ${tree} ${settings}`);
+});
+
+// Решение владельца 16.11.2026: строка проекта тоже с иконкой — той, что
+// трекер своей машины поставил бы окну сессии этого каталога.
+test('иконка проекта встаёт перед именем строки проекта', () => {
+  const ICON = 'X:\\icons\\proj.ico';
+  const URL = 'data:image/png;base64,AAAA';
+  const projects = [{ ...AGGREGATOR_PROJECTS[0], icon: ICON }];
+  const html = (extra) => renderProjectRows(projects, '', null, null, null, extra).items[0].html;
+  const own = html({ windowHost: 'win-host', configHost: 'win-host', windowIcons: new Map([[ICON, URL]]) });
+  assert.ok(own.includes(`<div class="name"><img class="winicon" src="${URL}" width="16" height="16" alt="">`), own);
+  // Проекты чужой машины — путь здесь не прочитается.
+  const foreign = html({ windowHost: 'mac-host', configHost: 'win-host', windowIcons: new Map([[ICON, URL]]) });
+  assert.ok(!foreign.includes('winicon'), foreign);
 });

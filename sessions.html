@@ -1483,6 +1483,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // строки сессии: строка имени здесь flex (ради подписи с хоткеем), а
       // безымянный flex-элемент обрезается без многоточия.
       `<div class="text"><div class="name">` +
+      // Иконка проекта — та, что трекер своей машины поставил бы окну сессии
+      // этого каталога; та же windowIconHtml, что у строки сессии, и стоит
+      // так же первой. Нет её — ничего, имя не сдвигается.
+      windowIconHtml(project, windowIcons) +
       (project.mark ? '<span class="mark">★</span> ' : '') +
       `<span class="label">${escapeHtml(project.label)}</span>` +
       // Хоткей — подписью рядом с именем, как метка PR и имя окна у сессии:
@@ -2328,7 +2332,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     lastSessions = state.sessions;
     // Поля может не быть — старый агрегатор на той стороне. Тогда режим /a
     // покажет пустой список, и это честный ответ, а не поломка.
-    projectRows = window.ProjectList.buildProjectList(state);
+    projectRows = window.ProjectList.buildProjectList(state, CONFIG.windowHost);
     // То же самое про снимки и режим /s.
     // Снимки соседних машин в списке не нужны: восстановить их раскладку на
     // своём экране человеку нечего.

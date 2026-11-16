@@ -48,8 +48,13 @@
    * `missingLast` утопил бы весь список в конец одинаковым способом. Свежесть
    * — единственное, что у проекта есть.
    */
-  function buildProjectList({ projects } = {}) {
+  function buildProjectList(state, configHost) {
+    const { projects } = state || {};
     const list = Array.isArray(projects) ? projects : [];
+    // Иконка строки — та, что трекер своей машины поставил бы окну сессии
+    // этого каталога (`projects[].icon`); чужой машины — нет, путь там не
+    // прочитается. См. trackerIcons.
+    const icons = windowApi.trackerIcons(state, configHost).projects;
     return list
       .filter(p => p && typeof p.path === 'string' && p.path)
       .map(p => ({
@@ -81,6 +86,10 @@
         // session-glyph.js): числам из чужого файла не верит именно тот, кто
         // их печатает.
         todo: Array.isArray(p.todo) ? p.todo : [],
+        // Под тем же именем, что у сессии: картинку рисует общая
+        // windowIconHtml, а дозаказывает requestWindowIcons по `rows`, куда
+        // строка проекта попадает наравне с сессиями. Пустая строка — нет.
+        windowIcon: icons.get(p.path) || '',
         // Метка источника: слияние в Rust (merge_state.rs) ставит её на
         // каждую строку списка, и транспорт действия (commandParts) читает
         // именно её, а не CONFIG.sshHost, — иначе местный проект открылся бы

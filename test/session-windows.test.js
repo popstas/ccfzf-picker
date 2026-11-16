@@ -501,3 +501,39 @@ test('placeIds без настройки stale отсева не делает', 
   ];
   assert.deepStrictEqual(SessionWindows.placeIds(rows, STATE, 'desktop-box'), ['old', 'hidden']);
 });
+
+// ── Иконки строк без окна ─────────────────────────────────────────────────
+//
+// Решение владельца 16.11.2026: иконку показывают и история, и проекты. Окна у
+// таких строк нет, и путь приезжает не в записи окна, а от трекера: иконки
+// проектов — в `projects[].icon` (верхний `windowHost` называет машину, чьи
+// это проекты), корона head — в записи машины (`windowHosts[].headIcon`).
+// Путь живёт на диске той машины, поэтому берётся только у своей.
+{
+  const { trackerIcons } = require('../frontend-src/session-windows');
+  const STATE = {
+    windowHost: 'Win-Host',
+    projects: [
+      { path: '/p/a', icon: 'X:\\i\\a.ico' },
+      { path: '/p/b', icon: '  X:\\i\\b.ico  ' },
+      { path: '/p/c' },
+      { path: '/p/d', icon: 7 },
+    ],
+    windowHosts: [{ host: 'win-host', headIcon: 'X:\\r\\crown.ico' }, { host: 'other', headIcon: 'Y:\\crown.ico' }],
+  };
+
+  test('иконки проектов и корона — со своей машины', () => {
+    const got = trackerIcons(STATE, 'WIN-HOST');
+    assert.deepStrictEqual([...got.projects], [['/p/a', 'X:\\i\\a.ico'], ['/p/b', 'X:\\i\\b.ico']]);
+    assert.strictEqual(got.head, 'X:\\r\\crown.ico');
+  });
+
+  test('чужая машина и неназванная своя — пусто', () => {
+    for (const host of ['other', '', undefined]) {
+      const got = trackerIcons(STATE, host);
+      assert.strictEqual(got.projects.size, 0, String(host));
+      assert.strictEqual(got.head, host === 'other' ? 'Y:\\crown.ico' : '', String(host));
+    }
+    assert.deepStrictEqual(trackerIcons(null, 'win-host'), { projects: new Map(), head: '' });
+  });
+}

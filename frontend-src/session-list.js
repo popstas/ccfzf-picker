@@ -170,6 +170,13 @@
       windowApi.trackerHosts(state).map(e => windowApi.normHost((e || {}).host)).filter(Boolean),
     );
 
+    // Иконки строк без окна (история): проекта по каталогу и корона head. С
+    // трекера своей машины — см. trackerIcons. Head — та, на кого ссылается
+    // `headId` хоть одной строки: метку head самой сессии агрегатор не везёт,
+    // а реестр детей — везёт.
+    const icons = windowApi.trackerIcons(state, configHost);
+    const headIds = new Set(list.map(x => String((x || {}).headId || '').trim()).filter(Boolean));
+
     const rows = [];
     for (const s of list) {
       if (!s || !s.id || s.kind === 'background') continue;
@@ -287,7 +294,13 @@
           // Иконка окна (поле `icon` записи окна от трекера) — путь, а не
           // картинка: читает её Rust (`window_icons`), страница рисует.
           // Только у своего окна — см. windowIconOf.
-          windowIcon: windowIconOf(w, configHost),
+          //
+          // Нет её — иконка, которую трекер поставил бы окну этой сессии: у
+          // head корона, у прочих иконка проекта по каталогу. Так закрытая
+          // сессия в истории выглядит так же, как выглядела с окном.
+          windowIcon: windowIconOf(w, configHost)
+            || (headIds.has(s.id) ? icons.head : '')
+            || icons.projects.get(s.cwd || '') || '',
           // Все окна сессии целиком, без урезания до «своего». Единственный
           // потребитель — unreadTargets (session-windows.js): отмотка
           // «просмотрено» обязана уйти каждому трекеру сессии, а не только
