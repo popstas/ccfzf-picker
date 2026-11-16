@@ -1212,9 +1212,9 @@ test('shell: без поля (старый ccfzf) всё как раньше', (
 
 test('shell: строка карточки называет команду и экранирует её', () => {
   assert.strictEqual(shellHtml({ live: true, shell: true, shellCmd: 'sleep 300 && echo "<ok>"' }),
-    '<div class="bgshell">background command: sleep 300 &amp;&amp; echo &quot;&lt;ok&gt;&quot;</div>');
+    '<div class="bgshell">shell: sleep 300 &amp;&amp; echo &quot;&lt;ok&gt;&quot;</div>');
   assert.strictEqual(shellHtml({ live: true, shell: true, shellCmd: '' }),
-    '<div class="bgshell">background command</div>');
+    '<div class="bgshell">shell</div>');
   assert.strictEqual(shellHtml({ live: false, shell: true, shellCmd: 'x' }), '');
 });
 

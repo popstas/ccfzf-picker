@@ -480,7 +480,7 @@
   function shellHtml(session) {
     if (!session || !session.live || !session.shell) return '';
     const cmd = typeof session.shellCmd === 'string' ? session.shellCmd : '';
-    return `<div class="bgshell">background command${cmd ? `: ${escapeHtml(cmd)}` : ''}</div>`;
+    return `<div class="bgshell">shell${cmd ? `: ${escapeHtml(cmd)}` : ''}</div>`;
   }
 
   function commentHtml(session, show = true) {
