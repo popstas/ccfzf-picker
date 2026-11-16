@@ -1588,7 +1588,8 @@ const infoBackdrop = document.getElementById('info-backdrop');
       html: `<div class="row snapshot-session${row.open ? ' on-screen' : ''}" data-index="${index}"` +
         ` title="${escapeHtml(row.cwd)}">` +
         `<div class="dot${row.open ? ' active' : ''}"></div>` +
-        `<div class="text"><div class="name">${escapeHtml(row.label)}` +
+        // Иконка проекта — как у строки сессии, первой в имени; нет — ничего.
+        `<div class="text"><div class="name">${windowIconHtml(row, windowIcons)}${escapeHtml(row.label)}` +
         // Имя сессии — подписью рядом, и только когда оно расходится с именем
         // каталога: сессий одного проекта в снимке бывает несколько.
         `${snapshotNameHtml(row.label, row.title)}</div>` +
@@ -1606,7 +1607,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
   // целиком, — поэтому у него класс `row`, а не `group-label`.
   function snapshotItemsFor(query) {
     const open = window.PickerSnapshots.openIdsFromState(lastState);
-    return window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query, collapsedDays);
+    // Иконки проектов — тем же путём, что у истории: карта трекера своей
+    // машины. Снимки и так только свои (snapshotsHere), чужих путей тут нет.
+    const icons = window.SessionWindows.trackerIcons(lastState, CONFIG.windowHost).projects;
+    return window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query, collapsedDays, icons);
   }
 
   /**
@@ -2136,7 +2140,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
         windowHost: lastState.windowHost, windowPid: lastState.windowPid,
       },
       sortMode,
-      { ...filters, configHost: CONFIG.windowHost },
+      // Иконки истории (проект по каталогу, корона head) — с полного ответа:
+      // пересобранный выше их источников (`projects`, `windowHosts`) не несёт.
+      { ...filters, configHost: CONFIG.windowHost,
+        icons: window.SessionWindows.trackerIcons(lastState, CONFIG.windowHost) },
     );
     groups = payload.groups;
     sortMode = payload.sort;

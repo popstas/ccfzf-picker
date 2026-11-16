@@ -479,6 +479,9 @@
     // верхними полями ответа, и по одной записи окна её не узнать.
     let rows = listApi.buildSessionList({
       sessions: res.sessions, seen: res.seen, state: res, configHost: opts.configHost,
+      // Иконки строк без окна — готовой картой: ответ здесь бывает пересобран
+      // без `projects`/`windowHosts` (см. icons в buildSessionList).
+      icons: opts.icons,
     });
     if (opts.onlyLive) rows = rows.filter(r => r.live);
     // Историю `onlyWindow` не трогает, и это не поблажка, а определение: окна

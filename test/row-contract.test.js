@@ -640,12 +640,19 @@ function renderSnapshotRows(snapshots, query, options) {
   const opts = options || {};
   const ctx = {
     // Ровно то, чем itemsOfSection пользуется снаружи себя.
-    window: { PickerSnapshots: { buildSnapshotRows, openIdsFromState }, PickerSections },
+    window: { PickerSnapshots: { buildSnapshotRows, openIdsFromState }, PickerSections, SessionWindows },
+    CONFIG: { windowHost: opts.configHost || '' },
+    windowIconHtml: Glyph.windowIconHtml,
+    windowIcons: opts.windowIcons || new Map(),
     snapshotRows: snapshots,
     // Отступлений нет — дни складываются по умолчанию: свежий развёрнут.
     collapsedDays: (opts.collapsedDays || {}),
     // Открытые окна приезжают тем же ответом, что и весь список.
-    lastState: { sessions: (opts.open || []).map(id => ({ id, window: { hwnd: 1 } })) },
+    lastState: {
+      sessions: (opts.open || []).map(id => ({ id, window: { hwnd: 1 } })),
+      windowHost: opts.windowHost || '',
+      projects: opts.projects || [],
+    },
     rows: [],
     toggles: opts.toggles || { showPaths: true },
     escapeHtml: Glyph.escapeHtml,
@@ -1395,7 +1402,7 @@ test('подписи колонок совпадают в пикере и в н�
 // Показанные режим и запрос подставные, а `activeFilters` — настоящая, из
 // session-groups.js: правило «спрошенное перебивает отобранное» проверяется
 // здесь вместе с проводкой, а не вместо неё.
-function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query: '' }) {
+function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query: '' }, lastState = {}) {
   const source = SESSIONS_HTML.match(/\n {2}function regroup\(\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'regroup не найден в sessions.html — тест сторожит не то');
   let opts = null;
@@ -1405,12 +1412,13 @@ function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query:
         activeFilters: Groups.activeFilters,
         buildSessionsPayload: (_state, sort, o) => { opts = o; return { groups: [], sort }; },
       },
+      SessionWindows,
     },
     CONFIG: { onlyLive: configOnlyLive, windowHost: 'win-host' },
     toggles,
     shownModeAndQuery: () => shown,
     lastSessions: [],
-    lastState: {},
+    lastState,
     seen: {},
     sortMode: 'recent',
     groups: [],
@@ -2541,4 +2549,35 @@ test('иконка проекта встаёт перед именем стро�
   // Проекты чужой машины — путь здесь не прочитается.
   const foreign = html({ windowHost: 'mac-host', configHost: 'win-host', windowIcons: new Map([[ICON, URL]]) });
   assert.ok(!foreign.includes('winicon'), foreign);
+});
+
+// Иконка проекта у строки сессии снимка (Стас 16.11.2026) — тем же путём, что
+// у истории: карта трекера своей машины, путь → картинка от Rust.
+test('строка сессии снимка рисует иконку своего проекта перед именем', () => {
+  const ICON = 'X:\\icons\\proj.ico';
+  const URL = 'data:image/png;base64,AAAA';
+  const { items } = renderSnapshotRows(AGGREGATOR_SNAPSHOTS, '', {
+    configHost: 'win-host', windowHost: 'win-host',
+    projects: [{ path: '/home/user/projects/ccfzf', icon: ICON }],
+    windowIcons: new Map([[ICON, URL]]),
+  });
+  const session = items.find(i => i.key === 'snap:snap-1:aaa');
+  assert.ok(session.html.includes(`<div class="name"><img class="winicon" src="${URL}" width="16" height="16" alt="">`), session.html);
+  const other = items.find(i => i.key === 'snap:snap-1:bbb');
+  assert.ok(!other.html.includes('winicon'), other.html);
+});
+
+// Стас 16.11.2026: «в history нет иконок проектов». regroup пересобирает ответ
+// из четырёх полей, и источников иконок (`projects`, `windowHosts`) в нём нет —
+// поэтому карта обязана уехать в buildSessionsPayload опцией, собранной с
+// полного ответа. Вычитывается настоящий regroup.
+test('regroup отдаёт карту иконок с полного ответа — иначе у истории их нет', () => {
+  const opts = regroupWith(false, {}, undefined, {
+    windowHost: 'win-host',
+    projects: [{ path: '/home/user/a', icon: 'X:\\i\\a.ico' }],
+    windowHosts: [{ host: 'win-host', pid: 7, canFocus: true, headIcon: 'X:\\r\\crown.ico' }],
+  });
+  assert.ok(opts.icons, 'карта иконок не передана');
+  assert.strictEqual(opts.icons.projects.get('/home/user/a'), 'X:\\i\\a.ico');
+  assert.strictEqual(opts.icons.head, 'X:\\r\\crown.ico');
 });

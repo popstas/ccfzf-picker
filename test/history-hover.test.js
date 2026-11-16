@@ -51,3 +51,4 @@ test('в яркой истории строка под курсором снов
   assert.ok(row.at > STYLE.indexOf('.row.stale:not(.active):hover { background: none; }'),
     'подсветка стоит раньше правила, которое её снимает');
 });
+

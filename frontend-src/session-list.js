@@ -148,7 +148,7 @@
     return !inDesktopApp(row) && (row || {}).agentSource !== 'transcript';
   }
 
-  function buildSessionList({ sessions, seen, state, configHost } = {}) {
+  function buildSessionList({ sessions, seen, state, configHost, icons: givenIcons } = {}) {
     const list = Array.isArray(sessions) ? sessions : [];
     const byId = {};
     for (const s of list) if (s && s.id) byId[s.id] = s;
@@ -174,7 +174,14 @@
     // трекера своей машины — см. trackerIcons. Head — та, на кого ссылается
     // `headId` хоть одной строки: метку head самой сессии агрегатор не везёт,
     // а реестр детей — везёт.
-    const icons = windowApi.trackerIcons(state, configHost);
+    //
+    // Карту можно передать готовой (`icons`), и страница так и делает: она
+    // пересобирает ответ из четырёх полей (regroup в sessions.html), и ни
+    // `projects`, ни `windowHosts` в нём нет — без этого иконок у истории не
+    // было вовсе (Стас 16.11.2026). Своя сборка — для полного ответа.
+    const icons = givenIcons && givenIcons.projects instanceof Map
+      ? givenIcons
+      : windowApi.trackerIcons(state, configHost);
     const headIds = new Set(list.map(x => String((x || {}).headId || '').trim()).filter(Boolean));
 
     const rows = [];

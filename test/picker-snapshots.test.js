@@ -350,3 +350,19 @@ test('snapshotsUnavailable: трекер жив, но дороги до маши
 test('snapshotsUnavailable: трекер жив и достижим — причины нет', () => {
   assert.strictEqual(snapshotsUnavailable(ALIVE, ' Alpha-Host ', true), null);
 });
+
+// Стас 16.11.2026: иконки проектов и у снимков. Строка сессии снимка берёт
+// иконку по каталогу из карты трекера своей машины (`trackerIcons().projects`),
+// точным сравнением — пути у снимков и у проектов приезжают в одной форме, без
+// хвостового слэша (сверено на живом ответе). Заголовкам иконки нет.
+test('строка сессии снимка несёт иконку своего проекта, заголовки — нет', () => {
+  const icons = new Map([['/home/user/projects/js/ccfzf-picker', 'X:\\i\\picker.ico']]);
+  const rows = buildSnapshotRows([SNAP], new Set(), '', {}, icons);
+  const byKind = kind => rows.filter(r => r.kind === kind);
+  assert.deepStrictEqual(byKind('snapshot-session').map(r => r.windowIcon), ['X:\\i\\picker.ico', '']);
+  assert.ok(byKind('snapshot').every(r => !r.windowIcon));
+  assert.ok(byKind('snapshot-day').every(r => !r.windowIcon));
+  // Без карты — пустая строка, а не отсутствие поля.
+  assert.deepStrictEqual(buildSnapshotRows([SNAP], new Set(), '', {})
+    .filter(r => r.kind === 'snapshot-session').map(r => r.windowIcon), ['', '']);
+});
