@@ -1,6 +1,6 @@
 //! Просьбы к оконному менеджеру — прямым http-запросом.
 //!
-//! Второй транспорт тех же пяти просьб, что уже уходят публикацией в MQTT
+//! Второй транспорт тех же шести просьб, что уже уходят публикацией в MQTT
 //! (`mqtt.rs`). Пути и тела не наши: их слушает `ROUTES` в
 //! `windows11-manager/src/http-server.js`, и разбирает тем же роутером, каким
 //! разбирает пришедшее по MQTT. Придумывать рядом свои значило бы заводить
@@ -16,7 +16,7 @@
 //! человеку, что именно не так, — отдельная задача.
 //!
 //! Развилку транспорта (звать этот модуль или `mqtt.rs`) заводит `transport_for`
-//! в `main.rs` — она же зовёт все семь просьб ниже по шести командам и
+//! в `main.rs` — она же зовёт все восемь просьб ниже по семи командам и
 //! хоткею плитки.
 
 use std::time::Duration;
@@ -33,9 +33,10 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 /// Хвост топика → путь у приёмника. Общего источника правды у этих пар нет,
 /// как нет его и у имён команд; согласие держит сторож
 /// `test/manager-routes.test.js`.
-pub const ROUTES: [(&str, &str); 5] = [
+pub const ROUTES: [(&str, &str); 6] = [
     ("/claude-focus", "/claude-wt/focus"),
     ("/claude-session-unread", "/claude-wt/session-unread"),
+    ("/claude-session-seen", "/claude-wt/session-seen"),
     ("/claude-session-open", "/claude-wt/session-open"),
     ("/claude-snapshot-restore", "/claude-wt/snapshot-restore"),
     ("/claude-place", "/claude-wt/place"),
@@ -60,11 +61,11 @@ fn parse_endpoint(raw: &str) -> Option<(String, u16)> {
     Some((host.to_string(), port))
 }
 
-/// Общий ход всех пяти просьб.
+/// Общий ход всех шести просьб.
 ///
 /// Маршрут разрешается раньше адреса — не по важности отказа, а ради теста:
 /// отказ по кривому адресу называет в тексте и маршрут, каким шла просьба, а
-/// значит опечатка в захардкоженном хвосте у любой из семи публичных функций
+/// значит опечатка в захардкоженном хвосте у любой из восьми публичных функций
 /// видна в тексте самого отказа, и ловит её тест без единого похода в сеть
 /// (`every_public_request_carries_its_own_route` ниже).
 fn post(endpoint: &str, topic_tail: &str, body: String) -> Result<(), String> {
@@ -90,6 +91,12 @@ pub fn focus(endpoint: &str, id: &str) -> Result<(), String> {
 /// Вернуть сессию в непрочитанное — у менеджера, а не у себя.
 pub fn unread(endpoint: &str, id: &str) -> Result<(), String> {
     post(endpoint, "/claude-session-unread", focus_body(id))
+}
+
+/// Сказать менеджеру, что сессию посмотрели, не открывая окна («Mark seen»):
+/// он гасит оранжевую кнопку её окна в панели задач.
+pub fn seen(endpoint: &str, id: &str) -> Result<(), String> {
+    post(endpoint, "/claude-session-seen", focus_body(id))
 }
 
 /// Попросить открыть сессию на машине менеджера.
@@ -248,6 +255,7 @@ mod tests {
     fn routes_match_the_receiver() {
         assert_eq!(route_for("/claude-focus"), Some("/claude-wt/focus"));
         assert_eq!(route_for("/claude-session-unread"), Some("/claude-wt/session-unread"));
+        assert_eq!(route_for("/claude-session-seen"), Some("/claude-wt/session-seen"));
         assert_eq!(route_for("/claude-session-open"), Some("/claude-wt/session-open"));
         assert_eq!(route_for("/claude-snapshot-restore"), Some("/claude-wt/snapshot-restore"));
         assert_eq!(route_for("/claude-place"), Some("/claude-wt/place"));
@@ -280,7 +288,7 @@ mod tests {
         );
     }
 
-    /// Опечатка в захардкоженном хвосте у любой из семи публичных функций
+    /// Опечатка в захардкоженном хвосте у любой из восьми публичных функций
     /// ловится здесь без похода в сеть: адрес нарочно кривой, `post()`
     /// отказывает раньше, чем дошёл бы до сети, а маршрут, которым шла
     /// просьба, виден в тексте самого отказа (см. комментарий у `post`).
@@ -289,9 +297,10 @@ mod tests {
     #[test]
     fn every_public_request_carries_its_own_route() {
         let placement = Placement::default();
-        let cases: [(&str, Result<(), String>); 7] = [
+        let cases: [(&str, Result<(), String>); 8] = [
             ("/claude-wt/focus", focus("bad", "id")),
             ("/claude-wt/session-unread", unread("bad", "id")),
+            ("/claude-wt/session-seen", seen("bad", "id")),
             ("/claude-wt/session-open", open("bad", "id", "cwd", placement)),
             ("/claude-wt/session-open", open_project("bad", "cwd", placement)),
             ("/claude-wt/session-open", open_new("bad", "cwd", "name", placement)),

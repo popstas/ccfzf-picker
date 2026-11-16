@@ -1119,14 +1119,48 @@ fn split_targets(targets: &[Target]) -> (Vec<&Target>, Vec<&Target>) {
     (http, mqtt)
 }
 
+/// Какая просьба уходит всем трекерам сессии. Их две, и ход у них общий до
+/// буквы — цели, развилка транспорта, схлопывание баз, первая ошибка после всех
+/// попыток; разнятся только адрес и топик. Две копии одного тела разошлись бы
+/// на первой правке (так и было бы с `split_targets`, сторожащим удвоение).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SessionAsk {
+    /// «Mark unread»: отмотать отметку «просмотрено» у трекера.
+    Unread,
+    /// «Mark seen» и Shift+клик: погасить кнопку окна в панели задач.
+    Seen,
+}
+
+impl SessionAsk {
+    fn command(self) -> &'static str {
+        match self {
+            SessionAsk::Unread => "unread_session_mqtt",
+            SessionAsk::Seen => "seen_session_mqtt",
+        }
+    }
+
+    fn http(self, endpoint: &str, id: &str) -> Result<(), String> {
+        match self {
+            SessionAsk::Unread => manager_http::unread(endpoint, id),
+            SessionAsk::Seen => manager_http::seen(endpoint, id),
+        }
+    }
+
+    fn mqtt(self, broker: &mqtt::Broker, base: &str, id: &str) -> Result<(), String> {
+        match self {
+            SessionAsk::Unread => mqtt::unread(broker, base, id),
+            SessionAsk::Seen => mqtt::seen(broker, base, id),
+        }
+    }
+}
+
 /// Каждая цель получает свою попытку независимо от исхода предыдущих: ранний
 /// выход на первой же ошибке оставлял бы вторую машину неотмотанной — ровно
 /// половинчатую отмотку, ради ухода от которой список целей и завели. Наружу
 /// уходит первая случившаяся ошибка, но только после того, как испробованы
 /// все. Транспорт выбирается для каждой цели своим `transport_for`: при
 /// наличии http публикации в MQTT для этой же цели не происходит вовсе.
-#[tauri::command]
-async fn unread_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), String> {
+async fn ask_session_trackers(ask: SessionAsk, id: String, targets: Vec<Target>) -> Result<(), String> {
     let broker = config_parts()?.0;
     tauri::async_runtime::spawn_blocking(move || {
         // Адрес называет трекер той машины, где стоит окно, и машин этих бывает
@@ -1145,7 +1179,7 @@ async fn unread_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), Str
         // http-цели — каждая своим запросом. Транспорт для каждой уже выбран
         // `transport_for`, и повторной публикации в MQTT для неё не будет.
         for t in http_targets {
-            if let Err(e) = manager_http::unread(&t.http, &id) {
+            if let Err(e) = ask.http(&t.http, &id) {
                 if first_err.is_none() {
                     first_err = Some(e);
                 }
@@ -1161,7 +1195,7 @@ async fn unread_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), Str
             match &broker {
                 Some(broker) => {
                     for base in mqtt::unread_bases(broker, &mqtt_bases) {
-                        if let Err(e) = mqtt::unread(broker, &base, &id) {
+                        if let Err(e) = ask.mqtt(broker, &base, &id) {
                             if first_err.is_none() {
                                 first_err = Some(e);
                             }
@@ -1185,7 +1219,23 @@ async fn unread_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), Str
         }
     })
     .await
-    .map_err(|e| format!("unread_session_mqtt task failed: {e}"))?
+    .map_err(|e| format!("{} task failed: {e}", ask.command()))?
+}
+
+#[tauri::command]
+async fn unread_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), String> {
+    ask_session_trackers(SessionAsk::Unread, id, targets).await
+}
+
+/// Пометить сессию просмотренной у её трекеров — тем же ходом, что отмотка.
+///
+/// Местная отметка ставится страницей сама и брокера не ждёт; эта просьба —
+/// для кнопки окна в панели задач, которую держит служба windows11-manager.
+/// Целей столько же, сколько у отмотки: окна сессии на всех машинах, и
+/// подсветка гаснет у каждого — местная отметка тоже стоит на весь id.
+#[tauri::command]
+async fn seen_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), String> {
+    ask_session_trackers(SessionAsk::Seen, id, targets).await
 }
 
 /// Попросить поднять раскладку снимка.
@@ -1194,7 +1244,7 @@ async fn unread_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), Str
 /// выдаётся: восстановление открывает новые окна, а не поднимает существующее,
 /// и `AllowSetForegroundWindow` тут не при чём.
 ///
-/// Транспорт — как и у остальных пяти просьб: наличие http-адреса решает
+/// Транспорт — как и у остальных просьб: наличие http-адреса решает
 /// `transport_for`, и второй попытки после отказа первой не будет.
 #[tauri::command]
 async fn restore_snapshot_mqtt(
@@ -3350,7 +3400,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             hide_picker, app_version, set_picker_size, poll_now, spawn_detached, open_pr, load_seen, save_seen, load_config,
             terminal_helper, manager_terminal, window_icons,
-            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt,
+            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt, seen_session_mqtt,
             restore_snapshot_mqtt, place_windows_mqtt, set_picker_selection, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
@@ -5222,6 +5272,24 @@ actions:
     /// второй раз, — ровно запрещённое удвоение. Три проверки ловят её порознь:
     /// http-список не должен нести пустых адресов, mqtt-список — непустых, а
     /// сумма долей — быть равна списку целиком (ни потери, ни задвоения).
+    /// Две просьбы к трекерам сессии делят одно тело, и разнятся только
+    /// адресом: перепутай плечи в `SessionAsk` — Shift+клик отматывал бы
+    /// «просмотрено» вместо того, чтобы гасить кнопку окна. Маршрут виден в
+    /// тексте отказа по кривому адресу, без похода в сеть.
+    #[test]
+    fn each_session_ask_goes_to_its_own_route() {
+        for (ask, route, command) in [
+            (super::SessionAsk::Unread, "/claude-wt/session-unread", "unread_session_mqtt"),
+            (super::SessionAsk::Seen, "/claude-wt/session-seen", "seen_session_mqtt"),
+        ] {
+            assert_eq!(
+                ask.http("bad", "id"),
+                Err(format!("manager address is malformed: bad (route {route})")),
+            );
+            assert_eq!(ask.command(), command);
+        }
+    }
+
     #[test]
     fn split_targets_sends_each_target_through_exactly_one_transport() {
         let targets = vec![

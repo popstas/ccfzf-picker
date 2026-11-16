@@ -2497,14 +2497,23 @@ const infoBackdrop = document.getElementById('info-backdrop');
   /**
    * Пометить сессию просмотренной, не открывая её окна.
    *
-   * Зеркало markUnread, но короче ровно на публикацию: отметки складываются по
-   * максимуму, и местная, поставленная «сейчас», перекрывает трекерный
-   * `focusedAt` сама. Отмотке же максимум мешает — оттого markUnread и обязан
-   * просить трекер, а этот ход обходится без брокера вовсе и работает
-   * одинаково на любой машине.
+   * Отметки складываются по максимуму, и местная, поставленная «сейчас»,
+   * перекрывает трекерный `focusedAt` сама — списку брокер не нужен. Нужен он
+   * кнопке окна в панели задач: оранжевой её держит служба windows11-manager,
+   * и без просьбы она горела бы до следующего фокуса окна (Стас 16.11.2026).
+   * Поэтому, как и markUnread, ход просит трекеры сессии — теми же целями и тем
+   * же откатом на адрес менеджера своей машины (`seen_session_mqtt`). Нет
+   * транспорта — остаётся одна местная отметка, как было.
    */
   function markSeenNow(row) {
     markSeen(row.id, Math.floor(Date.now() / 1000)).then(regroup);
+    if (!managerReachable()) return;
+    const targets = window.SessionWindows.unreadTargets(row, lastState);
+    invoke('seen_session_mqtt', {
+      id: row.id,
+      targets: targets.length ? targets : [{ base: '', http: managerHttpHere() }],
+    })
+      .catch((e) => { error = String(e); render(); });
   }
 
   /**
