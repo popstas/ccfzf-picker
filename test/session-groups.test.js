@@ -927,3 +927,26 @@ test('пустой вход не роняет и не выдумывает от�
   assert.deepStrictEqual(activeFilters(), { onlyLive: false, onlyWindow: false, hideDesktop: false });
   assert.deepStrictEqual(activeFilters({}), { onlyLive: false, onlyWindow: false, hideDesktop: false });
 });
+
+// Стас 16.11.2026: «в history нет иконок проектов». Причина — форма ответа,
+// который страница отдаёт сюда: regroup в sessions.html пересобирает его из
+// четырёх полей (sessions, seen, windowHost, windowPid), и ни `projects`, ни
+// `windowHosts` в нём нет — иконкам проекта и короне взяться было неоткуда.
+// Тест сверяет ровно эту форму: карта иконок приезжает опцией `icons`.
+test('история берёт иконку проекта из opts.icons, когда ответ пересобран страницей', () => {
+  const pageShaped = {
+    ok: true, seen: {}, windowHost: 'win-host', windowPid: 7,
+    sessions: [
+      { id: 'h', title: 'head', cwd: '/home/user/a', live: false },
+      { id: 'c', title: 'child', cwd: '/home/user/a', live: false, headId: 'h' },
+      { id: 'x', title: 'чужой каталог', cwd: '/home/user/zzz', live: false },
+    ],
+  };
+  const icons = { projects: new Map([['/home/user/a', 'X:\\i\\a.ico']]), head: 'X:\\r\\crown.ico' };
+  const rows = buildSessionsPayload(pageShaped, 'recent', { configHost: 'win-host', icons })
+    .groups.flatMap(g => g.sessions);
+  const icon = id => rows.find(r => r.id === id).windowIcon;
+  assert.strictEqual(icon('h'), 'X:\\r\\crown.ico');
+  assert.strictEqual(icon('c'), 'X:\\i\\a.ico');
+  assert.strictEqual(icon('x'), '');
+});

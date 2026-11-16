@@ -33,3 +33,22 @@ test('гашение по проекту (dim-other) курсор над ист�
   const rule = ruleWith('[data-block="past"]:hover', '.row.stale');
   assert.ok(rule && rule.selector.includes(':not(.dim-other)'), rule && rule.selector);
 });
+
+// Стас 16.11.2026: «затемнение пропало, но также пропала подсветка строки при
+// наведении на ряд». Старой строке фон под мышью снят (`.row.stale:not(.active):hover`),
+// сигналом наведения был скачок яркости 0.5 → 1, — а в истории под курсором
+// яркие теперь все, и строка под мышью ничем не выделялась. Внутри блока
+// истории ей возвращается фон наведения; оба правила проверяются вместе.
+test('в яркой истории строка под курсором снова подсвечена фоном', () => {
+  const bright = ruleWith('[data-block="past"]:hover', '.row.stale');
+  const row = ruleWith('[data-block="past"]', '.row.stale:not(.active):hover');
+  assert.ok(bright && /opacity:\s*1/.test(bright.body), 'яркость истории под курсором пропала');
+  assert.ok(row, 'подсветки строки под курсором в истории нет');
+  assert.match(row.body, /background:\s*var\(--row-hover\)/);
+  assert.ok(row.selector.includes('[data-block^="past:"]'), row.selector);
+  // После `background: none` у старой строки — иначе порядок в файле решил бы
+  // спор против подсветки.
+  assert.ok(row.at > STYLE.indexOf('.row.stale:not(.active):hover { background: none; }'),
+    'подсветка стоит раньше правила, которое её снимает');
+});
+

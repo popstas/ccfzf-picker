@@ -306,6 +306,15 @@
            и подчиняется своей галке. Сторож — test/history-hover.test.js. */
         .block[data-block="past"]:hover .row.stale:not(.dim-other),
         .block[data-block^="past:"]:hover .row.stale:not(.dim-other) { opacity: 1; }
+        /* Строке под мышью в такой истории возвращается фон наведения. Правило
+           выше снимает у старой строки единственный сигнал наведения — скачок
+           яркости 0.5 → 1, — а фон ей снят `background: none` ещё выше, и строка
+           под курсором ничем не выделялась (Стас, 16.11.2026: «пропала подсветка
+           строки при наведении на ряд»). Внутри блока истории старая строка
+           подсвечивается так же, как обычная; `:not(.active)` держит фон
+           выделения главнее, как и у правила, которое этот фон снимает. */
+        .block[data-block="past"] .row.stale:not(.active):hover,
+        .block[data-block^="past:"] .row.stale:not(.active):hover { background: var(--row-hover); }
         /* Гашение по наведённому проекту. Стоит после `.row.stale` намеренно: обе
            правки меняют opacity, и на строке с обоими классами они не складываются, а
            перекрывают друг друга по порядку в файле. Главнее здесь наведение — оно
@@ -1579,7 +1588,8 @@ const infoBackdrop = document.getElementById('info-backdrop');
       html: `<div class="row snapshot-session${row.open ? ' on-screen' : ''}" data-index="${index}"` +
         ` title="${escapeHtml(row.cwd)}">` +
         `<div class="dot${row.open ? ' active' : ''}"></div>` +
-        `<div class="text"><div class="name">${escapeHtml(row.label)}` +
+        // Иконка проекта — как у строки сессии, первой в имени; нет — ничего.
+        `<div class="text"><div class="name">${windowIconHtml(row, windowIcons)}${escapeHtml(row.label)}` +
         // Имя сессии — подписью рядом, и только когда оно расходится с именем
         // каталога: сессий одного проекта в снимке бывает несколько.
         `${snapshotNameHtml(row.label, row.title)}</div>` +
@@ -1597,7 +1607,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
   // целиком, — поэтому у него класс `row`, а не `group-label`.
   function snapshotItemsFor(query) {
     const open = window.PickerSnapshots.openIdsFromState(lastState);
-    return window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query, collapsedDays);
+    // Иконки проектов — тем же путём, что у истории: карта трекера своей
+    // машины. Снимки и так только свои (snapshotsHere), чужих путей тут нет.
+    const icons = window.SessionWindows.trackerIcons(lastState, CONFIG.windowHost).projects;
+    return window.PickerSnapshots.buildSnapshotRows(snapshotRows, open, query, collapsedDays, icons);
   }
 
   /**
@@ -2127,7 +2140,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
         windowHost: lastState.windowHost, windowPid: lastState.windowPid,
       },
       sortMode,
-      { ...filters, configHost: CONFIG.windowHost },
+      // Иконки истории (проект по каталогу, корона head) — с полного ответа:
+      // пересобранный выше их источников (`projects`, `windowHosts`) не несёт.
+      { ...filters, configHost: CONFIG.windowHost,
+        icons: window.SessionWindows.trackerIcons(lastState, CONFIG.windowHost) },
     );
     groups = payload.groups;
     sortMode = payload.sort;
@@ -2488,14 +2504,23 @@ const infoBackdrop = document.getElementById('info-backdrop');
   /**
    * Пометить сессию просмотренной, не открывая её окна.
    *
-   * Зеркало markUnread, но короче ровно на публикацию: отметки складываются по
-   * максимуму, и местная, поставленная «сейчас», перекрывает трекерный
-   * `focusedAt` сама. Отмотке же максимум мешает — оттого markUnread и обязан
-   * просить трекер, а этот ход обходится без брокера вовсе и работает
-   * одинаково на любой машине.
+   * Отметки складываются по максимуму, и местная, поставленная «сейчас»,
+   * перекрывает трекерный `focusedAt` сама — списку брокер не нужен. Нужен он
+   * кнопке окна в панели задач: оранжевой её держит служба windows11-manager,
+   * и без просьбы она горела бы до следующего фокуса окна (Стас 16.11.2026).
+   * Поэтому, как и markUnread, ход просит трекеры сессии — теми же целями и тем
+   * же откатом на адрес менеджера своей машины (`seen_session_mqtt`). Нет
+   * транспорта — остаётся одна местная отметка, как было.
    */
   function markSeenNow(row) {
     markSeen(row.id, Math.floor(Date.now() / 1000)).then(regroup);
+    if (!managerReachable()) return;
+    const targets = window.SessionWindows.unreadTargets(row, lastState);
+    invoke('seen_session_mqtt', {
+      id: row.id,
+      targets: targets.length ? targets : [{ base: '', http: managerHttpHere() }],
+    })
+      .catch((e) => { error = String(e); render(); });
   }
 
   /**

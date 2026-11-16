@@ -174,3 +174,52 @@ test('placeWindows шлёт адрес машины окон, а не адрес
       'http обязан называть машину окон (focusHttp), а не менеджера (managerHttpHere)');
   });
 });
+
+// Shift+клик и «Mark seen» (Стас 16.11.2026): местной отметки мало — оранжевую
+// кнопку окна в панели задач держит служба windows11-manager. Просьба уходит
+// тем же путём, что у markUnread: те же цели, тот же откат на адрес менеджера.
+test('markSeenNow просит трекер погасить кнопку окна — теми же целями, что markUnread', () => {
+  const calls = [];
+  const seen = [];
+  const row = { id: 'no-windows', lastActivity: 1000 };
+  const ctx = {
+    CONFIG: { windowHost: 'mac', mqtt: { configured: false } },
+    window: { SessionWindows },
+    lastState: MAC_AND_REACHABLE_WINDOWS,
+    row,
+    invoke: (cmd, args) => { calls.push([cmd, args]); return Promise.resolve(); },
+    markSeen: (id, at) => { seen.push([id, at]); return Promise.resolve(); },
+    regroup: () => {},
+    render: () => {},
+    error: '',
+  };
+  run(['markSeenNow'], 'markSeenNow(row);', ctx);
+  assert.strictEqual(seen.length, 1, 'местная отметка ставится по-прежнему');
+  assert.ok(seen[0][1] > row.lastActivity, 'местная отметка — «сейчас»');
+  assert.strictEqual(calls.length, 1, 'seen_session_mqtt обязана уйти — менеджер достижим');
+  const [cmd, args] = calls[0];
+  assert.strictEqual(cmd, 'seen_session_mqtt');
+  assert.strictEqual(args.id, 'no-windows');
+  assert.strictEqual(args.targets.length, 1);
+  assert.strictEqual(args.targets[0].base, '');
+  assert.strictEqual(args.targets[0].http, 'pc-win:9722');
+});
+
+test('markSeenNow без транспорта ставит только местную отметку и молчит', () => {
+  const calls = [];
+  let seen = 0;
+  const ctx = {
+    CONFIG: { windowHost: 'mac', mqtt: { configured: false } },
+    window: { SessionWindows },
+    lastState: {},
+    row: { id: 'no-windows', lastActivity: 1000 },
+    invoke: (cmd, args) => { calls.push([cmd, args]); return Promise.resolve(); },
+    markSeen: () => { seen += 1; return Promise.resolve(); },
+    regroup: () => {},
+    render: () => {},
+    error: '',
+  };
+  run(['markSeenNow'], 'markSeenNow(row);', ctx);
+  assert.strictEqual(seen, 1);
+  assert.strictEqual(calls.length, 0, 'без транспорта просьбу слать некуда');
+});

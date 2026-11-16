@@ -35,6 +35,9 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 /// всё, что после неё, задано приёмником и меняться отсюда не может.
 const FOCUS_TOPIC: &str = "/claude-focus";
 const UNREAD_TOPIC: &str = "/claude-session-unread";
+/// «Посмотрели, не открывая окна» (Shift+клик, «Mark seen»): менеджер гасит
+/// оранжевую кнопку окна сессии в панели задач. Зеркало `UNREAD_TOPIC`.
+const SEEN_TOPIC: &str = "/claude-session-seen";
 const RESTORE_TOPIC: &str = "/claude-snapshot-restore";
 /// Просьба к windows11-manager открыть сессию у себя. Отличается от
 /// `FOCUS_TOPIC` тем, что ни окна, ни самой сессии у трекера может не быть
@@ -277,6 +280,15 @@ pub fn focus(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
 /// любой машине.
 pub fn unread(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
     publish(broker, base, UNREAD_TOPIC, &focus_body(id))
+}
+
+/// Сказать трекеру, что сессию посмотрели, не открывая окна.
+///
+/// Местной отметке это не нужно — она по максимуму перекрывает трекерную сама.
+/// Нужно это кнопке окна в панели задач: её держит служба windows11-manager, и
+/// без просьбы она горела бы до следующего фокуса окна.
+pub fn seen(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
+    publish(broker, base, SEEN_TOPIC, &focus_body(id))
 }
 
 /// Попросить открыть сессию на машине трекера.
@@ -674,7 +686,7 @@ mod tests {
         broker_from_config, group_payload, open_new_payload, open_payload, open_project_payload, place_payload,
         resolve_base, restore_payload, terminal_name, topic_of, unread_bases, Placement,
         FOCUS_TOPIC,
-        OPEN_TOPIC, PLACE_TOPIC, RESTORE_TOPIC, UNREAD_TOPIC,
+        OPEN_TOPIC, PLACE_TOPIC, RESTORE_TOPIC, SEEN_TOPIC, UNREAD_TOPIC,
     };
 
     /// Тело просьбы о группе — контракт с windows11-manager дословно:
@@ -721,6 +733,10 @@ mod tests {
         assert_eq!(
             topic_of(&resolve_base(&broker, ""), UNREAD_TOPIC),
             "home/room/pc/windows/claude-session-unread"
+        );
+        assert_eq!(
+            topic_of(&resolve_base(&broker, ""), SEEN_TOPIC),
+            "home/room/pc/windows/claude-session-seen"
         );
     }
 

@@ -209,7 +209,10 @@
    * переключатель хуже отсутствующего, и страница рисует такой заголовок
    * подписью, а не строкой (см. `snapshotItem` в sessions.html).
    */
-  function buildSnapshotRows(snapshots, openIds, query, collapsedDays) {
+  function buildSnapshotRows(snapshots, openIds, query, collapsedDays, projectIcons) {
+    // Иконки проектов: cwd → путь, с трекера своей машины (trackerIcons).
+    // Сравнение точное — пути снимков и проектов приезжают в одной форме.
+    const icons = projectIcons instanceof Map ? projectIcons : new Map();
     const open = openIds instanceof Set ? openIds : new Set(openIds ?? []);
     const q = String(query ?? '').trim().toLowerCase();
     const override = collapsedDays && typeof collapsedDays === 'object' ? collapsedDays : {};
@@ -231,6 +234,9 @@
           id: s.id,
           snapshotId: snap.id,
           cwd: String(s?.cwd ?? ''),
+          // Под тем же именем, что у сессии и проекта: картинку рисует общая
+          // windowIconHtml, дозаказывает requestWindowIcons по `rows`.
+          windowIcon: icons.get(String(s?.cwd ?? '')) || '',
           label: projectBasename(s),
           // Имя сессии — второй подписью рядом с именем проекта
           // (snapshotNameHtml): сессий одного каталога в снимке бывает
