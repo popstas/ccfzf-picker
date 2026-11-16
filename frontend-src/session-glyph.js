@@ -50,10 +50,17 @@
     const needsAttention = session.agentState === 'question'
       || session.agentState === 'review'
       || (session.agentState === 'idle' && session.agentEvent === 'attention');
-    if (needsAttention) {
-      if (session.agentSeen) return 'idle';
+    if (needsAttention && !session.agentSeen) {
       return session.agentState === 'question' ? 'question' : 'review';
     }
+    // Ход закончен, а фоновая команда идёт — циан вместо серого. Ниже
+    // непросмотренного: «посмотри, чем кончилось» важнее того, что после
+    // ещё что-то крутится, — и правило гашения по взгляду остаётся прежним.
+    // Выше `active` ставить нечего: работающий агент пишет `busy`, и
+    // агрегатор `shell` ему не ставит. Старый ccfzf поля не шлёт вовсе —
+    // тогда всё как раньше.
+    if (session.shell && session.agentState !== 'active') return 'shell';
+    if (needsAttention) return 'idle';
     return AGENT_DOT[session.agentState] || 'idle';
   }
 
@@ -112,9 +119,10 @@
     // ничего не сообщает. Строка при этом остаётся строкой родителя.
     if (!session.live && !session.agentBackground) return '';
     const { agentState, agentEvent } = session;
-    const text = !agentEvent || agentEvent === agentState
+    const base = !agentEvent || agentEvent === agentState
       ? agentState
       : `${agentState} · ${agentEvent}`;
+    const text = session.shell && agentState !== 'active' ? `${base} · shell` : base;
     return session.agentBackground ? `bg ${text}` : text;
   }
 
@@ -461,6 +469,20 @@
    * каждой сессии без него, а таких почти все. То же правило, что у `prompt` и
    * `answer` рядом.
    */
+  /**
+   * Фоновая команда агента — своей строкой под ответом, пока она идёт.
+   *
+   * Только у живой сессии с `shell`: ход закончен, а команда, запущенная в
+   * фоне, ещё работает. Текст — начало команды, как его отдал агрегатор
+   * (`shellCmd`, до 80 знаков); не разобрался — строка всё равно есть, без
+   * текста: сам факт важнее. Старый ccfzf поля не шлёт, и строки нет.
+   */
+  function shellHtml(session) {
+    if (!session || !session.live || !session.shell) return '';
+    const cmd = typeof session.shellCmd === 'string' ? session.shellCmd : '';
+    return `<div class="bgshell">shell${cmd ? `: ${escapeHtml(cmd)}` : ''}</div>`;
+  }
+
   function commentHtml(session, show = true) {
     const text = (session || {}).comment;
     if (!show || typeof text !== 'string' || !text) return '';
@@ -973,6 +995,6 @@
     shortPath, rowTitle, titleAttr, escapeHtml,
     prNumber, prBadgeHtml, wordSet, sameWords, hidesProject, projectLine, windowNameHtml, windowIconHtml, zellijNameHtml, headNameHtml,
     snapshotNameHtml,
-    docsBadgeHtml, docKindOf, promptsHtml, commentHtml,
+    docsBadgeHtml, docKindOf, promptsHtml, commentHtml, shellHtml,
   };
 });

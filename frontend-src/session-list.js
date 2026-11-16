@@ -340,6 +340,12 @@
           promptCount: Number(s.prompts) || 0,
           spec: typeof s.spec === 'string' ? s.spec : '',
           plan: typeof s.plan === 'string' ? s.plan : '',
+          // Ход закончен, а фоновая команда агента идёт. Поле самой сессии,
+          // не записи агента: агрегатор берёт его из реестра процесса
+          // (`~/.claude/sessions/<pid>.json`), а не из хука. Только строгое
+          // `true` — ccfzf без этого поля значит «как раньше».
+          shell: s.shell === true,
+          shellCmd: typeof s.shellCmd === 'string' ? s.shellCmd : '',
           agentState: (agent || {}).state || '',
           agentEvent: (agent || {}).event || '',
           // Уведомление агента. Непусто только на attention; у сессии, ждущей

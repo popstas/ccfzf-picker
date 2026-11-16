@@ -1731,6 +1731,7 @@ function renderSessionRows(state, query, toggles, stale, treeMode, extra = {}) {
     prBadgeHtml: Glyph.prBadgeHtml,
     docsBadgeHtml: Glyph.docsBadgeHtml,
     commentHtml: Glyph.commentHtml,
+    shellHtml: Glyph.shellHtml,
     windowNameHtml: Glyph.windowNameHtml,
     windowIconHtml: Glyph.windowIconHtml,
     windowIcons: extra.windowIcons || new Map(),
@@ -2580,4 +2581,21 @@ test('regroup отдаёт карту иконок с полного ответ�
   assert.ok(opts.icons, 'карта иконок не передана');
   assert.strictEqual(opts.icons.projects.get('/home/user/a'), 'X:\\i\\a.ico');
   assert.strictEqual(opts.icons.head, 'X:\\r\\crown.ico');
+});
+
+test('shell: признак ccfzf доезжает до кружка и строки карточки', () => {
+  const row = firstRow([aggregatorSession({
+    shell: true, shellCmd: 'until ! pgrep -f x; do sleep 5; done',
+    agent: { state: 'idle', event: 'stop', updated: 1785870223, summary: 'жду' },
+  })], { 'f8ef5e26-24b7-47f7-822c-812a5c25002a': 1785870300 });
+  assert.strictEqual(row.shell, true);
+  assert.strictEqual(Glyph.statusDotHtml(row), '<div class="dot shell"></div>');
+  assert.match(Glyph.shellHtml(row), /shell: until ! pgrep -f x/);
+});
+
+test('shell: ответ старого ccfzf без поля — строка без признака', () => {
+  const row = firstRow([aggregatorSession()]);
+  assert.strictEqual(row.shell, false);
+  assert.strictEqual(row.shellCmd, '');
+  assert.strictEqual(Glyph.shellHtml(row), '');
 });

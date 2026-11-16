@@ -1174,3 +1174,52 @@ test('путь иконки берётся только у окна своей �
   assert.strictEqual(windowIconOf({ host: 'win-host', icon: 42 }, 'win-host'), '', 'мусор вместо пути');
   assert.strictEqual(windowIconOf(null, 'win-host'), '');
 });
+
+// ── Фоновая команда при законченном ходе (`shell` от ccfzf) ────────────────
+
+const { shellHtml } = require('../frontend-src/session-glyph');
+
+test('shell: живая сессия с фоновой командой горит cyan вместо серого', () => {
+  const s = { live: true, agentState: 'idle', shell: true };
+  assert.strictEqual(statusDotHtml(s), '<div class="dot shell"></div>');
+  // Просмотренный review — прежде серый — тоже cyan.
+  assert.strictEqual(statusDotHtml({ live: true, agentState: 'review', agentSeen: true, shell: true }),
+    '<div class="dot shell"></div>');
+});
+
+test('shell: непросмотренное остаётся оранжевым, вопрос — жёлтым', () => {
+  assert.strictEqual(statusDotHtml({ live: true, agentState: 'review', shell: true }),
+    '<div class="dot review"></div>');
+  assert.strictEqual(
+    statusDotHtml({ live: true, agentState: 'idle', agentEvent: 'attention', shell: true }),
+    '<div class="dot review"></div>');
+  assert.strictEqual(statusDotHtml({ live: true, agentState: 'question', shell: true }),
+    '<div class="dot question"></div>');
+});
+
+test('shell: работающий агент остаётся зелёным, закрытая сессия — без кружка', () => {
+  assert.strictEqual(statusDotHtml({ live: true, agentState: 'active', shell: true }),
+    '<div class="dot active"></div>');
+  assert.strictEqual(statusDotHtml({ live: false, agentState: 'idle', shell: true }),
+    '<div class="dot closed"></div>');
+});
+
+test('shell: без поля (старый ccfzf) всё как раньше', () => {
+  assert.strictEqual(statusDotHtml({ live: true, agentState: 'idle' }), '<div class="dot idle"></div>');
+  assert.strictEqual(stateText({ live: true, agentState: 'idle' }), 'idle');
+  assert.strictEqual(shellHtml({ live: true, agentState: 'idle' }), '');
+});
+
+test('shell: строка карточки называет команду и экранирует её', () => {
+  assert.strictEqual(shellHtml({ live: true, shell: true, shellCmd: 'sleep 300 && echo "<ok>"' }),
+    '<div class="bgshell">shell: sleep 300 &amp;&amp; echo &quot;&lt;ok&gt;&quot;</div>');
+  assert.strictEqual(shellHtml({ live: true, shell: true, shellCmd: '' }),
+    '<div class="bgshell">shell</div>');
+  assert.strictEqual(shellHtml({ live: false, shell: true, shellCmd: 'x' }), '');
+});
+
+test('shell: текст статуса дописывает shell', () => {
+  assert.strictEqual(stateText({ live: true, agentState: 'idle', agentEvent: 'attention', shell: true }),
+    'idle · attention · shell');
+  assert.strictEqual(stateText({ live: true, agentState: 'active', shell: true }), 'active');
+});
