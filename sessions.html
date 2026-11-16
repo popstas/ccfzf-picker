@@ -336,6 +336,10 @@
         }
         /* Агент работает. */
         .dot.active { background: var(--ok); }
+        /* Ход закончен, а фоновая команда агента ещё идёт (`shell` из
+           реестра агента, см. dotState). Циан, а не зелёный: агент не
+           работает и не ждёт ответа, но и не простаивает. */
+        .dot.shell { background: var(--shell); }
         /* Агент спрашивает — ждёт ответа человека. */
         .dot.question { background: var(--warn); }
         /* Агент закончил, результат ещё не смотрели. */
@@ -424,6 +428,7 @@
            не опознание — строку ищут глазами по названию и каталогу. */
         .summary { font-size: 11px; color: var(--fg-dimmer); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .prompt { font-size: 11px; color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bgshell { font-size: 11px; color: var(--shell); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         /* Метка PR — той же тусклостью, что и колонка хоткея: опознают строку
            по имени и пути, это подсказка рядом. */
         .name .pr { margin-left: 6px; font-size: 11px; color: var(--fg-dim); font-weight: normal; }
@@ -1329,7 +1334,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
   const {
     statusDotHtml, ageHtml, stateHtml, sessionIdHtml, sessionName, hotkeyHtml, usageHtml, todoHtml,
     projectCountHtml, projectColumnWidths,
-    docsBadgeHtml, promptsHtml, commentHtml,
+    docsBadgeHtml, promptsHtml, commentHtml, shellHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
     windowNameHtml, windowIconHtml, zellijNameHtml, headNameHtml, snapshotNameHtml,
   } = window.SessionGlyph;
@@ -1713,6 +1718,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
         ? `<div class="prompt">${escapeHtml(session.agentPrompt)}</div>` : '') +
       (toggles.showAnswer && session.agentDescription
         ? `<div class="summary">${escapeHtml(session.agentDescription)}</div>` : '') +
+      // Фоновая команда — под ответом: ответ говорит, чем ход кончился, а
+      // эта строка — что после него ещё идёт. См. shellHtml.
+      shellHtml(session) +
       // Комментарий — последней строкой тела, под ответом: он про сессию
       // целиком, а не про текущий ход, и над ответом перебивал бы то, ради
       // чего в строку и смотрят.

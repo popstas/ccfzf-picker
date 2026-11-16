@@ -59,6 +59,9 @@
     --danger: #f85149;
     --link: #6aa9ff;
     --idle: #6e7681;
+    /* Ход закончен, а фоновая команда агента идёт: не зелёный «работает»,
+       но и не серый «простаивает». */
+    --shell: #39c5cf;
 }
 
 @media (prefers-color-scheme: light) {
@@ -86,6 +89,7 @@
         --danger: #cf222e;
         --link: #0969da;
         --idle: #8c959f;
+        --shell: #1b7c83;
     }
 }
 
@@ -113,4 +117,5 @@
     --danger: #cf222e;
     --link: #0969da;
     --idle: #8c959f;
+    --shell: #1b7c83;
 }
