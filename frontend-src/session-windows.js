@@ -304,7 +304,38 @@
     return out;
   }
 
+  /**
+   * Иконки строк без окна — с трекера **этой** машины.
+   *
+   * Окна у сессии из истории и у строки проекта нет, и путь к иконке приезжает
+   * не в записи окна, а двумя полями трекера: иконки проектов —
+   * `projects[].icon` (их машину называет верхний `windowHost`: проекты
+   * агрегатор берёт у того же источника), корона head — `headIcon` в записи
+   * машины. Путь живёт на диске машины трекера, поэтому берётся только у своей
+   * — то же правило, что у `windowIconOf` в session-list.js. Решает
+   * windows11-manager (`projectIcons`/`headIcon`), здесь только читается.
+   *
+   * Отдаёт `{ projects: Map<cwd, путь>, head: путь }`; чего нет — пусто.
+   */
+  function trackerIcons(state, configHost) {
+    const out = { projects: new Map(), head: '' };
+    const mine = normHost(configHost);
+    if (!mine) return out;
+    const s = state || {};
+    if (normHost(s.windowHost) === mine && Array.isArray(s.projects)) {
+      for (const p of s.projects) {
+        if (!p || typeof p.path !== 'string' || !p.path || typeof p.icon !== 'string') continue;
+        const icon = p.icon.trim();
+        if (icon) out.projects.set(p.path, icon);
+      }
+    }
+    const entry = trackerHosts(s).find(e => normHost(e.host) === mine);
+    if (entry && typeof entry.headIcon === 'string') out.head = entry.headIcon.trim();
+    return out;
+  }
+
   return {
+    trackerIcons,
     windowOf, windowsOf, normHost, canFocusRow, focusWindowOf, trackerHere, trackerHosts, focusPid,
     mqttBaseFor, httpFor, httpForHost, managerHttp, openManager, unreadTargets, placeIds, minimizedHere,
   };

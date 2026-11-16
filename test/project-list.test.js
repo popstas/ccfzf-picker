@@ -383,3 +383,17 @@ test('открывает он тем же, чем открывает Enter на 
   // быть не должно, на этой мине уже подорвался newSession с самодельным argv.
   assert.match(shared[0], /newSession\(cwd, source\)/, shared[0]);
 });
+
+// Решение владельца 16.11.2026: у строки проекта иконка — та, что трекер
+// поставил бы окну сессии этого каталога. Путь на диске машины трекера
+// (`windowHost`), поэтому только у своей.
+test('строка проекта несёт иконку только со своей машины', () => {
+  const st = {
+    windowHost: 'win-host',
+    projects: [{ path: '/p/a', name: 'a', icon: 'X:\\i\\a.ico' }, { path: '/p/b', name: 'b' }],
+  };
+  const byId = rows => Object.fromEntries(rows.map(r => [r.id, r.windowIcon]));
+  assert.deepStrictEqual(byId(buildProjectList(st, 'WIN-HOST')), { '/p/a': 'X:\\i\\a.ico', '/p/b': '' });
+  assert.deepStrictEqual(byId(buildProjectList(st, 'mac-host')), { '/p/a': '', '/p/b': '' });
+  assert.deepStrictEqual(byId(buildProjectList(st)), { '/p/a': '', '/p/b': '' });
+});

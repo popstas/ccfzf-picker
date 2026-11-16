@@ -596,3 +596,46 @@ test('нет метки кеша — ноль, «не знаем»', () => {
   });
   assert.strictEqual(rows[0].agentCacheAt, 0);
 });
+
+// ── Иконка у строки без окна ──────────────────────────────────────────────
+//
+// Решение владельца 16.11.2026: история и проекты тоже с иконками. Окна нет —
+// иконка берётся у проекта по каталогу, у head-сессии — корона. Своё окно с
+// иконкой главнее: её трекер поставил именно этому окну.
+{
+  const ICONS = {
+    windowHost: 'win-host',
+    projects: [{ path: '/home/user/x', icon: 'X:\\i\\x.ico' }],
+    windowHosts: [{ host: 'win-host', pid: 7, canFocus: true, headIcon: 'X:\\r\\crown.ico' }],
+  };
+  const build = (sessions, configHost = 'win-host', st = ICONS) =>
+    buildSessionList({ sessions, seen: {}, state: st, configHost });
+
+  test('закрытая сессия берёт иконку своего проекта', () => {
+    const [row] = build([state()]);
+    assert.strictEqual(row.windowIcon, 'X:\\i\\x.ico');
+  });
+
+  test('сессия из чужого каталога — без иконки', () => {
+    const [row] = build([state({ cwd: '/home/user/elsewhere' })]);
+    assert.strictEqual(row.windowIcon, '');
+  });
+
+  test('head-сессия — корона, даже закрытая', () => {
+    const rows = build([state({ id: 'h' }), state({ id: 'c', headId: 'h' })]);
+    assert.strictEqual(rows.find(r => r.id === 'h').windowIcon, 'X:\\r\\crown.ico');
+    assert.strictEqual(rows.find(r => r.id === 'c').windowIcon, 'X:\\i\\x.ico');
+  });
+
+  test('иконка своего окна главнее иконки проекта', () => {
+    const [row] = build([state({
+      windows: [{ host: 'win-host', title: 't', icon: 'X:\\i\\own.ico', lastSeen: 1, focusedAt: 0 }],
+    })]);
+    assert.strictEqual(row.windowIcon, 'X:\\i\\own.ico');
+  });
+
+  test('проекты чужой машины здесь не читаются', () => {
+    const [row] = build([state()], 'mac-host');
+    assert.strictEqual(row.windowIcon, '');
+  });
+}
