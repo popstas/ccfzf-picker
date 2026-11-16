@@ -2590,7 +2590,7 @@ test('shell: признак ccfzf доезжает до кружка и стро
   })], { 'f8ef5e26-24b7-47f7-822c-812a5c25002a': 1785870300 });
   assert.strictEqual(row.shell, true);
   assert.strictEqual(Glyph.statusDotHtml(row), '<div class="dot shell"></div>');
-  assert.match(Glyph.shellHtml(row), /идёт фоновая команда: until ! pgrep -f x/);
+  assert.match(Glyph.shellHtml(row), /background command: until ! pgrep -f x/);
 });
 
 test('shell: ответ старого ccfzf без поля — строка без признака', () => {
