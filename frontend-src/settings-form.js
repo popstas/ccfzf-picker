@@ -182,6 +182,20 @@
           hint: 'From 0.1 (very dim) to 1.0 (fully opaque).' },
       ],
     },
+    // Пороги подсветки процента контекста в колонке usage. Своя вкладка по
+    // примеру `stale`: Columns рисуется таблицей ui.json и полей не носит, а
+    // здесь правится config.yaml. Умолчания — те же, что в config-shape.js.
+    {
+      id: 'context',
+      title: 'Context highlight',
+      fields: [
+        { id: 'contextLevels.bright', label: 'Light text from, %', type: 'number', default: 15,
+          hint: 'Context used, percent of the window. 0 turns the step off.' },
+        { id: 'contextLevels.warn', label: 'Yellow from, %', type: 'number', default: 30 },
+        { id: 'contextLevels.hot', label: 'Red from, %', type: 'number', default: 40,
+          hint: 'Each step must be higher than the one before it.' },
+      ],
+    },
     {
       id: 'window',
       title: 'Window popup',
@@ -622,6 +636,21 @@
     validNumber('stale.sessionHours', Number.MIN_VALUE, Infinity, 'must be greater than 0');
     validNumber('stale.projectHours', Number.MIN_VALUE, Infinity, 'must be greater than 0');
     validNumber('stale.opacity', 0.1, 1, 'must be between 0.1 and 1.0');
+    const LEVELS = ['contextLevels.bright', 'contextLevels.warn', 'contextLevels.hot'];
+    for (const id of LEVELS) validNumber(id, 0, 100, 'must be between 0 and 100');
+    // Ступени идут вверх. Перепутанные не ломают отрисовку (`contextLevel`
+    // берёт самую тревожную из достигнутых), но младшая тогда не показалась
+    // бы никогда — а человек, ставивший её, ждёт обратного. Выключенные
+    // (ноль) в сравнении не участвуют.
+    const set = LEVELS
+      .filter(id => fields[id] !== undefined)
+      .map(id => ({ id, value: Number(fields[id]) }))
+      .filter(l => Number.isFinite(l.value) && l.value > 0);
+    for (let i = 1; i < set.length; i++) {
+      if (set[i].value <= set[i - 1].value) {
+        problems.push(`${set[i].id} must be higher than ${set[i - 1].id}`);
+      }
+    }
     // Размер: 0 (Default), 1–100 (доля экрана) или ≥101 (пиксели) — тот же
     // диапазон, что и у `normalizePickerSize` в config-shape.js, и он же
     // обязан совпасть с тем, что принимает `scale_axis` в Rust (иначе форма
