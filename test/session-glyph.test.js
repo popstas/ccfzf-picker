@@ -302,13 +302,30 @@ test('ageHtml shows the running turn, not the seconds since the last tool call',
   );
 });
 
-test('contextLevel warns at thirty per cent and turns hot at forty', () => {
+test('contextLevel brightens at fifteen, warns at thirty and turns hot at forty', () => {
   // Границы включающие: ровно 30 — это уже предупреждение, а не последняя
   // спокойная строка.
-  assert.strictEqual(contextLevel(29), '');
+  assert.strictEqual(contextLevel(14), '');
+  assert.strictEqual(contextLevel(15), 'bright');
+  assert.strictEqual(contextLevel(29), 'bright');
   assert.strictEqual(contextLevel(30), 'warn');
   assert.strictEqual(contextLevel(39), 'warn');
   assert.strictEqual(contextLevel(40), 'hot');
+});
+
+test('contextLevel берёт пороги из конфига, ноль выключает ступень', () => {
+  const levels = { bright: 0, warn: 50, hot: 70 };
+  assert.strictEqual(contextLevel(20, levels), '');
+  assert.strictEqual(contextLevel(55, levels), 'warn');
+  assert.strictEqual(contextLevel(70, levels), 'hot');
+  // Нуля у красного нет: «от нуля процентов» покрасило бы весь список.
+  assert.strictEqual(contextLevel(0, { bright: 0, warn: 0, hot: 0 }), '');
+});
+
+test('usageHtml красит контекст по порогам из опций', () => {
+  assert.ok(usageHtml({ agentContextPct: 20, agentCostUsd: 1 }).includes('class="ctx bright"'));
+  assert.ok(usageHtml({ agentContextPct: 20, agentCostUsd: 1 },
+    { contextLevels: { bright: 25, warn: 30, hot: 40 } }).includes('<span class="ctx">20%</span>'));
 });
 
 test('usageHtml puts the cost before the highlighted context', () => {

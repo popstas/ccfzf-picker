@@ -530,8 +530,11 @@
             font-variant-numeric: tabular-nums;
         }
         .todo .rest { color: var(--fg-dimmer); }
-        /* Заполненность контекста. Жёлтый — тот же, что у спрашивающего агента:
-           «обрати внимание». Красный — «скоро начнёт забывать начало». */
+        /* Заполненность контекста. Светлый — цвет имени сессии: ещё не
+           тревога, но цифру уже видно среди тусклых соседей. Жёлтый — тот же,
+           что у спрашивающего агента: «обрати внимание». Красный — «скоро
+           начнёт забывать начало». Пороги — `contextLevels` в config.yaml. */
+        .usage .ctx.bright { color: var(--fg); }
         .usage .ctx.warn { color: var(--warn); }
         .usage .ctx.hot { color: var(--danger); }
         /* Остаток кеша промпта. Те же два цвета и тот же смысл: жёлтый —
@@ -1744,7 +1747,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // ставит никто — хоткей есть у каталога, а не у разговора, — и колонка
       // была рядом пустых `div` у каждой строки списка. У проекта он теперь
       // подпись в строке имени, а не колонка.
-      usageHtml(session, toggles, nowSec) +
+      usageHtml(session, { ...toggles, contextLevels: CONFIG.contextLevels }, nowSec) +
       promptsHtml(session, toggles.showPrompts) +
       ageHtml(session, nowSec) +
       `</div></div>`;

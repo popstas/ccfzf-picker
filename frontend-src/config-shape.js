@@ -123,6 +123,11 @@
     // Визуальное приглушение старых строк выключено, пока человек сам его не
     // попросил. Пороги остаются в конфиге и при выключенной галке.
     stale: { enabled: false, sessionHours: 2, projectHours: 24, opacity: 0.5 },
+    // Пороги подсветки процента контекста в колонке usage, в процентах:
+    // светлый шрифт, жёлтый, красный. Ноль выключает ступень. Те же числа —
+    // `CONTEXT_LEVELS` в session-glyph.js: страница без конфига (тесты, первая
+    // отрисовка) красит так же, как с пустым config.yaml.
+    contextLevels: { bright: 15, warn: 30, hot: 40 },
     // Подложка позади пикера — своя половинка на каждую раскладку, обе
     // выключены по умолчанию: затемнение стола позади списка меняет то, что
     // человек видит на всём экране, а не только в самом пикере, и включать
@@ -330,6 +335,25 @@
   }
 
   /**
+   * Пороги подсветки контекста. Каждый — отдельно, тем же правилом, что у
+   * `normalizeStale`: опечатка в одном не сбрасывает остальные. Допустимо
+   * 0–100; ноль значит «ступени нет», всё прочее — умолчание.
+   */
+  function normalizeContextLevels(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const percent = (value, fallback) => {
+      const number = typeof value === 'number' ? value
+        : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+      return Number.isFinite(number) && number >= 0 && number <= 100 ? number : fallback;
+    };
+    const out = {};
+    for (const key of Object.keys(DEFAULTS.contextLevels)) {
+      out[key] = percent(src[key], DEFAULTS.contextLevels[key]);
+    }
+    return out;
+  }
+
+  /**
    * Флаги подложки — по одному на раскладку, независимо друг от друга: порча
    * одного не должна гасить другой, тем же правилом, что и у `normalizeStale`.
    */
@@ -384,6 +408,7 @@
       editorSshRemote: src.editorSshRemote === true,
       pickerSize: normalizePickerSize(src.pickerSize),
       stale: normalizeStale(src.stale),
+      contextLevels: normalizeContextLevels(src.contextLevels),
       scrim: normalizeScrim(src.scrim),
       showOnActiveDisplay: typeof src.showOnActiveDisplay === 'boolean'
         ? src.showOnActiveDisplay

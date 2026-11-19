@@ -352,17 +352,27 @@
     return `<span class="hk${taken}">${escapeHtml(key)}</span>`;
   }
 
-  // Пороги подсветки контекста. До тридцати процентов заполненность ничего не
-  // значит — она такая у любой сессии после пары ходов, и красить её значило бы
-  // красить весь список. Дальше это уже предупреждение: за сорока процентами
-  // начинают выпадать ранние куски разговора, и лучше узнать об этом из списка,
-  // чем из ответа, который забыл, о чём шла речь.
-  const CONTEXT_WARN = 30;
-  const CONTEXT_HOT = 40;
+  // Пороги подсветки контекста, по умолчанию. Ниже первого заполненность
+  // ничего не значит — она такая у любой сессии после пары ходов, и красить её
+  // значило бы красить весь список. С пятнадцати процентов цифра просто
+  // светлеет до цвета имени: ещё не тревога, но строку уже видно среди
+  // тусклых соседей. С тридцати — жёлтый, «обрати внимание»; за сорока
+  // начинают выпадать ранние куски разговора, и лучше узнать об этом из
+  // списка, чем из ответа, который забыл, о чём шла речь.
+  //
+  // Правит их человек ключом `contextLevels` в config.yaml (форма —
+  // вкладка Context в настройках); нормализует config-shape.js, умолчания
+  // там те же — сверяет session-glyph.test.js. Ноль выключает ступень.
+  const CONTEXT_LEVELS = Object.freeze({ bright: 15, warn: 30, hot: 40 });
 
-  function contextLevel(pct) {
-    if (pct >= CONTEXT_HOT) return 'hot';
-    if (pct >= CONTEXT_WARN) return 'warn';
+  // Сверху вниз: побеждает самая тревожная ступень из достигнутых. Порядок
+  // порогов поэтому не обязателен для корректности — жёлтый ниже светлого
+  // просто никогда не уступит ему, — но форма настроек его всё равно требует.
+  function contextLevel(pct, levels = CONTEXT_LEVELS) {
+    for (const level of ['hot', 'warn', 'bright']) {
+      const at = Number(levels?.[level]);
+      if (at > 0 && pct >= at) return level;
+    }
     return '';
   }
 
@@ -427,15 +437,16 @@
    * а как поломка отрисовки: у соседних строк цифры есть, у этой пусто.
    * Различать два случая всё равно нечем, и «0%» честнее пустоты.
    */
-  function usageHtml(session, { showCost = true, showContext = true, showCache = true } = {},
-    nowSec = Date.now() / 1000) {
+  function usageHtml(session, {
+    showCost = true, showContext = true, showCache = true, contextLevels = CONTEXT_LEVELS,
+  } = {}, nowSec = Date.now() / 1000) {
     // Все величины выключены — колонки нет вовсе; см. stateHtml о том, почему
     // выключенный чекбокс не оставляет за собой пустой элемент.
     if (!showCost && !showContext && !showCache) return '';
     const pct = Number.isFinite(session?.agentContextPct) ? session.agentContextPct : 0;
     const cost = Number.isFinite(session?.agentCostUsd) ? session.agentCostUsd : 0;
     const parts = [];
-    const level = contextLevel(pct);
+    const level = contextLevel(pct, contextLevels);
     // Доли контекста бывает и не вовсе — у сессии приложения и у строки с
     // машины без хуков. Правило про это одно на строку и карточку и живёт в
     // session-list.js: два места об одном факте разошлись бы молча.
@@ -988,7 +999,7 @@
 
   return {
     statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
-    sessionIdHtml, sessionName, hotkeyHtml, contextLevel, usageHtml,
+    sessionIdHtml, sessionName, hotkeyHtml, CONTEXT_LEVELS, contextLevel, usageHtml,
     cacheRemainingSec, cacheLevel, cacheText, windowHtml, windowHostHtml,
     todoHtml, todoText, projectCountHtml, projectCountText, projectColumnWidths, ageText,
     TERMINAL_GLYPHS, terminalOf,

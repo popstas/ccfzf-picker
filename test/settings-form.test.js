@@ -16,7 +16,7 @@ test('страницы перечисляют поля без повторов',
   const ids = PAGES.flatMap(p => p.fields.map(f => f.id));
   assert.deepStrictEqual([...new Set(ids)], ids);
   assert.deepStrictEqual(PAGES.map(p => p.id),
-    ['general', 'stale', 'window', 'columns', 'panels', 'hotkeys', 'mqtt', 'paths', 'log']);
+    ['general', 'stale', 'context', 'window', 'columns', 'panels', 'hotkeys', 'mqtt', 'paths', 'log']);
 });
 
 test('windowHost живёт на General, mqtt и pathMap — на своих вкладках', () => {
@@ -685,4 +685,42 @@ test('путь к корню TLS — поле на вкладке MQTT', () => {
   assert.ok(ids.includes('mqtt.ca'));
   const fields = configToFields({ mqtt: { host: 'mqtts://broker.example', ca: '/etc/ca.pem' } });
   assert.strictEqual(fields['mqtt.ca'], '/etc/ca.pem');
+});
+
+test('пороги контекста: умолчания формы совпадают с config-shape и session-glyph', () => {
+  // Три места знают одни и те же числа: форма (умолчание поля), нормализация
+  // конфига и отрисовка без конфига. Разойдись они — пустой config.yaml
+  // красил бы не так, как обещает открытая вкладка настроек.
+  const { CONTEXT_LEVELS } = require('../frontend-src/session-glyph.js');
+  const fields = configToFields({});
+  const normalized = normalizeConfig({}).contextLevels;
+  assert.deepStrictEqual(normalized, { bright: 15, warn: 30, hot: 40 });
+  assert.deepStrictEqual({ ...CONTEXT_LEVELS }, normalized);
+  for (const key of Object.keys(normalized)) {
+    assert.strictEqual(fields[`contextLevels.${key}`], normalized[key], key);
+  }
+});
+
+test('пороги контекста уезжают точечным патчем', () => {
+  const original = { contextLevels: { bright: 15, warn: 30, hot: 40 }, ...NO_PICKER_SIZE };
+  const fields = configToFields(original);
+  assert.deepStrictEqual(
+    fieldsToPatch({ ...fields, 'contextLevels.bright': '20' }, original),
+    { contextLevels: { bright: 20 } },
+  );
+});
+
+test('пороги контекста: вне 0–100 и не по возрастанию — отказ, ноль выключает', () => {
+  const base = { ...configToFields({}), sshHost: 'host' };
+  const has = (patch, word) => validate({ ...base, ...patch }).some(p => p.includes(word));
+  assert.ok(!validate(base).some(p => p.startsWith('contextLevels')));
+  assert.ok(has({ 'contextLevels.hot': '120' }, 'contextLevels.hot must be between'));
+  assert.ok(has({ 'contextLevels.bright': '-1' }, 'contextLevels.bright must be between'));
+  assert.ok(has({ 'contextLevels.warn': '10' }, 'contextLevels.warn must be higher'));
+  assert.ok(has({ 'contextLevels.hot': '30' }, 'contextLevels.hot must be higher'));
+  // Выключенная ступень в сравнении не участвует: 0 у светлой — не «ниже нуля».
+  assert.ok(!validate({ ...base, 'contextLevels.bright': '0' })
+    .some(p => p.startsWith('contextLevels')));
+  assert.ok(!validate({ ...base, 'contextLevels.warn': '0', 'contextLevels.bright': '35' })
+    .some(p => p.startsWith('contextLevels')));
 });
