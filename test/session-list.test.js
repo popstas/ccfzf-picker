@@ -597,6 +597,26 @@ test('нет метки кеша — ноль, «не знаем»', () => {
   assert.strictEqual(rows[0].agentCacheAt, 0);
 });
 
+// ── Метка сжатия ───────────────────────────────────────────────────────────
+//
+// `compactAt` агрегатор ставит сессии, которую сжали (`/compact`) и после
+// этого не продолжили: контекст пуст, продолжения нет. По ней строка гаснет
+// сразу, не дожидаясь порога возраста (StaleItems.isStale).
+
+test('метка сжатия доезжает до строки', () => {
+  const rows = buildSessionList({
+    sessions: [state({ agent: { state: 'idle', updated: 500, compactAt: 470 } })],
+  });
+  assert.strictEqual(rows[0].agentCompactAt, 470);
+});
+
+test('нет метки сжатия — ноль', () => {
+  const rows = buildSessionList({
+    sessions: [state({ agent: { state: 'review', updated: 500 } })],
+  });
+  assert.strictEqual(rows[0].agentCompactAt, 0);
+});
+
 // ── Иконка у строки без окна ──────────────────────────────────────────────
 //
 // Решение владельца 16.11.2026: история и проекты тоже с иконками. Окна нет —
