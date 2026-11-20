@@ -28,12 +28,15 @@
    * ставит агрегатор). Решение владельца 20.11.2026: контекст после `/compact`
    * пуст, дальнейших действий нет, и ждать порога возраста незачем. Знание это
    * строка несёт сама, поэтому оно не довод, как свёрнутость, а поле. Только
-   * у сессии: у проекта своего сжатия нет.
+   * у сессии: у проекта своего сжатия нет. Работающую строку метка не гасит:
+   * хук мог уже написать `active`, а хвост транскрипта до ответа агента ещё не
+   * дорос — так бывает сразу после автосжатия посреди хода.
    */
   function isStale(row, nowSec, stale, kind, minimized) {
     if (!stale || stale.enabled !== true || !AGE_KINDS.has(kind)) return false;
     if (minimized === true) return true;
-    if (kind === 'session' && Number(row && row.agentCompactAt) > 0) return true;
+    if (kind === 'session' && Number(row && row.agentCompactAt) > 0
+      && row.agentState !== 'active') return true;
     const rawLastActivity = row && row.lastActivity;
     if (typeof rawLastActivity !== 'number' || !Number.isFinite(rawLastActivity)) return false;
     const lastActivity = rawLastActivity;

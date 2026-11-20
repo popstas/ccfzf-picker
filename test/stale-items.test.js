@@ -124,3 +124,10 @@ test('сжатость подчиняется галке dim stale и не тр�
   assert.strictEqual(isStale(row, NOW, STALE, 'project'), false);
   assert.strictEqual(isStale(row, NOW, STALE, 'zellij'), false);
 });
+
+test('метка сжатия не гасит работающую строку', () => {
+  // Сразу после автосжатия посреди хода хук уже пишет `active`, а ответ агента
+  // в хвост ещё не лёг — метка там на секунды, и гасить работающую нельзя.
+  const row = { lastActivity: NOW - 1, agentCompactAt: NOW - 5, agentState: 'active' };
+  assert.strictEqual(isStale(row, NOW, STALE, 'session'), false);
+});
