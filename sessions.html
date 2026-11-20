@@ -539,8 +539,9 @@
         .usage .ctx.bright { color: var(--fg); }
         .usage .ctx.warn { color: var(--attention); }
         .usage .ctx.hot { color: var(--danger); }
-        /* Остаток кеша промпта. Те же два цвета и тот же смысл: жёлтый —
-           «пора вспомнить», красный — «сейчас или будет дорого». */
+        /* Остаток кеша промпта. Янтарь `--warn` — «пора вспомнить», красный —
+           «сейчас или будет дорого». Янтарь здесь, а не жёлтый `--attention`
+           контекста, чтобы две цифры одной колонки не сливались в одну. */
         .usage .cache.warn { color: var(--warn); }
         .usage .cache.hot { color: var(--danger); }
         .usage .cost { color: var(--fg-dimmer); }
