@@ -282,6 +282,16 @@ fn number_at(src: &Value, key: &str) -> f64 {
     src.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0)
 }
 
+/// Сессию сжали и не продолжили — порт третьего повода `StaleItems.isStale`.
+///
+/// Метку `compactAt` ставит агрегатор, когда после границы сжатия нет ни
+/// реплики, ни ответа агента. Работающую строку она не гасит: хук мог уже
+/// написать `active`, а хвост транскрипта до ответа ещё не дорос.
+fn compacted(agent: &Value) -> bool {
+    number_at(agent, "compactAt") > 0.0
+        && agent.get("state").and_then(|v| v.as_str()) != Some("active")
+}
+
 /// Затемнение строк, каким его видит раскладка.
 ///
 /// Порт `staleSettings()` со страницы: `enabled` — галка `dim stale` из
@@ -300,18 +310,19 @@ impl Stale {
     /// Затемнение выключено: раскладка группы берёт строки без отсева.
     pub const OFF: Stale = Stale { enabled: false, session_hours: 0.0, now_s: 0.0 };
 
-    /// Тускла ли строка: свёрнута здесь или молчит дольше порога.
+    /// Тускла ли строка: свёрнута здесь, сжата и не продолжена или молчит
+    /// дольше порога.
     ///
-    /// Порт `StaleItems.isStale`, и порядок проверок тот же: свёрнутость —
-    /// факт, а не догадка по времени, и возраст у свёрнутой строки не
-    /// спрашивается вовсе. Выключенная галка гасит оба правила: строка,
+    /// Порт `StaleItems.isStale`, и порядок проверок тот же: свёрнутость и
+    /// сжатость — факты, а не догадка по времени, и возраст у такой строки не
+    /// спрашивается вовсе. Выключенная галка гасит все правила: строка,
     /// выпадающая из раскладки вопреки снятой галке, выглядела бы поломкой
     /// хоткея.
-    fn hides(&self, minimized: bool, last_activity: f64) -> bool {
+    fn hides(&self, minimized: bool, compacted: bool, last_activity: f64) -> bool {
         if !self.enabled {
             return false;
         }
-        if minimized {
+        if minimized || compacted {
             return true;
         }
         let threshold = self.session_hours * 3600.0;
@@ -401,7 +412,11 @@ fn sorted_rows(state: &Value, config_host: &str, sort: &str, stale: &Stale) -> V
         if !has_own_window(&windows, &mine) {
             continue;
         }
-        if stale.hides(minimized_here(&windows, &mine), last_activity_of(s, &active.agent)) {
+        if stale.hides(
+            minimized_here(&windows, &mine),
+            compacted(&active.agent),
+            last_activity_of(s, &active.agent),
+        ) {
             continue;
         }
         rows.push(Row {
@@ -791,24 +806,37 @@ mod tests {
     }
 
     #[test]
+    fn compacted_row_hides_at_once_but_not_while_working() {
+        // Решение владельца 20.11.2026: сжатую и не продолженную сессию
+        // раскладка не берёт, как и список не показывает ярко, — не дожидаясь
+        // порога возраста. Работающую не трогает: хук уже сказал `active`.
+        let stale = Stale { enabled: true, session_hours: 2.0, now_s: 10_000.0 };
+        assert!(stale.hides(false, true, 9_999.0));
+        assert!(!Stale::OFF.hides(false, true, 9_999.0));
+        assert!(compacted(&json!({ "state": "idle", "compactAt": 9_000 })));
+        assert!(!compacted(&json!({ "state": "active", "compactAt": 9_000 })));
+        assert!(!compacted(&json!({ "state": "idle" })));
+    }
+
+    #[test]
     fn the_age_threshold_matches_the_page() {
         // Порог — не «больше», а «не меньше»: страница считает так же
         // (`now - lastActivity >= sessionHours * 3600`), и разойдись они,
         // строка на самой границе гасла бы в списке и раскладывалась бы
         // клавишей.
         let stale = Stale { enabled: true, session_hours: 2.0, now_s: 10_000.0 };
-        assert!(!stale.hides(false, 10_000.0 - 7_199.0));
-        assert!(stale.hides(false, 10_000.0 - 7_200.0));
+        assert!(!stale.hides(false, false, 10_000.0 - 7_199.0));
+        assert!(stale.hides(false, false, 10_000.0 - 7_200.0));
         // Ноль — «времени нет», а не «бесконечно старая»: то же правило, что
         // на странице.
-        assert!(!stale.hides(false, 0.0));
+        assert!(!stale.hides(false, false, 0.0));
         // Будущее время — тоже неизвестное.
-        assert!(!stale.hides(false, 20_000.0));
+        assert!(!stale.hides(false, false, 20_000.0));
         // Свёрнутость возраста не спрашивает вовсе.
-        assert!(stale.hides(true, 10_000.0));
+        assert!(stale.hides(true, false, 10_000.0));
         // Выключенная галка гасит оба правила.
         let off = Stale { enabled: false, ..stale };
-        assert!(!off.hides(true, 0.0));
+        assert!(!off.hides(true, false, 0.0));
     }
 
     /// Тот же отсев тусклых строк, что делает страница, — на том же входе.

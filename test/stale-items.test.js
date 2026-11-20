@@ -107,3 +107,27 @@ test('несказанная свёрнутость ничего не меняе
   assert.strictEqual(isStale({ lastActivity: NOW - 1 }, NOW, STALE, 'session'), false);
   assert.strictEqual(isStale({ lastActivity: NOW - 1 }, NOW, STALE, 'session', 'да'), false);
 });
+
+test('сжатая и не продолженная сессия гаснет сразу', () => {
+  // Решение владельца 20.11.2026: после /compact контекст пуст и продолжения
+  // нет — ждать порога возраста незачем. Метку ставит агрегатор только тогда,
+  // когда после границы сжатия не было ни реплики, ни ответа агента.
+  const fresh = { lastActivity: NOW - 1, agentCompactAt: NOW - 30 };
+  assert.strictEqual(isStale(fresh, NOW, STALE, 'session'), true);
+  assert.strictEqual(staleClass(fresh, NOW, STALE, 'session'), ' stale');
+  assert.strictEqual(isStale({ lastActivity: NOW - 1, agentCompactAt: 0 }, NOW, STALE, 'session'), false);
+});
+
+test('сжатость подчиняется галке dim stale и не трогает чужие виды строк', () => {
+  const row = { lastActivity: NOW - 1, agentCompactAt: NOW - 30 };
+  assert.strictEqual(isStale(row, NOW, { ...STALE, enabled: false }, 'session'), false);
+  assert.strictEqual(isStale(row, NOW, STALE, 'project'), false);
+  assert.strictEqual(isStale(row, NOW, STALE, 'zellij'), false);
+});
+
+test('метка сжатия не гасит работающую строку', () => {
+  // Сразу после автосжатия посреди хода хук уже пишет `active`, а ответ агента
+  // в хвост ещё не лёг — метка там на секунды, и гасить работающую нельзя.
+  const row = { lastActivity: NOW - 1, agentCompactAt: NOW - 5, agentState: 'active' };
+  assert.strictEqual(isStale(row, NOW, STALE, 'session'), false);
+});
