@@ -474,3 +474,21 @@ test('localSource — булев флаг с умолчанием true', () => {
   // Не булево — то же, что отсутствие ключа, то есть умолчание.
   assert.strictEqual(normalizeConfig({ localSource: 'да' }).localSource, true);
 });
+
+test('cacheWarnMinutes: умолчание 10', () => {
+  assert.strictEqual(normalizeConfig({}).cacheWarnMinutes, 10);
+});
+
+test('cacheWarnMinutes: 0 сохраняется — это «выключено»', () => {
+  // positive() у stale превратил бы ноль в умолчание, и выключить мигание
+  // стало бы нечем.
+  assert.strictEqual(normalizeConfig({ cacheWarnMinutes: 0 }).cacheWarnMinutes, 0);
+  assert.strictEqual(normalizeConfig({ cacheWarnMinutes: '0' }).cacheWarnMinutes, 0);
+  assert.strictEqual(normalizeConfig({ cacheWarnMinutes: 59 }).cacheWarnMinutes, 59);
+});
+
+test('cacheWarnMinutes: вне 0…59 и не целое — умолчание', () => {
+  for (const bad of [60, -1, 'x', 2.5, null, true]) {
+    assert.strictEqual(normalizeConfig({ cacheWarnMinutes: bad }).cacheWarnMinutes, 10, String(bad));
+  }
+});
