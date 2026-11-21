@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn every_public_request_carries_its_own_route() {
         let placement = Placement::default();
-        let cases: [(&str, Result<(), String>); 9] = [
+        let cases: [(&str, Result<(), String>); 10] = [
             ("/claude-wt/focus", focus("bad", "id")),
             ("/claude-wt/session-unread", unread("bad", "id")),
             ("/claude-wt/session-seen", seen("bad", "id")),
