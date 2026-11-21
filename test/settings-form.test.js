@@ -724,3 +724,19 @@ test('пороги контекста: вне 0–100 и не по возрас�
   assert.ok(!validate({ ...base, 'contextLevels.warn': '0', 'contextLevels.bright': '35' })
     .some(p => p.startsWith('contextLevels')));
 });
+
+test('cacheWarnMinutes: поле во вкладке context, умолчание совпадает с config-shape', () => {
+  const page = PAGES.find(p => p.id === 'context');
+  assert.ok(page.fields.some(f => f.id === 'cacheWarnMinutes'), 'поля cacheWarnMinutes нет во вкладке context');
+  assert.strictEqual(configToFields({}).cacheWarnMinutes, normalizeConfig({}).cacheWarnMinutes);
+});
+
+test('cacheWarnMinutes: 0 и 59 проходят, 60, -1 и дробь — отказ', () => {
+  const base = { ...configToFields({}), sshHost: 'host' };
+  const bad = v => validate({ ...base, cacheWarnMinutes: v }).some(p => p.startsWith('cacheWarnMinutes'));
+  assert.ok(!bad('0'));
+  assert.ok(!bad('59'));
+  assert.ok(bad('60'));
+  assert.ok(bad('-1'));
+  assert.ok(bad('2.5'));
+});

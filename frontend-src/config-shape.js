@@ -128,6 +128,10 @@
     // `CONTEXT_LEVELS` в session-glyph.js: страница без конфига (тесты, первая
     // отрисовка) красит так же, как с пустым config.yaml.
     contextLevels: { bright: 15, warn: 30, hot: 40 },
+    // За сколько минут до конца кеша промпта кнопка окна сессии мигает жёлтым
+    // (мигает служба windows11-manager, набор шлёт пикер). Ноль выключает.
+    // Умолчание — решение Стаса 21.11.2026.
+    cacheWarnMinutes: 10,
     // Подложка позади пикера — своя половинка на каждую раскладку, обе
     // выключены по умолчанию: затемнение стола позади списка меняет то, что
     // человек видит на всём экране, а не только в самом пикере, и включать
@@ -354,6 +358,19 @@
   }
 
   /**
+   * Минуты до конца кеша, с которых мигает кнопка окна. Целое 0…59: ноль
+   * значит «выключено» и потому не подменяется умолчанием (как это сделал бы
+   * `positive()` у stale), а при 60 и больше мигала бы каждая ждущая сессия
+   * весь час. Всё прочее — умолчание.
+   */
+  function normalizeCacheWarnMinutes(value) {
+    const number = typeof value === 'number' ? value
+      : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+    return Number.isInteger(number) && number >= 0 && number <= 59
+      ? number : DEFAULTS.cacheWarnMinutes;
+  }
+
+  /**
    * Флаги подложки — по одному на раскладку, независимо друг от друга: порча
    * одного не должна гасить другой, тем же правилом, что и у `normalizeStale`.
    */
@@ -409,6 +426,7 @@
       pickerSize: normalizePickerSize(src.pickerSize),
       stale: normalizeStale(src.stale),
       contextLevels: normalizeContextLevels(src.contextLevels),
+      cacheWarnMinutes: normalizeCacheWarnMinutes(src.cacheWarnMinutes),
       scrim: normalizeScrim(src.scrim),
       showOnActiveDisplay: typeof src.showOnActiveDisplay === 'boolean'
         ? src.showOnActiveDisplay

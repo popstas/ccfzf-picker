@@ -837,6 +837,7 @@
      StaleItems, тускла ли строка, а строке приписывается машина её окна. -->
 <script src="stale-items.js"></script>
 <script src="session-windows.js"></script>
+<script src="cache-warn.js"></script>
 <script src="session-list.js"></script>
 <script src="zellij-list.js"></script>
 <script src="open-transport.js"></script>
@@ -2388,7 +2389,37 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // своём экране человеку нечего.
     snapshotRows = window.PickerSnapshots.snapshotsHere(state, CONFIG.windowHost);
     lastState = state;
+    sendCacheWarn(state);
     regroup();
+  }
+
+  /*
+   * Мигание кнопки окна перед остыванием кеша (frontend-src/cache-warn.js).
+   * Набор уходит с каждого ответа опроса — и скрытого окна тоже, — но
+   * отправитель шлёт трекеру только изменившийся набор или повтор раз в пять
+   * минут. Строки — все сессии ответа, до отсевов regroup: мигать должно и то,
+   * что сейчас не показано. Цель без http-адреса при ненастроенном брокере
+   * отброшена: слать ей нечем, и отказ мигал бы в статуслайне на каждом
+   * изменении набора.
+   */
+  const cacheWarn = window.CacheWarn.createCacheWarnSender({
+    send: (target, body) => invoke('cache_warn_send', { target, body }),
+    onError: (e) => { error = String(e); render(); },
+  });
+
+  function sendCacheWarn(state) {
+    // Ноль — строки не строятся вовсе: пустая карта и так гасит у трекеров
+    // всё, что им слали раньше.
+    const rows = CONFIG.cacheWarnMinutes > 0
+      ? window.SessionList.buildSessionList({
+        sessions: state.sessions, seen, state, configHost: CONFIG.windowHost,
+      })
+      : [];
+    const sets = window.CacheWarn.cacheWarnSets(rows, state, CONFIG.cacheWarnMinutes);
+    for (const [key, { target }] of sets) {
+      if (!target.http && !CONFIG.mqtt.configured) sets.delete(key);
+    }
+    cacheWarn.update(sets);
   }
 
   // Опрос идёт в Rust и не останавливается вместе с показом: он же держит
