@@ -24,6 +24,10 @@
   // Служба держит набор в памяти, и любая выкатка её перезапускает: повтор
   // раз в пять минут возвращает ей набор без участия человека.
   const CACHE_WARN_HEARTBEAT_MS = 5 * 60 * 1000;
+  // Пауза после отказа. Трекер со старым менеджером отвечает 404, лежащий —
+  // таймаутом; повтор на каждом опросе (раз в секунду) мигал бы ошибкой в
+  // статуслайне без конца и перебивал бы ею отказ ssh.
+  const CACHE_WARN_RETRY_MS = 60 * 1000;
 
   const targetKey = t => `${t.base}|${t.http}`;
 
@@ -67,41 +71,46 @@
    * пустой список — так гаснет мигание у сессии, которой больше нет, и у всех
    * разом при `warnMin` 0.
    *
-   * Отказ отправки не запоминается: следующий `update` повторит. Отправка,
+   * Отказ отправки не запоминается как отправленное: повтор — не раньше
+   * `retryMs`, для набора и для пустого списка одинаково. Отправка,
    * которая ещё идёт, второй раз не уходит — http-просьба ждёт до пяти секунд,
    * а ответы опроса приходят каждую.
    */
   function createCacheWarnSender({
     send, onError = () => {}, nowMs = Date.now, heartbeatMs = CACHE_WARN_HEARTBEAT_MS,
+    retryMs = CACHE_WARN_RETRY_MS,
   }) {
     const sent = new Map();
     const pending = new Set();
+    // ключ → время последнего отказа; удачная отправка его снимает.
+    const failedAt = new Map();
 
-    function push(key, target, body, done) {
+    function push(key, target, body, done, now) {
       pending.add(key);
       return Promise.resolve()
         .then(() => send(target, body))
-        .then(() => done(), (e) => onError(e))
+        .then(() => { failedAt.delete(key); done(); }, (e) => { failedAt.set(key, now); onError(e); })
         .finally(() => pending.delete(key));
     }
 
     function update(sets) {
       const now = nowMs();
       const jobs = [];
+      const resting = key => pending.has(key) || (failedAt.has(key) && now - failedAt.get(key) < retryMs);
       for (const [key, { target, body }] of sets) {
-        if (pending.has(key)) continue;
+        if (resting(key)) continue;
         const json = JSON.stringify(body);
         const prev = sent.get(key);
         if (prev && prev.json === json && now - prev.at < heartbeatMs) continue;
         jobs.push(push(key, target, body, () => {
           sent.set(key, { json, at: now, target, warnMin: body.warnMin });
-        }));
+        }, now));
       }
       for (const [key, prev] of sent) {
-        if (sets.has(key) || pending.has(key)) continue;
+        if (sets.has(key) || resting(key)) continue;
         jobs.push(push(key, prev.target, { warnMin: prev.warnMin, sessions: [] }, () => {
           sent.delete(key);
-        }));
+        }, now));
       }
       return Promise.all(jobs);
     }
@@ -109,5 +118,5 @@
     return { update };
   }
 
-  return { cacheWarnSets, createCacheWarnSender, CACHE_WARN_HEARTBEAT_MS };
+  return { cacheWarnSets, createCacheWarnSender, CACHE_WARN_HEARTBEAT_MS, CACHE_WARN_RETRY_MS };
 });

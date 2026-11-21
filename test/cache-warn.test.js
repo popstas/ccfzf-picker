@@ -84,14 +84,40 @@ test('warnMin 0 отправляет пустой список целям, ко�
   assert.deepStrictEqual(sent[1].body.sessions, []);
 });
 
-test('отказ send — следующий update шлёт снова, ошибка уходит в onError', async () => {
+test('отказ send — повтор не раньше чем через минуту, ошибка уходит в onError', async () => {
+  // Трекер со старым менеджером отвечает 404 — слать ему на каждом опросе
+  // (раз в секунду) значило бы мигать ошибкой в статуслайне без конца.
   const errors = [];
-  const { s, sent } = sender({ fail: true, onError: e => errors.push(e.message) });
+  const { s, sent, clock } = sender({ fail: true, onError: e => errors.push(e.message) });
   const sets = cacheWarnSets([row('a')], STATE, 10);
   await s.update(sets);
+  clock.now = 59 * 1000;
+  await s.update(sets);
+  assert.strictEqual(sent.length, 1);
+  clock.now = 60 * 1000;
   await s.update(sets);
   assert.strictEqual(sent.length, 2);
   assert.deepStrictEqual(errors, ['down', 'down']);
+});
+
+test('отказ пустого списка пропавшей цели тоже ждёт минуту', async () => {
+  let fail = false;
+  const sent = [];
+  const clock = { now: 0 };
+  const s = createCacheWarnSender({
+    send: (target, body) => { sent.push(body); return fail ? Promise.reject(new Error('down')) : Promise.resolve(); },
+    onError: () => {},
+    nowMs: () => clock.now,
+  });
+  await s.update(cacheWarnSets([row('a')], STATE, 10));
+  fail = true;
+  await s.update(new Map());
+  clock.now = 1000;
+  await s.update(new Map());
+  assert.strictEqual(sent.length, 2);
+  clock.now = 61 * 1000;
+  await s.update(new Map());
+  assert.strictEqual(sent.length, 3);
 });
 
 test('пока отправка идёт, тот же набор второй раз не уходит', async () => {
