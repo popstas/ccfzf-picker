@@ -1,0 +1,111 @@
+const test = require('node:test');
+const assert = require('node:assert');
+const { cacheWarnSets, createCacheWarnSender } = require('../frontend-src/cache-warn');
+
+// Строки — как их строит buildSessionList: окна сессии в `sessionWindows`.
+const NB = { host: 'nb', mqttBase: 'home/nb/windows' };
+const MAC = { host: 'mac', mqttBase: 'home/mac/windows' };
+const STATE = { windowHosts: [{ host: 'nb', http: { host: 'nb.example', port: 9722 } }, { host: 'mac' }] };
+const row = (id, over = {}) => ({
+  id, agentState: 'review', agentCacheAt: 100, sessionWindows: [NB], ...over,
+});
+const only = sets => [...sets.values()];
+
+test('в набор не идут работающие, сессии без cacheAt и без окна', () => {
+  const sets = cacheWarnSets([
+    row('a'),
+    row('b', { agentState: 'active' }),
+    row('c', { agentCacheAt: 0 }),
+    row('d', { sessionWindows: [] }),
+  ], STATE, 10);
+  assert.deepStrictEqual(only(sets).map(s => s.body), [{ warnMin: 10, sessions: [{ id: 'a', cacheAt: 100 }] }]);
+});
+
+test('две карточки одной сессии — одна запись, сессии по id', () => {
+  const sets = cacheWarnSets([row('b'), row('a'), row('a')], STATE, 10);
+  assert.deepStrictEqual(only(sets)[0].body.sessions.map(s => s.id), ['a', 'b']);
+});
+
+test('сессия с окнами на двух машинах попадает в набор обеих', () => {
+  const sets = cacheWarnSets([row('a', { sessionWindows: [NB, MAC] })], STATE, 10);
+  assert.strictEqual(sets.size, 2);
+  for (const s of sets.values()) assert.deepStrictEqual(s.body.sessions, [{ id: 'a', cacheAt: 100 }]);
+});
+
+test('warnMin 0 — пустая карта', () => {
+  assert.strictEqual(cacheWarnSets([row('a')], STATE, 0).size, 0);
+});
+
+function sender(over = {}) {
+  const sent = [];
+  const clock = { now: 0 };
+  const s = createCacheWarnSender({
+    send: (target, body) => { sent.push({ target, body }); return over.fail ? Promise.reject(new Error('down')) : Promise.resolve(); },
+    onError: over.onError || (() => {}),
+    nowMs: () => clock.now,
+  });
+  return { s, sent, clock };
+}
+
+test('тот же набор второй раз не уходит, через 5 минут уходит повтором', async () => {
+  const { s, sent, clock } = sender();
+  const sets = cacheWarnSets([row('a')], STATE, 10);
+  await s.update(sets);
+  await s.update(cacheWarnSets([row('a')], STATE, 10));
+  assert.strictEqual(sent.length, 1);
+  clock.now = 5 * 60 * 1000;
+  await s.update(sets);
+  assert.strictEqual(sent.length, 2);
+});
+
+test('изменившийся набор уходит сразу', async () => {
+  const { s, sent } = sender();
+  await s.update(cacheWarnSets([row('a')], STATE, 10));
+  await s.update(cacheWarnSets([row('a', { agentCacheAt: 200 })], STATE, 10));
+  assert.strictEqual(sent.length, 2);
+  assert.deepStrictEqual(sent[1].body.sessions, [{ id: 'a', cacheAt: 200 }]);
+});
+
+test('пропавшая цель получает пустой список один раз', async () => {
+  const { s, sent } = sender();
+  await s.update(cacheWarnSets([row('a')], STATE, 10));
+  await s.update(new Map());
+  await s.update(new Map());
+  assert.strictEqual(sent.length, 2);
+  assert.deepStrictEqual(sent[1].body.sessions, []);
+  assert.deepStrictEqual(sent[1].target, sent[0].target);
+});
+
+test('warnMin 0 отправляет пустой список целям, которым слали раньше', async () => {
+  const { s, sent } = sender();
+  await s.update(cacheWarnSets([row('a')], STATE, 10));
+  await s.update(cacheWarnSets([row('a')], STATE, 0));
+  assert.strictEqual(sent.length, 2);
+  assert.deepStrictEqual(sent[1].body.sessions, []);
+});
+
+test('отказ send — следующий update шлёт снова, ошибка уходит в onError', async () => {
+  const errors = [];
+  const { s, sent } = sender({ fail: true, onError: e => errors.push(e.message) });
+  const sets = cacheWarnSets([row('a')], STATE, 10);
+  await s.update(sets);
+  await s.update(sets);
+  assert.strictEqual(sent.length, 2);
+  assert.deepStrictEqual(errors, ['down', 'down']);
+});
+
+test('пока отправка идёт, тот же набор второй раз не уходит', async () => {
+  const sent = [];
+  let release;
+  const s = createCacheWarnSender({
+    send: (target, body) => { sent.push(body); return new Promise(r => { release = r; }); },
+    onError: () => {},
+    nowMs: () => 0,
+  });
+  const sets = cacheWarnSets([row('a')], STATE, 10);
+  const first = s.update(sets);
+  await s.update(sets);
+  assert.strictEqual(sent.length, 1);
+  release();
+  await first;
+});
