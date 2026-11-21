@@ -22,7 +22,7 @@
 use std::time::Duration;
 
 use crate::mqtt::{
-    focus_body, open_new_payload, open_payload, open_project_payload, place_payload,
+    focus_body, open_new_payload, open_payload, open_project_payload, open_prompt_payload, place_payload,
     restore_payload, Placement,
 };
 
@@ -81,7 +81,39 @@ fn post(endpoint: &str, topic_tail: &str, body: String) -> Result<(), String> {
         .set("Content-Type", "application/json")
         .send_string(&body)
         .map(|_| ())
-        .map_err(|e| format!("manager at {host}:{port} refused {route}: {e}"))
+        .map_err(|e| refusal(&host, port, route, e))
+}
+
+/// Текст отказа: у ответа с кодом — и причина, которую назвал менеджер.
+///
+/// Тело отказа у него — `{"error": "<причина>"}`, и в ней сказано главное:
+/// `unsupported action terminal-prompt` у менеджера прежней версии, предел
+/// промпта, не настроенный шаблон. Один код ответа (`status code 400`) не
+/// отличил бы эти случаи друг от друга, а пикер подсказывает обновить
+/// менеджер ровно по первому из них.
+fn refusal(host: &str, port: u16, route: &str, e: ureq::Error) -> String {
+    match e {
+        ureq::Error::Status(code, resp) => {
+            let reason = resp
+                .into_string()
+                .ok()
+                .and_then(|text| reason_of(&text))
+                .unwrap_or_default();
+            if reason.is_empty() {
+                format!("manager at {host}:{port} refused {route}: status {code}")
+            } else {
+                format!("manager at {host}:{port} refused {route}: status {code}: {reason}")
+            }
+        }
+        other => format!("manager at {host}:{port} refused {route}: {other}"),
+    }
+}
+
+/// Причина из тела отказа менеджера, или None — тело не по контракту.
+fn reason_of(body: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
+    let reason = parsed.get("error")?.as_str()?.trim();
+    (!reason.is_empty()).then(|| reason.to_string())
 }
 
 /// Попросить о подъёме окна сессии.
@@ -142,6 +174,21 @@ pub fn open_new(
         endpoint,
         "/claude-session-open",
         open_new_payload(cwd, name, place),
+    )
+}
+
+/// Попросить новую сессию в каталоге с первым промптом.
+pub fn open_prompt(
+    endpoint: &str,
+    cwd: &str,
+    name: &str,
+    prompt: &str,
+    place: Placement,
+) -> Result<(), String> {
+    post(
+        endpoint,
+        "/claude-session-open",
+        open_prompt_payload(cwd, name, prompt, place),
     )
 }
 
@@ -304,16 +351,30 @@ mod tests {
     /// просьба, виден в тексте самого отказа (см. комментарий у `post`).
     /// Разошлись бы хвост функции и хвост в `ROUTES` — текст назвал бы не тот
     /// маршрут, и `assert_eq!` это увидит.
+    /// Причина отказа берётся из тела менеджера — по ней пикер отличает
+    /// прежний менеджер (`unsupported action`) от прочих отказов.
+    #[test]
+    fn refusal_reason_is_read_from_the_manager_body() {
+        assert_eq!(
+            reason_of(r#"{"error":"session-open: unsupported action terminal-prompt"}"#).as_deref(),
+            Some("session-open: unsupported action terminal-prompt"),
+        );
+        assert_eq!(reason_of(r#"{"error":"  "}"#), None);
+        assert_eq!(reason_of(r#"{"ok":true}"#), None);
+        assert_eq!(reason_of("not json"), None);
+    }
+
     #[test]
     fn every_public_request_carries_its_own_route() {
         let placement = Placement::default();
-        let cases: [(&str, Result<(), String>); 9] = [
+        let cases: [(&str, Result<(), String>); 10] = [
             ("/claude-wt/focus", focus("bad", "id")),
             ("/claude-wt/session-unread", unread("bad", "id")),
             ("/claude-wt/session-seen", seen("bad", "id")),
             ("/claude-wt/session-open", open("bad", "id", "cwd", placement)),
             ("/claude-wt/session-open", open_project("bad", "cwd", placement)),
             ("/claude-wt/session-open", open_new("bad", "cwd", "name", placement)),
+            ("/claude-wt/session-open", open_prompt("bad", "cwd", "name", "hi", placement)),
             ("/claude-wt/snapshot-restore", restore("bad", "id", &[])),
             ("/claude-wt/place", place("bad", "tile", &[])),
             ("/claude-wt/cache-warn", cache_warn("bad", "{}")),

@@ -2036,6 +2036,14 @@ const infoBackdrop = document.getElementById('info-backdrop');
     } else if (error) {
       message.style.display = 'block';
       message.textContent = error;
+    } else if (projectPromptTarget()) {
+      // Подсказка режима промпта: что сделает Enter и с каким проектом. Без
+      // неё `/p pick fix it` выглядел бы обычным фильтром, а Enter сделал бы
+      // другое. Промпт сверх предела называется здесь же, до отправки.
+      const target = projectPromptTarget();
+      message.style.display = 'block';
+      message.textContent = window.OpenStrategy.promptProblem(target.prompt)
+        || `Enter: new session in ${target.project.label} with prompt`;
     } else if (hotkeysTaken.length) {
       message.style.display = 'block';
       // Единственное место, где человек узнаёт про не вставшую клавишу.
@@ -2602,6 +2610,81 @@ const infoBackdrop = document.getElementById('info-backdrop');
     showMode('projects');
   }
 
+  /**
+   * Режим промпта: `/p <проект> <промпт>` с однозначно названным проектом.
+   *
+   * Спрашивается по строке поиска каждый раз, а не хранится флагом: режим
+   * живёт в самом тексте (см. picker-mode.js), и отдельный признак разошёлся
+   * бы с тем, что на экране, на первой же правке строки руками.
+   */
+  function projectPromptTarget() {
+    const { mode, query } = shownModeAndQuery();
+    return mode === 'projects' ? window.PickerMode.projectPrompt(query, projectRows) : null;
+  }
+
+  /**
+   * Tab: назвать проект в строке поиска — `/p <проект> `, дальше пишется промпт.
+   *
+   * Проект — активной строки, а если она не проектная — тот, что под мышью
+   * (решение Стаса: «при проекте в фокусе или по наведению мышкой»). Мышь
+   * вторая, потому что активную строку видно всегда, а курсор может стоять над
+   * списком случайно.
+   *
+   * Уже набранный промпт переживает Tab: им меняют проект, а не текст. Прочий
+   * хвост (фильтр, которым проект искали) заменяется — свою работу он сделал.
+   *
+   * Слово для проекта даёт `projectToken`: такое, что разбор вернёт этот же
+   * проект, — иначе вставленное Tab-ом не значило бы того, что выбрано.
+   */
+  function tabToProject() {
+    let row = rows[active];
+    if (!row || row.kind !== 'project') {
+      const node = list.querySelector('.row.project:hover');
+      row = node ? rows[Number(node.dataset.index)] : null;
+    }
+    if (!row || row.kind !== 'project') return;
+    const project = projectRows.find(p => p.id === row.id && p.source === row.source) || row;
+    const token = window.PickerMode.projectToken(project, projectRows);
+    if (!token) return;
+    const current = projectPromptTarget();
+    search.value = `/p ${token} ${current ? current.prompt : ''}`;
+    search.focus();
+    search.setSelectionRange(search.value.length, search.value.length);
+    onSearchInput();
+  }
+
+  /**
+   * Enter в режиме промпта: новая сессия проекта, промпт — её первое сообщение.
+   *
+   * Всегда новая, мимо `projectOpenAction: focus`: промпт просили отдать
+   * новой сессии, и поднятое старое окно молча потеряло бы его. Транспорт —
+   * та же развилка, что у `^N` (`newSessionHere`): менеджер по http или MQTT,
+   * иначе местная `newSession`, — промпт доезжает по каждой.
+   *
+   * Своя строка проекта под Windows — отказ вслух: обе дороги кончились бы
+   * местной `/bin/sh -c`, которого там нет (правило в opening-sessions.md).
+   */
+  async function openProjectPrompt(row, prompt, opts = {}) {
+    const problem = window.OpenStrategy.promptProblem(prompt);
+    if (problem) {
+      error = problem;
+      render();
+      return;
+    }
+    if (window.OpenTransport.isWindowsLocalRow(row, PICKER_OS)) {
+      error = 'A prompt cannot start a session in a local project on Windows';
+      render();
+      return;
+    }
+    const sent = await newSessionHere(row, opts, prompt);
+    // Отправленный промпт из строки убирается: следующий Enter по той же
+    // строке завёл бы вторую сессию с тем же текстом.
+    if (sent) {
+      search.value = '';
+      onSearchInput();
+    }
+  }
+
   function markToggleId(row) {
     // Вопрос укороченный — без конфига и без системы, — и это верно ровно
     // потому, что оба пункта, о которых он спрашивает, ни от того, ни от
@@ -2991,7 +3074,13 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // делать, решает менеджер: поднять окно этого проекта или завести сессию с
     // его профилем. Enter здесь значит «покажи мне проект», а не «дай ещё один
     // терминал» — вторая просьба живёт под `^N`.
-    if (row.kind === 'project') return openProjectRow(row, opts);
+    if (row.kind === 'project') {
+      // Режим промпта: на экране только целевой проект, и Enter отдаёт ему
+      // промпт, а не открывает проект как обычно.
+      const target = projectPromptTarget();
+      if (target) return openProjectPrompt(target.project, target.prompt, opts);
+      return openProjectRow(row, opts);
+    }
     return openSession(row, opts);
   }
 
@@ -3617,17 +3706,19 @@ const infoBackdrop = document.getElementById('info-backdrop');
    * проектного хоткея строки нет вовсе (только каталог), и там source не
    * передаётся — commandParts откатывается на CONFIG.sshHost сам.
    */
-  async function newSession(cwd, source) {
-    if (!cwd || noSources()) return;
+  async function newSession(cwd, source, prompt) {
+    if (!cwd || noSources()) return false;
     const taken = takenSessionNames();
     // Пустая команда — отказ OpenStrategy, а не поломка: путь с `;` Windows
-    // Terminal порежет на панели ещё до шелла. Сказать об этом обязательно —
-    // иначе кнопка молча ничего не делает.
-    const remote = window.OpenStrategy.newSessionCommand(cwd, taken);
+    // Terminal порежет на панели ещё до шелла, а промпт сверх предела не
+    // уедет целиком. Сказать об этом обязательно — иначе кнопка молча ничего
+    // не делает.
+    const remote = window.OpenStrategy.newSessionCommand(cwd, taken, prompt);
     if (!remote) {
-      error = `The path contains ";", there is nothing to open such a directory with: ${cwd}`;
+      error = window.OpenStrategy.promptProblem(prompt)
+        || `The path contains ";", there is nothing to open such a directory with: ${cwd}`;
       render();
-      return;
+      return false;
     }
     // Через ту же terminalArgv, что и открытие сессии. Собранный здесь руками
     // `[file, ...args, 'ssh', …]` про подстановку не знал вовсе: у iTerm2 это
@@ -3642,20 +3733,21 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (!argv) {
       error = helperError || 'terminal helper is not available';
       render();
-      return;
+      return false;
     }
     try {
       await invoke('spawn_detached', { argv });
     } catch (e) {
       error = String(e);
       render();
-      return;
+      return false;
     }
     // Имя запоминается только после удачного запуска: занять его на отказе
     // значило бы отдать следующей сессии `-2` без всякой первой.
     const name = window.OpenStrategy.newSessionName(cwd, taken);
     if (name) issuedNames.set(name, Date.now());
     invoke('hide_picker');
+    return true;
   }
 
   /**
@@ -3822,15 +3914,15 @@ const infoBackdrop = document.getElementById('info-backdrop');
    *
    * Гасится до просьбы — то же правило и та же цена, что у `openProjectRow`.
    */
-  async function newSessionHere(row, opts = {}) {
+  async function newSessionHere(row, opts = {}, prompt = '') {
     const dir = window.OpenTransport.rowProjectDir(row);
     const action = window.OpenTransport.chooseProjectOpenAction(
       row, openManagerHere(), CONFIG.windowHost, managerReachable(),
     );
-    if (action !== 'manager') return newSession(row.cwd, row.source);
+    if (action !== 'manager') return newSession(row.cwd, row.source, prompt);
     const taken = takenSessionNames();
     const name = window.OpenStrategy.newSessionName(dir, taken);
-    if (!name) return newSession(row.cwd, row.source);
+    if (!name) return newSession(row.cwd, row.source, prompt);
     // Имя занимается до отправки, а не после — в отличие от местной
     // newSession, где имя ждёт лишь миллисекунды локального spawn, здесь
     // invoke ждёт ответа менеджера (таймаут до 5 с у обоих транспортов).
@@ -3841,19 +3933,29 @@ const infoBackdrop = document.getElementById('info-backdrop');
     issuedNames.set(name, Date.now());
     await invoke('hide_picker');
     try {
+      // `prompt` — только у просьбы с промптом: пустой Rust сам прочтёт как
+      // обычный `terminal-new`, но ключ без значения врал бы о просьбе.
       await invoke('new_session_mqtt', {
         cwd: dir, name, base: managerBase(), http: managerHttpHere(),
         noAutoplace: opts.noAutoplace === true,
+        ...(prompt ? { prompt } : {}),
       });
     } catch (e) {
       // Отказ — имя не занято: сессия не поднялась, и следующая попытка
       // вправе получить то же самое.
       issuedNames.delete(name);
-      error = String(e);
+      // Менеджер прежней версии действия `terminal-prompt` не знает и
+      // отвечает отказом с причиной `unsupported action` (её доносит Rust из
+      // тела ответа): сказать, где искать. Прочим отказам — таймауту, пределу,
+      // шаблону — эта подсказка соврала бы, у них причина своя.
+      error = prompt && /unsupported action/.test(String(e))
+        ? `The manager does not know prompts yet — update windows11-manager: ${e}`
+        : String(e);
       render();
-      return;
+      return false;
     }
     error = '';
+    return true;
   }
 
   /**
@@ -4229,6 +4331,15 @@ const infoBackdrop = document.getElementById('info-backdrop');
     if (configured) {
       e.preventDefault();
       runAction(rows[active], configured.id);
+      return;
+    }
+    // Tab — назвать проект в строке поиска под промпт (`tabToProject`).
+    // preventDefault всегда, и на строке сессии тоже: иначе webview увёл бы
+    // фокус из поиска, и набор после этого проваливался бы в никуда — тот же
+    // случай, ради которого у `/` своя ветка выше. Shift+Tab — так же.
+    if (e.key === 'Tab' && !(e.ctrlKey || e.metaKey || e.altKey)) {
+      e.preventDefault();
+      if (!e.shiftKey) tabToProject();
       return;
     }
     if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }

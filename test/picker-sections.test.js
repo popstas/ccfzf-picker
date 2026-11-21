@@ -817,3 +817,19 @@ test('в широкой живые без окна идут за своими ж
   }));
   assert.strictEqual(moved.find(s => s.key === 'nowindow').column, 1);
 });
+
+test('режим промпта оставляет в секции ровно целевой проект', () => {
+  // `/p <проект> <промпт>`: хвост-промпт фильтром не служит — по нему не
+  // нашлось бы ничего, а Enter жмут по строке целевого проекта.
+  const projects = [
+    { kind: 'project', id: '/p/ccfzf', cwd: '/p/ccfzf', label: 'ccfzf' },
+    { kind: 'project', id: '/p/ccfzf-picker', cwd: '/p/ccfzf-picker', label: 'ccfzf-picker' },
+  ];
+  const [section] = buildSections(base({ mode: 'projects', projects, query: 'ccfzf fix the bug' }));
+  assert.deepStrictEqual(section.rows.map(r => r.cwd), ['/p/ccfzf']);
+  // Неоднозначный кусок — прежний фильтр всем хвостом.
+  assert.deepStrictEqual(
+    buildSections(base({ mode: 'projects', projects, query: 'cc fix' })).map(s => s.kind),
+    [],
+  );
+});

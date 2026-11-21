@@ -244,11 +244,52 @@
     return nameApi.uniqueSessionName(base, taken);
   }
 
-  function newSessionCommand(cwd, taken) {
+  /**
+   * Предел первого промпта в байтах UTF-8.
+   *
+   * Промпт едет в командной строке терминала base64-ом (треть сверху), а у
+   * Windows на всю строку 32767 знаков, и в ней же ssh и обёртка `inDir`.
+   * 8 КБ оставляют запас вдвое. Тот же предел стоит у менеджера
+   * (`PROMPT_MAX_BYTES` в project-helpers.js windows11-manager): там это сито
+   * для чужого тела, здесь — отказ, который человек видит до отправки.
+   */
+  const PROMPT_MAX_BYTES = 8192;
+
+  function utf8Length(s) {
+    if (typeof Buffer === 'function') return Buffer.byteLength(s, 'utf8');
+    return new TextEncoder().encode(s).length;
+  }
+
+  /** Почему промпт не уедет — или пустая строка. Предел называется, промпт не обрезается. */
+  function promptProblem(prompt) {
+    const bytes = utf8Length(String(prompt == null ? '' : prompt).trim());
+    return bytes > PROMPT_MAX_BYTES
+      ? `The prompt is ${bytes} bytes, the limit is ${PROMPT_MAX_BYTES}`
+      : '';
+  }
+
+  /**
+   * Новая сессия; с `prompt` — с первым промптом.
+   *
+   * Промпт — позиционный аргумент claude после `--`, и до него он едет
+   * base64-ом, раскодируясь уже внутри `$SHELL -ic` на той стороне. Прямо
+   * через `q` его не провезти: `;` Windows Terminal режет на панели до всякого
+   * шелла, перевод строки рвёт командную строку, — а в base64 нет ни их, ни
+   * кавычек, ни `$`. Та же форма и у менеджера (`PROMPT_TAIL`), чтобы промпт
+   * доезжал одинаково по каждому транспорту.
+   *
+   * Промпт длиннее `PROMPT_MAX_BYTES` — отказ всей команды (пустая строка),
+   * как и путь с `;`: сессия с обрезком промпта хуже, чем никакой.
+   */
+  function newSessionCommand(cwd, taken, prompt) {
     const path = String(cwd == null ? '' : cwd).replace(/\/+$/, '');
     if (path.includes(';')) return '';
     const name = newSessionName(path, taken);
-    return inDir(path, `claude -n ${q(name)}`);
+    const text = String(prompt == null ? '' : prompt).trim();
+    if (!text) return inDir(path, `claude -n ${q(name)}`);
+    if (promptProblem(text)) return '';
+    const tail = ` -- "$(printf %s ${toBase64(text)} | base64 --decode)"`;
+    return inDir(path, `claude -n ${q(name)}${tail}`);
   }
 
   /**
@@ -413,6 +454,7 @@
   return {
     q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
     newSessionCommand, newSessionName, terminalCommand, terminalArgv, toBase64,
+    promptProblem, PROMPT_MAX_BYTES,
     commandParts, LOCAL_SOURCE,
     HELPER_PLACEHOLDER, COMMAND_B64_PLACEHOLDER,
   };

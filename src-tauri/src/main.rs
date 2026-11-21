@@ -1498,11 +1498,17 @@ async fn open_project_mqtt(
 /// занятых имён не ведёт.
 ///
 /// Транспорт — `transport_for` по наличию http-адреса, как и у соседей.
+///
+/// `prompt` — первый промпт новой сессии (`/p <проект> <промпт>`). Непустой
+/// уводит просьбу в действие `terminal-prompt` (`open_prompt`) по тому же
+/// транспорту: промпт обязан доехать и по http, и по MQTT, а не только
+/// местной дорогой.
 #[tauri::command]
 async fn new_session_mqtt(
     app: tauri::AppHandle,
     cwd: String,
     name: String,
+    prompt: Option<String>,
     base: Option<String>,
     http: Option<String>,
     no_autoplace: Option<bool>,
@@ -1514,9 +1520,11 @@ async fn new_session_mqtt(
     // машины — ветку выбирает `chooseProjectOpenAction`.
     let place = placement(&app, &raw, no_autoplace.unwrap_or(false));
     let endpoint = http.unwrap_or_default();
+    let prompt = prompt.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
     let result = match transport_for(&endpoint) {
-        Transport::Http => tauri::async_runtime::spawn_blocking(move || {
-            manager_http::open_new(&endpoint, &cwd, &name, place)
+        Transport::Http => tauri::async_runtime::spawn_blocking(move || match prompt {
+            Some(prompt) => manager_http::open_prompt(&endpoint, &cwd, &name, &prompt, place),
+            None => manager_http::open_new(&endpoint, &cwd, &name, place),
         })
         .await
         .map_err(|e| format!("new_session_mqtt task failed: {e}"))?,
@@ -1526,8 +1534,9 @@ async fn new_session_mqtt(
             // машины менеджера, а не машины окна. Свой из конфига — запасной
             // ход для трекера прежней версии.
             let base = mqtt::resolve_base(&broker, base.unwrap_or_default().trim());
-            tauri::async_runtime::spawn_blocking(move || {
-                mqtt::open_new(&broker, &base, &cwd, &name, place)
+            tauri::async_runtime::spawn_blocking(move || match prompt {
+                Some(prompt) => mqtt::open_prompt(&broker, &base, &cwd, &name, &prompt, place),
+                None => mqtt::open_new(&broker, &base, &cwd, &name, place),
             })
             .await
             .map_err(|e| format!("new_session_mqtt task failed: {e}"))?
