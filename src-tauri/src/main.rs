@@ -1227,6 +1227,29 @@ async fn unread_session_mqtt(id: String, targets: Vec<Target>) -> Result<(), Str
     ask_session_trackers(SessionAsk::Unread, id, targets).await
 }
 
+/// Отдать одному трекеру набор сессий для мигания кнопки окна перед
+/// остыванием кеша (`frontend-src/cache-warn.js` собирает его и решает, когда
+/// слать). Цель одна на вызов: набор у каждого трекера свой, и общего тела на
+/// все цели, как у Mark seen, здесь нет. Транспорт — тот же `transport_for`;
+/// база MQTT разрешается `resolve_base`, как у отмотки.
+#[tauri::command]
+async fn cache_warn_send(target: Target, body: serde_json::Value) -> Result<(), String> {
+    let broker = config_parts()?.0;
+    let body = body.to_string();
+    tauri::async_runtime::spawn_blocking(move || match transport_for(&target.http) {
+        Transport::Http => manager_http::cache_warn(&target.http, &body),
+        Transport::Mqtt => match &broker {
+            Some(broker) => mqtt::cache_warn(broker, &mqtt::resolve_base(broker, &target.base), &body),
+            None => Err(
+                "mqtt is not configured: base and a host (name, mqtt:// or mqtts:// address) are required in config.yaml"
+                    .to_string(),
+            ),
+        },
+    })
+    .await
+    .map_err(|e| format!("cache_warn_send task failed: {e}"))?
+}
+
 /// Пометить сессию просмотренной у её трекеров — тем же ходом, что отмотка.
 ///
 /// Местная отметка ставится страницей сама и брокера не ждёт; эта просьба —
@@ -3400,7 +3423,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             hide_picker, app_version, set_picker_size, poll_now, spawn_detached, open_pr, load_seen, save_seen, load_config,
             terminal_helper, manager_terminal, window_icons,
-            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt, seen_session_mqtt,
+            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt, seen_session_mqtt, cache_warn_send,
             restore_snapshot_mqtt, place_windows_mqtt, set_picker_selection, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
