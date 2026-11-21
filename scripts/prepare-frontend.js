@@ -19,6 +19,8 @@ const FILES = [
   // Перед session-windows: тот берёт StaleItems из globalThis на загрузке.
   'frontend-src/stale-items.js',
   'frontend-src/session-windows.js',
+  // После session-windows: берёт SessionWindows из globalThis на загрузке.
+  'frontend-src/cache-warn.js',
   'frontend-src/open-transport.js',
   'frontend-src/session-groups.js',
   'frontend-src/ui-state.js',

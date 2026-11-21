@@ -20,6 +20,12 @@ a Mac). Tabs on the left, the page on the right.
 - **Columns** — two checkboxes per column: `list` — whether to draw the column
   in the row, `statusline` — whether to put its checkbox in the line at the
   bottom. Space in the status line is limited, and what goes there is your call.
+- **Context highlight** — the context-share thresholds of the `usage` column
+  (light text, yellow, red), and how many minutes before the prompt cache
+  expires the taskbar button of the session window starts blinking yellow
+  (`cacheWarnMinutes`, 10 by default, `0` turns it off). The blinking is drawn
+  by windows11-manager, so it reaches only WezTerm windows on a machine running
+  it; focusing the window stops it until the agent answers again.
 - **Layout panels** — the order, collapsed state and visibility of the wide-mode
   (`^F`) panels: which column a panel occupies and along which axes. Below the
   wide table, **Column widths in the wide view** switches between `Equal` and

@@ -38,6 +38,9 @@ const UNREAD_TOPIC: &str = "/claude-session-unread";
 /// «Посмотрели, не открывая окна» (Shift+клик, «Mark seen»): менеджер гасит
 /// оранжевую кнопку окна сессии в панели задач. Зеркало `UNREAD_TOPIC`.
 const SEEN_TOPIC: &str = "/claude-session-seen";
+/// Набор сессий для мигания кнопки окна перед остыванием кеша промпта.
+/// Тело то же, что у http-пути `/claude-wt/cache-warn`.
+const CACHE_WARN_TOPIC: &str = "/claude-cache-warn";
 const RESTORE_TOPIC: &str = "/claude-snapshot-restore";
 /// Просьба к windows11-manager открыть сессию у себя. Отличается от
 /// `FOCUS_TOPIC` тем, что ни окна, ни самой сессии у трекера может не быть
@@ -289,6 +292,12 @@ pub fn unread(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
 /// без просьбы она горела бы до следующего фокуса окна.
 pub fn seen(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
     publish(broker, base, SEEN_TOPIC, &focus_body(id))
+}
+
+/// Отдать трекеру набор сессий для мигания перед остыванием кеша. Зеркало
+/// `manager_http::cache_warn` для машины без http-адреса.
+pub fn cache_warn(broker: &Broker, base: &str, body: &str) -> Result<(), String> {
+    publish(broker, base, CACHE_WARN_TOPIC, body)
 }
 
 /// Попросить открыть сессию на машине трекера.

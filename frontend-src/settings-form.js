@@ -194,6 +194,12 @@
         { id: 'contextLevels.warn', label: 'Yellow from, %', type: 'number', default: 30 },
         { id: 'contextLevels.hot', label: 'Red from, %', type: 'number', default: 40,
           hint: 'Each step must be higher than the one before it.' },
+        // Не порог контекста, а соседний вопрос той же колонки usage — таймер
+        // кеша. Своей вкладки на одно поле не заводим.
+        { id: 'cacheWarnMinutes',
+          label: 'Blink the taskbar button before the cache expires, minutes',
+          type: 'number', default: 10,
+          hint: '0 turns it off. WezTerm windows on machines running windows11-manager.' },
       ],
     },
     {
@@ -638,6 +644,13 @@
     validNumber('stale.opacity', 0.1, 1, 'must be between 0.1 and 1.0');
     const LEVELS = ['contextLevels.bright', 'contextLevels.warn', 'contextLevels.hot'];
     for (const id of LEVELS) validNumber(id, 0, 100, 'must be between 0 and 100');
+    // Целое: служба windows11-manager принимает только целые минуты 0…59, а
+    // дробь, пропущенная формой, молча обернулась бы умолчанием.
+    validNumber('cacheWarnMinutes', 0, 59, 'must be from 0 to 59');
+    if (fields.cacheWarnMinutes !== undefined && String(fields.cacheWarnMinutes).trim()
+      && !Number.isInteger(Number(fields.cacheWarnMinutes))) {
+      problems.push('cacheWarnMinutes must be a whole number');
+    }
     // Ступени идут вверх. Перепутанные не ломают отрисовку (`contextLevel`
     // берёт самую тревожную из достигнутых), но младшая тогда не показалась
     // бы никогда — а человек, ставивший её, ждёт обратного. Выключенные
