@@ -514,3 +514,75 @@ test('строка с чужой машины на Windows по-прежнему
   assert.ok(got.argv.includes('ssh'), got.argv.join(' '));
   assert.strictEqual(got.cwd, undefined);
 });
+
+// ─── Новая сессия с первым промптом (`/p <проект> <промпт>`) ─────────────
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { promptProblem, PROMPT_MAX_BYTES } = require('../frontend-src/open-strategy');
+
+// Всё, на чём ломается командная строка: обе кавычки, `;` (панели Windows
+// Terminal), `$` и подстановки, перевод строки, кириллица.
+const NASTY = `fix "it" now; don't $HOME \`id\` $(echo x)\nвторая строка — ёж`;
+
+test('промпт уезжает base64-ом: ни `;`, ни перевода строки в команде', () => {
+  const cmd = newSessionCommand('/home/user/projects/api', [], NASTY);
+  assert.ok(!cmd.includes(';'), cmd);
+  assert.ok(!cmd.includes('\n'), cmd);
+  assert.ok(!cmd.includes('ёж'), cmd);
+  assert.match(cmd, /claude -n '\\''api'\\'' -- "\$\(printf %s [A-Za-z0-9+/=]+ \| base64 --decode\)"/);
+});
+
+test('без промпта команда прежняя, слово в слово', () => {
+  assert.strictEqual(
+    newSessionCommand('/home/user/projects/api', [], ''),
+    newSessionCommand('/home/user/projects/api', []),
+  );
+  assert.strictEqual(
+    newSessionCommand('/home/user/projects/api', [], '   '),
+    newSessionCommand('/home/user/projects/api', []),
+  );
+});
+
+test('предел промпта назван, а не обрезан молча', () => {
+  assert.strictEqual(promptProblem('hi'), '');
+  assert.strictEqual(promptProblem('ж'.repeat(PROMPT_MAX_BYTES / 2)), '');
+  const problem = promptProblem('ж'.repeat(PROMPT_MAX_BYTES / 2 + 1));
+  assert.match(problem, new RegExp(String(PROMPT_MAX_BYTES)));
+  // Длинный промпт — отказ всей команды, а не сессия с обрезком.
+  assert.strictEqual(newSessionCommand('/p/api', [], 'x'.repeat(PROMPT_MAX_BYTES + 1)), '');
+});
+
+test('промпт доезжает до claude целиком: оба шелла настоящие, claude подставной',
+  { skip: process.platform === 'win32' }, () => {
+    // Местная дорога: `/bin/sh -c <команда>` (commandParts без ssh), внутри —
+    // `$SHELL -ic`. На ssh-дороге первый шелл — чужой, но разбирает он ту же
+    // строку тем же POSIX-правилом.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'picker-prompt-'));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    const out = path.join(dir, 'argv');
+    fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\nfor a; do printf '%s\\0' "$a"; done > "$OUT"\n`);
+    fs.chmodSync(path.join(bin, 'claude'), 0o755);
+    const cwd = path.join(dir, "про'ект");
+    fs.mkdirSync(cwd);
+    const [file, ...args] = commandParts(newSessionCommand(cwd, [], NASTY), LOCAL_SOURCE);
+    const res = spawnSync(file, args, {
+      env: { PATH: `${bin}:/usr/bin:/bin`, SHELL: '/bin/sh', OUT: out, HOME: dir },
+      encoding: 'utf8',
+    });
+    assert.strictEqual(res.status, 0, res.stderr);
+    const argv = fs.readFileSync(out, 'utf8').split('\0').slice(0, -1);
+    assert.deepStrictEqual(argv, ['-n', "про'ект", '--', NASTY]);
+  });
+
+test('команда с промптом проходит и `{command}`, и `{helper}` терминалов', () => {
+  // iTerm2 берёт команду одной строкой внутри двойных кавычек AppleScript,
+  // соседний пресет — base64 для помощника. Обе подстановки обязаны принять
+  // команду с промптом, как принимают обычную.
+  const remote = newSessionCommand('/p/api', [], NASTY);
+  const parts = commandParts(remote, 'host');
+  const viaCommand = terminalArgv({ file: 'osascript', args: ['-e', 'write text "{command}"'] }, parts);
+  assert.ok(viaCommand && viaCommand.join(' ').includes('base64 --decode'), String(viaCommand));
+});

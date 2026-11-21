@@ -16,6 +16,11 @@
   const snapshotsApi = typeof module === 'object' && module.exports
     ? require('./picker-snapshots')
     : globalThis.PickerSnapshots;
+  // Разбор `/p <проект> <промпт>` — у режимов: тот же файл, что знает
+  // префиксы. picker-mode.js стоит в sessions.html выше этого файла.
+  const modeApi = typeof module === 'object' && module.exports
+    ? require('./picker-mode')
+    : globalThis.PickerMode;
 
   // Колонки широкого режима. Раскладка задана человеком и держится на смысле
   // строк, а не на их числе:
@@ -246,7 +251,12 @@
     // Проекты и снимки — секции того же списка, а не отдельные режимы: их
     // видно сразу, свёрнутыми, и префикс оставляет на экране одну из них.
     if (mode === 'sessions' || mode === 'projects') {
-      const rows = filterApi.filterProjects(o.projects || [], query);
+      // В режиме промпта (`/p <проект> <промпт>`) на экране ровно тот проект,
+      // которому уйдёт промпт: Enter жмут по нему, и по нему же человек видит,
+      // что слово разобралось. Хвост-промпт фильтром не служит — по нему не
+      // нашлось бы ничего.
+      const target = mode === 'projects' ? modeApi.projectPrompt(query, o.projects || []) : null;
+      const rows = target ? [target.project] : filterApi.filterProjects(o.projects || [], query);
       if (rows.length) {
         sections.push({
           key: 'projects', label: 'Projects', kind: 'projects',

@@ -22,7 +22,7 @@
 use std::time::Duration;
 
 use crate::mqtt::{
-    focus_body, open_new_payload, open_payload, open_project_payload, place_payload,
+    focus_body, open_new_payload, open_payload, open_project_payload, open_prompt_payload, place_payload,
     restore_payload, Placement,
 };
 
@@ -133,6 +133,21 @@ pub fn open_new(
         endpoint,
         "/claude-session-open",
         open_new_payload(cwd, name, place),
+    )
+}
+
+/// Попросить новую сессию в каталоге с первым промптом.
+pub fn open_prompt(
+    endpoint: &str,
+    cwd: &str,
+    name: &str,
+    prompt: &str,
+    place: Placement,
+) -> Result<(), String> {
+    post(
+        endpoint,
+        "/claude-session-open",
+        open_prompt_payload(cwd, name, prompt, place),
     )
 }
 
@@ -297,13 +312,14 @@ mod tests {
     #[test]
     fn every_public_request_carries_its_own_route() {
         let placement = Placement::default();
-        let cases: [(&str, Result<(), String>); 8] = [
+        let cases: [(&str, Result<(), String>); 9] = [
             ("/claude-wt/focus", focus("bad", "id")),
             ("/claude-wt/session-unread", unread("bad", "id")),
             ("/claude-wt/session-seen", seen("bad", "id")),
             ("/claude-wt/session-open", open("bad", "id", "cwd", placement)),
             ("/claude-wt/session-open", open_project("bad", "cwd", placement)),
             ("/claude-wt/session-open", open_new("bad", "cwd", "name", placement)),
+            ("/claude-wt/session-open", open_prompt("bad", "cwd", "name", "hi", placement)),
             ("/claude-wt/snapshot-restore", restore("bad", "id", &[])),
             ("/claude-wt/place", place("bad", "tile", &[])),
         ];

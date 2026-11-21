@@ -476,6 +476,40 @@ pub(crate) fn open_new_payload(cwd: &str, name: &str, place: Placement) -> Strin
     serde_json::Value::Object(body).to_string()
 }
 
+/// Попросить новую сессию с первым промптом (`/p <проект> <промпт>`).
+///
+/// Своё действие `terminal-prompt`, а не поле `prompt` у `terminal-new`, по
+/// той же причине, по какой `terminal-new` не стал флагом у `terminal` (см.
+/// `open_new`): менеджер прежней версии незнакомое поле выкинул бы молча и
+/// открыл сессию без промпта, а незнакомое действие отвергает вслух.
+pub fn open_prompt(
+    broker: &Broker,
+    base: &str,
+    cwd: &str,
+    name: &str,
+    prompt: &str,
+    place: Placement,
+) -> Result<(), String> {
+    publish(broker, base, OPEN_TOPIC, &open_prompt_payload(cwd, name, prompt, place))
+}
+
+/// Тело просьбы с промптом: то же, что у `open_new`, плюс сам промпт.
+///
+/// Промпт едет как есть, строкой JSON: кодирует его в base64 менеджер,
+/// перед тем как подставить в командную строку терминала.
+pub(crate) fn open_prompt_payload(cwd: &str, name: &str, prompt: &str, place: Placement) -> String {
+    let mut body = serde_json::Map::new();
+    body.insert(
+        "action".to_string(),
+        serde_json::Value::String("terminal-prompt".to_string()),
+    );
+    body.insert("cwd".to_string(), serde_json::Value::String(cwd.to_string()));
+    body.insert("name".to_string(), serde_json::Value::String(name.to_string()));
+    body.insert("prompt".to_string(), serde_json::Value::String(prompt.to_string()));
+    put_placement(&mut body, place);
+    serde_json::Value::Object(body).to_string()
+}
+
 /// Тело просьбы о восстановлении.
 ///
 /// Без `sessionIds` приёмник поднимает снимок целиком. Пустой массив он
@@ -683,7 +717,8 @@ fn publish(broker: &Broker, base: &str, tail: &str, payload: &str) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::{
-        broker_from_config, group_payload, open_new_payload, open_payload, open_project_payload, place_payload,
+        broker_from_config, group_payload, open_new_payload, open_payload, open_project_payload,
+        open_prompt_payload, place_payload,
         resolve_base, restore_payload, terminal_name, topic_of, unread_bases, Placement,
         FOCUS_TOPIC,
         OPEN_TOPIC, PLACE_TOPIC, RESTORE_TOPIC, SEEN_TOPIC, UNREAD_TOPIC,
@@ -1010,6 +1045,21 @@ mod tests {
             open_new_payload("/p/site", "site-2", NOWHERE),
             r#"{"action":"terminal-new","cwd":"/p/site","name":"site-2"}"#
         );
+    }
+
+    /// Промпт едет строкой JSON как есть: кавычки, `;`, `$`, перевод строки и
+    /// кириллица экранирует serde, а до командной строки его довозит base64-ом
+    /// уже менеджер. Действие своё — `terminal-prompt`.
+    #[test]
+    fn prompt_body_carries_the_prompt_as_plain_json() {
+        let prompt = "fix \"it\"; don't $HOME\nёж";
+        let body = open_prompt_payload("/p/site", "site-2", prompt, NOWHERE);
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["action"], "terminal-prompt");
+        assert_eq!(parsed["cwd"], "/p/site");
+        assert_eq!(parsed["name"], "site-2");
+        assert_eq!(parsed["prompt"], prompt);
+        assert!(open_prompt_payload("/p/site", "s", "x", pinned(1.0, 2.0)).contains("noAutoplace"));
     }
 
     /// Просьба без единой оговорки про место: как ставили, так и ставьте.

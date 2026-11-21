@@ -107,3 +107,79 @@ test('вставка префикса поверх чужого заменяет
   assert.strictEqual(withPrefix('/l a', 'local'), '/l a');
   assert.strictEqual(withPrefix('', 'remote'), '/r ');
 });
+
+// ─── `/p <проект> <промпт>` ───────────────────────────────────────────────
+const { projectPrompt, projectToken } = require('../frontend-src/picker-mode');
+
+const PROJECTS = [
+  { kind: 'project', id: '/p/ccfzf', cwd: '/p/ccfzf', label: 'ccfzf', source: 's' },
+  { kind: 'project', id: '/p/ccfzf-picker', cwd: '/p/ccfzf-picker', label: 'ccfzf-picker', source: 's' },
+  { kind: 'project', id: '/p/windows11-manager', cwd: '/p/windows11-manager', label: 'windows11-manager', source: 's' },
+  { kind: 'project', id: '/p/my notes', cwd: '/p/my notes', label: 'my notes', source: 's' },
+];
+
+test('однозначный кусок имени и хвост — промпт этому проекту', () => {
+  const hit = projectPrompt('picker fix the bug', PROJECTS);
+  assert.strictEqual(hit.project.cwd, '/p/ccfzf-picker');
+  assert.strictEqual(hit.prompt, 'fix the bug');
+});
+
+test('точное совпадение побеждает кусок чужого имени', () => {
+  // `ccfzf` — кусок и `ccfzf-picker`, но имя `ccfzf` названо целиком.
+  assert.strictEqual(projectPrompt('ccfzf hi', PROJECTS).project.cwd, '/p/ccfzf');
+  // Регистр не важен и для точного.
+  assert.strictEqual(projectPrompt('CCFZF hi', PROJECTS).project.cwd, '/p/ccfzf');
+});
+
+test('неоднозначный кусок — не промпт, а прежний фильтр', () => {
+  // `cc` есть в двух именах: гадать, кому отдать промпт, нельзя.
+  assert.strictEqual(projectPrompt('cc hello', PROJECTS), null);
+});
+
+test('без хвоста и без совпадения — прежний режим', () => {
+  assert.strictEqual(projectPrompt('picker', PROJECTS), null);
+  assert.strictEqual(projectPrompt('picker   ', PROJECTS), null);
+  assert.strictEqual(projectPrompt('nothing here', PROJECTS), null);
+  assert.strictEqual(projectPrompt('', PROJECTS), null);
+  assert.strictEqual(projectPrompt('picker hi', []), null);
+});
+
+test('промпт берётся как есть: переводы строк, кавычки, кириллица', () => {
+  const text = `fix "it"; don't $HOME\nвторая строка`;
+  assert.strictEqual(projectPrompt(`windows ${text}`, PROJECTS).prompt, text);
+});
+
+test('путь каталога целиком — тоже точное имя', () => {
+  // Им Tab называет проект, у которого имя с пробелом или с тёзкой.
+  assert.strictEqual(projectPrompt('/p/my notes x', PROJECTS), null);
+  assert.strictEqual(projectPrompt('/p/ccfzf hi', PROJECTS).project.cwd, '/p/ccfzf');
+});
+
+test('тёзки с разных машин — точное имя неоднозначно, различает путь', () => {
+  const twins = [
+    { kind: 'project', cwd: '/srv/one/site', label: 'site', source: 'one' },
+    { kind: 'project', cwd: '/srv/site', label: 'site', source: 'two' },
+  ];
+  assert.strictEqual(projectPrompt('site hi', twins), null);
+  assert.strictEqual(projectPrompt('/srv/site hi', twins).project.source, 'two');
+  assert.strictEqual(projectToken(twins[1], twins), '/srv/site');
+});
+
+test('Tab называет проект тем словом, которое к нему же и разберётся', () => {
+  assert.strictEqual(projectToken(PROJECTS[0], PROJECTS), 'ccfzf');
+  assert.strictEqual(projectToken(PROJECTS[1], PROJECTS), 'ccfzf-picker');
+  // Имя с пробелом словом не стать: берётся кусок без пробела, если он однозначен.
+  assert.strictEqual(projectToken(PROJECTS[3], PROJECTS), 'notes');
+  for (const p of PROJECTS) {
+    const token = projectToken(p, PROJECTS);
+    assert.strictEqual(projectPrompt(`${token} x`, PROJECTS).project, p, token);
+  }
+});
+
+test('не разобрать никак — пустая строка', () => {
+  const same = [
+    { kind: 'project', cwd: '/a/x y', label: 'x y', source: 'one' },
+    { kind: 'project', cwd: '/b/x y', label: 'x y', source: 'two' },
+  ];
+  assert.strictEqual(projectToken(same[0], same), '');
+});
