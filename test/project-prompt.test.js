@@ -28,8 +28,8 @@ test('Enter в режиме промпта идёт мимо openProjectRow и p
 });
 
 test('промпт уходит развилкой ^N, а не мимо менеджера', () => {
-  // Своя местная newSession здесь потеряла бы http и MQTT менеджера: на nb
-  // это профиль Windows Terminal и расстановка окна.
+  // Своя местная newSession здесь потеряла бы http и MQTT менеджера, а с
+  // ними профиль Windows Terminal и расстановку окна.
   const open = body('openProjectPrompt');
   assert.match(open, /newSessionHere\(row, opts, prompt\)/);
   assert.doesNotMatch(open, /\bnewSession\(/);

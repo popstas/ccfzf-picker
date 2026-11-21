@@ -577,10 +577,10 @@ test('промпт доезжает до claude целиком: оба шелл�
     assert.deepStrictEqual(argv, ['-n', "про'ект", '--', NASTY]);
   });
 
-test('команда с промптом проходит и `{command}`, и `{helper}` терминалов', () => {
-  // iTerm2 берёт команду одной строкой внутри двойных кавычек AppleScript,
-  // соседний пресет — base64 для помощника. Обе подстановки обязаны принять
-  // команду с промптом, как принимают обычную.
+test('команда с промптом проходит подстановку `{command}` (iTerm2)', () => {
+  // iTerm2 берёт команду одной строкой внутри двойных кавычек AppleScript, и
+  // команда с промптом обязана пройти эту подстановку, как проходит обычная.
+  // `{helper}` берёт команду целиком base64-ом и знаков не разбирает вовсе.
   const remote = newSessionCommand('/p/api', [], NASTY);
   const parts = commandParts(remote, 'host');
   const viaCommand = terminalArgv({ file: 'osascript', args: ['-e', 'write text "{command}"'] }, parts);

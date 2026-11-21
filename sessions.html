@@ -3914,9 +3914,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // вправе получить то же самое.
       issuedNames.delete(name);
       // Менеджер прежней версии действия `terminal-prompt` не знает и
-      // отвечает отказом: сказать, где искать, а не только код ответа.
-      error = prompt
-        ? `The manager did not take the prompt (is windows11-manager up to date?): ${e}`
+      // отвечает отказом с причиной `unsupported action` (её доносит Rust из
+      // тела ответа): сказать, где искать. Прочим отказам — таймауту, пределу,
+      // шаблону — эта подсказка соврала бы, у них причина своя.
+      error = prompt && /unsupported action/.test(String(e))
+        ? `The manager does not know prompts yet — update windows11-manager: ${e}`
         : String(e);
       render();
       return false;
