@@ -2398,6 +2398,65 @@ const infoBackdrop = document.getElementById('info-backdrop');
     lastState = state;
     sendCacheWarn(state);
     regroup();
+    // Пункт трея «Reopen disconnected sessions» ждёт второго удачного ответа
+    // после нажатия (см. reopenDisconnected).
+    if (reopenWait && --reopenWait.left <= 0) {
+      const wait = reopenWait;
+      reopenWait = null;
+      clearTimeout(wait.timer);
+      reopenDisconnected(state);
+    }
+  }
+
+  /*
+   * Пункт трея «Reopen disconnected sessions».
+   *
+   * Rust показывает окно и шлёт событие: у скрытого пикера WebView2 усыпляет
+   * страницу, а команду перехвата собирает она. Список скрытого пикера мог
+   * отстать на восемь минут (бэкофф опроса), и SIGHUP по нему ушёл бы
+   * устаревшему pid. Поэтому ждём **второго** удачного ответа после нажатия:
+   * опрос идёт одним потоком, по одному за раз (`poller.rs`), и первый ответ
+   * мог быть от опроса, начатого ещё до нажатия, а второй начат уже после
+   * него. Метка `generated` для этого не годится: слияние источников берёт
+   * самую старую, а у ccfzf она дробная, и `as_i64` в merge_state её не
+   * читает. Показ сам будит опрос. Не дождались за 10 с — отказ словами, а не
+   * молчание.
+   *
+   * Подтверждение одно на весь список; дальше каждая строка идёт общей
+   * openSession с `reopen` — той же дорогой, что пункт `^K`.
+   */
+  let reopenWait = null;
+  const REOPEN_WAIT_MS = 10_000;
+
+  function requestReopenDisconnected() {
+    if (reopenWait) clearTimeout(reopenWait.timer);
+    reopenWait = {
+      left: 2,
+      timer: setTimeout(() => {
+        reopenWait = null;
+        error = 'No fresh session list, nothing reopened';
+        render();
+      }, REOPEN_WAIT_MS),
+    };
+  }
+
+  async function reopenDisconnected(state) {
+    const all = window.SessionList.buildSessionList({
+      sessions: state.sessions, seen, state, configHost: CONFIG.windowHost,
+    });
+    const targets = window.SessionActions.reopenableRows(all, CONFIG, { os: PICKER_OS });
+    if (!targets.length) {
+      showNotice('No disconnected sessions');
+      return;
+    }
+    const names = targets.map(r => `  ${sessionName(r)} — process ${r.pid} on ${sourceLabel(r)}`).join('\n');
+    const ok = confirm(
+      `Reopen ${targets.length} disconnected session${targets.length === 1 ? '' : 's'}?\n\n${names}\n\n`
+      + 'Each process will get SIGHUP and exit; the session will be resumed in a new terminal.\n'
+      + 'Old windows stay as they are.',
+    );
+    if (!ok) return;
+    for (const row of targets) await openSession(row, { reopen: true, confirmed: true });
   }
 
   /*
@@ -4701,6 +4760,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
 
     // Ответ агрегатора приезжает событием: опросом распоряжается Rust.
     await listen('state', (event) => applyState(event.payload));
+    await listen('reopen-disconnected', requestReopenDisconnected);
 
     // Настройки правит другое окно, и своего ui.json пикер сам не перечитает.
     await listen('ui-changed', async () => {

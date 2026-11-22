@@ -262,5 +262,16 @@
     return actions;
   }
 
-  return { prNumber, availableActions };
+  /**
+   * Строки, которые поднимет пункт трея «Reopen disconnected sessions».
+   *
+   * Мерка — сам пункт `reopen` у строки, а не вторая копия его условий:
+   * трей и `^K` обязаны соглашаться, какую сессию можно снять и поднять.
+   */
+  function reopenableRows(rows, config, opts) {
+    return (Array.isArray(rows) ? rows : [])
+      .filter(r => availableActions(r, config, opts).some(a => a.id === 'reopen'));
+  }
+
+  return { prNumber, availableActions, reopenableRows };
 });

@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { availableActions, prNumber } = require('../frontend-src/session-actions');
+const { availableActions, prNumber, reopenableRows } = require('../frontend-src/session-actions');
 const { prBadgeHtml } = require('../frontend-src/session-glyph');
 const { normalizeConfig } = require('../frontend-src/config-shape');
 const { menuKeys } = require('../frontend-src/action-hotkey');
@@ -70,6 +70,40 @@ test('openSession с reopen — takeover местным терминалом, б
   assert.match(fn[0], /const action = opts\.reopen \? 'local' :/);
   const run = html.match(/\n {2}function runAction\(row, id\) \{[\s\S]*?\n {2}\}\n/)[0];
   assert.match(run, /id === 'reopen'\) \{\s*openSession\(row, \{ reopen: true \}\)/);
+});
+
+test('reopenableRows — те же строки, у которых меню предлагает Reopen session', () => {
+  // Одно правило на оба входа: пункт трея выбирает строки той же меркой, что
+  // `^K`, а не своей копией условий.
+  const cut = { id: 'a', cwd: '/home/user/x', live: true, pid: 42, disconnected: true };
+  const rows = [
+    cut,
+    { ...cut, id: 'b', disconnected: false },
+    { ...cut, id: 'c', pid: 0 },
+    { ...cut, id: 'd', source: 'local' },
+    { ...cut, id: 'e', source: 'build-host' },
+    { kind: 'project', id: '/p', cwd: '/p', disconnected: true, live: true, pid: 1 },
+  ];
+  assert.deepStrictEqual(reopenableRows(rows, {}, { os: 'windows' }).map(r => r.id), ['a', 'e']);
+  assert.deepStrictEqual(reopenableRows(rows, {}, { os: 'linux' }).map(r => r.id), ['a', 'd', 'e']);
+  assert.deepStrictEqual(reopenableRows(null), []);
+});
+
+// Пункт трея жмут при скрытом пикере, а WebView2 у скрытого окна усыпляет
+// страницу, и команду собирает она. Поэтому Rust сперва показывает окно, а
+// страница ждёт свежего ответа: список скрытого пикера мог отстать на восемь
+// минут, и SIGHUP ушёл бы по устаревшему pid.
+test('пункт трея Reopen ждёт свежего ответа и открывает общей openSession', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+  assert.match(html, /listen\('reopen-disconnected'/);
+  const fn = html.match(/\n {2}async function reopenDisconnected\(state\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(fn, 'reopenDisconnected не найден — тест сторожит не то');
+  assert.match(fn[0], /reopenableRows\(/);
+  assert.match(fn[0], /openSession\(row, \{ reopen: true, confirmed: true \}\)/);
+  assert.ok(!/buildOpenCommand/.test(fn[0]), 'своей сборки команды у пункта трея быть не должно');
+  const apply = html.match(/\n {2}function applyState\(payload\) \{[\s\S]*?\n {2}\}\n/)[0];
+  assert.match(apply, /reopenWait && --reopenWait\.left <= 0/);
+  assert.match(html, /reopenWait = \{\s*left: 2,/);
 });
 
 test('информация о сессии есть всегда', () => {

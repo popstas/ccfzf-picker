@@ -3642,6 +3642,17 @@ fn main() {
             // достижимы и тогда, когда до шестерёнки в статуслайне не добраться:
             // хоткей не встал, а пикер не открывается по той самой настройке,
             // которую надо и поправить.
+            // Поднять разорванные сессии разом: агент жив, а ssh к нему умер
+            // (`disconnected` от агрегатора). Пункт активен всегда: про
+            // разорванные знает страница, а не трей, и спросить её скрытую
+            // нечего — если поднимать некого, она так и скажет.
+            let reopen_item = MenuItem::with_id(
+                app,
+                "reopen-disconnected",
+                "Reopen disconnected sessions",
+                true,
+                None::<&str>,
+            )?;
             let settings_item =
                 MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -3679,6 +3690,7 @@ fn main() {
                     .map(|item| item as &dyn tauri::menu::IsMenuItem<tauri::Wry>),
             );
             items.push(&tile_item);
+            items.push(&reopen_item);
             items.push(&settings_item);
             items.push(&quit_item);
             items.push(&mqtt_item);
@@ -3720,6 +3732,13 @@ fn main() {
                     // и чтение конфига цикл событий не занимают. Публикация и
                     // так уходит в `spawn_blocking` внутри.
                     "tile" => tile_press(app),
+                    // Сначала показ, потом просьба: у скрытого пикера WebView2
+                    // усыпляет страницу, а перехват собирает она. Порядок тот
+                    // же, что у режимов (`show_in_mode`).
+                    "reopen-disconnected" => {
+                        show_picker(app);
+                        let _ = app.emit("reopen-disconnected", ());
+                    }
                     "quit" => app.exit(0),
                     // Пункты-режимы разбираются таблицей, а не веткой на
                     // каждый: ветка, забытая при заведении пятого режима, дала
@@ -4545,7 +4564,7 @@ mod tests {
             .expect("обработчик меню не закрыт");
         // `version` сюда не входит намеренно: он заведён неактивным (подпись,
         // а не действие), и ветки ему не полагается.
-        for id in ["show", "show-projects", "tile", "settings", "quit"] {
+        for id in ["show", "show-projects", "tile", "reopen-disconnected", "settings", "quit"] {
             assert!(
                 handler.contains(&format!("\"{id}\"")) || mode_for_menu_id(id).is_some(),
                 "пункт трея {id} не разобран в on_menu_event — нажатие молча не сделает ничего"
