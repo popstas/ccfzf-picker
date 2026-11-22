@@ -120,12 +120,19 @@ pub fn merge_states(parts: &[(Source, Value)]) -> Value {
 
     // Возраст ответа — по самому старому куску: максимум соврал бы про
     // свежесть всей половины.
+    //
+    // Сравнение — в f64: ccfzf отдаёт `time.time()`, и у дробного `as_i64()`
+    // даёт None. Так и было: минимум не считался никогда, а в ответе стояло
+    // значение первого куска — его верхние поля легли в `out` целиком. В ответ
+    // уходит само значение куска, а не пересобранное число: целое остаётся
+    // целым, дробь — дробью.
     let oldest = tagged
         .iter()
-        .filter_map(|v| v.get("generated").and_then(|g| g.as_i64()))
-        .min();
-    if let Some(g) = oldest {
-        out.insert("generated".to_string(), Value::from(g));
+        .filter_map(|v| v.get("generated"))
+        .filter_map(|g| g.as_f64().map(|t| (t, g)))
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+    if let Some((_, g)) = oldest {
+        out.insert("generated".to_string(), g.clone());
     }
 
     Value::Object(out)
@@ -190,11 +197,31 @@ mod tests {
     }
 
     /// Возраст ответа — по самому старому куску: максимум соврал бы про
-    /// свежесть всей половины.
+    /// свежесть всей половины. Старый кусок стоит вторым: первый лёг в ответ
+    /// целиком, и при обратном порядке тест не отличил бы минимум от его
+    /// отсутствия. Целое при этом остаётся целым, а не становится `10.0`.
     #[test]
     fn generated_is_the_oldest_part() {
-        let out = merge_states(&[(remote(), state(10, &["a"])), (Source::Local, state(20, &["b"]))]);
+        let out = merge_states(&[(remote(), state(20, &["a"])), (Source::Local, state(10, &["b"]))]);
         assert_eq!(out["generated"], 10);
+    }
+
+    /// ccfzf отдаёт `generated` дробным — это `time.time()`. Целые фикстуры
+    /// соседнего теста этого не видели: `as_i64()` у дробного даёт `None`,
+    /// минимум не считался, и в ответе оставалось значение первого куска —
+    /// его верхние поля легли в документ целиком. Поэтому первым здесь стоит
+    /// более свежий кусок: при обратном порядке ошибка совпала бы с ответом.
+    #[test]
+    fn fractional_generated_is_the_oldest_part() {
+        let part = |generated: f64, id: &str| serde_json::json!({
+            "generated": generated,
+            "sessions": [{"id": id}],
+        });
+        let out = merge_states(&[
+            (remote(), part(1763800020.75, "a")),
+            (Source::Local, part(1763800010.25, "b")),
+        ]);
+        assert_eq!(out["generated"].as_f64(), Some(1763800010.25), "минимум, и дробь не срезана");
     }
 
     /// Проекты, снимки, зелийные строки и записи машин — те же правила, свои
