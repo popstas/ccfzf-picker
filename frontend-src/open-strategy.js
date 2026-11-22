@@ -313,6 +313,37 @@
   }
 
   /**
+   * Снять процесс перехватываемой сессии: команда, которая кончается успехом,
+   * только когда процесса больше нет.
+   *
+   * SIGHUP, а не -9: агент успевает закрыть транскрипт. Ожидание — до 10
+   * секунд с проверкой раз в полсекунды; если процесс всё же жив, команда
+   * кончается кодом 1, и `&&` не пускает resume — иначе получилось бы два
+   * процесса на одном файле.
+   *
+   * Скрипт едет base64-ом в stdin `sh`, а не строкой. Цикл ожидания без `;`
+   * или перевода строки не записать, а Windows Terminal режет свою командную
+   * строку по `;` на панели до всякого шелла — до 22.11.2026 перехват
+   * склеивался через `; ` и на Windows развалился бы первым. В алфавите
+   * base64 нет ни `;`, ни кавычек, ни пробела. Тот же приём, каким
+   * `newSessionCommand` везёт промпт, только без двойных кавычек: скрипту
+   * незачем быть аргументом, он читается из трубы.
+   *
+   * `seq` и `base64 --decode` — те же, что уже стоят у первого промпта; GNU-
+   * шных `tail --pid` и `timeout` нет на маке.
+   */
+  function takeoverPrefix(pid) {
+    const n = Number(pid);
+    const script = [
+      `kill -HUP ${n} 2>/dev/null`,
+      `for i in $(seq 20); do kill -0 ${n} 2>/dev/null || break; sleep 0.5; done`,
+      `if kill -0 ${n} 2>/dev/null; then echo "ccfzf-picker: process ${n} is still alive" >&2; exit 1; fi`,
+      '',
+    ].join('\n');
+    return `printf %s ${toBase64(script)} | base64 --decode | sh`;
+  }
+
+  /**
    * argv для запуска терминала. Ввод-вывод делает вызывающий.
    *
    * `destructive` поднимается только у перехвата: это единственная ветка, где
@@ -343,16 +374,7 @@
       remote = resumeCommand(row.cwd, row.id);
     } else if (strategy === 'takeover') {
       destructive = true;
-      // SIGHUP, а не -9: агент успевает закрыть транскрипт. Ожидание — до 10
-      // секунд с проверкой раз в полсекунды; если процесс всё же жив, resume
-      // не запускается, иначе получилось бы два процесса на одном файле.
-      const pid = Number(row.pid);
-      remote = [
-        `kill -HUP ${pid}`,
-        `for i in $(seq 20); do kill -0 ${pid} 2>/dev/null || break; sleep 0.5; done`,
-        `kill -0 ${pid} 2>/dev/null && { echo "ccfzf-picker: process ${pid} is still alive" >&2; exit 1; }`,
-        resumeCommand(row.cwd, row.id),
-      ].join('; ');
+      remote = `${takeoverPrefix(row.pid)} && ${resumeCommand(row.cwd, row.id)}`;
     }
 
     if (remote === null) return null;
@@ -479,7 +501,7 @@
   // рано или поздно разойдётся с первым.
   return {
     q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
-    newSessionCommand, newSessionName, terminalCommand, terminalArgv, toBase64, pathProblem,
+    takeoverPrefix, newSessionCommand, newSessionName, terminalCommand, terminalArgv, toBase64, pathProblem,
     promptProblem, PROMPT_MAX_BYTES,
     commandParts, LOCAL_SOURCE,
     HELPER_PLACEHOLDER, COMMAND_B64_PLACEHOLDER,

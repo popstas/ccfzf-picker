@@ -83,6 +83,14 @@
  ],
  "live": [
   {
+   "why": "разорванная сессия не занимает имени — ни заголовком, ни окном: ^N рядом с ней получает прежнее имя",
+   "state": {"sessions": [
+    {"title": "api", "live": true, "disconnected": true, "windows": [{"title": "api"}]},
+    {"title": "notes", "live": true, "disconnected": false}
+   ]},
+   "expected": ["notes"]
+  },
+  {
    "why": "мёртвая тёзка не занимает имени, пустое и отсутствующее имя — тоже",
    "state": {"sessions": [
     {"title": "api", "live": true},

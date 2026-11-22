@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { availableActions, prNumber } = require('../frontend-src/session-actions');
+const { availableActions, prNumber, reopenableRows } = require('../frontend-src/session-actions');
 const { prBadgeHtml } = require('../frontend-src/session-glyph');
 const { normalizeConfig } = require('../frontend-src/config-shape');
 const { menuKeys } = require('../frontend-src/action-hotkey');
@@ -37,6 +37,82 @@ test('у сессии приложения с чужой машины пункт
   // Enter там открывает терминал сам — пункт был бы дублем.
   const ids = availableActions({ ...DESKTOP_ROW, source: 'build-host' }).map(a => a.id);
   assert.ok(!ids.includes('resume'), ids.join(','));
+});
+
+test('Reopen session — только у разорванной строки, которую есть чем снять', () => {
+  const cut = { id: 'a', cwd: '/home/user/x', live: true, pid: 42, disconnected: true };
+  const has = row => availableActions(row).some(a => a.id === 'reopen');
+  assert.deepStrictEqual(availableActions(cut).find(a => a.id === 'reopen'),
+    { id: 'reopen', label: 'Reopen session' });
+  // Целая строка — у неё Enter, перехватывать живую сессию незачем.
+  assert.ok(!has({ ...cut, disconnected: false }));
+  // Без pid снимать нечего: takeover без цели — это голый resume рядом.
+  assert.ok(!has({ ...cut, pid: 0 }));
+  // Без каталога resume не собрать.
+  assert.ok(!has({ ...cut, cwd: '' }));
+  assert.ok(!has({ ...cut, live: false }));
+  // Своя строка на Windows: команда уходит через `/bin/sh -c`, которого там нет.
+  assert.ok(!availableActions({ ...cut, source: 'local' }, {}, { os: 'windows' })
+    .some(a => a.id === 'reopen'));
+  // Сессия приложения: терминала у неё нет вовсе, поднимать в нём нечего.
+  assert.ok(!has({ ...DESKTOP_ROW, live: true, pid: 42, disconnected: true }));
+});
+
+// Reopen обязан идти мимо развилки Enter: у разорванной сессии бывает свежая
+// запись окна, и `focus` поднял бы окно-труп, а менеджер звал бы `ccfzf
+// --session` со своим решением вместо перехвата. Поведением не поймать —
+// openSession без половины страницы не исполняется, — сторож текстовый.
+test('openSession с reopen — takeover местным терминалом, без своей сборки команды', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+  const fn = html.match(/\n {2}async function openSession\(row, opts = \{\}\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(fn, 'openSession не найден — тест сторожит не то');
+  assert.match(fn[0], /const strategy = opts\.reopen \? 'takeover' :/);
+  assert.match(fn[0], /const action = opts\.reopen \? 'local' :/);
+  const run = html.match(/\n {2}function runAction\(row, id\) \{[\s\S]*?\n {2}\}\n/)[0];
+  assert.match(run, /id === 'reopen'\) \{\s*openSession\(row, \{ reopen: true \}\)/);
+});
+
+test('reopenableRows — те же строки, у которых меню предлагает Reopen session', () => {
+  // Одно правило на оба входа: пункт трея выбирает строки той же меркой, что
+  // `^K`, а не своей копией условий.
+  const cut = { id: 'a', cwd: '/home/user/x', live: true, pid: 42, disconnected: true };
+  const rows = [
+    cut,
+    { ...cut, id: 'b', disconnected: false },
+    { ...cut, id: 'c', pid: 0 },
+    { ...cut, id: 'd', source: 'local' },
+    { ...cut, id: 'e', source: 'build-host' },
+    { kind: 'project', id: '/p', cwd: '/p', disconnected: true, live: true, pid: 1 },
+  ];
+  assert.deepStrictEqual(reopenableRows(rows, {}, { os: 'windows' }).map(r => r.id), ['a', 'e']);
+  assert.deepStrictEqual(reopenableRows(rows, {}, { os: 'linux' }).map(r => r.id), ['a', 'd', 'e']);
+  assert.deepStrictEqual(reopenableRows(null), []);
+});
+
+// Пункт трея жмут при скрытом пикере, а WebView2 у скрытого окна усыпляет
+// страницу, и команду собирает она. Поэтому Rust сперва показывает окно, а
+// страница ждёт свежего ответа: список скрытого пикера мог отстать на восемь
+// минут, и SIGHUP ушёл бы по устаревшему pid.
+test('пункт трея Reopen ждёт свежего ответа и открывает общей openSession', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+  assert.match(html, /listen\('reopen-disconnected'/);
+  const targets = html.match(/\n {2}function reopenTargets\(state\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(targets, 'reopenTargets не найден — тест сторожит не то');
+  assert.match(targets[0], /reopenableRows\(/);
+  const fn = html.match(/\n {2}async function reopenDisconnected\(targets\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(fn, 'reopenDisconnected не найден — тест сторожит не то');
+  assert.match(fn[0], /openSession\(row, \{ reopen: true, confirmed: true, keepShown: true \}\)/);
+  assert.ok(!/buildOpenCommand/.test(fn[0]), 'своей сборки команды у пункта трея быть не должно');
+  // Гасится один раз, после цикла: иначе строки со второй собирались бы в
+  // скрытой, то есть усыплённой, странице.
+  assert.match(fn[0], /\n {4}invoke\('hide_picker'\);\n {2}\}\n$/);
+  const apply = html.match(/\n {2}function applyState\(payload\) \{[\s\S]*?\n {2}\}\n/)[0];
+  assert.match(apply, /reopenWait && --reopenWait\.left <= 0/);
+  // Пустой список до прогрева признака — ещё не «нет разорванных».
+  assert.match(apply, /targets\.length \|\| Date\.now\(\) >= reopenWait\.until/);
+  assert.match(html, /reopenWait = \{\s*left: 2,\s*until: Date\.now\(\) \+ REOPEN_WARMUP_MS,/);
+  const open = html.match(/\n {2}async function openSession\(row, opts = \{\}\) \{[\s\S]*?\n {2}\}\n/)[0];
+  assert.match(open, /if \(!opts\.keepShown\) invoke\('hide_picker'\);/);
 });
 
 test('информация о сессии есть всегда', () => {
@@ -348,6 +424,7 @@ test('каждый встроенный пункт меню обработан �
   const ids = new Set([
     ...availableActions(rich),
     ...availableActions({ ...rich, agentSeen: false }),
+    ...availableActions({ ...rich, disconnected: true }),
     ...availableActions({ kind: 'snapshot', id: 'snap-1' }),
     ...availableActions({ kind: 'project', id: '/p', cwd: '/p' }),
     // Сессия приложения: у неё свой пункт, и он тоже обязан быть разобран.

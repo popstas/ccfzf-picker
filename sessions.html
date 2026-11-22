@@ -331,24 +331,34 @@
             font-size: 10px; letter-spacing: .08em;
             text-transform: uppercase; color: var(--fg-dim);
         }
+        /* Цвет состояния — в местной переменной `--dot`, а не прямо в
+           `background`: ею же красится кольцо разорванной сессии
+           (`.dot.disconnected`), и одно правило контура годится всем
+           состояниям. Токеном палитры `--dot` не является — в theme.css её нет. */
         .dot {
             flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%;
-            background: var(--idle);
+            --dot: var(--idle);
+            background: var(--dot);
         }
         /* Агент работает. */
-        .dot.active { background: var(--ok); }
+        .dot.active { --dot: var(--ok); }
         /* Ход закончен, а фоновая команда агента ещё идёт (`shell` из
            реестра агента, см. dotState). Циан, а не зелёный: агент не
            работает и не ждёт ответа, но и не простаивает. */
-        .dot.shell { background: var(--shell); }
+        .dot.shell { --dot: var(--shell); }
         /* Агент спрашивает — ждёт ответа человека. */
-        .dot.question { background: var(--warn); }
+        .dot.question { --dot: var(--warn); }
         /* Агент закончил, результат ещё не смотрели. */
-        .dot.review { background: var(--review); }
+        .dot.review { --dot: var(--review); }
         /* Простаивает: закончил и постоял, считается проверенным. Серый здесь
            остаётся: он отличает живую сессию от закрытой, у которой кружка нет
            вовсе, — а это и есть главный вопрос к строке. Гасили и вернули. */
-        .dot.idle { background: var(--idle); }
+        .dot.idle { --dot: var(--idle); }
+        /* Агент жив, а ssh к нему разорван (`disconnected` от агрегатора):
+           кольцо того же цвета, что был бы у кружка. Контур, а не новый цвет:
+           состояние агента остаётся видно — работал он до обрыва или ждал, —
+           а пустая середина говорит «войти сюда нечем». */
+        .dot.disconnected { background: transparent; box-shadow: inset 0 0 0 2px var(--dot); }
         /* Закрытая сессия — кружка нет, но место под него остаётся,
            иначе текст закрытых строк съезжает относительно живых. */
         .dot.closed { background: transparent; }
@@ -2388,6 +2398,84 @@ const infoBackdrop = document.getElementById('info-backdrop');
     lastState = state;
     sendCacheWarn(state);
     regroup();
+    // Пункт трея «Reopen disconnected sessions» ждёт свежего ответа и, если
+    // разорванных в нём нет, прогрева признака (см. requestReopenDisconnected).
+    if (reopenWait && --reopenWait.left <= 0) {
+      const targets = reopenTargets(state);
+      if (targets.length || Date.now() >= reopenWait.until) {
+        const wait = reopenWait;
+        reopenWait = null;
+        clearTimeout(wait.timer);
+        reopenDisconnected(targets);
+      }
+    }
+  }
+
+  /*
+   * Пункт трея «Reopen disconnected sessions».
+   *
+   * Rust показывает окно и шлёт событие: у скрытого пикера WebView2 усыпляет
+   * страницу, а команду перехвата собирает она. Список скрытого пикера мог
+   * отстать на восемь минут (бэкофф опроса), и SIGHUP по нему ушёл бы
+   * устаревшему pid. Поэтому ждём **второго** удачного ответа после нажатия:
+   * опрос идёт одним потоком, по одному за раз (`poller.rs`), и первый ответ
+   * мог быть от опроса, начатого ещё до нажатия, а второй начат уже после
+   * него. Показ сам будит опрос.
+   *
+   * Пустой список на втором ответе — ещё не ответ. Признак у агрегатора
+   * требует, чтобы очередь простояла 8 с между опросами не дальше 60 с друг от
+   * друга (SENDQ_STUCK_SECS / SENDQ_MAX_GAP в ccfzf), а скрытый пикер опрашивал
+   * реже: серия на показе начинается заново, и вердикт созреет секунд через
+   * восемь. Поэтому «нет разорванных» говорится только после REOPEN_WARMUP_MS
+   * от нажатия; разорванные нашлись раньше — поднимаются сразу. Ответов нет
+   * вовсе за REOPEN_WAIT_MS — отказ словами, а не молчание.
+   */
+  let reopenWait = null;
+  const REOPEN_WARMUP_MS = 12_000;
+  const REOPEN_WAIT_MS = 20_000;
+
+  function requestReopenDisconnected() {
+    if (reopenWait) clearTimeout(reopenWait.timer);
+    reopenWait = {
+      left: 2,
+      until: Date.now() + REOPEN_WARMUP_MS,
+      timer: setTimeout(() => {
+        reopenWait = null;
+        error = 'No fresh session list, nothing reopened';
+        render();
+      }, REOPEN_WAIT_MS),
+    };
+  }
+
+  /** Строки ответа, которые поднял бы пункт трея: та же мерка, что у `^K`. */
+  function reopenTargets(state) {
+    const all = window.SessionList.buildSessionList({
+      sessions: state.sessions, seen, state, configHost: CONFIG.windowHost,
+    });
+    return window.SessionActions.reopenableRows(all, CONFIG, { os: PICKER_OS });
+  }
+
+  /*
+   * Подтверждение одно на весь список; дальше каждая строка идёт общей
+   * openSession с `reopen` — той же дорогой, что пункт `^K`. Пикер гасится
+   * один раз, после всех: openSession гасит его в конце, и строки со второй
+   * по последнюю собирались бы уже в скрытой странице — той, которую WebView2
+   * усыпляет.
+   */
+  async function reopenDisconnected(targets) {
+    if (!targets.length) {
+      showNotice('No disconnected sessions');
+      return;
+    }
+    const names = targets.map(r => `  ${sessionName(r)} — process ${r.pid} on ${sourceLabel(r)}`).join('\n');
+    const ok = confirm(
+      `Reopen ${targets.length} disconnected session${targets.length === 1 ? '' : 's'}?\n\n${names}\n\n`
+      + 'Each process will get SIGHUP and exit; the session will be resumed in a new terminal.\n'
+      + 'Old windows stay as they are.',
+    );
+    if (!ok) return;
+    for (const row of targets) await openSession(row, { reopen: true, confirmed: true, keepShown: true });
+    invoke('hide_picker');
   }
 
   /*
@@ -2925,7 +3013,13 @@ const infoBackdrop = document.getElementById('info-backdrop');
    */
   async function openSession(row, opts = {}) {
     if (!row) return;
-    const strategy = window.OpenStrategy.chooseOpenStrategy(
+    // `reopen` — перехват разорванной сессии («Reopen session», пункт трея):
+    // стратегия принудительно `takeover`, а развилка Enter не спрашивается.
+    // Подъём окна (`focus`) у разорванной поднял бы труп — запись окна у
+    // трекера бывает и свежая, — а менеджер звал бы `ccfzf --session` со своим
+    // решением вместо перехвата. Цена: открывает местный терминал, и профиль
+    // Windows Terminal по каталогу (его знает только менеджер) теряется.
+    const strategy = opts.reopen ? 'takeover' : window.OpenStrategy.chooseOpenStrategy(
       row, CONFIG.caps, { canFocus: rowCanFocus(row) },
     );
     // Развилку целиком решает chooseEnterAction (open-transport.js), а не
@@ -2933,7 +3027,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // состояния трекера, а у пары if-ов в этом файле их не было — отсюда и
     // взялись подъём окна мимо права на передний план и Enter, не сделавший
     // ничего у незнакомой трекеру сессии.
-    const action = window.OpenTransport.chooseEnterAction(
+    const action = opts.reopen ? 'local' : window.OpenTransport.chooseEnterAction(
       row, strategy, openManagerHere(), CONFIG.windowHost, managerReachable(),
     );
     // Окно уже открыто, и поднять его умеет только эта дорога: она гасит пикер
@@ -2967,7 +3061,15 @@ const infoBackdrop = document.getElementById('info-backdrop');
       else if (helperNeeded(terminal)) { error = helperError || 'terminal helper is not available'; render(); }
       return;
     }
-    if (cmd.destructive) {
+    // Пункт трея спрашивает один раз на весь список и зовёт с `confirmed`.
+    if (cmd.destructive && opts.reopen && !opts.confirmed) {
+      const ok = confirm(
+        `Reopen session "${sessionName(row)}"?\n\n`
+        + `Process ${row.pid} on ${sourceLabel(row)} will get SIGHUP and exit; the session will be resumed in a new terminal.\n`
+        + `Its old window stays as it is.`,
+      );
+      if (!ok) return;
+    } else if (cmd.destructive && !opts.reopen) {
       const ok = confirm(
         `Take over session "${sessionName(row)}"?\n\n`
         + `Process ${row.pid} on ${sourceLabel(row)} will get SIGHUP and exit, and its window on Windows will close.\n`
@@ -2984,7 +3086,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
     }
     // Отметка «посмотрел» ставится здесь: другого повода на маке нет.
     await markSeen(row.id, Math.floor(Date.now() / 1000));
-    invoke('hide_picker');
+    // `keepShown` — у пункта трея, который поднимает несколько строк подряд и
+    // гасит пикер сам, после последней.
+    if (!opts.keepShown) invoke('hide_picker');
   }
 
   /**
@@ -4053,6 +4157,12 @@ const infoBackdrop = document.getElementById('info-backdrop');
       openSession(row, { viaTerminal: true });
       return;
     }
+    // «Reopen session» — перехват разорванной сессии: тот же openSession, с
+    // принудительной стратегией и мимо менеджера (см. opts.reopen там).
+    if (id === 'reopen') {
+      openSession(row, { reopen: true });
+      return;
+    }
     if (id === 'pr') {
       // Форму ссылки уже проверил availableActions — до сюда доходит только
       // https://github.com/<owner>/<repo>/pull/<число>.
@@ -4671,6 +4781,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
 
     // Ответ агрегатора приезжает событием: опросом распоряжается Rust.
     await listen('state', (event) => applyState(event.payload));
+    await listen('reopen-disconnected', requestReopenDisconnected);
 
     // Настройки правит другое окно, и своего ui.json пикер сам не перечитает.
     await listen('ui-changed', async () => {

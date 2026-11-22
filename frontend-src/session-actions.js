@@ -182,6 +182,17 @@
     // просмотренным нечего у строки без записи агента и незачем у той, что уже
     // просмотрена. Оба пункта разом не появляются никогда — это сторожит тест.
     if (row && row.agentUpdated && !row.agentSeen) actions.push({ id: 'seen', label: 'Mark seen' });
+    // Разорванную сессию (агент жив, его ssh мёртв — признак агрегатора)
+    // поднимает перехват: SIGHUP сироте и `--resume` в новом терминале. Окно-
+    // труп не трогается: привязка окна к сессии у трекера по заголовку, и
+    // закрытие могло бы унести живых соседей по вкладкам. Условия — те, без
+    // которых перехвату не из чего собраться: pid (кого снимать) и каталог
+    // (где поднимать). На Windows у своей строки и у сессии приложения пункта
+    // нет по тем же причинам, что у переклейки ниже.
+    if (row && row.live && row.disconnected === true && Number(row.pid) > 0 && row.cwd
+      && !winLocal && !transportApi.isDesktopRow(row)) {
+      actions.push({ id: 'reopen', label: 'Reopen session' });
+    }
     // Переклейка предлагается только там, где ей есть за что тянуть: живая
     // сессия с известным pid. Пикер эту команду не выполняет — отдаёт человеку,
     // см. buildAttachCommand.
@@ -251,5 +262,16 @@
     return actions;
   }
 
-  return { prNumber, availableActions };
+  /**
+   * Строки, которые поднимет пункт трея «Reopen disconnected sessions».
+   *
+   * Мерка — сам пункт `reopen` у строки, а не вторая копия его условий:
+   * трей и `^K` обязаны соглашаться, какую сессию можно снять и поднять.
+   */
+  function reopenableRows(rows, config, opts) {
+    return (Array.isArray(rows) ? rows : [])
+      .filter(r => availableActions(r, config, opts).some(a => a.id === 'reopen'));
+  }
+
+  return { prNumber, availableActions, reopenableRows };
 });

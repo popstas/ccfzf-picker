@@ -146,6 +146,45 @@ test('agentSeen гасит кружок ровно с той стороны, с 
     '<div class="dot idle"></div>');
 });
 
+test('disconnected доезжает до строки и только булевым', () => {
+  // Признак считает агрегатор (застрявшая очередь ssh-сокета); страница его
+  // не выводит сама, а только несёт. Без поля — false: старый агрегатор.
+  assert.strictEqual(firstRow([aggregatorSession({ disconnected: true })]).disconnected, true);
+  assert.strictEqual(firstRow([aggregatorSession()]).disconnected, false);
+  assert.strictEqual(firstRow([aggregatorSession({ disconnected: 'yes' })]).disconnected, false);
+});
+
+test('разорванная сессия — контур цвета своего состояния', () => {
+  // Цвет состояния остаётся: разорванная, работавшая до обрыва, — зелёное
+  // кольцо, ждавшая ответа — жёлтое. Закрытой контура нет, как нет и кружка.
+  assert.strictEqual(Glyph.statusDotHtml({ live: true, disconnected: true, agentState: 'active' }),
+    '<div class="dot active disconnected"></div>');
+  assert.strictEqual(Glyph.statusDotHtml({ live: true, disconnected: true, agentState: 'question' }),
+    '<div class="dot question disconnected"></div>');
+  assert.strictEqual(Glyph.statusDotHtml({ live: false, disconnected: true, agentState: 'active' }),
+    '<div class="dot closed"></div>');
+  assert.strictEqual(Glyph.statusDotHtml({ live: true, agentState: 'active' }),
+    '<div class="dot active"></div>');
+});
+
+test('контур рисуется цветом состояния, без нового токена палитры', () => {
+  // Кольцо берёт цвет из той же переменной, которой залит кружок, — иначе у
+  // каждого из пяти состояний понадобилось бы своё правило контура, и шестое,
+  // заведённое потом, осталось бы без него.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+  const style = html.match(/<style>([\s\S]*?)<\/style>/)[1];
+  const rule = style.match(/\.dot\.disconnected\s*\{([^}]*)\}/);
+  assert.ok(rule, 'нет правила .dot.disconnected');
+  assert.match(rule[1], /box-shadow:\s*inset 0 0 0 2px var\(--dot\)/);
+  assert.match(rule[1], /background:\s*transparent/);
+  for (const state of ['active', 'shell', 'question', 'review', 'idle']) {
+    assert.match(style, new RegExp(`\\.dot\\.${state}\\s*\\{\\s*--dot:\\s*var\\(--[a-z-]+\\)`),
+      `.dot.${state} не задаёт --dot — контур этого состояния вышел бы бесцветным`);
+  }
+  const theme = fs.readFileSync(path.join(__dirname, '..', 'frontend-src', 'theme.css'), 'utf8');
+  assert.ok(!/--dot\b/.test(theme), '--dot — местная переменная кружка, не токен палитры');
+});
+
 test('сессия без записи агента рисуется пусто, а не «undefined»', () => {
   const row = firstRow([aggregatorSession({ agent: null, live: false })]);
   assert.strictEqual(Glyph.statusDotHtml(row), '<div class="dot closed"></div>');
