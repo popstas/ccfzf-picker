@@ -186,7 +186,27 @@
     return `exec $SHELL -ic ${q(`cd -- ${q(cwd)} && ${cmd}`)}`;
   }
 
+  /**
+   * Почему каталог не уедет в командной строке терминала — или пустая строка.
+   *
+   * Одна проверка на всех, кто кладёт путь в эту строку: `resumeCommand`,
+   * `newSessionCommand`, `terminalCommand`. Windows Terminal режет свою
+   * командную строку по `;` на панели **до** всякого шелла, и `q` тут не
+   * спасает. До 22.11.2026 отказ стоял только у новой сессии и терминала, а
+   * resume (Enter на сессии из такого каталога) разваливался на панели —
+   * случай тот же, вход другой. Текст отказа общий: вызывающие показывают его
+   * человеку, а не молчат.
+   */
+  function pathProblem(cwd) {
+    const path = String(cwd == null ? '' : cwd);
+    return path.includes(';')
+      ? `The path contains ";", there is nothing to open such a directory with: ${path}`
+      : '';
+  }
+
+  /** Отказ (пустая строка) — на пути с `;`, см. pathProblem. */
   function resumeCommand(cwd, id) {
+    if (pathProblem(cwd)) return '';
     return inDir(cwd, `claude --resume ${q(id)}`);
   }
 
@@ -209,7 +229,7 @@
    */
   function terminalCommand(cwd) {
     const path = String(cwd == null ? '' : cwd).replace(/\/+$/, '');
-    if (!path || path.includes(';')) return '';
+    if (!path || pathProblem(path)) return '';
     return inDir(path, 'exec $SHELL -i');
   }
 
@@ -239,7 +259,7 @@
    */
   function newSessionName(cwd, taken) {
     const path = String(cwd == null ? '' : cwd).replace(/\/+$/, '');
-    if (path.includes(';')) return '';
+    if (pathProblem(path)) return '';
     const base = path.split('/').pop() || path;
     return nameApi.uniqueSessionName(base, taken);
   }
@@ -283,7 +303,7 @@
    */
   function newSessionCommand(cwd, taken, prompt) {
     const path = String(cwd == null ? '' : cwd).replace(/\/+$/, '');
-    if (path.includes(';')) return '';
+    if (pathProblem(path)) return '';
     const name = newSessionName(path, taken);
     const text = String(prompt == null ? '' : prompt).trim();
     if (!text) return inDir(path, `claude -n ${q(name)}`);
@@ -351,6 +371,12 @@
       const bare = terminalArgv(terminal, ['claude', '--resume', row.id], opts);
       return bare === null ? null : { argv: bare, destructive: false, cwd: row.cwd };
     }
+    // Путь с `;` — отказ resume и takeover целиком (pathProblem). После
+    // windows-ветки: там каталог ставит запуск, а не командная строка, и
+    // резать нечего. До сборки argv: у takeover команда с пустым хвостом
+    // сняла бы процесс SIGHUP-ом, и подхватить сессию было бы нечем.
+    // Вызывающий на null спрашивает pathProblem и говорит человеку сам.
+    if ((strategy === 'resume' || strategy === 'takeover') && pathProblem(row.cwd)) return null;
     const argv = terminalArgv(terminal, commandParts(remote, source), opts);
     return argv === null ? null : { argv, destructive };
   }
@@ -453,7 +479,7 @@
   // рано или поздно разойдётся с первым.
   return {
     q, inDir, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand,
-    newSessionCommand, newSessionName, terminalCommand, terminalArgv, toBase64,
+    newSessionCommand, newSessionName, terminalCommand, terminalArgv, toBase64, pathProblem,
     promptProblem, PROMPT_MAX_BYTES,
     commandParts, LOCAL_SOURCE,
     HELPER_PLACEHOLDER, COMMAND_B64_PLACEHOLDER,

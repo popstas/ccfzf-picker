@@ -1410,7 +1410,14 @@ function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query:
     window: {
       SessionGroups: {
         activeFilters: Groups.activeFilters,
-        buildSessionsPayload: (_state, sort, o) => { opts = o; return { groups: [], sort }; },
+        payloadSource: Groups.payloadSource,
+        buildSessionsPayload: (state, sort, o) => {
+          opts = o;
+          // Ответ, который regroup подал на вход, — для сторожа ниже; сам
+          // список здесь не строится, отсевы сверяются по opts.
+          Object.defineProperty(opts, 'input', { value: state, enumerable: false });
+          return { groups: [], sort };
+        },
       },
       SessionWindows,
     },
@@ -2581,6 +2588,24 @@ test('regroup отдаёт карту иконок с полного ответ�
   assert.ok(opts.icons, 'карта иконок не передана');
   assert.strictEqual(opts.icons.projects.get('/home/user/a'), 'X:\\i\\a.ico');
   assert.strictEqual(opts.icons.head, 'X:\\r\\crown.ico');
+});
+
+test('regroup доносит зелийные сессии ответа до buildSessionsPayload — иначе группы Zellij нет', () => {
+  // Сторож дороги окна, а не модуля: тесты session-groups.test.js зовут
+  // buildSessionsPayload с настоящим ответом и видят группу Zellij, а
+  // regroup() собирал ответ заново поимённо — без `zellij`, — и в живом окне
+  // группы не было никогда. Здесь вход берётся у настоящего regroup и
+  // скармливается настоящему buildSessionsPayload.
+  const lastState = {
+    sessions: [{ id: 'a', title: 'жив', live: true }],
+    zellij: [{ name: 'home', created: 50 }],
+  };
+  const opts = regroupWith(false, {}, undefined, lastState);
+  assert.deepStrictEqual(opts.input.zellij, lastState.zellij, 'zellij потерялся по дороге');
+  const out = Groups.buildSessionsPayload(opts.input, 'recent', opts);
+  const z = out.groups.find(g => g.key === 'zellij');
+  assert.ok(z, 'группы Zellij нет: ' + out.groups.map(g => g.key).join(' '));
+  assert.deepStrictEqual(z.sessions.map(r => r.id), ['zellij:home']);
 });
 
 test('shell: признак ccfzf доезжает до кружка и строки карточки', () => {

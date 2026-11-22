@@ -61,6 +61,63 @@
   `only windowed`, `show all`, `dim stale`), справочник клавиш, переключатель
   широкого режима и шестерёнка настроек.
 
+## Стек
+
+Пикер — одна часть небольшого стека и **единственная обязательная**. Сам по
+себе он показывает сессии Claude Code той машины, где запущен: агрегатор вшит
+в бинарь. Всё остальное ставится по желанию, и каждая часть добавляет фичи в
+то же окно.
+
+```mermaid
+flowchart TB
+  claude["Claude Code<br/>транскрипты, реестр сессий"]
+  hooks["хуки агента<br/>(в составе ccfzf)"]
+  ccfzf["агрегатор ccfzf<br/>вшитый или установленный<br/>на другой машине"]
+  picker["ccfzf-picker<br/>(обязателен)"]
+  w11["windows11-manager<br/>(Windows)"]
+  mwm["macos-windows-manager<br/>(macOS)"]
+  broker["брокер MQTT"]
+  ha["Home Assistant<br/>+ панель openHASP"]
+
+  claude --> ccfzf
+  ccfzf -- "ccfzf --state<br/>(здесь или по ssh)" --> picker
+  claude -. "события хуков" .-> hooks
+  hooks -. "сводка, контекст, стоимость" .-> ccfzf
+  w11 -. "файл трекера:<br/>окна, снимки, хоткеи" .-> ccfzf
+  mwm -. "файл трекера:<br/>окна, снимки" .-> ccfzf
+  picker -. "http: открыть, поднять,<br/>восстановить, разложить" .-> w11
+  picker -. "поднять, разложить" .-> broker
+  broker -.-> mwm
+  broker -.-> w11
+  w11 -. "слоты сессий" .-> broker
+  broker -.-> ha
+  ha -. "нажатие на слот: поднять" .-> broker
+
+  classDef optional stroke-dasharray: 5 5
+  class hooks,w11,mwm,broker,ha optional
+```
+
+| Часть | Когда ставить | Что добавляет |
+|---|---|---|
+| **ccfzf-picker** | всегда | Список сессий этой машины (`localSource: true`), поиск и режимы, панель проектов, кружки состояния, таймер кеша промпта, Enter — продолжить сессию в терминале или в Claude Desktop, `^O` — папка в редакторе, меню `^K`, широкий режим, окно настроек. Вшитому агрегатору нужны `bash` и `python3` на Linux и macOS, `python` в `PATH` на Windows. |
+| **[ccfzf]** на другой машине | агенты работают не здесь | Сессии той машины, по ssh (`sshHost`); там же это и fzf-пикер в терминале. Одна удалённая машина, её список сливается со своим. |
+| **Хуки агента** (в составе ccfzf) | мало одного состояния | Последний запрос и последний ответ агента под строкой, занятый контекст, стоимость, запрос разрешения, на котором стоит сессия, ссылка на PR, сессия, остающаяся живой через `/clear`. Нужны `bash` и `jq`, поэтому не на нативном Windows. Без хуков состояние, вопрос агента, таймер кеша и пометка сжатия всё равно есть — из хвоста транскрипта. |
+| **[windows11-manager]** | Windows | Окна терминалов привязаны к сессиям: буква окна в строке, Enter поднимает открытое окно, а не заводит второе, сессии открываются в своём профиле Windows Terminal, проектные хоткеи, снимки раскладки с восстановлением, раскладки плиткой, каскадом и группой, отметки «просмотрено» и «непросмотрено» общие с трекером и кнопкой на панели задач. Файл трекера отдаёт агрегатору через общую папку, с пикером говорит по http, брокер не нужен. |
+| **[macos-windows-manager]** | macOS | Окна терминалов привязаны к сессиям, раскладки плиткой и каскадом, снимки раскладки (восстанавливает их сам пикер, сессия за сессией). Файл трекера возит агрегатору по ssh, а заодно и вшитому. Подъём окна по Enter и раскладка из пикера требуют брокера MQTT; без него трекер окна всё равно привязывает, а раскладывает из своего меню в трее. |
+| **Брокер MQTT** | подъём окон на маке или панель | Транспорт до трекера на маке и для экспорта в Home Assistant, запасной путь до трекера на Windows, если тот не назвал свой http-адрес. |
+| **Home Assistant + openHASP** | настенная панель | Сессии строками на сенсорной панели; нажатие поднимает окно сессии. Публикует их windows11-manager по MQTT. |
+
+**windows-mqtt в стек больше не входит.** Всё, что он делал для сессий,
+переехало в windows11-manager и пикер; ставить его стоит только ради его
+собственных модулей умного дома.
+
+Что в каждой части написано на Rust, Node, Python и shell и где между ними
+граница — [docs/stack.md](docs/stack.md).
+
+[ccfzf]: https://github.com/popstas/ccfzf
+[windows11-manager]: https://github.com/popstas/windows11-manager
+[macos-windows-manager]: https://github.com/popstas/macos-windows-manager
+
 ## Установка
 
 ### Готовой сборкой
@@ -127,12 +184,17 @@ built into the binary (`~/.config/ccfzf-picker/ccfzf`) and runs it through
 installed, it is the one that rewrites `~/.ccfzf.sessions.json` — the dump the
 window tracker, the Home Assistant export and the openHASP panel live on.
 
-Linux and macOS only: `ccfzf` is a bash wrapper around an embedded python
-program, and neither it nor the bundled copy runs on native Windows.
+`ccfzf` is a bash wrapper around an embedded python program. On native
+Windows there is no `bash` to run the wrapper with, so the picker cuts the
+python program out of the bundled copy and runs it directly — `python` or
+`python3` has to be on `PATH`.
 
 With `localSource` on, `sshHost` may be left empty — one source is a working
-setup. Local sessions get no window mark and no Enter-to-focus until the window
-tracker on this machine learns to bind them; that is a separate task.
+setup. On macOS local sessions get their window mark and Enter-to-focus too:
+macos-windows-manager writes its tracker file for the local aggregator as well
+(its `features.localSource`). On Windows the tracker still writes for one
+aggregator only, the one behind its shared folder, so local sessions there have
+no window mark yet; that is a separate task.
 
 Если каталоги удалённого хоста примонтированы к этой машине, укажите `pathMap`
 — пару «путь там ⇄ путь здесь». По ней пикер добавит к каждой сессии действия
@@ -242,6 +304,7 @@ panels пишет `~/.config/ccfzf-picker/ui.json`, остальных —
 ## Документы
 
 - [CLAUDE.md](CLAUDE.md) — как собирать и какие правила уже оплачены багами.
+- [docs/stack.md](docs/stack.md) — Rust, Node, Python и shell в каждой части стека.
 - [docs/TODO.md](docs/TODO.md) — что отложено и почему.
 - [docs/window-layouts.md](docs/window-layouts.md) — как просить оконный трекер
   расставить окна плиткой или каскадом.

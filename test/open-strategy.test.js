@@ -2,8 +2,10 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand, newSessionCommand,
-  newSessionName, terminalCommand, commandParts, LOCAL_SOURCE,
+  newSessionName, terminalCommand, commandParts, LOCAL_SOURCE, pathProblem,
 } = require('../frontend-src/open-strategy');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const ATTACH_42 = `reptyr -T 42 || reptyr "$(pgrep -x -f 'reptyr -T 42' | head -1)"`;
 
@@ -359,6 +361,52 @@ test('точка с запятой в пути — отказ, а не кома�
   assert.ok(ok && !ok.includes(';'), ok);
 });
 
+test('resume: точка с запятой в пути — отказ, как и у новой сессии', () => {
+  // Тот же Windows Terminal, тот же разрез на панели до всякого шелла: вход
+  // другой (Enter на сессии из такого каталога), случай тот же.
+  assert.strictEqual(resumeCommand('/home/user/a;b', 'aaaa-bbbb'), '');
+  assert.strictEqual(resumeCommand(';', 'aaaa-bbbb'), '');
+  const ok = resumeCommand('/home/user/projects/x', 'aaaa-bbbb');
+  assert.ok(ok && !ok.includes(';'), ok);
+});
+
+test('открытие сессии из каталога с `;` не собирает команду — ни resume, ни takeover', () => {
+  // null, а не команда с пустым хвостом: у resume это был бы пустой запуск,
+  // а у takeover хуже — процесс получил бы SIGHUP, и подхватить сессию было
+  // бы нечем.
+  const opts = { sshHost: 'build-host', terminal: { file: 'kitty', args: [] } };
+  const r = row({ cwd: '/home/user/a;b', live: true, pid: 4242 });
+  assert.strictEqual(buildOpenCommand(r, 'resume', opts), null);
+  assert.strictEqual(buildOpenCommand(r, 'takeover', opts), null);
+});
+
+test('местная строка на Windows с `;` в пути открывается: каталог ставит запуск, не командная строка', () => {
+  // Отказ — про путь внутри командной строки терминала. У местной строки на
+  // Windows каталога там нет вовсе (`spawn_detached` с `cwd`), и резать нечего.
+  const r = { kind: 'interactive', id: 'b5a54ce3-a022-4c9a-aa91-e306d75bdc76',
+              cwd: '<drive>:\\projects\\a;b', source: 'local' };
+  const got = buildOpenCommand(r, 'resume', { terminal: { file: 'wt.exe', args: [] }, os: 'windows' });
+  assert.deepStrictEqual(got.argv, ['wt.exe', 'claude', '--resume', r.id]);
+  assert.strictEqual(got.cwd, r.cwd);
+});
+
+test('pathProblem называет отказ по `;` одной строкой на всех вызывающих', () => {
+  assert.match(pathProblem('/home/user/a;b'), /The path contains ";"/);
+  assert.match(pathProblem('/home/user/a;b'), /\/home\/user\/a;b/);
+  assert.strictEqual(pathProblem('/home/user/projects/x'), '');
+  assert.strictEqual(pathProblem(''), '');
+});
+
+test('Enter на сессии из каталога с `;` говорит человеку, а не молчит', () => {
+  // openSession живёт в sessions.html и из тестов не исполняется; сверяется,
+  // что ветка пустой команды спрашивает pathProblem — иначе buildOpenCommand
+  // отказал бы, а человек увидел бы Enter, не сделавший ничего.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+  const body = html.slice(html.indexOf('async function openSession('));
+  const branch = body.slice(body.indexOf('if (!cmd) {'), body.indexOf('if (cmd.destructive)'));
+  assert.match(branch, /OpenStrategy\.pathProblem\(row\.cwd\)/, branch);
+});
+
 test('новая сессия в занятом имени получает суффикс', () => {
   // Кавычки навешиваются дважды (см. inDir), поэтому и в готовой команде имя
   // ищем в экранированном виде — как в соседних тестах этого файла.
@@ -517,9 +565,7 @@ test('строка с чужой машины на Windows по-прежнему
 
 // ─── Новая сессия с первым промптом (`/p <проект> <промпт>`) ─────────────
 const { spawnSync } = require('node:child_process');
-const fs = require('node:fs');
 const os = require('node:os');
-const path = require('node:path');
 const { promptProblem, PROMPT_MAX_BYTES } = require('../frontend-src/open-strategy');
 
 // Всё, на чём ломается командная строка: обе кавычки, `;` (панели Windows

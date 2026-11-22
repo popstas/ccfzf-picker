@@ -17,6 +17,9 @@ cd src-tauri && cargo test    # оболочка
 
 `node --test test/` на этих версиях Node не работает — только `npm test`.
 
+Из чего состоит стек и что на каком языке — `docs/stack.md`; какую фичу какая
+программа даёт человеку — раздел Stack в README.
+
 ## Выкатка
 
 Собирает и перезапускает пикер на целевой машине `data/scripts/deploy-win.sh`
@@ -275,7 +278,7 @@ Developer ID нет, universal удвоил бы вес ровно в той з�
 | Тема | Файл | Правил | О чём |
 |---|---|---|---|
 | Окна и передний план | [`docs/rules/windows-and-focus.md`](docs/rules/windows-and-focus.md) | 11 | кто видит окна, чьё это окно, кому отдаётся передний план, куда уходит просьба |
-| Открытие сессий и проектов | [`docs/rules/opening-sessions.md`](docs/rules/opening-sessions.md) | 16 | что делает Enter, кто открывает — пикер или менеджер и по какому транспорту (http/mqtt/mqtts, риск незащищённого сервера, корни TLS), Claude Desktop, курсор, редактор `^O` и SSH Remote в Zed |
+| Открытие сессий и проектов | [`docs/rules/opening-sessions.md`](docs/rules/opening-sessions.md) | 17 | что делает Enter, кто открывает — пикер или менеджер и по какому транспорту (http/mqtt/mqtts, риск незащищённого сервера, корни TLS), Claude Desktop, курсор, редактор `^O` и SSH Remote в Zed |
 | Хоткеи, трей и меню `^K` | [`docs/rules/hotkeys-and-tray.md`](docs/rules/hotkeys-and-tray.md) | 11 | глобальные клавиши и `none` у клавиш раскладки, проектные хоткеи, жесты мыши, пункты трея и строки, метка связи с брокером |
 | Строки списка | [`docs/rules/list-rows.md`](docs/rules/list-rows.md) | 16 | что и где рисуется в строке: иконка окна, имена, id, хоткеи, подпись head-сессии и режим иерархии, ширины колонок, таймер кеша, гашение сжатых |
 | Настройки и `ui.json` | [`docs/rules/settings-and-ui-state.md`](docs/rules/settings-and-ui-state.md) | 7 | восемь полей `ui.json`, слияние `config.yaml`, создание окна, гашение пикера |
