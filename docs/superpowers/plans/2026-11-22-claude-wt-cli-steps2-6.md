@@ -81,6 +81,19 @@
 - [ ] Вычистить приватное из перенесённого текста (вступление ребёнку, сообщения об ошибках) — сканер чист.
 - [ ] Коммит `feat(cli): session spawn`.
 
+### Task 6b: `session open <session>`
+
+**Files:** Create `cli/lib/commands/session-open.mjs`; Test `tests/cli/session-open.test.mjs`.
+
+**Interfaces:** Consumes `context`, `ownTarget`, `manager` (`cli/lib/act.mjs`), `post`/`answer` (`cli/lib/manager.mjs`).
+- Только своя сессия (как `focus`). Окно у сессии есть — `{code:1, error:'window exists, use window focus'}` без запроса (открывать второе окно нельзя).
+- Машина — трекер с `http` и `openSession: true` в `windowHosts` (`--machine`/`--url` перебивают, но не на машину без `openSession`).
+- `POST /claude-wt/session-open {id}`; ответ `{action}` (`resume`/`restore`/`pending`/…) — код 0 с `action`; `pending` — та же сессия уже открывается, код 0; `ok:false`/`httpStatus` — код 1 с `error`; таймаут — **код 3, повтор запрещён** (второе окно), текст `outcome unknown — do not retry; check with tree in 30 s`.
+
+- [ ] Тесты: чужая — 1 без запроса; с окном — 1 без запроса; тело `{id}`; `pending` — 0; таймаут — 3 и текст «do not retry»; машина без `openSession` — 1.
+- [ ] FAIL → реализация → зелёные → коммит `feat(cli): session open — открыть окно своей сессии`.
+- [ ] Скилл `claude-wt-cli` (head): строка «открыть своё окно — `session open`, без спроса, после кода 3 не повторять».
+
 ### Task 6a: README, `--help`, PR
 
 - [ ] `--help` и README ccfzf: группы `session` и `head`, ссылка «вывод совместим со скриптами скиллов».
@@ -109,7 +122,10 @@
 - [ ] `session-find`, `session-rename`, `session-close`, `session-spawn`, `head-session`: команды в примерах — `claude-wt …`; обёртки остаются для старых вызовов (`telegram-delegate`, памяти и планы с путями `.mjs`). Удалять ли обёртки потом — решение Стаса.
 - [ ] Живая проверка из head: `claude-wt session spawn` тестового ребёнка → `session find --timeout 45` → `session rename` → `session close` (закрытие — только с подтверждения Стаса по этой сессии, правило head-session; спросить перед проверкой).
 
+## Решение Стаса 2026-11-22 по `session open`
+
+Агенту можно без спроса открыть окно **своей** сессии, когда окна нет. Команда — Task 6b фазы 1.
+
 ## Отложено до решения Стаса
 
-- **`session open <session>`** (открыть свою сессию, когда окна нет; дорога `/claude-wt/session-open`, правило «не повторять»). Спека выносит его отдельным шагом, а `focus` по решению Стаса окон не открывает — значит, вопрос, **может ли агент открыть окно своей сессии без спроса**, открыт. Не делать, пока он не ответил.
 - Удалять ли обёртки в скиллах после переезда.
