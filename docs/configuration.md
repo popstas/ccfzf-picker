@@ -19,8 +19,10 @@ built into the binary (`~/.config/ccfzf-picker/ccfzf`) and runs it through
 installed, it is the one that rewrites `~/.ccfzf.sessions.json` — the dump the
 window tracker, the Home Assistant export and the openHASP panel live on.
 
-Linux and macOS only: `ccfzf` is a bash wrapper around an embedded python
-program, and neither it nor the bundled copy runs on native Windows.
+`ccfzf` is a bash wrapper around an embedded python program. On native
+Windows there is no `bash` to run the wrapper with, so the picker cuts the
+python program out of the bundled copy and runs it directly — `python` or
+`python3` has to be on `PATH`.
 
 With `localSource` on, `sshHost` may be left empty — one source is a working
 setup. Local sessions get no window mark and no Enter-to-focus until the window
