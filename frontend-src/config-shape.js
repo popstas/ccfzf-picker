@@ -61,6 +61,9 @@
     // можно и оставить. Умолчание — сегодняшнее поведение: кто ключа не трогал,
     // разницы не заметит.
     searchDesktop: true,
+    // Живые сессии секциями по типу проекта (`work`, `home`, …, `untyped`)
+    // вместо деления по машинам. Выключено: без галки список ровно прежний.
+    groupByProjectType: false,
     // Клик мимо окна закрывает пикер. Читает это поле Rust — окно прячет он;
     // здесь оно описано затем же, зачем и остальные: чтобы форма конфига была
     // в одном месте и проверялась одним тестом.
@@ -413,6 +416,7 @@
       // договорились», а не «показывай две сотни транскриптов».
       onlyLive: typeof src.onlyLive === 'boolean' ? src.onlyLive : DEFAULTS.onlyLive,
       searchDesktop: typeof src.searchDesktop === 'boolean' ? src.searchDesktop : DEFAULTS.searchDesktop,
+      groupByProjectType: src.groupByProjectType === true,
       hideOnBlur: typeof src.hideOnBlur === 'boolean' ? src.hideOnBlur : DEFAULTS.hideOnBlur,
       backgroundRefresh: typeof src.backgroundRefresh === 'boolean'
         ? src.backgroundRefresh

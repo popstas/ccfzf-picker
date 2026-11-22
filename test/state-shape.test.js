@@ -181,3 +181,15 @@ test('целый снимок претензий не вызывает', () => {
     snapshots: [{ id: 'snap-1', created: 10, sessions: [{ id: 'a', cwd: '/p', title: 't' }] }],
   }), []);
 });
+
+test('тип проекта необязателен, но если есть — строка', () => {
+  const base = { path: '/p', name: 'p', sessions: 0, live: 0, mtime: 0 };
+  assert.deepStrictEqual(projectProblems({ projects: [base, { ...base, type: 'work' }] }), []);
+  assert.deepStrictEqual(projectProblems({ projects: [{ ...base, type: 1 }] }), ['projects[0].type is not a string']);
+});
+
+test('кривой projectType сессии не стоит опроса', () => {
+  // Поле пишет агрегатор на другой машине; buildSessionList сводит мусор к ''.
+  const s = { id: 'a', cwd: '/p', title: 't', mtime: 1, live: false, kind: 'interactive', projectType: 1 };
+  assert.deepStrictEqual(validateState({ generated: 1, sessions: [s] }), []);
+});

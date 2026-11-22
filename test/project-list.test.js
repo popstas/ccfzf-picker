@@ -397,3 +397,12 @@ test('строка проекта несёт иконку только со св
   assert.deepStrictEqual(byId(buildProjectList(st, 'mac-host')), { '/p/a': '', '/p/b': '' });
   assert.deepStrictEqual(byId(buildProjectList(st)), { '/p/a': '', '/p/b': '' });
 });
+
+test('тип проекта доезжает строкой, мусор и отсутствие — пустая строка', () => {
+  const rows = buildProjectList({ projects: [
+    { path: '/p/a', name: 'a', mark: false, sessions: 0, live: 0, mtime: 3, type: 'work' },
+    { path: '/p/b', name: 'b', mark: false, sessions: 0, live: 0, mtime: 2, type: 5 },
+    { path: '/p/c', name: 'c', mark: false, sessions: 0, live: 0, mtime: 1 },
+  ] });
+  assert.deepStrictEqual(rows.map(r => [r.cwd, r.projectType]), [['/p/a', 'work'], ['/p/b', ''], ['/p/c', '']]);
+});

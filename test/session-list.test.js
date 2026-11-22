@@ -688,3 +688,31 @@ test('у задачи без done и more — открытая и без счё�
   // неправду ровно о том, ради чего подпись и заведена.
   assert.deepStrictEqual(rows[0].task, { text: 'Задача', done: false, vault: '', more: 0 });
 });
+
+// ── Тип проекта: projectType и проект-владелец projectCwd ─────────────────
+
+test('projectType доезжает строкой, мусор и отсутствие — пустая строка', () => {
+  const rows = buildSessionList({ sessions: [
+    state({ id: 'a', projectType: 'work' }),
+    state({ id: 'b', projectType: 7 }),
+    state({ id: 'c' }),
+  ] });
+  assert.deepStrictEqual(rows.map(r => r.projectType), ['work', '', '']);
+});
+
+test('projectCwd: поле есть — оно, флаг есть без поля — свой cwd, флага нет — пусто', () => {
+  // Агрегатор пишет projectCwd только при отличии от cwd, а что владельцев он
+  // считает вообще, говорит верхний projectOwners. Без флага — агрегатор
+  // старый, и пункта Type у сессии нет (пустая строка).
+  const sessions = [
+    state({ id: 'a', cwd: '/p/site/.worktrees/x', projectCwd: '/p/site' }),
+    state({ id: 'b', cwd: '/p/home' }),
+  ];
+  const withFlag = buildSessionList({ sessions, state: { projectOwners: true, sessions } });
+  assert.deepStrictEqual(withFlag.map(r => r.projectCwd), ['/p/site', '/p/home']);
+  const old = buildSessionList({ sessions: [state({ id: 'b', cwd: '/p/home' })], state: { sessions: [] } });
+  assert.deepStrictEqual(old.map(r => r.projectCwd), ['']);
+  // Флаг — только строгое true: поле пишет чужой репозиторий.
+  const junk = buildSessionList({ sessions: [state({ id: 'b' })], state: { projectOwners: 'yes' } });
+  assert.deepStrictEqual(junk.map(r => r.projectCwd), ['']);
+});
