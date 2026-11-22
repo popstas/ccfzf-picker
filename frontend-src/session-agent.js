@@ -38,12 +38,20 @@
    * На маке отметку ставит не трекер окон, а само открытие сессии, но правило
    * то же: переход в ту же секунду, что и запись состояния, — это переход
    * после неё, поэтому сравнение нестрогое.
+   *
+   * `unreadAt` — явное «верни в непросмотренное» от оконного трекера (Mark
+   * unread, `claude-wt session unread` агента). Оно перебивает отметку
+   * взгляда, пока новее её: сессию, которую пикер сам отметил просмотренной,
+   * откат трекерного `focusedAt` не возвращал, а агенту дотянуться до
+   * seen.json пикера нечем. Сравнение строгое — взгляд в ту же секунду, что и
+   * отметка, считается взглядом после неё (так же, как с записью состояния).
    */
-  function seenSinceUpdate(agent, focusedAt) {
+  function seenSinceUpdate(agent, focusedAt, unreadAt) {
     const updated = (agent || {}).updated || 0;
     if (!updated) return false;
     const seen = Number.isFinite(focusedAt) ? focusedAt : 0;
-    return seen >= updated;
+    const unread = Number.isFinite(unreadAt) ? unreadAt : 0;
+    return seen >= updated && !(unread > seen);
   }
 
   /**

@@ -172,3 +172,12 @@ test('карточка называет задачу вольта: текст, �
   // Без задачи строки нет вовсе: карточка пустых строк не рисует.
   assert.ok(!buildSessionInfoRows({ ...session, task: null }, 3460).some(r => r.label === 'task'));
 });
+
+// «seen: no» при свежем focused необъяснимо без отметки «непросмотрено»
+// трекера: она перебивает взгляд, пока новее его.
+test('buildSessionInfoRows shows the tracker unread mark, hides it when absent', () => {
+  const marked = buildSessionInfoRows({ ...session, unreadAt: 3400 }, 3460);
+  assert.ok(/ · /.test(valueOf(marked, 'marked unread')));
+  const labels = buildSessionInfoRows({ ...session, unreadAt: 0 }, 3460).map(r => r.label);
+  assert.ok(!labels.includes('marked unread'));
+});

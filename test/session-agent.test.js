@@ -49,6 +49,18 @@ test('просмотр в ту же секунду считается просм
   assert.strictEqual(seenSinceUpdate({ updated: 100 }, undefined), false);
 });
 
+// Явное «непросмотрено» трекера (session-unread) перебивает отметку взгляда,
+// пока новее её; взгляд в ту же секунду — уже после отметки.
+test('unreadAt новее отметки взгляда — не видел', () => {
+  assert.strictEqual(seenSinceUpdate({ updated: 100 }, 500, 600), false);
+  assert.strictEqual(seenSinceUpdate({ updated: 100 }, 600, 600), true);
+  assert.strictEqual(seenSinceUpdate({ updated: 100 }, 700, 600), true);
+  assert.strictEqual(seenSinceUpdate({ updated: 100 }, 500, 0), true);
+  assert.strictEqual(seenSinceUpdate({ updated: 100 }, 500, undefined), true);
+  // И старое правило никуда не делось: отметка взгляда старше записи — не видел.
+  assert.strictEqual(seenSinceUpdate({ updated: 100 }, 99, 0), false);
+});
+
 test('работу сессии говорит тот, чья запись свежее', () => {
   const parent = { id: 'p', agent: { updated: 100 } };
   const byId = {

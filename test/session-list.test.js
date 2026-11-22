@@ -159,6 +159,35 @@ test('отметка трекера и своя складываются по м
   assert.strictEqual(buildSessionList({ sessions: newer, seen: {} })[0].agentSeen, true);
 });
 
+// Агент (`claude-wt session unread`) не дотягивается до seen.json пикера, а
+// откат трекерного focusedAt своя отметка пикера перебивала по максимуму.
+// unreadAt от трекера перебивает обе, пока новее их; взгляд на окно — новый
+// focusedAt — снимает его сам.
+test('unreadAt трекера перебивает свою отметку пикера, новый фокус окна снимает', () => {
+  const win = (focusedAt, unreadAt) => ({ title: 'wt', desktop: 1, lastSeen: 900, focusedAt, unreadAt });
+  const marked = [state({ id: 'a', agent: { state: 'review', updated: 500 }, window: win(499, 800) })];
+  const row = buildSessionList({ sessions: marked, seen: { a: 700 } })[0];
+  assert.strictEqual(row.focusedAt, 700);
+  assert.strictEqual(row.unreadAt, 800);
+  assert.strictEqual(row.agentSeen, false);
+  // Своя отметка позже unreadAt (открыли из списка после отметки) — видел.
+  assert.strictEqual(buildSessionList({ sessions: marked, seen: { a: 801 } })[0].agentSeen, true);
+  // Окно вывели вперёд после отметки — видел.
+  const focused = [state({ id: 'a', agent: { state: 'review', updated: 500 }, window: win(850, 800) })];
+  assert.strictEqual(buildSessionList({ sessions: focused, seen: { a: 700 } })[0].agentSeen, true);
+});
+
+// Отметка — у окна карточки: взгляд на одно окно сессии второй карточке её не
+// снимает, как и с focusedAt.
+test('unreadAt считается по окну своей карточки', () => {
+  const sessions = [state({ id: 'a', agent: { state: 'review', updated: 500 }, windows: [
+    { host: 'nb', title: 'wt', desktop: 1, lastSeen: 900, focusedAt: 850, unreadAt: 800 },
+    { host: 'mac', title: 'wt', desktop: 1, lastSeen: 900, focusedAt: 600, unreadAt: 800 },
+  ] })];
+  const rows = buildSessionList({ sessions, seen: {} });
+  assert.deepStrictEqual(rows.map(r => [r.windowHost, r.agentSeen]), [['nb', true], ['mac', false]]);
+});
+
 // Трекера может не быть вовсе (на маке его нет), а прежний трекер поля не
 // писал. Строка при этом обязана остаться такой же, как до всей этой затеи.
 test('без окна и без отметки трекера считается только своя', () => {
