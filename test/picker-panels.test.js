@@ -200,6 +200,16 @@ test('внутри колонки панель встаёт в конец', () =
   assert.deepStrictEqual(order.wide[1], ['remote', 'projects', 'past']);
 });
 
+test('панель, уже стоящая в названной колонке, своего места не теряет', () => {
+  // Окно настроек зовёт withColumn на каждую тронутую панель
+  // (overlayDirtyPanels) — и на галку «show», и на «expanded», не только на
+  // выпадашку колонки. Отправляй он панель в конец всякий раз, снятая и
+  // возвращённая галка «show» переставляла бы панель вниз колонки, хотя
+  // колонку никто не менял: место, назначенное перетаскиванием, терялось бы.
+  const order = withColumn({ narrow: [], wide: [[], [], ['projects', 'past', 'snapshots']] }, 'projects', 3);
+  assert.deepStrictEqual(order.wide[2], ['projects', 'past', 'snapshots']);
+});
+
 test('соседние колонки перестановка не трогает', () => {
   const order = withColumn(
     { narrow: ['live'], wide: [['live'], ['remote'], ['snapshots']] }, 'past', 1);

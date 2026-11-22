@@ -72,9 +72,98 @@ test('номер за краями списка упирается в края',
 });
 
 test('незнакомый ключ добавляется, а не теряется', () => {
-  // Секция, которой ещё нет в сохранённом порядке, — обычное дело: порядок
-  // пишется только по видимому списку.
+  // Секция, которой ещё нет в сохранённом порядке, — обычное дело: в файл
+  // попадает только то, что человек когда-то двигал или видел при переносе.
   assert.deepStrictEqual(moveBlockKey(['live'], 'past', 0), ['past', 'live']);
+});
+
+// ── mergeOrder: невидимые ключи сохранённого порядка остаются на местах ────
+
+const { mergeOrder, buildSections } = require('../frontend-src/picker-sections');
+
+test('mergeOrder: отсутствующий ключ остаётся за своим соседом сверху', () => {
+  // Сохранено [live, remote, past, projects], машины сейчас нет — на экране
+  // live, past, projects. Человек поднял projects наверх.
+  assert.deepStrictEqual(
+    mergeOrder(['live', 'remote', 'past', 'projects'], ['projects', 'live', 'past'], 'projects'),
+    ['projects', 'live', 'remote', 'past']);
+});
+
+test('mergeOrder: отсутствующий без соседа сверху встаёт в начало', () => {
+  assert.deepStrictEqual(
+    mergeOrder(['snapshots', 'live', 'past'], ['past', 'live'], 'past'),
+    ['snapshots', 'past', 'live']);
+});
+
+test('mergeOrder: два отсутствующих подряд держатся цепочкой', () => {
+  assert.deepStrictEqual(
+    mergeOrder(['live', 'remote', 'snapshots', 'past', 'projects'], ['live', 'projects', 'past'], 'projects'),
+    ['live', 'remote', 'snapshots', 'projects', 'past']);
+});
+
+test('mergeOrder: переносимая секция якорем не служит — сосед не уезжает следом', () => {
+  // Якорем remote был бы live, и уйди live в конец — remote уехал бы за ним,
+  // хотя его никто не трогал. Место remote — перед past, как и было.
+  assert.deepStrictEqual(
+    mergeOrder(['live', 'remote', 'past', 'projects'], ['past', 'projects', 'live'], 'live'),
+    ['remote', 'past', 'projects', 'live']);
+});
+
+test('mergeOrder: без сохранённого порядка — ровно видимый', () => {
+  assert.deepStrictEqual(mergeOrder([], ['past', 'live'], 'past'), ['past', 'live']);
+  assert.deepStrictEqual(mergeOrder(undefined, ['past', 'live'], 'past'), ['past', 'live']);
+});
+
+test('mergeOrder: видимые ключи идут в видимом порядке, а не в сохранённом', () => {
+  // Сохранённый порядок колонки может расходиться с видимым (свёрнутая
+  // опущена в низ колонки) — главным для видимых остаётся то, что на экране.
+  assert.deepStrictEqual(
+    mergeOrder(['past', 'snapshots', 'projects'], ['projects', 'past'], 'projects'),
+    ['projects', 'past', 'snapshots']);
+});
+
+test('секция, которой нет на экране, сохраняет место в order после перетаскивания соседей', () => {
+  // Узкая: сохранено [live, remote, past, projects], чужой машины сейчас нет.
+  // projects перетащили наверх — remote в файле остаётся между live и past.
+  const headers = ['live', 'past', 'projects'].map(key => ({ key }));
+  const narrow = commitWith({
+    fullscreen: false, drag: { key: 'projects' },
+    order: { narrow: ['live', 'remote', 'past', 'projects'], wide: [] },
+    narrowHeaders: () => headers, sectionKeyOf: n => n.key, dropIndexOf: () => 0,
+  });
+  assert.deepStrictEqual(narrow.order.narrow, ['projects', 'live', 'remote', 'past']);
+
+  // Широкая: во второй колонке сохранено [remote, projects], машины нет —
+  // видна только projects. В колонку перетащили past над projects.
+  const wide = commitWith({
+    fullscreen: true, drag: { key: 'past' },
+    order: { narrow: [], wide: [['live'], ['remote', 'projects'], ['past', 'snapshots']] },
+    wideDropTarget: () => ({ column: 2, at: 0, keys: ['projects'] }),
+  });
+  assert.deepStrictEqual(wide.order.wide, [['live'], ['remote', 'past', 'projects'], ['snapshots']]);
+});
+
+test('вернувшаяся секция встаёт на прежнее место, а не в конец', () => {
+  // Круговая проверка: слитый порядок отдаётся настоящей сборке секций, и
+  // вернувшаяся машина встаёт между live и past, как стояла до своего ухода.
+  const headers = ['live', 'past', 'projects'].map(key => ({ key }));
+  const { order } = commitWith({
+    fullscreen: false, drag: { key: 'projects' },
+    order: { narrow: ['live', 'remote', 'past', 'projects'], wide: [] },
+    narrowHeaders: () => headers, sectionKeyOf: n => n.key, dropIndexOf: () => 0,
+  });
+  const session = id => ({ id, label: id, cwd: `/home/user/${id}`, live: true });
+  const groups = [
+    { key: 'live', label: 'Active local sessions', sessions: [session('a')], remote: false },
+    { key: 'remote:box-host', label: 'Active on box-host', sessions: [session('b')], remote: true, host: 'box-host' },
+    { key: 'past', label: 'History', past: true, sessions: [{ ...session('c'), live: false }] },
+  ];
+  const sections = buildSections({
+    groups, projects: [{ id: 'p', kind: 'project', label: 'p', cwd: '/home/user/p' }],
+    snapshots: [], mode: 'sessions', query: '', trackerHere: true, collapsed: {},
+    hidden: { snapshots: true }, layout: 'narrow', order: order.narrow,
+  });
+  assert.deepStrictEqual(sections.map(s => s.key), ['projects', 'live', 'remote', 'past']);
 });
 
 // ── dropIndexOf: позиция вставки по указателю ──────────────────────────────
