@@ -578,3 +578,19 @@
   а не человек→проект. Сторожа — `test/project-prompt.test.js`, прогон обоих
   шеллов с подставным claude — в `test/open-strategy.test.js` и
   `src/claude-wt/prompt-launch.test.js` у windows11-manager.
+
+- **Путь с `;` отвергается одной проверкой у всех, кто кладёт каталог в
+  командную строку терминала, — и отказ человеку называется.** Windows Terminal
+  режет свою командную строку по `;` на панели до всякого шелла, и `q` его не
+  останавливает. Проверка одна — `pathProblem` в `frontend-src/open-strategy.js`,
+  её спрашивают `resumeCommand`, `newSessionCommand`, `newSessionName` и
+  `terminalCommand`, и она же отдаёт текст отказа всем трём вызывающим в
+  `sessions.html` (`openSession`, `newSession`, `openTerminalHere`). До
+  22.11.2026 отказ стоял только у новой сессии и терминала: Enter на сессии из
+  такого каталога собирал resume и разваливался на панели. `buildOpenCommand`
+  на таком пути отдаёт `null` и у `resume`, и у `takeover` — у второго
+  команда с пустым хвостом сняла бы процесс SIGHUP-ом, и подхватить сессию было
+  бы нечем, — а `openSession` на `null` сначала спрашивает `pathProblem` и
+  только потом про помощник терминала. Исключение — своя строка под Windows:
+  каталог там ставит `spawn_detached` (`cwd`), а не командная строка, и резать
+  нечего. Сторожа — `test/open-strategy.test.js`.
