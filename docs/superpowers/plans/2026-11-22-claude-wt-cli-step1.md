@@ -63,7 +63,7 @@
 - Test: `src/commands/claude-commands.test.js`, тест `build.js` (если есть), иначе там же
 
 **Interfaces:**
-- Produces: ответ `claude-place`: `{ok:true, placed: number}` | `{ok:false, reason}` (тело не разобрано — `'bad payload'`; отказ `arrangeClaudeWindows` — его `reason`; исключение — `e.message`). Отброшенное `throttlePress` (`DROPPED`) по http — `{ok:false, reason:'throttled'}`. Поля `foreground` у `place` нет (отступление от спеки, решение плана: `arrangeGroup` подъём окна не проверяет, а CLI для `layout` его не требует).
+- Produces: ответ `claude-place`: `{ok:true, placed: number}` | `{ok:false, reason}` (тело не разобрано — `'bad payload'`; отказ `arrangeClaudeWindows` — его `reason`; исключение — `e.message`). Отброшенное `throttlePress` (`DROPPED`) по http — как сегодня **429**, тело `{ok:false, reason:'throttled', error:'throttled'}` (у всех отброшенных: place, snapshot-restore, dock-press): пикер показывает 429 в статуслайне, и это поведение не меняется. CLI разбирает тело и у не-2xx. Поля `foreground` у `place` нет (отступление от спеки, решение плана: `arrangeGroup` подъём окна не проверяет, а CLI для `layout` его не требует).
 
 - [ ] **Step 1: Тесты** — `'place group отдаёт placed'`, `'place с отказом раскладки — ok:false и reason'`, `'place с неразобранным телом — bad payload'`, `'place дважды за секунду — второй throttled'`.
 - [ ] **Step 2:** запуск — FAIL.
