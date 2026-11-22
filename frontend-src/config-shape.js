@@ -56,6 +56,11 @@
     // агрегатор знает наверняка: он видит живые процессы, а не окна
     // терминалов.
     onlyLive: true,
+    // Ищутся ли сессии Claude Desktop. Отдельно от галки списка `claude
+    // desktop`: они мешают в поиске и в `/h` (Стас 22.11), а в обычном списке их
+    // можно и оставить. Умолчание — сегодняшнее поведение: кто ключа не трогал,
+    // разницы не заметит.
+    searchDesktop: true,
     // Клик мимо окна закрывает пикер. Читает это поле Rust — окно прячет он;
     // здесь оно описано затем же, зачем и остальные: чтобы форма конфига была
     // в одном месте и проверялась одним тестом.
@@ -407,6 +412,7 @@
       // Единственное поле, где умолчание true: отсутствие ключа значит «как
       // договорились», а не «показывай две сотни транскриптов».
       onlyLive: typeof src.onlyLive === 'boolean' ? src.onlyLive : DEFAULTS.onlyLive,
+      searchDesktop: typeof src.searchDesktop === 'boolean' ? src.searchDesktop : DEFAULTS.searchDesktop,
       hideOnBlur: typeof src.hideOnBlur === 'boolean' ? src.hideOnBlur : DEFAULTS.hideOnBlur,
       backgroundRefresh: typeof src.backgroundRefresh === 'boolean'
         ? src.backgroundRefresh

@@ -22,6 +22,7 @@ test('пустой конфиг даёт рабочие значения по у
   assert.strictEqual(c.caps.takeover, false);
   assert.strictEqual(c.onlyLive, true);
   assert.strictEqual(c.hideOnBlur, true);
+  assert.strictEqual(c.searchDesktop, true);
   assert.deepStrictEqual(c.terminal, { file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] });
   // Пустое имя машины — фокуса не бывает. Умолчания у него нет по той же
   // причине, что и у sshHost: любое значение было бы чужим именем машины.
@@ -139,7 +140,7 @@ test('заданные значения перекрывают умолчани�
 // Единственное поле с умолчанием true, поэтому его выключение проверяется
 // отдельно: `false` не должен потеряться на проверке «значение задано».
 test('поля с умолчанием true выключаются только явным false', () => {
-  for (const key of ['onlyLive', 'hideOnBlur']) {
+  for (const key of ['onlyLive', 'hideOnBlur', 'searchDesktop']) {
     assert.strictEqual(normalizeConfig({ [key]: false })[key], false, key);
     assert.strictEqual(normalizeConfig({ [key]: 'нет' })[key], true, key);
     assert.strictEqual(normalizeConfig({})[key], true, key);
