@@ -1900,8 +1900,17 @@ const infoBackdrop = document.getElementById('info-backdrop');
 
   /** Секции текущего режима и раскладки. Один вызов на обе ветки render(). */
   function sectionsFor(mode, query) {
+    // hide dimmed прячет и погашенные проекты, но только здесь, в секциях:
+    // глобальный projectRows читают хоткеи проектов, `/p` и справочник клавиш,
+    // и спрятанный с глаз проект там обязан остаться. Правило снятия то же, что
+    // у сессий, — activeFilters: запрос и префикс показывают всё.
+    const hideStale = window.SessionGroups.activeFilters({ mode, query, hideStale: toggles.hideStale }).hideStale;
+    const nowSec = Math.floor(Date.now() / 1000);
+    const projects = hideStale
+      ? projectRows.filter(p => !window.StaleItems.isStale(p, nowSec, staleSettings(), 'project'))
+      : projectRows;
     const sections = window.PickerSections.buildSections({
-      groups, projects: projectRows, snapshots: snapshotItemsFor(query),
+      groups, projects, snapshots: snapshotItemsFor(query),
       mode, query, trackerHere: trackerIsHere(),
       snapshotsUnavailable: snapshotsUnavailableHere(),
       layout: layoutName(), collapsed: collapsed[layoutName()],

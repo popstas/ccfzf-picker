@@ -1633,6 +1633,55 @@ test('hide dimmed снимается запросом', () => {
   assert.strictEqual(opts.hideStale, false);
 });
 
+// hide dimmed прячет и проекты, но только в секциях: projectRows читают хоткеи
+// проектов, `/p` и справочник клавиш, и спрятанный с глаз проект там обязан
+// остаться — его хоткей и `/p <проект>` продолжают работать.
+function sectionsForWith(projectRows, toggles, mode = 'sessions', query = '') {
+  const source = pageFunctions('staleSettings()', 'sectionsFor(mode, query)', 'layoutName()');
+  let projects = null;
+  const ctx = {
+    window: {
+      StaleItems,
+      SessionGroups: { activeFilters: Groups.activeFilters },
+      PickerSections: { buildSections: (o) => { projects = o.projects; return []; } },
+    },
+    CONFIG: DIM_CONFIG,
+    toggles,
+    tree: false,
+    fullscreen: false,
+    groups: [],
+    projectRows,
+    snapshotItemsFor: () => [],
+    trackerIsHere: () => false,
+    snapshotsUnavailableHere: () => null,
+    collapsed: { narrow: {}, wide: {} },
+    order: { narrow: [], wide: [] },
+    hidden: { narrow: {}, wide: {} },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${source}\nsectionsFor(${JSON.stringify(mode)}, ${JSON.stringify(query)});`, ctx,
+    { filename: 'sessions.html' });
+  assert.ok(projects, 'buildSections не позван');
+  return projects;
+}
+
+test('hide dimmed прячет погашенный проект только в секциях', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const rows = [
+    { path: '/p/old', name: 'old', lastActivity: now - 7200 },
+    { path: '/p/new', name: 'new', lastActivity: now - 60 },
+  ];
+  const shown = sectionsForWith(rows, { hideStale: true, dimStale: true });
+  assert.deepStrictEqual(Array.from(shown, r => r.name), ['new']);
+  // Глобальный список не тронут: хоткеи и `/p` читают его.
+  assert.strictEqual(rows.length, 2);
+  // Без hide dimmed, при выключенной dim stale и при запросе — все на месте.
+  assert.strictEqual(sectionsForWith(rows, { hideStale: false, dimStale: true }).length, 2);
+  assert.strictEqual(sectionsForWith(rows, { hideStale: true, dimStale: false }).length, 2);
+  assert.strictEqual(sectionsForWith(rows, { hideStale: true, dimStale: true }, 'sessions', 'old').length, 2);
+  assert.strictEqual(sectionsForWith(rows, { hideStale: true, dimStale: true }, 'projects', '').length, 2);
+});
+
 test('правка запроса пересчитывает состав списка, а не только рисунок', () => {
   // От запроса зависит не только рисунок, но и то, что вообще попадает в
   // список. С одним только render отмена отсевов срабатывала бы к следующему
@@ -1842,6 +1891,8 @@ function renderSessionRows(state, query, toggles, stale, treeMode, extra = {}) {
       StaleItems,
       SessionWindows,
       SessionTree,
+      // sectionsFor спрашивает activeFilters, прятать ли погашенные проекты.
+      SessionGroups: Groups,
     },
     CONFIG: {
       stale: staleConfig,
