@@ -24,6 +24,11 @@ and a session opens in the terminal of your choice.
   of the last activity.
 - **Enter opens the session** — in a terminal, or back inside Claude Desktop for
   the sessions that came from it.
+- **Reopen disconnected sessions** — a session whose ssh link died while the
+  agent lived on (the laptop slept, the network dropped) gets a hollow circle.
+  `^K` → **Reopen session**, or **Reopen disconnected sessions** in the tray menu,
+  stops the orphaned agent and resumes it in a new terminal; the dead window is
+  left as it is. The sign comes from `ccfzf` and works on Linux ssh hosts.
 - **`^O` opens the folder in your editor** — Zed, VS Code or Cursor, whichever
   is installed, or the one you pick in settings. With Zed, **Use SSH Remote**
   opens remote sessions over SSH instead of a network drive, so Zed notices
