@@ -127,6 +127,9 @@
    */
   function groupInMode(group, mode) {
     if (mode === 'sessions') return true;
+    // Типовые группы — живые обеих машин; `/l` и `/r` отбирают их строки
+    // по машине в buildSections, а группировка внутри остаётся по типу.
+    if (group.typeBlock === true) return mode === 'local' || mode === 'remote';
     if (mode === 'local') return group.key === 'live';
     if (mode === 'remote') return group.remote === true;
     if (mode === 'history') return group.past === true;
@@ -164,8 +167,15 @@
 
     if (SESSION_MODES.includes(mode)) {
       let remote = null;
-      for (const group of filterApi.filterSessions(o.groups || [], query)) {
-        if (!groupInMode(group, mode)) continue;
+      for (const found of filterApi.filterSessions(o.groups || [], query)) {
+        if (!groupInMode(found, mode)) continue;
+        // `/l` — свои (`windowHost` пуст), `/r` — чужие: тот же признак, по
+        // которому activeGroups делит живые по машинам.
+        const byHost = found.typeBlock === true && (mode === 'local' || mode === 'remote');
+        const group = byHost
+          ? { ...found, sessions: found.sessions.filter(s => (mode === 'remote') === Boolean(s.windowHost)) }
+          : found;
+        if (byHost && !group.sessions.length) continue;
         // Чужие группы склеиваются в одну секцию — в обеих раскладках.
         // Узнаётся чужая группа по своей пометке (`group.remote`), а не по
         // заголовку: заголовок носит имя машины — данные с той стороны, — и
@@ -197,6 +207,7 @@
           key: group.key, label: group.label, kind: 'sessions',
           rows: group.sessions, count: group.sessions.length,
           past: group.past === true,
+          ...(group.typeBlock === true ? { typeBlock: true } : {}),
           ...(wide ? { column: group.past ? COLUMN_PAST : COLUMN_LIVE } : {}),
         });
       }
@@ -225,8 +236,10 @@
     // чужих машин он «Active sessions», с ними — «Active local sessions».
     // Разойдись эти два имени, панель называлась бы по-разному в зависимости
     // от того, пуста она или нет.
+    // Блок типов стоит на месте `live` и сам и есть своя живая панель:
+    // пустая «Active sessions» над ним была бы второй.
     if (mode === 'sessions' && !String(query).trim()
-      && !sections.some(s => s.key === LIVE_KEY)) {
+      && !sections.some(s => s.key === LIVE_KEY || s.typeBlock === true)) {
       // Ключ один на все машины в обеих раскладках, поэтому и вопрос один.
       const hasRemote = sections.some(s => s.key === REMOTE_KEY);
       // При «only windowed» живые без окна стоят своей секцией ниже, и
@@ -325,7 +338,8 @@
     // молчащий Enter. То же исключение уже сделано для свёрнутости.
     const hidden = o.hidden && typeof o.hidden === 'object' ? o.hidden : {};
     const named = mode !== 'sessions';
-    const shown = named ? sections : sections.filter(s => hidden[s.key] !== true);
+    // Блок типов прячется вместе с `live`: его место и есть место `live`.
+    const shown = named ? sections : sections.filter(s => hidden[orderKeyOf(s)] !== true);
 
     // Непустой запрос разворачивает всё, и это сильнее любой памяти о
     // свёрнутости: секция, свёрнутая под запросом, прятала бы ровно то, что
@@ -403,6 +417,41 @@
     return columns.map(keys => withFollowers(keys).filter(k => keys.includes(k) || !named.has(k)));
   }
 
+  /**
+   * Ключ секции в порядке `order` из ui.json. Типовые секции (`type:<имя>`)
+   * стоят одним блоком на месте `live`: ключ `type:*` в сохранённом порядке не
+   * живёт — набор типов меняется вместе с данными, а неназванный ключ
+   * уехал бы в конец (см. `typeGroups` в session-groups.js). Принимает секцию
+   * или строку ключа: перетаскивание знает только ключ заголовка.
+   */
+  function orderKeyOf(section) {
+    const key = typeof section === 'string' ? section : (section || {}).key;
+    const typeBlock = typeof section === 'string' ? String(key).startsWith('type:') : (section || {}).typeBlock === true;
+    return typeBlock ? LIVE_KEY : key;
+  }
+
+  /**
+   * Новый порядок ключей после переноса секции `key` на место `to`.
+   *
+   * `keys` и `to` — видимые заголовки (как их видит указатель), где типовые
+   * идут подряд несколькими; результат — ключи `order`, где блок типов один
+   * ключ `live`. Перенос любой типовой двигает весь блок. Без типовых — ровно
+   * прежний moveKey: `to` считается по списку, где переносимая ещё стоит.
+   */
+  function moveBlockKey(keys, key, to) {
+    const moving = orderKeyOf(key);
+    const before = [];
+    const rest = [];
+    keys.forEach((raw, i) => {
+      const k = orderKeyOf(raw);
+      if (k === moving || rest.includes(k)) return;
+      rest.push(k);
+      if (i < to) before.push(k);
+    });
+    rest.splice(before.length, 0, moving);
+    return rest;
+  }
+
   /** Место ключа в списке; неназванный — в конец. */
   function placeOf(keys, key) {
     const at = keys.indexOf(key);
@@ -428,7 +477,7 @@
     if (!keys.length) return sections;
     return sections
       .map((section, at) => ({ section, at }))
-      .sort((a, b) => (placeOf(keys, a.section.key) - placeOf(keys, b.section.key))
+      .sort((a, b) => (placeOf(keys, orderKeyOf(a.section)) - placeOf(keys, orderKeyOf(b.section)))
         || (a.at - b.at))
       .map(({ section }) => section);
   }
@@ -450,11 +499,12 @@
     const placed = sections.map((section, at) => {
       // Колонка из файла главнее колонки по смыслу — но только для той
       // секции, которую в файле назвали.
-      const col = columns.length ? columns.findIndex(keys => keys.includes(section.key)) : -1;
+      const key = orderKeyOf(section);
+      const col = columns.length ? columns.findIndex(keys => keys.includes(key)) : -1;
       return {
         section: col === -1 ? section : { ...section, column: col + 1 },
         at,
-        place: col === -1 ? UNPLACED : columns[col].indexOf(section.key),
+        place: col === -1 ? UNPLACED : columns[col].indexOf(key),
         // Свёрнутая — в низ своей колонки, поверх любого назначенного места.
         // Свёрнутая секция это одна строка заголовка, а доля колонки ей
         // достаётся такая же, как развёрнутому соседу: измерено, свёрнутая
@@ -465,7 +515,10 @@
         // Опускание живёт здесь, а не в CSS: по этому же списку считается
         // `rows` и порядок блоков, по которому ходят `←/→`. Подвинь мы блок
         // одним оформлением — стрелка уводила бы не туда, куда смотрит глаз.
-        sunk: section.collapsed === true ? 1 : 0,
+        //
+        // Типовые секции не опускаются: блок типов стоит одним куском на
+        // месте `live`, и свёрнутая `home` под соседями порвала бы его.
+        sunk: section.collapsed === true && section.typeBlock !== true ? 1 : 0,
       };
     });
     return placed
@@ -541,6 +594,7 @@
 
   return {
     buildSections, sectionHeaderText, moveInBlocks, moveBetweenBlocks, firstRowInPanel,
+    orderKeyOf, moveBlockKey,
     wideColumnGrow,
   };
 });

@@ -286,7 +286,7 @@ Developer ID нет, universal удвоил бы вес ровно в той з�
 | Терминалы | [`docs/rules/terminals.md`](docs/rules/terminals.md) | 7 | argv, пресеты, подстановки `{command}` и `{helper}`, iTerm2, папки |
 | Источники состояния | [`docs/rules/state-sources.md`](docs/rules/state-sources.md) | 10 | откуда берётся список, местный и ssh-источник, состояние агента, бэкофф, условный опрос, сигнал трекера, простой машины |
 | Фильтры и режимы | [`docs/rules/filtering.md`](docs/rules/filtering.md) | 8 | `onlyLive`, `onlyWindow`, `showAll`, `showDesktop`, `hideStale`, префиксы и что их перебивает, `/p <проект> <промпт>` |
-| Секции и раскладки | [`docs/rules/layouts.md`](docs/rules/layouts.md) | 4 | `buildSections`, узкий и широкий список, перетаскивание, размер окна, плитка, раскладка группы head |
+| Секции и раскладки | [`docs/rules/layouts.md`](docs/rules/layouts.md) | 5 | `buildSections`, узкий и широкий список, перетаскивание, блок типов проекта, размер окна, плитка, раскладка группы head |
 | Снимки раскладки | [`docs/rules/snapshots.md`](docs/rules/snapshots.md) | 3 | откуда приезжают, как сгруппированы, кто их восстанавливает, почему пустая секция не пропадает |
 
 Указатель — не пересказ: правило живёт в своём файле целиком, и решать по

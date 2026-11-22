@@ -2235,7 +2235,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // Иконки истории (проект по каталогу, корона head) — готовой картой
       // трекера этой машины, тем же trackerIcons, что у списка проектов.
       { ...filters, isDimmed, configHost: CONFIG.windowHost,
-        icons: window.SessionWindows.trackerIcons(lastState, CONFIG.windowHost) },
+        icons: window.SessionWindows.trackerIcons(lastState, CONFIG.windowHost),
+        // Живые — секциями по типу проекта вместо машин. Раскладка, а не
+        // отсев: запрос и префикс её не отменяют.
+        groupByProjectType: CONFIG.groupByProjectType === true },
     );
     groups = payload.groups;
     sortMode = payload.sort;
@@ -3441,21 +3444,6 @@ const infoBackdrop = document.getElementById('info-backdrop');
     return row && row.kind === 'section' ? row.sectionKey : '';
   }
 
-  /**
-   * Переставить ключ в списке.
-   *
-   * `to` считается по видимому списку, где перетаскиваемая секция ещё стоит на
-   * своём месте: убрав её раньше, чем поправлен номер, мы съехали бы на
-   * единицу при движении вниз.
-   */
-  function moveKey(keys, key, to) {
-    const from = keys.indexOf(key);
-    const rest = keys.filter(k => k !== key);
-    const at = from !== -1 && from < to ? to - 1 : to;
-    rest.splice(Math.max(0, Math.min(rest.length, at)), 0, key);
-    return rest;
-  }
-
   /** Сколько заголовков выше указателя — столько и позиция вставки. */
   function dropIndexOf(nodes, y) {
     let at = 0;
@@ -3560,22 +3548,22 @@ const infoBackdrop = document.getElementById('info-backdrop');
       const target = wideDropTarget(x, y);
       if (!target) return;
       // Ключ вынимается из всех колонок и кладётся в названную: секция одна,
-      // и остаться в прежней колонке она не может.
-      const columns = order.wide.map(keys => keys.filter(k => k !== drag.key));
+      // и остаться в прежней колонке она не может. Типовая секция (`type:*`)
+      // в порядке — это `live`: блок типов переносится целиком (orderKeyOf).
+      const moving = window.PickerSections.orderKeyOf(drag.key);
+      const columns = order.wide.map(keys => keys.filter(k => k !== moving));
       // Видимый порядок колонки, а не сохранённый: сохранённого может не быть
       // вовсе, а поставить секцию надо туда, куда смотрит человек.
-      const visible = target.keys.filter(k => k !== drag.key);
-      const at = Math.max(0, Math.min(visible.length, target.at
-        - (target.keys.indexOf(drag.key) !== -1 && target.keys.indexOf(drag.key) < target.at ? 1 : 0)));
-      visible.splice(at, 0, drag.key);
-      columns[target.column - 1] = visible;
+      columns[target.column - 1] = window.PickerSections.moveBlockKey(target.keys, drag.key, target.at);
       order = { ...order, wide: columns };
     } else {
       // Видимый порядок, а не сохранённый: в файле может не быть ничего, а
       // человек переносит то, что видит.
       const headers = narrowHeaders();
       const visible = headers.map(sectionKeyOf).filter(Boolean);
-      order = { ...order, narrow: moveKey(visible, drag.key, dropIndexOf(headers, y)) };
+      // moveBlockKey, а не прежний moveKey: типовые секции стоят одним блоком
+      // на месте `live`, и в порядок уходит ключ `live`, а не `type:*`.
+      order = { ...order, narrow: window.PickerSections.moveBlockKey(visible, drag.key, dropIndexOf(headers, y)) };
     }
     // Порядок секций, которых сейчас нет на экране (лёг трекер — нет и его
     // секции), в файле не сохраняется: он записывается по видимому списку.

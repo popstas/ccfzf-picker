@@ -2863,3 +2863,11 @@ test('shell: ответ старого ccfzf без поля — строка б
   assert.strictEqual(row.shellCmd, '');
   assert.strictEqual(Glyph.shellHtml(row), '');
 });
+
+test('regroup подаёт CONFIG.groupByProjectType в buildSessionsPayload', () => {
+  assert.strictEqual(regroupWith(true, {}, undefined, {}, { groupByProjectType: true }).groupByProjectType, true);
+  assert.strictEqual(regroupWith(true, {}, undefined, {}, {}).groupByProjectType, false);
+  // Раскладка, а не отсев: запрос её не отменяет.
+  assert.strictEqual(regroupWith(true, {}, { mode: 'sessions', query: 'x' }, {}, { groupByProjectType: true })
+    .groupByProjectType, true);
+});

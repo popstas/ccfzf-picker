@@ -281,6 +281,10 @@
 
     if (!open.length) return [...bare, ...past, ...tail];
     sortGroupSessions(open, mode);
+    // Группировка по типу проекта — вместо деления по машинам, только живых.
+    // Живые без окна — за последней типовой секцией: вопрос у той секции «окна
+    // нет», а не тип.
+    if (opts.groupByProjectType) return [...typeGroups(open), ...bare, ...past, ...tail];
     // Сразу под своими живыми, раньше чужих машин: окна нет — значит, и
     // машины окна нет, и сессия почти всегда своя (`windowlessGroup`).
     const active = activeGroups(open);
@@ -326,6 +330,42 @@
    */
   function windowlessGroup(sessions) {
     return { desktop: null, key: 'nowindow', label: 'Live without window', sessions, remote: false, host: '' };
+  }
+
+  /** Типы, которые встают первыми, в этом порядке; прочие — по алфавиту. */
+  const TYPE_FIRST = ['work', 'home'];
+  /** Секция живых сессий без типа — последней. Имя зарезервировано у менеджера. */
+  const UNTYPED = 'untyped';
+
+  /**
+   * Живые сессии — по группе на тип проекта (`projectType` строки), обе
+   * машины вместе: машину называет колонка строки (решение Стаса 22.11,
+   * вариант A — тип вместо машин).
+   *
+   * Ключ постоянный, `type:<имя>`: по нему помнится свёрнутость. Место в
+   * порядке секций у всех типовых одно — место `live` (`typeBlock`, см.
+   * `orderKeyOf` в picker-sections.js): набор типов меняется вместе с
+   * данными, и ключ, которого нет в `order`, уехал бы в конец списка — та же
+   * цена, за которую `remote:<host>` склеили в `remote`.
+   *
+   * Порядок внутри блока фиксирован: `work`, `home`, прочие по алфавиту,
+   * `untyped` последней. Сессии внутри группы уже отсортированы — `open`
+   * приходит отсортированным, и фильтр порядок сохраняет.
+   */
+  function typeGroups(open) {
+    const byType = new Map();
+    for (const s of open) {
+      const type = (typeof s.projectType === 'string' && s.projectType) || UNTYPED;
+      if (!byType.has(type)) byType.set(type, []);
+      byType.get(type).push(s);
+    }
+    const rank = t => (t === UNTYPED ? 2 : TYPE_FIRST.includes(t) ? -1 : 0);
+    const types = [...byType.keys()].sort((a, b) => (rank(a) - rank(b))
+      || (rank(a) === -1 ? TYPE_FIRST.indexOf(a) - TYPE_FIRST.indexOf(b) : a.localeCompare(b)));
+    return types.map(type => ({
+      desktop: null, key: `type:${type}`, label: type, sessions: byType.get(type),
+      remote: false, host: '', typeBlock: true,
+    }));
   }
 
   /**
@@ -540,7 +580,11 @@
     const zellij = zellijApi.buildZellijList({ zellij: res.zellij });
     // `onlyWindow` здесь уже не отсев, а раскладка: живая без окна уходит в
     // свою секцию (`windowlessGroup`), а не из списка.
-    const groups = groupSessions([...labelSessions(rows), ...zellij], mode, { onlyWindow: !!opts.onlyWindow });
+    const groups = groupSessions([...labelSessions(rows), ...zellij], mode, {
+      onlyWindow: !!opts.onlyWindow,
+      // Раскладка, а не отсев: запрос и префикс её не отменяют.
+      groupByProjectType: opts.groupByProjectType === true,
+    });
     return { ok: true, groups, sort: mode };
   }
 

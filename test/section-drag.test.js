@@ -11,6 +11,9 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const SESSIONS_HTML = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+// Перестановка ключа живёт в picker-sections.js (moveBlockKey): блок типов
+// проекта переносится там одним ключом `live`, а без типов правило прежнее.
+const { moveBlockKey } = require('../frontend-src/picker-sections');
 
 function sourceOf(name) {
   const re = new RegExp(`\\n {2}function ${name}\\([\\s\\S]*?\\n {2}\\}\\n`);
@@ -32,46 +35,46 @@ function run(names, expr, ctx = {}) {
   return Array.isArray(ctx.result) ? [...ctx.result] : ctx.result;
 }
 
-// ── moveKey: перестановка ключа по номеру из видимого списка ────────────────
+// ── moveBlockKey: перестановка ключа по номеру из видимого списка ───────────
 
 test('перенос вниз считается по списку, где секция ещё на месте', () => {
   // Номер приходит из видимого списка, в котором перетаскиваемая секция
   // стоит на своём месте. Убери её раньше, чем поправлен номер, — и всякий
   // перенос вниз промахивался бы ровно на единицу.
   const keys = ['live', 'remote', 'past', 'projects'];
-  assert.deepStrictEqual(run(['moveKey'], `moveKey(${JSON.stringify(keys)}, 'live', 2)`),
+  assert.deepStrictEqual(moveBlockKey(keys, 'live', 2),
     ['remote', 'live', 'past', 'projects']);
-  assert.deepStrictEqual(run(['moveKey'], `moveKey(${JSON.stringify(keys)}, 'live', 4)`),
+  assert.deepStrictEqual(moveBlockKey(keys, 'live', 4),
     ['remote', 'past', 'projects', 'live']);
 });
 
 test('перенос вверх номера не сдвигает', () => {
   const keys = ['live', 'remote', 'past'];
-  assert.deepStrictEqual(run(['moveKey'], `moveKey(${JSON.stringify(keys)}, 'past', 0)`),
+  assert.deepStrictEqual(moveBlockKey(keys, 'past', 0),
     ['past', 'live', 'remote']);
-  assert.deepStrictEqual(run(['moveKey'], `moveKey(${JSON.stringify(keys)}, 'past', 1)`),
+  assert.deepStrictEqual(moveBlockKey(keys, 'past', 1),
     ['live', 'past', 'remote']);
 });
 
 test('перенос на своё же место ничего не меняет', () => {
   // Иначе дрогнувшая рука тасовала бы список без просьбы.
   const keys = ['live', 'remote', 'past'];
-  assert.deepStrictEqual(run(['moveKey'], `moveKey(${JSON.stringify(keys)}, 'remote', 1)`), keys);
-  assert.deepStrictEqual(run(['moveKey'], `moveKey(${JSON.stringify(keys)}, 'remote', 2)`), keys);
+  assert.deepStrictEqual(moveBlockKey(keys, 'remote', 1), keys);
+  assert.deepStrictEqual(moveBlockKey(keys, 'remote', 2), keys);
 });
 
 test('номер за краями списка упирается в края', () => {
   const keys = ['live', 'remote'];
-  assert.deepStrictEqual(run(['moveKey'], `moveKey(${JSON.stringify(keys)}, 'live', 99)`),
+  assert.deepStrictEqual(moveBlockKey(keys, 'live', 99),
     ['remote', 'live']);
-  assert.deepStrictEqual(run(['moveKey'], `moveKey(${JSON.stringify(keys)}, 'remote', -5)`),
+  assert.deepStrictEqual(moveBlockKey(keys, 'remote', -5),
     ['remote', 'live']);
 });
 
 test('незнакомый ключ добавляется, а не теряется', () => {
   // Секция, которой ещё нет в сохранённом порядке, — обычное дело: порядок
   // пишется только по видимому списку.
-  assert.deepStrictEqual(run(['moveKey'], `moveKey(['live'], 'past', 0)`), ['past', 'live']);
+  assert.deepStrictEqual(moveBlockKey(['live'], 'past', 0), ['past', 'live']);
 });
 
 // ── dropIndexOf: позиция вставки по указателю ──────────────────────────────
