@@ -15,8 +15,22 @@
   Сделано 22.11: шаг 1 (windows11-manager#54, ccfzf#32 — tree, window
   focus/layout, snapshot) и шаги 2–6 (ccfzf#33, #35 — session find/rename/close/
   spawn/open, head mark/adopt; скрипты скиллов стали обёртками над CLI, обёртки
-  оставлены — решение Стаса), скилл `claude-wt-cli`. Осталось: `place --zone`
-  (нужен путь в менеджере), `seen`/`unread` (отметка пикера живёт в его seen.json).
+  оставлены — решение Стаса), скилл `claude-wt-cli`. Тоже 22.11: `session
+  unread`/`seen` — поле `unreadAt` в файле трекера, которое перебивает
+  seen.json пикера (ветки `feat/unread-at` трёх репо). Осталось: `place --zone`
+  (нужен путь в менеджере).
+
+- [ ] **`unreadAt` в macos-windows-manager.** Половина отметки «непросмотрено»
+  на маке не сделана (мак недоступен с конца октября 2026, решение Стаса
+  14.11). windows11-manager с 22.11 ставит в слот и в файл трекера `unreadAt`
+  (epoch-секунды) на `claude-session-unread` и снимает его на
+  `claude-session-seen` вместе с `focusedAt = now`; пикер считает сессию
+  непросмотренной, пока `unreadAt` новее и seen.json, и `focusedAt` окна.
+  Маковскому трекеру — то же: поле в записи окна и в его отпечатке, обработка
+  обеих просьб (MQTT `<base>/windows/claude-session-unread|seen`, у мака http
+  нет). До того «Mark unread» по маковскому окну работает только местной
+  отметкой, а `claude-wt session unread` маковскую машину пропускает (нет
+  http-менеджера — код 1).
 
 - [ ] **Окно на экране есть, а привязки к сессии нет — и пикер заводит вторую
   сессию с тем же именем.** Снято живьём 2026-08-22 на маке: проектный хоткей

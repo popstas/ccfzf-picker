@@ -88,6 +88,7 @@
       ['turn', stamp(s.agentTurnAt ?? 0, nowSec)],
       ['last activity', stamp(s.lastActivity ?? 0, nowSec)],
       ['focused', stamp(s.focusedAt ?? 0, nowSec)],
+      ['marked unread', stamp(s.unreadAt ?? 0, nowSec)],
     ];
     return rows
       .filter(([, value]) => value !== '' && value !== null && value !== undefined)

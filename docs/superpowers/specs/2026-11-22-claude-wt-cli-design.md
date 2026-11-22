@@ -103,6 +103,10 @@
   `docs/rules/windows-and-focus.md`). Через менеджер `session-seen` гасит только
   кнопку на панели задач, `unread` откатывает только `focusedAt` — точку в
   пикере агент так не изменит, а вход в пикер снаружи — не цель.
+  **Решено 22.11 (Стас):** поле `unreadAt` в файле трекера, новее местной
+  отметки пикера — сессия непросмотрена. `session unread` ставит его у трекеров
+  всех окон сессии, `session seen` ставит `focusedAt = now` и снимает его
+  (решение head), окно не поднимается. Правило — `docs/rules/windows-and-focus.md`.
 - **`layout <head>`** — `{mode: "group", groups: [[head, ...потомки с окнами]],
   selected: head}` на `/claude-wt/place`, без точного повтора правил группировки
   пикера (`nestByHead`, `place_order::group_ids`, фикстура

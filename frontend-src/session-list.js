@@ -262,6 +262,12 @@
         // session-windows.js и markUnread в sessions.html) — иначе сосед,
         // которого не тронули, вернул бы «просмотрено» на первой же карточке.
         const focusedAt = Math.max(mark, (w || {}).focusedAt || 0, 0);
+        // Явное «непросмотрено» от трекера этого окна (session-unread): пока
+        // оно новее отметки взгляда карточки, сессия непросмотрена — даже
+        // если пикер сам отметил её просмотренной. Своё у каждой карточки, как
+        // и focusedAt: «Mark unread» и `claude-wt session unread` ставят его у
+        // всех трекеров сессии, а снимает его взгляд на конкретное окно.
+        const unreadAt = Number.isFinite((w || {}).unreadAt) ? w.unreadAt : 0;
         rows.push({
           id: s.id,
           title: s.title || '',
@@ -469,13 +475,17 @@
           // работает как надо: отметка взгляда, поставленная после последней
           // записи файла, и значит «видел то, что там сейчас». Ноль здесь
           // оставил бы жёлтый вопрос гореть и после захода в сессию.
-          agentSeen: agentApi.seenSinceUpdate(agent, focusedAt),
+          agentSeen: agentApi.seenSinceUpdate(agent, focusedAt, unreadAt),
           agentBackground: active.background,
           agentSessionId: active.id,
           // Отметка открытия/взгляда, epoch-секунды: максимум своей (из
           // seen.json) и focusedAt именно этого окна — не всех окон сессии.
           // У карточки с двумя окнами это время своё для каждой.
           focusedAt: focusedAt || 0,
+          // Отметка «непросмотрено» трекера этого окна, epoch-секунды; ноль —
+          // её нет. Для карточки сведений: без неё «seen: no» при свежем
+          // focused было бы необъяснимо.
+          unreadAt,
         });
       }
     }
