@@ -143,3 +143,32 @@ test('порог перетаскивания есть, иначе клик ст
   // позиций, и свернуть секцию мышью стало бы нечем.
   assert.ok(/DRAG_THRESHOLD = \d+/.test(SESSIONS_HTML), 'порога нет');
 });
+
+// ── commitDrag: блок типов проекта переносится ключом live ─────────────────
+
+function commitWith(ctx) {
+  const PickerSections = require('../frontend-src/picker-sections');
+  let saved = 0;
+  const full = { window: { PickerSections }, saveUi: () => { saved++; }, ...ctx };
+  vm.createContext(full);
+  vm.runInContext(`${sourceOf('commitDrag')}\ncommitDrag(0, 0);`, full, { filename: 'sessions.html' });
+  return { order: JSON.parse(JSON.stringify(full.order)), saved };
+}
+
+test('узкая: перенос типовой секции пишет в порядок live, а не type:*', () => {
+  const headers = ['type:work', 'type:home', 'type:untyped', 'nowindow', 'past', 'projects'].map(key => ({ key }));
+  const { order, saved } = commitWith({
+    fullscreen: false, drag: { key: 'type:home' }, order: { narrow: [], wide: [] },
+    narrowHeaders: () => headers, sectionKeyOf: n => n.key, dropIndexOf: () => 5,
+  });
+  assert.deepStrictEqual(order.narrow, ['nowindow', 'past', 'live', 'projects']);
+  assert.strictEqual(saved, 1);
+});
+
+test('широкая: блок типов уезжает в другую колонку ключом live, из прежней вынут', () => {
+  const { order } = commitWith({
+    fullscreen: true, drag: { key: 'type:work' }, order: { narrow: [], wide: [['live', 'past'], ['projects']] },
+    wideDropTarget: () => ({ column: 2, at: 1, keys: ['projects'] }),
+  });
+  assert.deepStrictEqual(order.wide, [['past'], ['projects', 'live']]);
+});

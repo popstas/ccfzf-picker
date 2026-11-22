@@ -229,3 +229,12 @@ test('подписи ширины колонок — ровно на те сло
     assert.ok(typeof label === 'string' && label, 'пустая подпись');
   }
 });
+
+test('ключи секций типа проекта из ui.json в список панелей не попадают', () => {
+  // Место и показ блока типов задаёт панель live; строка у type:work с
+  // колонкой и «hidden» обещала бы выбор, который ничего не делает.
+  const state = ui({ collapsed: { narrow: { 'type:work': true }, wide: { 'type:home': true } } });
+  for (const layout of ['narrow', 'wide']) {
+    assert.ok(!panelRows(state, layout).some(r => r.key.startsWith('type:')), layout);
+  }
+});

@@ -743,7 +743,7 @@ fn publish(broker: &Broker, base: &str, tail: &str, payload: &str) -> Result<(),
 mod tests {
     use super::{
         broker_from_config, group_payload, open_new_payload, open_payload, open_project_payload,
-        open_prompt_payload, place_payload,
+        open_prompt_payload, place_payload, project_type_body,
         resolve_base, restore_payload, terminal_name, topic_of, unread_bases, Placement,
         FOCUS_TOPIC,
         OPEN_TOPIC, PLACE_TOPIC, RESTORE_TOPIC, SEEN_TOPIC, UNREAD_TOPIC,
