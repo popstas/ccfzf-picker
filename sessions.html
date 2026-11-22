@@ -331,24 +331,34 @@
             font-size: 10px; letter-spacing: .08em;
             text-transform: uppercase; color: var(--fg-dim);
         }
+        /* Цвет состояния — в местной переменной `--dot`, а не прямо в
+           `background`: ею же красится кольцо разорванной сессии
+           (`.dot.disconnected`), и одно правило контура годится всем
+           состояниям. Токеном палитры `--dot` не является — в theme.css её нет. */
         .dot {
             flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%;
-            background: var(--idle);
+            --dot: var(--idle);
+            background: var(--dot);
         }
         /* Агент работает. */
-        .dot.active { background: var(--ok); }
+        .dot.active { --dot: var(--ok); }
         /* Ход закончен, а фоновая команда агента ещё идёт (`shell` из
            реестра агента, см. dotState). Циан, а не зелёный: агент не
            работает и не ждёт ответа, но и не простаивает. */
-        .dot.shell { background: var(--shell); }
+        .dot.shell { --dot: var(--shell); }
         /* Агент спрашивает — ждёт ответа человека. */
-        .dot.question { background: var(--warn); }
+        .dot.question { --dot: var(--warn); }
         /* Агент закончил, результат ещё не смотрели. */
-        .dot.review { background: var(--review); }
+        .dot.review { --dot: var(--review); }
         /* Простаивает: закончил и постоял, считается проверенным. Серый здесь
            остаётся: он отличает живую сессию от закрытой, у которой кружка нет
            вовсе, — а это и есть главный вопрос к строке. Гасили и вернули. */
-        .dot.idle { background: var(--idle); }
+        .dot.idle { --dot: var(--idle); }
+        /* Агент жив, а ssh к нему разорван (`disconnected` от агрегатора):
+           кольцо того же цвета, что был бы у кружка. Контур, а не новый цвет:
+           состояние агента остаётся видно — работал он до обрыва или ждал, —
+           а пустая середина говорит «войти сюда нечем». */
+        .dot.disconnected { background: transparent; box-shadow: inset 0 0 0 2px var(--dot); }
         /* Закрытая сессия — кружка нет, но место под него остаётся,
            иначе текст закрытых строк съезжает относительно живых. */
         .dot.closed { background: transparent; }

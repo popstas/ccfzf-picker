@@ -66,7 +66,9 @@
 
   function statusDotHtml(session) {
     if (!session || !session.live) return '<div class="dot closed"></div>';
-    return `<div class="dot ${dotState(session)}"></div>`;
+    // Разорванная — тот же цвет состояния, но контуром (`.dot.disconnected`).
+    const cut = session.disconnected ? ' disconnected' : '';
+    return `<div class="dot ${dotState(session)}${cut}"></div>`;
   }
 
   /**
