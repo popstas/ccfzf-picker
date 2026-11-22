@@ -892,6 +892,32 @@
   }
 
   /**
+   * Подпись задачи вольта после имени сессии — над какой задачей она работает.
+   *
+   * Связь пишет скилл sess2task подпунктом `- Сессия <имя>` в tasks.md вольта,
+   * находит её агрегатор (поле `task`), а здесь только рисуется. Закрытая
+   * задача — с `✓` и своим классом: живая сессия с уже закрытой задачей — то,
+   * что подпись и должна дать заметить. Остальные задачи того же имени — числом
+   * `+N`, их список в подсказке не помещается, а вот число — да.
+   *
+   * Подпись того же рода, что имя окна и head, но своим классом: текст у неё
+   * длинный (до 120 знаков от агрегатора), и режется он многоточием, а не
+   * раздвигает строку. `show === false` — галка `showTask` выключена.
+   */
+  function taskNameHtml(session, show = true) {
+    if (show === false) return '';
+    const task = session?.task;
+    const text = typeof task?.text === 'string' ? task.text.trim() : '';
+    if (!text) return '';
+    const more = Number.isInteger(task.more) && task.more > 0 ? task.more : 0;
+    const vault = typeof task.vault === 'string' && task.vault ? `${task.vault}: ` : '';
+    const title = `${vault}${text}${more ? ` (+${more} more)` : ''}`;
+    return `<span class="task${task.done === true ? ' done' : ''}" title="${escapeHtml(title)}">`
+      + `${task.done === true ? '✓ ' : ''}${escapeHtml(text)}`
+      + `${more ? ` <span class="more">+${more}</span>` : ''}</span>`;
+  }
+
+  /**
    * Имя сессии рядом с именем проекта в строке снимка — и только когда они
    * разошлись.
    *
@@ -1006,7 +1032,7 @@
     todoHtml, todoText, projectCountHtml, projectCountText, projectColumnWidths, ageText,
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
-    prNumber, prBadgeHtml, wordSet, sameWords, hidesProject, projectLine, windowNameHtml, windowIconHtml, zellijNameHtml, headNameHtml,
+    prNumber, prBadgeHtml, wordSet, sameWords, hidesProject, projectLine, windowNameHtml, windowIconHtml, zellijNameHtml, headNameHtml, taskNameHtml,
     snapshotNameHtml,
     docsBadgeHtml, docKindOf, promptsHtml, commentHtml, shellHtml,
   };

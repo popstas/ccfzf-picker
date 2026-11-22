@@ -148,6 +148,31 @@
     return !inDesktopApp(row) && (row || {}).agentSource !== 'transcript';
   }
 
+  /**
+   * Задача вольта из поля `task` агрегатора: {text, done, vault, more} или null.
+   *
+   * Белый список, как у остальных полей ответа: агрегатор — отдельная
+   * программа и выкатывается отдельно. Старый ccfzf поля не отдаёт вовсе, у
+   * чужой версии оно может оказаться чем угодно — и в обоих случаях подписи
+   * просто нет, а строка остаётся строкой. Пустой текст — тоже `null`: подпись
+   * без слов была бы одной галкой ✓ ни о чём.
+   *
+   * `done` — только строгое `true`: ✓ у открытой задачи сказал бы неправду
+   * ровно о том, ради чего подпись и заведена, — заметить живую сессию с уже
+   * закрытой задачей. `more` — целое больше нуля, иначе ноль.
+   */
+  function taskOf(task) {
+    if (!task || typeof task !== 'object' || Array.isArray(task)) return null;
+    const text = typeof task.text === 'string' ? task.text.trim() : '';
+    if (!text) return null;
+    return {
+      text,
+      done: task.done === true,
+      vault: typeof task.vault === 'string' ? task.vault : '',
+      more: Number.isInteger(task.more) && task.more > 0 ? task.more : 0,
+    };
+  }
+
   function buildSessionList({ sessions, seen, state, configHost, icons: givenIcons } = {}) {
     const list = Array.isArray(sessions) ? sessions : [];
     const byId = {};
@@ -340,6 +365,11 @@
           // — она уходит в стог поиска, и недостающее поле нашлось бы там
           // словом `undefined`.
           comment: typeof s.comment === 'string' ? s.comment : '',
+          // Задача вольта, под которой сессию записал sess2task. Ищет её
+          // агрегатор по имени сессии в tasks.md вольтов своей машины; здесь —
+          // только разбор белым списком (taskOf). `null`, а не пустой объект:
+          // подписи и строки карточки у такой сессии нет вовсе.
+          task: taskOf(s.task),
           // Размер сессии — число реплик человека. Поле самой сессии, не
           // записи агента: считает его агрегатор по транскрипту, а не хук, —
           // поэтому и без префикса `agent`.

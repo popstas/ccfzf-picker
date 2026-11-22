@@ -456,6 +456,24 @@
         .name .wname, .name .sname, .name .zname, .name .hname {
             margin-left: 6px; font-size: 11px; color: var(--fg-dim); font-weight: normal;
         }
+        /* Задача вольта (taskNameHtml) — подпись, но длинная: до 120 знаков от
+           агрегатора. Поэтому своя обрезка многоточием и сжатие вдесятеро
+           быстрее имени — в узком окне уступает место задача, а не имя, по
+           которому строку опознают.
+
+           Цвет — середина между цветом имени и тусклым `--fg-dim` соседних
+           подписей (Стас 22.11.2026): тусклой открытую задачу было не
+           разглядеть, а цветом имени она с ним сливалась. Смешивается
+           `currentColor`, то есть цвет имени в этом состоянии строки, — и
+           задача гаснет и светлеет вместе с именем: у закрытой строки, под
+           курсором, у выбранной. Закрытая задача — цветом
+           «готово»: живая сессия с уже закрытой задачей — то, что подпись и
+           должна дать заметить. */
+        .name .task {
+            flex: 0 10 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            margin-left: 6px; font-size: 11px; color: color-mix(in srgb, currentColor 50%, var(--fg-dim)); font-weight: normal;
+        }
+        .name .task.done { color: var(--ok); }
         /* Правые колонки одной группой: статус, id, контекст с деньгами,
            возраст. Прижимает их сюда именно она — раньше это делала `.state`
            своим margin-left: auto, и выключенный чекбокс события уносил
@@ -1074,6 +1092,9 @@
     // Третья строка тела, рядом с prompt и answer: это тоже текст под именем,
     // а не колонка справа.
     { key: 'showComment', label: 'comment', side: 'left' },
+    // Задача вольта — подпись в строке имени, то есть тоже «слева», рядом с
+    // комментарием: оба говорят, чем сессия занята, словами человека.
+    { key: 'showTask', label: 'task', side: 'left' },
     { key: 'showEvent', label: 'events', side: 'right' },
     { key: 'showCost', label: 'cost', side: 'right' },
     { key: 'showContext', label: 'context', side: 'right' },
@@ -1129,6 +1150,9 @@
     showPaths: { list: true, statusline: true },
     // Включён: комментарий пишут ровно затем, чтобы видеть его в списке.
     showComment: { list: true, statusline: false },
+    // Включена: ради подписи и заводили — видеть задачу сессии и замечать
+    // живые сессии с закрытой. В статуслайн не вынесена — место внизу кончилось.
+    showTask: { list: true, statusline: false },
     showHotkey: { list: true, statusline: false },
     showEvent: { list: false, statusline: false },
     showId: { list: false, statusline: true },
@@ -1364,7 +1388,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     projectCountHtml, projectColumnWidths,
     docsBadgeHtml, promptsHtml, commentHtml, shellHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
-    windowNameHtml, windowIconHtml, zellijNameHtml, headNameHtml, snapshotNameHtml,
+    windowNameHtml, windowIconHtml, zellijNameHtml, headNameHtml, taskNameHtml, snapshotNameHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -1730,6 +1754,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // Сессию открыла head-сессия под свою задачу — см. headNameHtml. В
       // иерархии у вложенной строки подписи нет: родитель стоит под ней.
       `${depth > 0 ? '' : headNameHtml(session)}` +
+      // Задача вольта, под которой сессию записал sess2task, — см.
+      // taskNameHtml. После имени и подписей родства: опознают строку по
+      // имени, задача уточняет, чем она занята.
+      taskNameHtml(session, toggles.showTask) +
       `${prBadgeHtml(session)}` +
       // Значок «есть спека или план» — рядом с PR и той же природы: оба
       // говорят, что у сессии есть бумага снаружи транскрипта, и оба ведут в

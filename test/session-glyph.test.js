@@ -1240,3 +1240,32 @@ test('shell: текст статуса дописывает shell', () => {
     'idle · attention · shell');
   assert.strictEqual(stateText({ live: true, agentState: 'active', shell: true }), 'active');
 });
+
+test('задача вольта стоит подписью после имени: открытая, закрытая с ✓, счёт +N', () => {
+  const { taskNameHtml } = require('../frontend-src/session-glyph');
+  const open = taskNameHtml({ task: { text: 'Покрасить забор', done: false, vault: 'home', more: 0 } });
+  assert.match(open, /<span class="task" title="home: Покрасить забор">Покрасить забор<\/span>/);
+  const done = taskNameHtml({ task: { text: 'Покрасить забор', done: true, vault: 'home', more: 0 } });
+  assert.match(done, /class="task done"[^>]*>✓ Покрасить забор</);
+  const more = taskNameHtml({ task: { text: 'Забор', done: false, vault: 'home', more: 2 } });
+  assert.match(more, />Забор <span class="more">\+2<\/span><\/span>/);
+  // Подсказка называет и остальные — иначе `+2` не о чем спросить.
+  assert.match(more, /title="home: Забор \(\+2 more\)"/);
+});
+
+test('подписи задачи нет без задачи и при выключенной галке', () => {
+  const { taskNameHtml } = require('../frontend-src/session-glyph');
+  const s = { task: { text: 'Забор', done: false, vault: 'home', more: 0 } };
+  assert.strictEqual(taskNameHtml(s, false), '');
+  assert.notStrictEqual(taskNameHtml(s, true), '');
+  assert.strictEqual(taskNameHtml({ task: null }), '');
+  assert.strictEqual(taskNameHtml({}), '');
+  assert.strictEqual(taskNameHtml(null), '');
+});
+
+test('текст задачи экранируется: его пишет человек в вольте', () => {
+  const { taskNameHtml } = require('../frontend-src/session-glyph');
+  const html = taskNameHtml({ task: { text: '<b>жирно</b>', done: false, vault: '"><i>', more: 0 } });
+  assert.ok(!html.includes('<b>'), html);
+  assert.ok(!html.includes('"><i>'), html);
+});

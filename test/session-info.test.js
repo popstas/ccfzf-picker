@@ -163,3 +163,12 @@ test('карточка без метки кеша строки cache не рис
   const labels = buildSessionInfoRows(session, 3460).map(r => r.label);
   assert.ok(!labels.includes('cache'));
 });
+
+test('карточка называет задачу вольта: текст, вольт, закрыта ли, сколько ещё', () => {
+  const rows = buildSessionInfoRows({ ...session, task: { text: 'Забор', done: true, vault: 'home', more: 2 } }, 3460);
+  assert.strictEqual(valueOf(rows, 'task'), '✓ Забор · home · +2 more');
+  const open = buildSessionInfoRows({ ...session, task: { text: 'Забор', done: false, vault: 'home', more: 0 } }, 3460);
+  assert.strictEqual(valueOf(open, 'task'), 'Забор · home');
+  // Без задачи строки нет вовсе: карточка пустых строк не рисует.
+  assert.ok(!buildSessionInfoRows({ ...session, task: null }, 3460).some(r => r.label === 'task'));
+});

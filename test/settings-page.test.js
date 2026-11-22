@@ -132,6 +132,15 @@ test('карандаш остался за комментарием и счёт�
   assert.notStrictEqual(columnIcon('showPrompts'), columnIcon('showComment'));
 });
 
+test('у галки задачи свой знак, ни с кем не общий', () => {
+  // Таблица значков — единственное, чем галки различаются на вкладке глазом.
+  const table = sourceOf(/\n {2}const COLUMN_ICONS = \{[\s\S]*?\n {2}\};\n/, 'COLUMN_ICONS');
+  const icons = [...table.matchAll(/^\s+(\w+): '([^']+)'/gm)];
+  const mine = columnIcon('showTask');
+  const same = icons.filter(([, key, icon]) => key !== 'showTask' && icon === mine).map(([, key]) => key);
+  assert.deepStrictEqual(same, []);
+});
+
 // ── таблица осей объясняет себя и отделена от таблицы колонок ───────────────
 //
 // Тем же приёмом, что и save(): настоящий axesTableHtml вычитывается из

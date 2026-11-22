@@ -32,6 +32,17 @@
     return left === null ? '' : SessionGlyph.cacheText(left);
   }
 
+  /** Задача вольта одной строкой карточки: «✓ текст · вольт · +N more». */
+  function taskLine(task) {
+    const text = typeof task?.text === 'string' ? task.text.trim() : '';
+    if (!text) return '';
+    return [
+      `${task.done === true ? '✓ ' : ''}${text}`,
+      typeof task.vault === 'string' ? task.vault : '',
+      Number.isInteger(task.more) && task.more > 0 ? `+${task.more} more` : '',
+    ].filter(Boolean).join(' · ');
+  }
+
   /**
    * Все поля сессии, которые есть в строке списка, — таблицей.
    *
@@ -51,6 +62,9 @@
       ['seen', s.agentState ? (s.agentSeen ? 'yes' : 'no') : ''],
       ['prompt', s.agentPrompt ?? ''],
       ['summary', s.agentDescription ?? ''],
+      // Задача вольта — целиком, с вольтом и счётом остальных: в строке она
+      // подписью и режется многоточием, а здесь места хватает.
+      ['task', taskLine(s.task)],
       // Ноль печатается, как и в строке списка (usageHtml в session-glyph.js):
       // пустая клетка там читалась как поломка, а не как «данных нет».
       ['cost', `$${s.agentCostUsd || 0}`],

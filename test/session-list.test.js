@@ -659,3 +659,32 @@ test('нет метки сжатия — ноль', () => {
     assert.strictEqual(row.windowIcon, '');
   });
 }
+
+// ── Задача вольта (поле `task` от ccfzf, sess2task) ─────────────────────────
+
+test('задача вольта доезжает до строки целиком', () => {
+  const rows = buildSessionList({
+    sessions: [state({ task: { text: 'Покрасить забор', done: true, vault: 'home', more: 2 } })],
+    seen: {},
+  });
+  assert.deepStrictEqual(rows[0].task, { text: 'Покрасить забор', done: true, vault: 'home', more: 2 });
+});
+
+test('без задачи и с мусором вместо неё — null', () => {
+  // Агрегатор старый (поля нет), чужая версия (не объект), пустой текст —
+  // подписи нет во всех трёх случаях, и строка от этого не ломается.
+  for (const task of [undefined, null, 'строка', 5, [], {}, { text: '' }, { text: '   ' }, { text: 7 }]) {
+    const rows = buildSessionList({ sessions: [state({ task })], seen: {} });
+    assert.strictEqual(rows[0].task, null, JSON.stringify(task));
+  }
+});
+
+test('у задачи без done и more — открытая и без счёта', () => {
+  const rows = buildSessionList({
+    sessions: [state({ task: { text: 'Задача', done: 'yes', more: -1 } })],
+    seen: {},
+  });
+  // Только строгое `true` значит «закрыта»: ✓ у открытой задачи сказал бы
+  // неправду ровно о том, ради чего подпись и заведена.
+  assert.deepStrictEqual(rows[0].task, { text: 'Задача', done: false, vault: '', more: 0 });
+});
