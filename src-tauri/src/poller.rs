@@ -153,10 +153,23 @@ pub fn combine(
 /// По очереди, а не параллельно: поток здесь один, источников два, а
 /// таймауты у ssh уже выставлены (`ConnectTimeout=5`, `ServerAlive*`), то есть
 /// худший случай ограничен. Второй поток стоил бы синхронизации ради секунд.
-pub fn poll_once(sources: &[Source], fresh_dump: bool) -> (Option<serde_json::Value>, String) {
+///
+/// Каждый источник спрашивается условно (`state_memo.rs`): с отпечатком его
+/// прошлого ответа, и короткое «без изменений» подменяется сохранённым полным
+/// ещё до слияния — `combine` и страница видят документ прежней формы.
+pub fn poll_once(
+    sources: &[Source],
+    fresh_dump: bool,
+    memo: &Mutex<crate::state_memo::Memo>,
+) -> (Option<serde_json::Value>, String) {
     let parts = sources
         .iter()
-        .map(|s| (s.clone(), crate::state_source::fetch(s, fresh_dump)))
+        .map(|s| {
+            let part = crate::state_memo::fetch_with(memo, s, |key| {
+                crate::state_source::fetch(s, fresh_dump, key)
+            });
+            (s.clone(), part)
+        })
         .collect();
     combine(parts)
 }
@@ -215,6 +228,9 @@ pub struct Poller {
     tx: Mutex<Sender<Signal>>,
     cache: Arc<Mutex<Cache>>,
     settings: Arc<Mutex<(Vec<Source>, bool)>>,
+    /// Отпечатки прошлых ответов по источнику — общие у потока и
+    /// `fresh_state`: оба спрашивают одних и тех же агрегаторов.
+    memo: Arc<Mutex<crate::state_memo::Memo>>,
 }
 
 fn payload(cache: &Cache) -> serde_json::Value {
@@ -270,9 +286,11 @@ impl Poller {
         let (tx, rx) = channel::<Signal>();
         let cache = Arc::new(Mutex::new(Cache::default()));
         let settings = Arc::new(Mutex::new((sources, background)));
+        let memo = Arc::new(Mutex::new(crate::state_memo::Memo::default()));
 
         let thread_cache = Arc::clone(&cache);
         let thread_settings = Arc::clone(&settings);
+        let thread_memo = Arc::clone(&memo);
         std::thread::spawn(move || {
             let mut visible = false;
             let mut delay = BACKGROUND_MIN;
@@ -351,7 +369,7 @@ impl Poller {
                     }
                 } else if !idle && due {
                     let fresh_dump = bursting.is_some();
-                    let (state, error) = poll_once(&sources, fresh_dump);
+                    let (state, error) = poll_once(&sources, fresh_dump, &thread_memo);
                     let changed = match state {
                         Some(state) => {
                             let fp = fingerprint(&state);
@@ -456,7 +474,7 @@ impl Poller {
             }
         });
 
-        Poller { tx: Mutex::new(tx), cache, settings }
+        Poller { tx: Mutex::new(tx), cache, settings, memo }
     }
 
     fn signal(&self, signal: Signal) {
@@ -482,8 +500,12 @@ impl Poller {
 
     /// Новые настройки подхватываются следующим тактом: рвать текущий ssh
     /// незачем, он всё равно вот-вот кончится.
+    ///
+    /// Память отпечатков сбрасывается: источник под той же меткой мог стать
+    /// другой машиной, и её «без изменений» подменилось бы чужим списком.
     pub fn set_config(&self, sources: Vec<Source>, background: bool) {
         *self.settings.lock().unwrap() = (sources, background);
+        self.memo.lock().unwrap().clear();
         self.signal(Signal::Nudge);
     }
 
@@ -501,7 +523,7 @@ impl Poller {
     /// `spawn_blocking`. Кэш не трогает: его держит поток поллера.
     pub fn fresh_state(&self) -> serde_json::Value {
         let sources = self.settings.lock().unwrap().0.clone();
-        let (fresh, error) = poll_once(&sources, false);
+        let (fresh, error) = poll_once(&sources, false, &self.memo);
         let cached = self.snapshot().get("state").cloned().unwrap_or(serde_json::Value::Null);
         let (state, fell_back) = state_or_snapshot(fresh, cached);
         if fell_back {

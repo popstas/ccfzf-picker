@@ -56,11 +56,14 @@ pub fn sources_from(config: &serde_json::Value) -> Vec<Source> {
         out.push(Source::Ssh(host.to_string()));
     }
     // Умолчание — «спрашивать»: местный источник выключает только явный
-    // `false`. Развилки по системе здесь нет намеренно, хотя на нативном
-    // Windows местного `ccfzf` не бывает: тот же ключ читает страница —
-    // проверка ненастроенности и галка в настройках, — и умолчание, разное у
-    // Rust и у неё, окно настроек молча увезло бы в `config.yaml` обратной
-    // записью. Windows-машине ключ пишется явным `false`.
+    // `false`. Развилки по системе здесь нет и на Windows: bash-обёртки там
+    // нет, но местный источник работает — `local_ccfzf::resolve` зовёт
+    // вырезанный из вшитой копии python-блок через `python`/`python3` из PATH.
+    // Без питона в PATH источник отказывает поимённо (`neither python nor
+    // python3 is on PATH`), и такой машине ключ пишется явным `false`. Второй
+    // довод против развилки — тот же ключ читает страница (проверка
+    // ненастроенности и галка в настройках), и умолчание, разное у Rust и у
+    // неё, окно настроек молча увезло бы в `config.yaml` обратной записью.
     if config.get("localSource").and_then(|v| v.as_bool()) != Some(false) {
         out.push(Source::Local);
     }
@@ -89,10 +92,26 @@ fn dump_env_prefix(fresh_dump: bool) -> String {
 /// Через ssh уезжает одна строка: её заново разбирает удалённый шелл, и
 /// `ccfzf --state` там команда. Местный вызов шелла не поднимает вовсе —
 /// `--state` обязан быть отдельным аргументом процесса.
-fn state_args(source: &Source, fresh_dump: bool) -> Vec<String> {
+///
+/// `if_changed` — отпечаток прошлого ответа этого же источника
+/// (`state_memo.rs`). Форма проверяется здесь второй раз, хотя память кладёт
+/// только проверенное: строка уезжает в чужой шелл, и сторож у самой двери
+/// дешевле, чем довод «туда не попадёт».
+fn state_args(source: &Source, fresh_dump: bool, if_changed: Option<&str>) -> Vec<String> {
+    let key = if_changed.filter(|fp| crate::state_memo::looks_like_fingerprint(fp));
     match source {
-        Source::Ssh(_) => vec![format!("{}ccfzf --state", dump_env_prefix(fresh_dump))],
-        Source::Local => vec!["--state".to_string()],
+        Source::Ssh(_) => vec![match key {
+            Some(fp) => format!("{}ccfzf --state --if-changed {fp}", dump_env_prefix(fresh_dump)),
+            None => format!("{}ccfzf --state", dump_env_prefix(fresh_dump)),
+        }],
+        Source::Local => {
+            let mut out = vec!["--state".to_string()];
+            if let Some(fp) = key {
+                out.push("--if-changed".to_string());
+                out.push(fp.to_string());
+            }
+            out
+        }
     }
 }
 
@@ -180,9 +199,13 @@ fn command_for(source: &Source, fresh_dump: bool) -> Result<std::process::Comman
 /// на установке соединения после сна машины или обрыва VPN,
 /// `ServerAliveInterval`/`ServerAliveCountMax` обрывают уже установленное, но
 /// замолчавшее соединение самое большее через 10 секунд.
-pub fn fetch(source: &Source, fresh_dump: bool) -> Result<serde_json::Value, String> {
+pub fn fetch(
+    source: &Source,
+    fresh_dump: bool,
+    if_changed: Option<&str>,
+) -> Result<serde_json::Value, String> {
     let out = command_for(source, fresh_dump)?
-        .args(state_args(source, fresh_dump))
+        .args(state_args(source, fresh_dump, if_changed))
         .output()
         .map_err(|e| format!("failed to start: {e}"))?;
 
@@ -346,31 +369,52 @@ mod tests {
     #[test]
     fn state_args_differ_by_transport() {
         assert_eq!(
-            state_args(&Source::Ssh("remote-host".into()), false),
+            state_args(&Source::Ssh("remote-host".into()), false, None),
             vec!["ccfzf --state".to_string()]
         );
-        assert_eq!(state_args(&Source::Local, false), vec!["--state".to_string()]);
+        assert_eq!(state_args(&Source::Local, false, None), vec!["--state".to_string()]);
     }
 
     #[test]
     fn a_fresh_dump_rides_a_prefix_only_over_ssh() {
         // По ssh команду разбирает шелл той стороны, и переменная едет строкой.
         assert_eq!(
-            state_args(&Source::Ssh("remote-host".into()), true),
+            state_args(&Source::Ssh("remote-host".into()), true, None),
             vec!["CCFZF_STATE_DUMP_MAX_AGE=0 ccfzf --state".to_string()]
         );
         // Местный вызов шелла не поднимает вовсе: там переменная ставится
         // процессу через Command::env, и в аргументах ей делать нечего.
-        assert_eq!(state_args(&Source::Local, true), vec!["--state".to_string()]);
+        assert_eq!(state_args(&Source::Local, true, None), vec!["--state".to_string()]);
     }
 
     #[test]
     fn an_ordinary_poll_does_not_ask_for_a_dump() {
         assert_eq!(
-            state_args(&Source::Ssh("remote-host".into()), false),
+            state_args(&Source::Ssh("remote-host".into()), false, None),
             vec!["ccfzf --state".to_string()]
         );
-        assert_eq!(state_args(&Source::Local, false), vec!["--state".to_string()]);
+        assert_eq!(state_args(&Source::Local, false, None), vec!["--state".to_string()]);
+    }
+
+    /// Отпечаток прошлого ответа едет ключом `--if-changed` по обеим дорогам:
+    /// по ssh — в той же строке, местному процессу — отдельными аргументами
+    /// (на Windows их разбирает алиас `--state` в python-блоке). Не похожее на
+    /// отпечаток в чужой шелл не уходит вовсе — опрос становится полным.
+    #[test]
+    fn the_fingerprint_rides_as_if_changed() {
+        let fp = "0123456789abcdef";
+        assert_eq!(
+            state_args(&Source::Ssh("remote-host".into()), true, Some(fp)),
+            vec![format!("CCFZF_STATE_DUMP_MAX_AGE=0 ccfzf --state --if-changed {fp}")]
+        );
+        assert_eq!(
+            state_args(&Source::Local, false, Some(fp)),
+            vec!["--state".to_string(), "--if-changed".to_string(), fp.to_string()]
+        );
+        assert_eq!(
+            state_args(&Source::Ssh("remote-host".into()), false, Some("abc; rm -rf ~")),
+            vec!["ccfzf --state".to_string()]
+        );
     }
 
     #[test]
