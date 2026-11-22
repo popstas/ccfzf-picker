@@ -69,7 +69,7 @@
 то же окно.
 
 ```mermaid
-flowchart LR
+flowchart TB
   claude["Claude Code<br/>транскрипты, реестр сессий"]
   hooks["хуки агента<br/>(в составе ccfzf)"]
   ccfzf["агрегатор ccfzf<br/>вшитый или установленный<br/>на другой машине"]

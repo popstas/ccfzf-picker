@@ -51,7 +51,7 @@ on: the aggregator is bundled into the binary. Everything else is optional, and
 each piece adds features to the same window.
 
 ```mermaid
-flowchart LR
+flowchart TB
   claude["Claude Code<br/>transcripts, session registry"]
   hooks["agent hooks<br/>(ship with ccfzf)"]
   ccfzf["ccfzf aggregator<br/>bundled, or installed<br/>on another machine"]
