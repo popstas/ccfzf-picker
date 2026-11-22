@@ -12,10 +12,11 @@
   `ask`, `hud`).
   Спека — `docs/superpowers/specs/2026-11-22-claude-wt-cli-design.md`, план
   шага 1 (окна и `tree`) — `docs/superpowers/plans/2026-11-22-claude-wt-cli-step1.md`.
-  Шаг 1 сделан 22.11: windows11-manager#54, ccfzf#32 (`claude-wt` tree, window
-  focus/layout, snapshot), скилл `claude-wt-cli`. Осталось: шаги 2–6 — переезд
-  команд `session-*`/`head-*` в CLI (отдельный план), `session open`,
-  `place --zone`, `seen`/`unread`.
+  Сделано 22.11: шаг 1 (windows11-manager#54, ccfzf#32 — tree, window
+  focus/layout, snapshot) и шаги 2–6 (ccfzf#33, #35 — session find/rename/close/
+  spawn/open, head mark/adopt; скрипты скиллов стали обёртками над CLI, обёртки
+  оставлены — решение Стаса), скилл `claude-wt-cli`. Осталось: `place --zone`
+  (нужен путь в менеджере), `seen`/`unread` (отметка пикера живёт в его seen.json).
 
 - [ ] **Сессии Claude Desktop не всплывают в поиске, если их прячут.** Стас
   22.11: сессии приложения в history мешают. Галка `showDesktop` (отсев
