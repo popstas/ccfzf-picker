@@ -1251,6 +1251,30 @@ async fn cache_warn_send(target: Target, body: serde_json::Value) -> Result<(), 
     .map_err(|e| format!("cache_warn_send task failed: {e}"))?
 }
 
+/// Поставить тип проекта `cwd` (пункт `Type` в `^K`) менеджеру своей машины.
+///
+/// Цель одна — менеджер этой машины (`CONFIG.windowHost`): у строки проекта
+/// окна нет, и рассылка по трекерам окна, как у отмотки, тут не годится.
+/// Транспорт — тот же `transport_for`: http-адрес менеджера, иначе MQTT с базой
+/// из своего конфига (`resolve_base`). `project_type: None` — снять тип.
+#[tauri::command]
+async fn project_type_set(target: Target, cwd: String, project_type: Option<String>) -> Result<(), String> {
+    let broker = config_parts()?.0;
+    let body = mqtt::project_type_body(&cwd, project_type.as_deref());
+    tauri::async_runtime::spawn_blocking(move || match transport_for(&target.http) {
+        Transport::Http => manager_http::project_type(&target.http, &body),
+        Transport::Mqtt => match &broker {
+            Some(broker) => mqtt::project_type(broker, &mqtt::resolve_base(broker, &target.base), &body),
+            None => Err(
+                "mqtt is not configured: base and a host (name, mqtt:// or mqtts:// address) are required in config.yaml"
+                    .to_string(),
+            ),
+        },
+    })
+    .await
+    .map_err(|e| format!("project_type_set task failed: {e}"))?
+}
+
 /// Пометить сессию просмотренной у её трекеров — тем же ходом, что отмотка.
 ///
 /// Местная отметка ставится страницей сама и брокера не ждёт; эта просьба —
@@ -3433,7 +3457,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             hide_picker, app_version, set_picker_size, poll_now, spawn_detached, open_pr, load_seen, save_seen, load_config,
             terminal_helper, manager_terminal, window_icons,
-            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt, seen_session_mqtt, cache_warn_send,
+            copy_to_clipboard, load_ui, save_ui, focus_window_mqtt, unread_session_mqtt, seen_session_mqtt, cache_warn_send, project_type_set,
             restore_snapshot_mqtt, place_windows_mqtt, set_picker_selection, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,

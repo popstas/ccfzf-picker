@@ -2705,6 +2705,27 @@ const infoBackdrop = document.getElementById('info-backdrop');
   }
 
   /**
+   * Поставить тип проекта (пункт `Type` в ^K): у строки проекта — её `cwd`, у
+   * сессии — её проекта-владельца (`projectTypeTarget`). `none` — снять тип.
+   *
+   * Просьба уходит менеджеру **своей** машины (`CONFIG.windowHost`): у строки
+   * проекта окна нет, и рассылка по трекерам окна, как у `markUnread`, тут не
+   * годится. Транспорт тот же — http менеджера этой машины, иначе MQTT с базой
+   * из своего конфига. Ответа не ждём: тип приезжает файлом трекера на
+   * следующей публикации, строка переедет в свою секцию сама.
+   */
+  function setProjectType(row, type) {
+    const cwd = window.SessionActions.projectTypeTarget(row);
+    if (!cwd || !managerReachable()) return;
+    invoke('project_type_set', {
+      target: { base: '', http: managerHttpHere() },
+      cwd,
+      projectType: type === 'none' ? null : type,
+    })
+      .catch((e) => { error = String(e); render(); });
+  }
+
+  /**
    * Пометить сессию просмотренной, не открывая её окна.
    *
    * Отметки складываются по максимуму, и местная, поставленная «сейчас»,
@@ -3771,6 +3792,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
   function actionsFor(row) {
     const actions = window.SessionActions.availableActions(row, CONFIG, {
       os: PICKER_OS, editorLabel: (editorInfo || {}).label, editorId: (editorInfo || {}).id,
+      // Пункт `Type` — просьба к менеджеру своей машины (`setProjectType`):
+      // без дороги до него выбора нет, и пункта тоже.
+      projectTypes: managerReachable() ? window.SessionActions.projectTypeChoices(projectRows) : undefined,
     });
     if (window.OpenTransport.canOpenRemote(row, openManagerHere(), CONFIG.windowHost, managerReachable())) {
       actions.push({
@@ -4256,6 +4280,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
     }
     if (id === 'unread') {
       markUnread(row);
+      return;
+    }
+    if (id.startsWith('type:')) {
+      setProjectType(row, id.slice('type:'.length));
       return;
     }
     if (id === 'seen') {
