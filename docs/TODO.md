@@ -12,7 +12,10 @@
   `ask`, `hud`).
   Спека — `docs/superpowers/specs/2026-11-22-claude-wt-cli-design.md`, план
   шага 1 (окна и `tree`) — `docs/superpowers/plans/2026-11-22-claude-wt-cli-step1.md`.
-  В работе с 22.11: `.cli-manager` (windows11-manager), `.cli-ccfzf` (ccfzf).
+  Шаг 1 сделан 22.11: windows11-manager#54, ccfzf#32 (`claude-wt` tree, window
+  focus/layout, snapshot), скилл `claude-wt-cli`. Осталось: шаги 2–6 — переезд
+  команд `session-*`/`head-*` в CLI (отдельный план), `session open`,
+  `place --zone`, `seen`/`unread`.
 
 - [ ] **После сна машины терминалы остаются разорванными, а пикер показывает
   сессию живой.** Окно закрылось вместе с сессией терминала (ssh отвалился,
