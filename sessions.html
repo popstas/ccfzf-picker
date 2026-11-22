@@ -2935,7 +2935,13 @@ const infoBackdrop = document.getElementById('info-backdrop');
    */
   async function openSession(row, opts = {}) {
     if (!row) return;
-    const strategy = window.OpenStrategy.chooseOpenStrategy(
+    // `reopen` — перехват разорванной сессии («Reopen session», пункт трея):
+    // стратегия принудительно `takeover`, а развилка Enter не спрашивается.
+    // Подъём окна (`focus`) у разорванной поднял бы труп — запись окна у
+    // трекера бывает и свежая, — а менеджер звал бы `ccfzf --session` со своим
+    // решением вместо перехвата. Цена: открывает местный терминал, и профиль
+    // Windows Terminal по каталогу (его знает только менеджер) теряется.
+    const strategy = opts.reopen ? 'takeover' : window.OpenStrategy.chooseOpenStrategy(
       row, CONFIG.caps, { canFocus: rowCanFocus(row) },
     );
     // Развилку целиком решает chooseEnterAction (open-transport.js), а не
@@ -2943,7 +2949,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // состояния трекера, а у пары if-ов в этом файле их не было — отсюда и
     // взялись подъём окна мимо права на передний план и Enter, не сделавший
     // ничего у незнакомой трекеру сессии.
-    const action = window.OpenTransport.chooseEnterAction(
+    const action = opts.reopen ? 'local' : window.OpenTransport.chooseEnterAction(
       row, strategy, openManagerHere(), CONFIG.windowHost, managerReachable(),
     );
     // Окно уже открыто, и поднять его умеет только эта дорога: она гасит пикер
@@ -2977,7 +2983,15 @@ const infoBackdrop = document.getElementById('info-backdrop');
       else if (helperNeeded(terminal)) { error = helperError || 'terminal helper is not available'; render(); }
       return;
     }
-    if (cmd.destructive) {
+    // Пункт трея спрашивает один раз на весь список и зовёт с `confirmed`.
+    if (cmd.destructive && opts.reopen && !opts.confirmed) {
+      const ok = confirm(
+        `Reopen session "${sessionName(row)}"?\n\n`
+        + `Process ${row.pid} on ${sourceLabel(row)} will get SIGHUP and exit; the session will be resumed in a new terminal.\n`
+        + `Its old window stays as it is.`,
+      );
+      if (!ok) return;
+    } else if (cmd.destructive && !opts.reopen) {
       const ok = confirm(
         `Take over session "${sessionName(row)}"?\n\n`
         + `Process ${row.pid} on ${sourceLabel(row)} will get SIGHUP and exit, and its window on Windows will close.\n`
@@ -4061,6 +4075,12 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // на ошибку, и второй экземпляр этого разошёлся бы с первым.
     if (id === 'resume') {
       openSession(row, { viaTerminal: true });
+      return;
+    }
+    // «Reopen session» — перехват разорванной сессии: тот же openSession, с
+    // принудительной стратегией и мимо менеджера (см. opts.reopen там).
+    if (id === 'reopen') {
+      openSession(row, { reopen: true });
       return;
     }
     if (id === 'pr') {

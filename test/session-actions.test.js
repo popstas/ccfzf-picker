@@ -39,6 +39,39 @@ test('у сессии приложения с чужой машины пункт
   assert.ok(!ids.includes('resume'), ids.join(','));
 });
 
+test('Reopen session — только у разорванной строки, которую есть чем снять', () => {
+  const cut = { id: 'a', cwd: '/home/user/x', live: true, pid: 42, disconnected: true };
+  const has = row => availableActions(row).some(a => a.id === 'reopen');
+  assert.deepStrictEqual(availableActions(cut).find(a => a.id === 'reopen'),
+    { id: 'reopen', label: 'Reopen session' });
+  // Целая строка — у неё Enter, перехватывать живую сессию незачем.
+  assert.ok(!has({ ...cut, disconnected: false }));
+  // Без pid снимать нечего: takeover без цели — это голый resume рядом.
+  assert.ok(!has({ ...cut, pid: 0 }));
+  // Без каталога resume не собрать.
+  assert.ok(!has({ ...cut, cwd: '' }));
+  assert.ok(!has({ ...cut, live: false }));
+  // Своя строка на Windows: команда уходит через `/bin/sh -c`, которого там нет.
+  assert.ok(!availableActions({ ...cut, source: 'local' }, {}, { os: 'windows' })
+    .some(a => a.id === 'reopen'));
+  // Сессия приложения: терминала у неё нет вовсе, поднимать в нём нечего.
+  assert.ok(!has({ ...DESKTOP_ROW, live: true, pid: 42, disconnected: true }));
+});
+
+// Reopen обязан идти мимо развилки Enter: у разорванной сессии бывает свежая
+// запись окна, и `focus` поднял бы окно-труп, а менеджер звал бы `ccfzf
+// --session` со своим решением вместо перехвата. Поведением не поймать —
+// openSession без половины страницы не исполняется, — сторож текстовый.
+test('openSession с reopen — takeover местным терминалом, без своей сборки команды', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
+  const fn = html.match(/\n {2}async function openSession\(row, opts = \{\}\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(fn, 'openSession не найден — тест сторожит не то');
+  assert.match(fn[0], /const strategy = opts\.reopen \? 'takeover' :/);
+  assert.match(fn[0], /const action = opts\.reopen \? 'local' :/);
+  const run = html.match(/\n {2}function runAction\(row, id\) \{[\s\S]*?\n {2}\}\n/)[0];
+  assert.match(run, /id === 'reopen'\) \{\s*openSession\(row, \{ reopen: true \}\)/);
+});
+
 test('информация о сессии есть всегда', () => {
   // Комментарий — рядом с ней и по той же причине: оба про сессию как
   // таковую, а не про её окно, живость или каталог, и потому есть у любой
@@ -348,6 +381,7 @@ test('каждый встроенный пункт меню обработан �
   const ids = new Set([
     ...availableActions(rich),
     ...availableActions({ ...rich, agentSeen: false }),
+    ...availableActions({ ...rich, disconnected: true }),
     ...availableActions({ kind: 'snapshot', id: 'snap-1' }),
     ...availableActions({ kind: 'project', id: '/p', cwd: '/p' }),
     // Сессия приложения: у неё свой пункт, и он тоже обязан быть разобран.
