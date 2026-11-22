@@ -2,8 +2,9 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   q, chooseOpenStrategy, buildOpenCommand, buildAttachCommand, resumeCommand, newSessionCommand,
-  newSessionName, terminalCommand, commandParts, LOCAL_SOURCE, pathProblem,
+  newSessionName, terminalCommand, commandParts, LOCAL_SOURCE, pathProblem, takeoverPrefix,
 } = require('../frontend-src/open-strategy');
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -181,10 +182,52 @@ test('перехват помечен необратимым и убивает �
   const cmd = buildOpenCommand(row({ live: true, pid: 42 }), 'takeover', OPTS);
   assert.strictEqual(cmd.destructive, true);
   const remote = cmd.argv[cmd.argv.length - 1];
-  assert.ok(remote.startsWith('kill -HUP 42'), remote);
-  assert.ok(!remote.includes('-9'), remote);
+  assert.ok(remote.startsWith(takeoverPrefix(42) + ' && '), remote);
+  const script = Buffer.from(remote.match(/printf %s (\S+) \|/)[1], 'base64').toString('utf8');
+  assert.ok(script.startsWith('kill -HUP 42'), script);
+  assert.ok(!script.includes('-9'), script);
   // Хвост перехвата — та же команда запуска, что и у resume, а не своя копия.
   assert.ok(remote.endsWith(resumeCommand('/home/user/projects/x', 'aaaa-bbbb')), remote);
+});
+
+test('у takeover в команде нет ни ";", ни перевода строки', () => {
+  // Windows Terminal режет свою командную строку по `;` на панели до всякого
+  // шелла — до этой правки перехват склеивался через `; ` и на Windows
+  // разваливался. Цикл ожидания без `;` не записать, поэтому он едет base64-ом.
+  const cmd = buildOpenCommand(row({ live: true, pid: 42 }), 'takeover', OPTS);
+  for (const a of cmd.argv) {
+    assert.ok(!a.includes(';'), a);
+    assert.ok(!/[\r\n]/.test(a), a);
+  }
+  assert.ok(!takeoverPrefix(42).includes(';'));
+});
+
+// Цель — внук через фоновый `&`: он переходит к init, и тот его хоронит. Прямой
+// ребёнок node после SIGHUP остался бы зомби (execSync держит цикл событий),
+// а `kill -0` по зомби отвечает «жив».
+function orphan(script) {
+  return Number(childProcess.execSync(`sh -c '${script} >/dev/null 2>&1 & echo $!'`).toString().trim());
+}
+
+test('takeoverPrefix снимает процесс и пропускает хвост', () => {
+  const pid = orphan('exec sleep 60');
+  const out = childProcess.execSync(`sh -c '${takeoverPrefix(pid)} && echo resumed'`).toString();
+  assert.strictEqual(out.trim(), 'resumed');
+  assert.throws(() => process.kill(pid, 0));
+});
+
+test('takeoverPrefix не пускает хвост, пока процесс жив', { timeout: 20000 }, () => {
+  // SIGHUP проигнорирован, и после exec игнор остаётся — процесс переживает
+  // перехват, а второй процесс на том же транскрипте хуже, чем никакой.
+  const pid = orphan('trap \"\" HUP; exec sleep 60');
+  try {
+    const r = childProcess.spawnSync('sh', ['-c', `${takeoverPrefix(pid)} && echo resumed`]);
+    assert.notStrictEqual(r.status, 0);
+    assert.ok(!r.stdout.toString().includes('resumed'));
+    assert.match(r.stderr.toString(), new RegExp(`process ${pid} is still alive`));
+  } finally {
+    try { process.kill(pid, 'SIGKILL'); } catch (_) { /* уже нет */ }
+  }
 });
 
 test('кавычки в пути не разрывают команду', () => {
