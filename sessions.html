@@ -1094,10 +1094,16 @@
     // выключенным он прятал бы сессии приложения у всех, кто про галку не
     // знает, — а узнать про пропажу неоткуда, отсев о себе не сообщает.
     { key: 'showDesktop', label: 'claude desktop', side: 'filter' },
-    // Четвёртая группа, `dim`, — и не колонка, и не фильтр. Состав списка
-    // затемнение не меняет (класс вешает отрисовщик строки), поэтому
-    // обработчику хватает render(); попади ключ в FILTER_KEYS, каждое
-    // нажатие пересобирало бы группы впустую.
+    // Прячет то, что гасит `dim stale`, — и ровно то (Стас 22.11: прятать ⇔
+    // гасить, без исключений). Клавиши в окне нет намеренно: просили прятать,
+    // а не гасить.
+    { key: 'hideStale', label: 'hide dimmed', side: 'filter' },
+    // Четвёртая группа, `dim`, — и не колонка, и не фильтр. Само затемнение
+    // состав списка не меняет (класс вешает отрисовщик строки), поэтому
+    // обработчику обычно хватает render(); попади ключ в FILTER_KEYS, каждое
+    // нажатие пересобирало бы группы впустую. Исключение — включённая
+    // `hide dimmed`: тогда `dim stale` решает, что спрятано, и щелчок по ней
+    // зовёт regroup (обработчик в renderChecks).
     { key: 'dimStale', label: 'dim stale', side: 'dim' },
     { key: 'dimProject', label: 'dim project', side: 'dim' },
     // `glyph` — не колонка со своим текстом и не фильтр: включённая ось list
@@ -1156,6 +1162,10 @@
     // приложением не пользуется. В статуслайн не вынесена: место внизу
     // кончилось, а щёлкают её один раз.
     showDesktop: { list: true, statusline: false },
+    // Выключена: прятать погашенное — разовое «покажи только яркое», а не
+    // то, с чем пикер открывается. Вынесена в статуслайн: ради быстрого щелчка
+    // её и заводили (Стас 22.11), без него она ничем не лучше dim stale.
+    hideStale: { list: false, statusline: true },
     // Умолчание подставляется при загрузке ui.json (toggleDefaults): здесь
     // CONFIG ещё пустой — load_config идёт позже, — и значение застыло бы на
     // встроенном. `true` тут только затем, чтобы ключ существовал.
@@ -1395,7 +1405,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
         // лишь к следующему ответу агрегатора, а тот может не прийти вовсе:
         // на скрытом окне такт уходит в минуты, а неизменившееся состояние
         // отсекается по отпечатку. Выглядело бы это мёртвым чекбоксом.
-        if (isFilter) regroup();
+        // `dim stale` при включённой `hide dimmed` — тоже про состав: выключил
+        // затемнение — спрятанные обязаны вернуться сразу.
+        if (isFilter || (key === 'dimStale' && toggles.hideStale)) regroup();
         else render();
         saveUi();
       });
@@ -2167,7 +2179,17 @@ const infoBackdrop = document.getElementById('info-backdrop');
       hideDesktop: !toggles.showDesktop,
       // А при поиске и в режимах Desktop прячет ключ конфига, не галка списка.
       searchDesktop: CONFIG.searchDesktop,
+      hideStale: toggles.hideStale,
     });
+    // hide dimmed прячет ровно то, что погашено: те же доводы, что у
+    // staleClass в sessionItem, — staleSettings (галка dim stale) и свёрнутое
+    // окно этой машины. Время — на момент пересборки; строка, перешедшая порог
+    // в тишине, спрячется на следующем изменившемся ответе — ровно тогда, когда
+    // и погаснет: периодической перерисовки у страницы нет ни для того, ни
+    // для другого.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const isDimmed = row => window.StaleItems.isStale(row, nowSec, staleSettings(), 'session',
+      window.SessionWindows.minimizedHere(row, null, CONFIG.windowHost));
     const payload = window.SessionGroups.buildSessionsPayload(
       // Ответ целиком, а не пересобранный поимённо: пересборка теряла всё,
       // что в ней не названо, — так пропадала группа Zellij (payloadSource).
@@ -2175,7 +2197,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       sortMode,
       // Иконки истории (проект по каталогу, корона head) — готовой картой
       // трекера этой машины, тем же trackerIcons, что у списка проектов.
-      { ...filters, configHost: CONFIG.windowHost,
+      { ...filters, isDimmed, configHost: CONFIG.windowHost,
         icons: window.SessionWindows.trackerIcons(lastState, CONFIG.windowHost) },
     );
     groups = payload.groups;

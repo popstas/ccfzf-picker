@@ -140,6 +140,7 @@
     onlyWindow: 'only sessions with a window',
     showAll: 'show all sessions',
     showDesktop: 'show Claude Desktop sessions',
+    hideStale: 'hide dimmed rows',
   };
 
   // Как назвать человеку не вставший хоткей и по какому ключу спросить о нём
@@ -175,6 +176,8 @@
       showAll: { list: false, statusline: true },
       // Единственный фильтр, включённый по умолчанию: см. sessions.html.
       showDesktop: { list: true, statusline: false },
+      // Выключена, но вынесена в статуслайн: см. sessions.html.
+      hideStale: { list: false, statusline: true },
       showTerminalIcon: { list: false, statusline: false },
       // `list` тут — плейсхолдер: настоящее значение переписывает строка
       // `UI_DEFAULTS.toggles.dimStale.list = Boolean(config?.stale?.enabled)`
@@ -519,6 +522,10 @@
       + 'The threshold comes from stale in config.yaml; this checkbox only turns the dimming on and off.',
     dimProject: 'Dims rows belonging to other projects while the pointer or the selection '
       + 'rests on a project row. In a list of projects alone there is nothing to separate, so it stays off there.',
+    // Фильтр, а не колонка, но подпись «hide dimmed rows» не говорит, что
+    // именно считается тусклым и что без dim stale прятать нечего.
+    hideStale: 'Hides what "dim stale" dims: old, minimized here, compacted and not resumed. '
+      + 'With "dim stale" off nothing is dimmed, so nothing is hidden.',
   };
 
   // Recommended — всё, кроме редко нужного: agent event и cost читаются не
@@ -685,7 +692,10 @@
       + '<div class="field axes-group"><label>Filters</label><table class="axes">'
       + '<tr><th></th>' + th('statusline', AXIS_HINTS.statusline)
       + th('enabled', AXIS_HINTS.enabled) + '</tr>'
-      + Object.entries(FILTER_LABELS).map(([k, l]) => `<tr><td>${esc(l)}</td>`
+      // Подсказка — из той же COLUMN_HINTS: у большинства фильтров подпись
+      // говорит сама за себя, и своя таблица ради одной строки была бы лишней.
+      + Object.entries(FILTER_LABELS).map(([k, l]) => `<tr><td>${
+        COLUMN_HINTS[k] ? `<span title="${esc(COLUMN_HINTS[k])}">${esc(l)}</span>` : esc(l)}</td>`
         + `<td><input type="checkbox" data-axis="statusline" data-key="${k}"${
           ui.toggles[k].statusline ? ' checked' : ''} title="${esc(AXIS_HINTS.statusline)}"></td>`
         + `<td><input type="checkbox" data-axis="list" data-key="${k}"${

@@ -518,6 +518,46 @@ test('отсев hideDesktop зелийных строк не касается',
   assert.ok(out.groups.some(g => g.label === 'Zellij'));
 });
 
+// ── hideStale: спрятана ⇔ погашена ─────────────────────────────────────────
+//
+// Что погашено, решает предикат страницы (`isDimmed` — тот же isStale, каким
+// красится строка): знание про порог, галку dim stale и свёрнутые окна живёт
+// там, а здесь только отсев.
+
+test('hideStale убирает погашенные сессии, и только их', () => {
+  const res = {
+    ok: true,
+    sessions: [
+      { id: 'old', title: 'Старая', live: true },
+      { id: 'new', title: 'Свежая', live: true },
+    ],
+  };
+  const out = buildSessionsPayload(res, 'recent', { hideStale: true, isDimmed: r => r.id === 'old' });
+  const ids = out.groups.flatMap(g => g.sessions.map(r => r.id));
+  assert.deepStrictEqual(ids, ['new']);
+});
+
+test('hideStale без предиката ничего не убирает', () => {
+  // Страница, не подавшая предиката, не знает, что погашено, — и прятать по
+  // догадке хуже, чем не прятать вовсе.
+  const res = { ok: true, sessions: [{ id: 'old', title: 'Старая', live: true }] };
+  const out = buildSessionsPayload(res, 'recent', { hideStale: true });
+  assert.deepStrictEqual(out.groups.flatMap(g => g.sessions.map(r => r.id)), ['old']);
+});
+
+test('hideStale зелийных строк не касается', () => {
+  // Зелийная строка не гаснет никогда (isStale на её вид отвечает false), а
+  // отсев стоит до подмешивания — даже предикат «всё погашено» её не тронет.
+  const res = {
+    ok: true,
+    sessions: [{ id: 'old', title: 'Старая', live: true }],
+    zellij: [{ name: 'home', created: 50 }],
+  };
+  const out = buildSessionsPayload(res, 'recent', { hideStale: true, isDimmed: () => true });
+  assert.ok(out.groups.some(g => g.label === 'Zellij'));
+  assert.ok(!out.groups.flatMap(g => g.sessions.map(r => r.id)).includes('old'));
+});
+
 test('onlyWindow историю не трогает: окна у неё не бывает по определению', () => {
   // Отсев спрашивает «покажи то, что сейчас на экране», и живой сессии без
   // окна отвечает честно. История же вычищалась им целиком — не потому, что
@@ -882,12 +922,12 @@ test('карточки сессии с окнами на своей и на чу
 
 test('без запроса и без префикса отсевы остаются как есть', () => {
   assert.deepStrictEqual(
-    activeFilters({ mode: 'sessions', query: '', onlyLive: true, onlyWindow: true, hideDesktop: true }),
-    { onlyLive: true, onlyWindow: true, hideDesktop: true },
+    activeFilters({ mode: 'sessions', query: '', onlyLive: true, onlyWindow: true, hideDesktop: true, hideStale: true }),
+    { onlyLive: true, onlyWindow: true, hideDesktop: true, hideStale: true },
   );
   assert.deepStrictEqual(
-    activeFilters({ mode: 'sessions', query: '', onlyLive: false, onlyWindow: false, hideDesktop: false }),
-    { onlyLive: false, onlyWindow: false, hideDesktop: false },
+    activeFilters({ mode: 'sessions', query: '', onlyLive: false, onlyWindow: false, hideDesktop: false, hideStale: false }),
+    { onlyLive: false, onlyWindow: false, hideDesktop: false, hideStale: false },
   );
 });
 
@@ -895,8 +935,8 @@ test('непустой запрос снимает все отсевы', () => {
   // Искали сессию, а не отбор. Отсев при поиске молчит: найденного просто нет
   // в списке, и почему — не сказано ни словом.
   assert.deepStrictEqual(
-    activeFilters({ mode: 'sessions', query: 'ccfzf', onlyLive: true, onlyWindow: true, hideDesktop: true }),
-    { onlyLive: false, onlyWindow: false, hideDesktop: false },
+    activeFilters({ mode: 'sessions', query: 'ccfzf', onlyLive: true, onlyWindow: true, hideDesktop: true, hideStale: true }),
+    { onlyLive: false, onlyWindow: false, hideDesktop: false, hideStale: false },
   );
 });
 
@@ -904,8 +944,8 @@ test('пробелы запросом не считаются', () => {
   // Иначе случайно нажатый пробел молча снимал бы отсевы, и человек видел бы
   // другой список, ничего не набрав.
   assert.deepStrictEqual(
-    activeFilters({ mode: 'sessions', query: '   ', onlyLive: true, onlyWindow: true, hideDesktop: true }),
-    { onlyLive: true, onlyWindow: true, hideDesktop: true },
+    activeFilters({ mode: 'sessions', query: '   ', onlyLive: true, onlyWindow: true, hideDesktop: true, hideStale: true }),
+    { onlyLive: true, onlyWindow: true, hideDesktop: true, hideStale: true },
   );
 });
 
@@ -915,8 +955,8 @@ test('любой префикс режима снимает отсевы и на
   // бы вторым списком рядом с PREFIXES и разошлась бы с ним на первой правке.
   for (const mode of ['local', 'remote', 'history', 'projects', 'snapshots']) {
     assert.deepStrictEqual(
-      activeFilters({ mode, query: '', onlyLive: true, onlyWindow: true, hideDesktop: true }),
-      { onlyLive: false, onlyWindow: false, hideDesktop: false },
+      activeFilters({ mode, query: '', onlyLive: true, onlyWindow: true, hideDesktop: true, hideStale: true }),
+      { onlyLive: false, onlyWindow: false, hideDesktop: false, hideStale: false },
       `режим ${mode}`,
     );
   }
@@ -947,8 +987,14 @@ test('searchDesktop по умолчанию — поиск показывает 
 
 test('пустой вход не роняет и не выдумывает отсевов', () => {
   // Зовётся она из regroup, а тот бывает позван и до первого ответа.
-  assert.deepStrictEqual(activeFilters(), { onlyLive: false, onlyWindow: false, hideDesktop: false });
-  assert.deepStrictEqual(activeFilters({}), { onlyLive: false, onlyWindow: false, hideDesktop: false });
+  assert.deepStrictEqual(activeFilters(),
+    { onlyLive: false, onlyWindow: false, hideDesktop: false, hideStale: false });
+  assert.deepStrictEqual(activeFilters({}),
+    { onlyLive: false, onlyWindow: false, hideDesktop: false, hideStale: false });
+});
+
+test('без запроса hideStale держится', () => {
+  assert.strictEqual(activeFilters({ query: '', hideStale: true }).hideStale, true);
 });
 
 // Стас 16.11.2026: «в history нет иконок проектов». Причина — форма ответа,

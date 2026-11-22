@@ -280,6 +280,18 @@ test('у каждой галки осей есть подсказка', () => {
   }
 });
 
+test('фильтр hide dimmed объясняет, что прячет, и стоит среди фильтров', () => {
+  // Подпись не говорит, что считается тусклым и что без dim stale прятать
+  // нечего, — это говорит подсказка. Строки фильтров иконок не несут, поэтому
+  // подсказка здесь единственное объяснение.
+  const html = axesHtml();
+  const filters = html.split('<label>Filters</label>')[1];
+  assert.ok(filters, 'таблицы фильтров нет — тест сторожит не то');
+  const row = filters.split('<tr>').find(chunk => chunk.includes('data-key="hideStale"'));
+  assert.ok(row, 'hide dimmed нет в таблице фильтров');
+  assert.match(row, /<span title="Hides what &quot;dim stale&quot; dims[^"]*">hide dimmed rows<\/span>/, row);
+});
+
 // Ревью финальной волны: `showTerminalIcon` — ось про глиф в колонке окна
 // (`side: 'glyph'` в sessions.html), и `renderChecks` там безусловно выкидывает
 // такие ключи из статуслайна (`side !== 'glyph'`). Чекбокс statusline у этой

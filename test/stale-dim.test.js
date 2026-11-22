@@ -47,9 +47,12 @@ test('галка dim stale есть и она не фильтр', () => {
   // сторона `filter` заставила бы пересобирать группы на каждое нажатие.
   assert.match(SESSIONS_HTML, /\{ key: 'dimStale', label: 'dim stale', side: 'dim' \}/,
     'галки dim stale нет в TOGGLE_CHECKS или у неё другая сторона');
+  // Фильтров четыре: четвёртый — hide dimmed (Стас 22.11). Он прячет
+  // погашенное, но сама dim stale фильтром от этого не стала: состав при ней
+  // пересчитывается только при включённой hide dimmed (row-contract.test.js).
   const filters = SESSIONS_HTML.match(/side: 'filter'/g) || [];
-  assert.strictEqual(filters.length, 3,
-    'фильтров стало не три — проверь, не уехала ли dimStale в фильтры');
+  assert.strictEqual(filters.length, 4,
+    'фильтров стало не четыре — проверь, не уехала ли dimStale в фильтры');
 });
 
 test('умолчание галки берётся из конфига, а не из литерала', () => {

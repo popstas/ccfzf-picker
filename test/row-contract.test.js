@@ -1272,6 +1272,41 @@ test('вынесена часть — статуслайн рисует ровн
   assert.ok(statusChecks.innerHTML.includes('class="status-check gap"'), statusChecks.innerHTML);
 });
 
+test('щелчок dim stale при включённой hide dimmed пересчитывает состав', () => {
+  // Затемнение само по себе состав не меняет, и обработчику dim stale хватало
+  // render. При hide dimmed меняет: выключил затемнение — спрятанные обязаны
+  // вернуться сразу, а не на следующем ответе агрегатора (тот может не прийти
+  // вовсе — неизменившееся состояние отсекается по отпечатку).
+  const on = renderChecksWith({
+    dimStale: { list: true, statusline: true },
+    hideStale: { list: true, statusline: true },
+  });
+  const input = on.toggleInputs.get('dimStale');
+  input.checked = false;
+  input.listeners.change();
+  assert.strictEqual(on.calls.regroup, 1, 'regroup не позван');
+  assert.strictEqual(on.calls.render, 0);
+
+  const off = renderChecksWith({
+    dimStale: { list: true, statusline: true },
+    hideStale: { list: false, statusline: true },
+  });
+  const plain = off.toggleInputs.get('dimStale');
+  plain.checked = false;
+  plain.listeners.change();
+  assert.strictEqual(off.calls.regroup, 0, 'без hide dimmed пересобирать нечего');
+  assert.strictEqual(off.calls.render, 1);
+});
+
+test('hide dimmed — фильтр: щелчок по нему зовёт regroup', () => {
+  const { toggleInputs, calls } = renderChecksWith({ hideStale: { list: false, statusline: true } });
+  const input = toggleInputs.get('hideStale');
+  assert.ok(input, 'галки hide dimmed нет в статуслайне');
+  input.checked = true;
+  input.listeners.change();
+  assert.strictEqual(calls.regroup, 1);
+});
+
 test('клик по нарисованному чекбоксу правит ось list, не трогая statusline', () => {
   const uiToggles = {
     showPrompt: { list: true, statusline: true },
@@ -1445,9 +1480,14 @@ function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query:
   config = {}) {
   const source = SESSIONS_HTML.match(/\n {2}function regroup\(\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'regroup не найден в sessions.html — тест сторожит не то');
+  // staleSettings — настоящая, из страницы: предикат isDimmed обязан гасить
+  // ровно то, что гасит отрисовщик строки, а тот спрашивает её.
+  const staleSource = SESSIONS_HTML.match(/\n {2}function staleSettings\(\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(staleSource, 'staleSettings не найден в sessions.html — тест сторожит не то');
   let opts = null;
   const ctx = {
     window: {
+      StaleItems,
       SessionGroups: {
         activeFilters: Groups.activeFilters,
         payloadSource: Groups.payloadSource,
@@ -1474,7 +1514,7 @@ function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query:
     render: () => {},
   };
   vm.createContext(ctx);
-  vm.runInContext(`${source[0]}\nregroup();`, ctx, { filename: 'sessions.html' });
+  vm.runInContext(`${staleSource[0]}\n${source[0]}\nregroup();`, ctx, { filename: 'sessions.html' });
   assert.ok(opts, 'buildSessionsPayload не позван');
   return opts;
 }
@@ -1548,6 +1588,49 @@ test('regroup подаёт CONFIG.searchDesktop: при запросе и search
   const plain = regroupWith(true, { showDesktop: true }, { mode: 'sessions', query: '' }, {},
     { searchDesktop: false });
   assert.strictEqual(plain.hideDesktop, false);
+});
+
+// ── hide dimmed: спрятана ⇔ погашена ───────────────────────────────────────
+//
+// Предикат isDimmed уезжает из regroup в buildSessionsPayload, и гасить он
+// обязан ровно то, что гасит отрисовщик строки: те же staleSettings, тот же
+// isStale, тот же довод свёрнутого окна. Разойдись они — пряталась бы яркая
+// строка или оставалась бы тусклая.
+const DIM_CONFIG = { stale: { enabled: true, sessionHours: 1, projectHours: 1 } };
+
+test('hide dimmed: уехавший isDimmed гасит старую строку и не трогает свежую', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const opts = regroupWith(true, { hideStale: true, dimStale: true }, undefined, {}, DIM_CONFIG);
+  assert.strictEqual(opts.hideStale, true);
+  assert.strictEqual(typeof opts.isDimmed, 'function', 'isDimmed не передан');
+  assert.strictEqual(opts.isDimmed({ id: 'old', lastActivity: now - 7200 }), true);
+  assert.strictEqual(opts.isDimmed({ id: 'new', lastActivity: now - 60 }), false);
+});
+
+test('hide dimmed при выключенной dim stale прятать нечего', () => {
+  // Решение Стаса 22.11: прятать ⇔ гасить. Ничего не погашено — ничего и не
+  // спрятано, сколько бы часов строке ни было.
+  const now = Math.floor(Date.now() / 1000);
+  const opts = regroupWith(true, { hideStale: true, dimStale: false }, undefined, {}, DIM_CONFIG);
+  assert.strictEqual(opts.isDimmed({ id: 'old', lastActivity: now - 7200 }), false);
+  assert.strictEqual(opts.isDimmed({ id: 'new', lastActivity: now - 60 }), false);
+});
+
+test('hide dimmed: свёрнутое окно этой машины прячет и свежую строку', () => {
+  // Без исключений: свёрнутое гасится — значит, и прячется.
+  const now = Math.floor(Date.now() / 1000);
+  const opts = regroupWith(true, { hideStale: true, dimStale: true }, undefined, {}, DIM_CONFIG);
+  const row = { id: 'min', lastActivity: now - 60,
+    windows: [{ host: 'win-host', title: 'x', minimized: true }] };
+  assert.strictEqual(SessionWindows.minimizedHere(row, null, 'win-host'), true,
+    'строка теста не свёрнута — тест сторожит не то');
+  assert.strictEqual(opts.isDimmed(row), true);
+});
+
+test('hide dimmed снимается запросом', () => {
+  const opts = regroupWith(true, { hideStale: true, dimStale: true }, { mode: 'sessions', query: 'x' }, {},
+    DIM_CONFIG);
+  assert.strictEqual(opts.hideStale, false);
 });
 
 test('правка запроса пересчитывает состав списка, а не только рисунок', () => {
