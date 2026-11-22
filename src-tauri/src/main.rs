@@ -32,6 +32,7 @@ mod proc;
 mod project_hotkeys;
 mod scrim;
 mod session_name;
+mod state_memo;
 mod state_source;
 mod tracker_signal;
 mod user_idle;
