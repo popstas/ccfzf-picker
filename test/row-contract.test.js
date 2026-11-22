@@ -1953,6 +1953,7 @@ function renderSessionRows(state, query, toggles, stale, treeMode, extra = {}) {
     windowIcons: extra.windowIcons || new Map(),
     zellijNameHtml: Glyph.zellijNameHtml,
     headNameHtml: Glyph.headNameHtml,
+    taskNameHtml: Glyph.taskNameHtml,
     windowHtml: Glyph.windowHtml,
     windowHostHtml: Glyph.windowHostHtml,
     stateHtml: Glyph.stateHtml,
@@ -2215,6 +2216,26 @@ test('дочерняя сессия head доезжает до строки с �
   });
   const row = plain.find(i => i.key.startsWith('s:'));
   assert.ok(!row.html.includes('hname'), row.html);
+});
+
+// Задача вольта — на настоящей разметке: вызов из шаблона строки и галку
+// `showTask` не сторожит больше ничто.
+test('задача вольта доезжает до строки подписью после имени и гаснет галкой', () => {
+  const task = { text: 'Покрасить забор', done: true, vault: 'home' };
+  const { items } = renderSessionRows({ ok: true, sessions: [aggregatorSession({ task })] },
+    '', { showTask: true });
+  const session = items.find(i => i.key.startsWith('s:'));
+  assert.ok(session.html.includes('>✓ Покрасить забор</span>'), session.html);
+  // После имени, а не перед ним: опознают строку по имени.
+  assert.ok(session.html.indexOf('class="label"') < session.html.indexOf('class="task'), session.html);
+
+  const { items: off } = renderSessionRows({ ok: true, sessions: [aggregatorSession({ task })] },
+    '', { showTask: false });
+  assert.ok(!off.find(i => i.key.startsWith('s:')).html.includes('class="task'));
+
+  const { items: none } = renderSessionRows({ ok: true, sessions: [aggregatorSession()] },
+    '', { showTask: true });
+  assert.ok(!none.find(i => i.key.startsWith('s:')).html.includes('class="task'));
 });
 
 // Маркер вида строки — самый хрупкий инвариант широкого режима: карточка в

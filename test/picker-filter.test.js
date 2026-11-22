@@ -145,6 +145,17 @@ test('поиск находит сессию по комментарию', () =>
   assert.deepStrictEqual(got.map(r => r.label), ['esm-migration']);
 });
 
+test('поиск находит сессию по слову её задачи из вольта', () => {
+  // Задача стоит подписью в строке — показанное обязано и находиться.
+  const rows = [
+    { kind: 'session', label: 'alpha', cwd: '/p/a', task: { text: 'Покрасить забор', done: false } },
+    { kind: 'session', label: 'other', cwd: '/p/b', task: null },
+  ];
+  assert.deepStrictEqual(filterRows(rows, 'забор').map(r => r.label), ['alpha']);
+  // Строка без задачи не находится словом `null` или `undefined`.
+  assert.deepStrictEqual(filterRows(rows, 'null'), []);
+});
+
 test('дочерняя сессия head находится по имени родителя и по подписи head:', () => {
   // Подпись `head:<имя>` в строке видна, значит и искаться обязана — тем же
   // текстом, каким нарисована.

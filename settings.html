@@ -121,6 +121,8 @@
     // Комментарий человека к сессии — третья строка тела, рядом с prompt и
     // answer.
     showComment: 'comment',
+    // Задача вольта — подпись после имени сессии.
+    showTask: 'task',
     showHotkey: 'hotkeys', showEvent: 'events', showId: 'id',
     showCost: 'cost', showContext: 'context', showCache: 'cache', showWindow: 'window',
     showWindowHost: 'window host', showTerminalIcon: 'terminal icon',
@@ -162,6 +164,7 @@
       showAnswer: { list: true, statusline: true },
       showPaths: { list: true, statusline: true },
       showComment: { list: true, statusline: false },
+      showTask: { list: true, statusline: false },
       showHotkey: { list: true, statusline: false },
       showEvent: { list: false, statusline: false },
       showId: { list: false, statusline: true },
@@ -466,6 +469,9 @@
     showEvent: '↯',
     showId: '#',
     showComment: '✎',
+    // Флажок — «отмеченная задача»; ✓ занят самой подписью закрытой задачи, а
+    // ☑ — колонкой todo.
+    showTask: '⚑',
     showCost: '$',
     showContext: '≡',
     // Секундомер с просьбой о текстовом начертании (U+FE0E) — по той же
@@ -498,6 +504,8 @@
     showWindowHost: 'The name of the machine that owns the open window',
     showComment: 'Your own note about the session, three or four words. Shared '
       + 'across machines and searchable; Ctrl+M edits it',
+    showTask: 'The vault task this session was recorded under (sess2task). '
+      + '✓ — the task is done',
     // «cache» само по себе не говорит ни что считается, ни почему у части
     // строк пусто — а пусто у большинства.
     showCache: 'Minutes left on the one-hour prompt cache since the last reply. '
