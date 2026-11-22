@@ -73,6 +73,12 @@
   // Панели с таким ключом нет теперь ни в одной раскладке, а в ui.json они
   // остались у всех, кто эти панели трогал.
   const STALE_HOST_KEY = /^remote:/;
+  // Секции типа проекта (`type:<имя>`) в окно настроек тоже не попадают: в
+  // порядке и в спрятанности они не живут — место и показ всего блока задаёт
+  // панель `live` (`orderKeyOf` в picker-sections.js). Строка с колонкой и
+  // галкой «hidden» у `type:work` обещала бы выбор, который ничего не делает.
+  // Свёрнутость их помнится в ui.json по-прежнему, правится она в самом пикере.
+  const TYPE_KEY = /^type:/;
 
   /**
    * Имя панели, которой нет в таблице.
@@ -191,7 +197,7 @@
     const known = knownPanelsFor(layout);
     const knownKeys = new Set(known.map(p => p.key));
     const extra = keysInUi(state, layout)
-      .filter(key => !knownKeys.has(key) && !STALE_HOST_KEY.test(key))
+      .filter(key => !knownKeys.has(key) && !STALE_HOST_KEY.test(key) && !TYPE_KEY.test(key))
       .map(key => ({ key, label: labelForUnknown(key) }));
     return [...known, ...extra].map(panel => ({
       key: panel.key,

@@ -740,3 +740,12 @@ test('cacheWarnMinutes: 0 и 59 проходят, 60, -1 и дробь — от�
   assert.ok(bad('-1'));
   assert.ok(bad('2.5'));
 });
+
+test('галка группировки по типу проекта — bool с умолчанием false', () => {
+  const field = PAGES.flatMap(p => p.fields).find(f => f.id === 'groupByProjectType');
+  assert.ok(field, 'поля groupByProjectType нет');
+  assert.strictEqual(field.type, 'bool');
+  assert.strictEqual(field.label, 'Group active sessions by project type');
+  assert.strictEqual(configToFields({ sshHost: 'h' }).groupByProjectType, false);
+  assert.strictEqual(configToFields({ groupByProjectType: true }).groupByProjectType, true);
+});

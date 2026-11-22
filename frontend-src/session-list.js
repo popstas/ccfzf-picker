@@ -209,6 +209,8 @@
       ? givenIcons
       : windowApi.trackerIcons(state, configHost);
     const headIds = new Set(list.map(x => String((x || {}).headId || '').trim()).filter(Boolean));
+    // Агрегатор считает проект-владельца сессии (см. `projectCwd` ниже).
+    const ownersKnown = Boolean(state && state.projectOwners === true);
 
     const rows = [];
     for (const s of list) {
@@ -370,6 +372,19 @@
           // только разбор белым списком (taskOf). `null`, а не пустой объект:
           // подписи и строки карточки у такой сессии нет вовсе.
           task: taskOf(s.task),
+          // Тип проекта-владельца — группировка живых по типу и отметка в ^K.
+          // Считает его агрегатор (project_owner): сессия из worktree лежит в
+          // подкаталоге проекта, а здесь есть только точное совпадение cwd.
+          projectType: typeof s.projectType === 'string' ? s.projectType.trim().toLowerCase() : '',
+          // Проект-владелец — куда пункт `Type` в ^K ставит тип. Агрегатор
+          // пишет поле только при отличии от `cwd`, а что владельцев он считает
+          // вообще, говорит верхний `projectOwners`: флаг есть, поля нет —
+          // владелец сам `cwd`; флага нет — агрегатор старый, и пустая строка
+          // значит «пункта Type нет». При двух источниках верхние поля берутся
+          // у первого (merge_states) — флаг общий на ответ.
+          projectCwd: typeof s.projectCwd === 'string' && s.projectCwd
+            ? s.projectCwd
+            : (ownersKnown ? String(s.cwd || '') : ''),
           // Размер сессии — число реплик человека. Поле самой сессии, не
           // записи агента: считает его агрегатор по транскрипту, а не хук, —
           // поэтому и без префикса `agent`.

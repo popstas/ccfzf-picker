@@ -41,6 +41,11 @@ const SEEN_TOPIC: &str = "/claude-session-seen";
 /// Набор сессий для мигания кнопки окна перед остыванием кеша промпта.
 /// Тело то же, что у http-пути `/claude-wt/cache-warn`.
 const CACHE_WARN_TOPIC: &str = "/claude-cache-warn";
+/// Поставить или снять тип проекта (`work`, `home`, свой) в `claudeWt.projects`
+/// менеджера: пункт `Type` в `^K`. Тело то же, что у http-пути
+/// `/claude-wt/project-type`; ответа пикер не ждёт — тип приезжает файлом
+/// трекера (`type` входит в его отпечаток).
+const PROJECT_TYPE_TOPIC: &str = "/claude-project-type";
 const RESTORE_TOPIC: &str = "/claude-snapshot-restore";
 /// Просьба к windows11-manager открыть сессию у себя. Отличается от
 /// `FOCUS_TOPIC` тем, что ни окна, ни самой сессии у трекера может не быть
@@ -264,6 +269,17 @@ pub fn terminal_name(raw: &serde_json::Value) -> String {
 /// зависимости от дороги, а поймать это можно было бы только на живой машине.
 pub(crate) fn focus_body(id: &str) -> String {
     serde_json::json!({ "id": id }).to_string()
+}
+
+/// Тело просьбы о типе проекта: `{cwd, type}`, `type: null` — снять тип.
+/// Одно на оба транспорта — по той же причине, что `focus_body`.
+pub(crate) fn project_type_body(cwd: &str, project_type: Option<&str>) -> String {
+    serde_json::json!({ "cwd": cwd, "type": project_type }).to_string()
+}
+
+/// Попросить менеджер поставить тип проекту `cwd`.
+pub fn project_type(broker: &Broker, base: &str, body: &str) -> Result<(), String> {
+    publish(broker, base, PROJECT_TYPE_TOPIC, body)
 }
 
 /// Попросить о подъёме окна сессии.
@@ -727,7 +743,7 @@ fn publish(broker: &Broker, base: &str, tail: &str, payload: &str) -> Result<(),
 mod tests {
     use super::{
         broker_from_config, group_payload, open_new_payload, open_payload, open_project_payload,
-        open_prompt_payload, place_payload,
+        open_prompt_payload, place_payload, project_type_body,
         resolve_base, restore_payload, terminal_name, topic_of, unread_bases, Placement,
         FOCUS_TOPIC,
         OPEN_TOPIC, PLACE_TOPIC, RESTORE_TOPIC, SEEN_TOPIC, UNREAD_TOPIC,
@@ -1036,6 +1052,14 @@ mod tests {
                 .collect();
             assert!(calls.is_empty(), "{name} снова считает имя терминала для менеджера: {calls:?}");
         }
+    }
+
+    // Контракт менеджера (`claude-project-type`): `type: null` — снять тип,
+    // а не строка `"none"` — её менеджер отвергает как зарезервированную.
+    #[test]
+    fn project_type_body_sends_null_to_clear() {
+        assert_eq!(project_type_body("/p/a", Some("work")), r#"{"cwd":"/p/a","type":"work"}"#);
+        assert_eq!(project_type_body("/p/a", None), r#"{"cwd":"/p/a","type":null}"#);
     }
 
     // Тела трёх просьб целиком: ключа `terminal` нет ни в одном, и менеджер

@@ -31,6 +31,60 @@
   // в аргумент команды открытия браузера, — дублировать такую проверку опасно.
   const prNumber = glyphApi.prNumber;
 
+  /** Типы, которые предлагаются всегда и первыми (решение Стаса 22.11). */
+  const BASE_TYPES = ['work', 'home'];
+  /** Имена, которые менеджер не принимает: `untyped` — подпись секции, `none` — «снять». */
+  const RESERVED_TYPES = ['untyped', 'none'];
+
+  /**
+   * Выбор типов для пункта `Type`: `work`, `home` и все типы, встреченные у
+   * проектов (`projectType` строк `buildProjectList`), прочие по алфавиту.
+   * Ввода нового имени в пикере нет (не цель дизайна): свой тип появляется в
+   * меню, как только он есть хоть у одного проекта.
+   */
+  function projectTypeChoices(projects) {
+    const seen = new Set(BASE_TYPES);
+    const extra = [];
+    for (const p of Array.isArray(projects) ? projects : []) {
+      const t = p && typeof p.projectType === 'string' ? p.projectType : '';
+      if (!t || seen.has(t) || RESERVED_TYPES.includes(t)) continue;
+      seen.add(t);
+      extra.push(t);
+    }
+    return [...BASE_TYPES, ...extra.sort((a, b) => a.localeCompare(b))];
+  }
+
+  /**
+   * Каталог, которому пункт `Type` ставит тип: у строки проекта — её `cwd`, у
+   * сессии — проект-владелец `projectCwd` (сессия из worktree получает тип
+   * проекта-предка). Пусто — пункта нет: у сессии от старого агрегатора
+   * владельца не знает никто, а путь не POSIX (Windows) менеджер отвергнет —
+   * пункт, который всегда даёт отказ, хуже отсутствующего.
+   */
+  function projectTypeTarget(row) {
+    const r = row || {};
+    if (r.kind === 'zellij' || r.kind === 'snapshot') return '';
+    const cwd = r.kind === 'project' ? r.cwd : r.projectCwd;
+    return typeof cwd === 'string' && cwd.startsWith('/') ? cwd : '';
+  }
+
+  /**
+   * Пункты `Type: <имя>` — по одному на тип, текущий отмечен (`checked`),
+   * плюс `Type: none` у строки, где тип есть. `opts.projectTypes` — выбор
+   * (`projectTypeChoices`); страница подаёт его, только когда до менеджера
+   * своей машины есть дорога (`managerReachable`). Нет выбора — нет пунктов.
+   */
+  function projectTypeActions(row, opts) {
+    const choices = (opts || {}).projectTypes;
+    if (!Array.isArray(choices) || !choices.length || !projectTypeTarget(row)) return [];
+    const current = typeof (row || {}).projectType === 'string' ? row.projectType : '';
+    const out = choices.map(t => ({
+      id: `type:${t}`, label: t === current ? `Type: ${t} ✓` : `Type: ${t}`, checked: t === current,
+    }));
+    if (current) out.push({ id: 'type:none', label: 'Type: none' });
+    return out;
+  }
+
   /**
    * Что пикер может предложить для этой строки.
    *
@@ -113,6 +167,7 @@
         { id: 'terminal', label: 'Open terminal' },
       ];
       forProject.push(...folderActions());
+      forProject.push(...projectTypeActions(row, opts));
       return forProject;
     }
     // Зелийная сессия — терминал, а не работа агента: записи агента, pid и
@@ -182,6 +237,9 @@
     // просмотренным нечего у строки без записи агента и незачем у той, что уже
     // просмотрена. Оба пункта разом не появляются никогда — это сторожит тест.
     if (row && row.agentUpdated && !row.agentSeen) actions.push({ id: 'seen', label: 'Mark seen' });
+    // Тип проекта-владельца — рядом с отметками: тоже просьба к менеджеру
+    // своей машины, а не действие над сессией.
+    actions.push(...projectTypeActions(row, opts));
     // Разорванную сессию (агент жив, его ssh мёртв — признак агрегатора)
     // поднимает перехват: SIGHUP сироте и `--resume` в новом терминале. Окно-
     // труп не трогается: привязка окна к сессии у трекера по заголовку, и
@@ -273,5 +331,5 @@
       .filter(r => availableActions(r, config, opts).some(a => a.id === 'reopen'));
   }
 
-  return { prNumber, availableActions, reopenableRows };
+  return { prNumber, availableActions, reopenableRows, projectTypeChoices, projectTypeTarget };
 });

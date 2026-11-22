@@ -23,6 +23,8 @@ test('пустой конфиг даёт рабочие значения по у
   assert.strictEqual(c.onlyLive, true);
   assert.strictEqual(c.hideOnBlur, true);
   assert.strictEqual(c.searchDesktop, true);
+  // Группировка активных по типу проекта выключена: без галки список ровно прежний.
+  assert.strictEqual(c.groupByProjectType, false);
   assert.deepStrictEqual(c.terminal, { file: '/opt/homebrew/bin/kitty', args: ['--single-instance'] });
   // Пустое имя машины — фокуса не бывает. Умолчания у него нет по той же
   // причине, что и у sshHost: любое значение было бы чужим именем машины.
@@ -492,4 +494,9 @@ test('cacheWarnMinutes: вне 0…59 и не целое — умолчание'
   for (const bad of [60, -1, 'x', 2.5, null, true]) {
     assert.strictEqual(normalizeConfig({ cacheWarnMinutes: bad }).cacheWarnMinutes, 10, String(bad));
   }
+});
+
+test('groupByProjectType — только строгое true', () => {
+  assert.strictEqual(normalizeConfig({ groupByProjectType: true }).groupByProjectType, true);
+  assert.strictEqual(normalizeConfig({ groupByProjectType: 'yes' }).groupByProjectType, false);
 });

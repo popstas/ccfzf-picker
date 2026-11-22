@@ -1054,3 +1054,51 @@ test('payloadSource до первого ответа даёт пустой, но
   assert.ok(Array.isArray(out.groups));
 });
 
+
+// ── Группировка живых по типу проекта (groupByProjectType) ────────────────
+
+const TYPED = [
+  row({ id: 'wa', live: true, projectType: 'work', windowHost: '' }),
+  row({ id: 'wb', live: true, projectType: 'work', windowHost: 'host-b' }),
+  row({ id: 'h', live: true, projectType: 'home', windowHost: '' }),
+  row({ id: 'al', live: true, projectType: 'alpha', windowHost: 'host-b' }),
+  row({ id: 'u', live: true, projectType: '', windowHost: 'host-b' }),
+  row({ id: 'old', live: false, projectType: 'work' }),
+];
+
+test('без опции группировка ровно прежняя', () => {
+  // Сторож анти-цели: выключенная галка не меняет раскладку ни на бит.
+  const sessions = TYPED.map(s => ({ ...s }));
+  assert.deepStrictEqual(groupSessions(sessions.map(s => ({ ...s })), 'recent', {}),
+    groupSessions(sessions.map(s => ({ ...s })), 'recent', { groupByProjectType: false }));
+  const keys = groupSessions(sessions, 'recent', {}).map(g => g.key);
+  assert.deepStrictEqual(keys, ['live', 'remote:host-b', 'past']);
+});
+
+test('с опцией живые — секциями по типу, машины вместе, порядок work, home, прочие, untyped', () => {
+  const groups = groupSessions(TYPED.map(s => ({ ...s })), 'recent', { groupByProjectType: true });
+  assert.deepStrictEqual(groups.map(g => g.key), ['type:work', 'type:home', 'type:alpha', 'type:untyped', 'past']);
+  assert.deepStrictEqual(groups.map(g => g.label), ['work', 'home', 'alpha', 'untyped', 'History']);
+  const work = groups.find(g => g.key === 'type:work');
+  assert.deepStrictEqual(work.sessions.map(s => s.id).sort(), ['wa', 'wb']);
+  assert.ok(groups.filter(g => g.key.startsWith('type:')).every(g => g.typeBlock === true && g.remote === false));
+  // История по типу не делится.
+  assert.deepStrictEqual(groups.find(g => g.key === 'past').sessions.map(s => s.id), ['old']);
+});
+
+test('с опцией живые без окна (onlyWindow) — за последней типовой секцией', () => {
+  const sessions = [
+    row({ id: 'w', live: true, projectType: 'work', window: { host: 'h' } }),
+    row({ id: 'bare', live: true, projectType: 'work', window: null }),
+  ];
+  const groups = groupSessions(sessions, 'recent', { groupByProjectType: true, onlyWindow: true });
+  assert.deepStrictEqual(groups.map(g => g.key), ['type:work', 'nowindow']);
+});
+
+test('buildSessionsPayload подаёт groupByProjectType в groupSessions', () => {
+  const res = { ok: true, seen: {}, sessions: [{ id: 'a', title: 'A', cwd: '/p/a', live: true, projectType: 'home' }] };
+  const on = buildSessionsPayload(res, 'recent', { groupByProjectType: true });
+  assert.deepStrictEqual(on.groups.map(g => g.key), ['type:home']);
+  const off = buildSessionsPayload(res, 'recent', {});
+  assert.deepStrictEqual(off.groups.map(g => g.key), ['live']);
+});

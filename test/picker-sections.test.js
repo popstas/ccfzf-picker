@@ -833,3 +833,74 @@ test('режим промпта оставляет в секции ровно ц
     [],
   );
 });
+
+// ── Блок типов на месте live ───────────────────────────────────────────────
+
+const TYPE_GROUPS = [
+  { key: 'type:work', label: 'work', typeBlock: true, remote: false,
+    sessions: [session('w1'), session('w2', { windowHost: 'host-b' })] },
+  { key: 'type:home', label: 'home', typeBlock: true, remote: false, sessions: [session('h1')] },
+  { key: 'type:untyped', label: 'untyped', typeBlock: true, remote: false,
+    sessions: [session('u1', { windowHost: 'host-b' })] },
+  { key: 'nowindow', label: 'Live without window', remote: false, sessions: [session('n1')] },
+  { key: 'past', label: 'History', past: true, sessions: [session('old', { live: false, lastActivity: AUG_12 })] },
+];
+
+function typed(extra) {
+  return base({ groups: TYPE_GROUPS, ...extra });
+}
+
+test('без типовых групп buildSessions ровно прежний (сторож выключенной галки)', () => {
+  const keys = (o) => buildSections(o).map(s => [s.key, s.column]);
+  assert.deepStrictEqual(keys(base()), [['live', 1], ['projects', 2], ['past', 3], ['snapshots', 3]]);
+  assert.deepStrictEqual(keys(base({ layout: 'narrow' })).map(([k]) => k), ['live', 'past', 'projects', 'snapshots']);
+});
+
+test('типовые секции — в колонке live, пустой панели Active sessions при них нет', () => {
+  const got = buildSections(typed()).map(s => [s.key, s.column]);
+  assert.deepStrictEqual(got, [['type:work', 1], ['type:home', 1], ['type:untyped', 1], ['nowindow', 1],
+    ['projects', 2], ['past', 3], ['snapshots', 3]]);
+});
+
+test('узкая: order [past, live, projects] ставит весь блок на место live, nowindow за последней типовой', () => {
+  const got = buildSections(typed({ layout: 'narrow', order: ['past', 'live', 'projects'] })).map(s => s.key);
+  assert.deepStrictEqual(got, ['past', 'type:work', 'type:home', 'type:untyped', 'nowindow', 'projects', 'snapshots']);
+});
+
+test('широкая: order кладёт live во вторую колонку — туда уезжает весь блок', () => {
+  const got = buildSections(typed({ order: [['past'], ['projects', 'live']] })).map(s => [s.key, s.column]);
+  assert.deepStrictEqual(got, [['past', 1], ['projects', 2], ['type:work', 2], ['type:home', 2], ['type:untyped', 2],
+    ['nowindow', 2], ['snapshots', 3]]);
+});
+
+test('/l — свои сессии по типу, /r — чужие по типу', () => {
+  const local = buildSections(typed({ mode: 'local' }));
+  assert.deepStrictEqual(local.map(s => [s.key, s.rows.map(r => r.id)]), [['type:work', ['w1']], ['type:home', ['h1']]]);
+  const remote = buildSections(typed({ mode: 'remote' }));
+  assert.deepStrictEqual(remote.map(s => [s.key, s.rows.map(r => r.id)]), [['type:work', ['w2']], ['type:untyped', ['u1']]]);
+});
+
+test('свёрнутость типовой секции — по её ключу type:<имя>', () => {
+  const got = buildSections(typed({ collapsed: { 'type:home': true } }));
+  assert.strictEqual(got.find(s => s.key === 'type:home').collapsed, true);
+  assert.strictEqual(got.find(s => s.key === 'type:work').collapsed, false);
+});
+
+test('спрятанная live прячет весь блок типов', () => {
+  const got = buildSections(typed({ hidden: { live: true } })).map(s => s.key);
+  assert.ok(!got.some(k => k.startsWith('type:')), got.join());
+});
+
+test('перетаскивание типовой секции пишет ключ live и двигает весь блок', () => {
+  const { moveBlockKey, orderKeyOf } = PickerSections;
+  assert.strictEqual(orderKeyOf('type:work'), 'live');
+  assert.strictEqual(orderKeyOf('past'), 'past');
+  const headers = ['type:work', 'type:home', 'type:untyped', 'nowindow', 'past', 'projects'];
+  // home тащат под past: блок встаёт целиком между past и projects.
+  assert.deepStrictEqual(moveBlockKey(headers, 'type:home', 5), ['nowindow', 'past', 'live', 'projects']);
+  // Без типовых ключей — то же, что прежний moveKey.
+  assert.deepStrictEqual(moveBlockKey(['live', 'past', 'projects'], 'projects', 0), ['projects', 'live', 'past']);
+  assert.deepStrictEqual(moveBlockKey(['live', 'past', 'projects'], 'live', 3), ['past', 'projects', 'live']);
+  // Секция из другой колонки (ключа в списке нет) — просто вставка.
+  assert.deepStrictEqual(moveBlockKey(['past'], 'type:work', 0), ['live', 'past']);
+});

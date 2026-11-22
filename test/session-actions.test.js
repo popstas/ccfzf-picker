@@ -2,7 +2,9 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { availableActions, prNumber, reopenableRows } = require('../frontend-src/session-actions');
+const {
+  availableActions, prNumber, reopenableRows, projectTypeChoices, projectTypeTarget,
+} = require('../frontend-src/session-actions');
 const { prBadgeHtml } = require('../frontend-src/session-glyph');
 const { normalizeConfig } = require('../frontend-src/config-shape');
 const { menuKeys } = require('../frontend-src/action-hotkey');
@@ -616,4 +618,57 @@ test('SSH Remote: с другим редактором пункты держат
   const ids = availableActions(row, cfg, { editorLabel: 'VS Code', editorId: 'vscode' }).map(a => a.id);
   assert.ok(!ids.includes('editor'), ids.join(','));
   assert.ok(!ids.includes('plan'), ids.join(','));
+});
+
+// ── Type в ^K: тип проекта у строки проекта и у сессии ──────────────────────
+
+const TYPES = { projectTypes: ['work', 'home', 'alpha'] };
+const typeItems = (row, opts) => availableActions(row, {}, opts).filter(a => a.id.startsWith('type:'));
+
+test('выбор типов: work и home всегда, встреченные в проектах — по алфавиту, без дублей и мусора', () => {
+  assert.deepStrictEqual(projectTypeChoices([
+    { projectType: 'zeta' }, { projectType: 'home' }, { projectType: '' }, { projectType: 'alpha' },
+    { projectType: 'zeta' }, null, { projectType: 'untyped' }, { projectType: 'none' },
+  ]), ['work', 'home', 'alpha', 'zeta']);
+  assert.deepStrictEqual(projectTypeChoices(undefined), ['work', 'home']);
+});
+
+test('у строки проекта пункт Type есть, текущий отмечен, none — снять', () => {
+  const row = { kind: 'project', id: '/p/site', cwd: '/p/site', projectType: 'home' };
+  const items = typeItems(row, TYPES);
+  assert.deepStrictEqual(items.map(a => a.id), ['type:work', 'type:home', 'type:alpha', 'type:none']);
+  assert.deepStrictEqual(items.filter(a => a.checked).map(a => a.id), ['type:home']);
+  assert.ok(items.every(a => /^Type: /.test(a.label)), items.map(a => a.label).join());
+});
+
+test('без текущего типа пункта none нет — снимать нечего', () => {
+  const row = { kind: 'project', id: '/p/site', cwd: '/p/site', projectType: '' };
+  assert.ok(!typeItems(row, TYPES).some(a => a.id === 'type:none'));
+});
+
+test('у сессии пункт Type ставит тип её projectCwd; без projectCwd (старый агрегатор) — нет', () => {
+  const session = { id: 's', cwd: '/p/site/.worktrees/x', projectCwd: '/p/site', projectType: 'work', agentUpdated: 0 };
+  assert.ok(typeItems(session, TYPES).length > 0);
+  assert.strictEqual(projectTypeTarget(session), '/p/site');
+  const old = { ...session, projectCwd: '' };
+  assert.deepStrictEqual(typeItems(old, TYPES), []);
+});
+
+test('без дороги до менеджера пункта Type нет', () => {
+  const row = { kind: 'project', id: '/p/site', cwd: '/p/site', projectType: '' };
+  assert.deepStrictEqual(typeItems(row, {}), []);
+  assert.deepStrictEqual(typeItems(row, undefined), []);
+});
+
+test('цель не POSIX-путь (Windows) — пункта нет: менеджер такой отвергнет', () => {
+  // UNC вместо буквы диска — см. комментарий в test/path-map.test.js.
+  const row = { kind: 'project', id: '\\\\nas\\p', cwd: '\\\\nas\\p', projectType: '' };
+  assert.deepStrictEqual(typeItems(row, TYPES), []);
+  const session = { id: 's', cwd: 'x', projectCwd: '\\\\nas\\x', projectType: '' };
+  assert.deepStrictEqual(typeItems(session, TYPES), []);
+});
+
+test('у зелийной строки и снимка пункта Type нет', () => {
+  assert.deepStrictEqual(typeItems({ kind: 'zellij', cwd: '/p', projectCwd: '/p' }, TYPES), []);
+  assert.deepStrictEqual(typeItems({ kind: 'snapshot', id: 'sn', cwd: '/p' }, TYPES), []);
 });

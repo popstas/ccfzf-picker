@@ -160,6 +160,10 @@
         { id: 'searchDesktop', label: 'Search Claude Desktop sessions', type: 'bool', default: true,
           hint: 'Off: searching and modes like /h skip Claude Desktop sessions; '
             + 'the list itself follows the "claude desktop" toggle.' },
+        { id: 'groupByProjectType', label: 'Group active sessions by project type', type: 'bool',
+          default: false,
+          hint: 'Running sessions are split into work, home, other types and untyped instead of by machine. '
+            + 'Types live in claudeWt.projects of windows11-manager; set them with Type in the ^K menu.' },
         { id: 'hideOnBlur', label: 'Hide the window when it loses focus', type: 'bool', default: true },
         { id: 'backgroundRefresh', label: 'Keep polling while the window is closed', type: 'bool',
           default: true,

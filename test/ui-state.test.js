@@ -301,3 +301,12 @@ test('ширина колонок читается только из извес�
   assert.strictEqual(uiStateToSave('name', {}, false, {}, {}, {}, false, 'twoThirds').wideSplit, 'twoThirds');
   assert.deepStrictEqual(require('../frontend-src/ui-state').WIDE_SPLITS, ['equal', 'twoThirds']);
 });
+
+test('свёрнутость секции типа проекта переживает запись ui.json', () => {
+  // Ключ type:<имя> непостоянен, но для свёрнутости это не страшно: она не
+  // порядок, и незнакомый ключ normalizeFlagMap не выбрасывает.
+  const { normalizeUiState, uiStateToSave } = require('../frontend-src/ui-state');
+  const saved = uiStateToSave('recent', {}, false, { narrow: { 'type:home': true }, wide: {} },
+    { narrow: [], wide: [] }, { narrow: {}, wide: {} }, false, 'equal');
+  assert.strictEqual(normalizeUiState(JSON.parse(JSON.stringify(saved))).collapsed.narrow['type:home'], true);
+});

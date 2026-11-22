@@ -105,6 +105,14 @@
       if (p && p.hotkey !== undefined && typeof p.hotkey !== 'string') {
         out.push(`projects[${i}].hotkey is not a string`);
       }
+      // Тип проекта — то же правило, что у хоткея: необязателен (старый
+      // агрегатор или менеджер), но если есть — строка. У сессий
+      // `projectType`/`projectCwd` здесь не проверяются вовсе: кривое поле
+      // сессии в validateState стоило бы всего опроса, а buildSessionList и
+      // так сводит мусор к пустой строке.
+      if (p && p.type !== undefined && typeof p.type !== 'string') {
+        out.push(`projects[${i}].type is not a string`);
+      }
     });
     return out;
   }

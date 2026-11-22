@@ -147,6 +147,23 @@
             min-height: 2em;
         }
         #list.blocks .block-rows { overflow-y: auto; min-height: 0; flex: 0 1 auto; }
+        /* Блок типов проекта (`type:*`, группировка по типу) — одна общая
+           обёртка с одним скроллом во всю высоту колонки (Стас 22.11: «скролл
+           должен быть один на все группы»). Каждой типовой секции своя доля
+           колонки, как у прочих блоков, давала бы своих полос по числу типов,
+           а развёрнутый блок короче своей доли — пустоту под ним: зазор между
+           раскрытыми типами вырастал до полэкрана. Внутри обёртки блоки — по
+           содержимому, зазор тот же, что между свёрнутыми (`gap` колонки), а
+           прокручивается вся обёртка. Собирает её `wideColumnHtml`. */
+        #list.blocks .block-stack {
+            flex: 1 1 0; min-height: 2em; overflow-y: auto;
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        #list.blocks .block-stack > .block,
+        #list.blocks .block-stack > .block:last-child:not(:only-child) {
+            flex: 0 0 auto; max-height: none; min-height: 0; overflow: visible;
+        }
+        #list.blocks .block-stack .block-rows { overflow-y: visible; }
         /* Карточка — только у строки сессии (`.row.session`), не у голого
            `.row`: тот же `.text`/`.meta`/`.name`/`.dot` носят и строка
            проекта, и снимок (заголовок и его сессия), и свёрнутый блок, и
@@ -1879,6 +1896,25 @@ const infoBackdrop = document.getElementById('info-backdrop');
   }
 
   /**
+   * Разметка одной колонки широкой раскладки: блок на секцию, а подряд идущие
+   * типовые секции (`typeBlock`) — в общей обёртке `.block-stack` с одним
+   * скроллом (см. стиль `.block-stack`). Блоки внутри обёртки те же
+   * `.block[data-block]`: тело ищется по ключу (`blockBodies`), а
+   * перетаскивание (`wideDropTarget`) ищет `.block` в колонке вглубь.
+   */
+  function wideColumnHtml(column) {
+    let html = '';
+    let stack = '';
+    for (const section of column) {
+      if (section.typeBlock === true) { stack += blockCellHtml(section); continue; }
+      if (stack) { html += `<div class="block-stack">${stack}</div>`; stack = ''; }
+      html += blockCellHtml(section);
+    }
+    if (stack) html += `<div class="block-stack">${stack}</div>`;
+    return html;
+  }
+
+  /**
    * Подзаголовок машины внутри блока чужих сессий.
    *
    * В `rows` не кладётся намеренно: это подпись, а не строка списка. Выбирать
@@ -1994,7 +2030,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
         byColumn.map(column => column[0].column), wideSplit);
       list.innerHTML = byColumn.map((column, i) =>
         `<div class="block-col col-${column[0].column}${grow[i] === 2 ? ' grow-2' : ''}">` +
-        column.map(blockCellHtml).join('') + '</div>').join('');
+        wideColumnHtml(column) + '</div>').join('');
       blocksShape = shape;
       renderedBlocks = new Map();
       blockBodies = new Map(Array.from(list.querySelectorAll('.block'),
@@ -2235,7 +2271,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // Иконки истории (проект по каталогу, корона head) — готовой картой
       // трекера этой машины, тем же trackerIcons, что у списка проектов.
       { ...filters, isDimmed, configHost: CONFIG.windowHost,
-        icons: window.SessionWindows.trackerIcons(lastState, CONFIG.windowHost) },
+        icons: window.SessionWindows.trackerIcons(lastState, CONFIG.windowHost),
+        // Живые — секциями по типу проекта вместо машин. Раскладка, а не
+        // отсев: запрос и префикс её не отменяют.
+        groupByProjectType: CONFIG.groupByProjectType === true },
     );
     groups = payload.groups;
     sortMode = payload.sort;
@@ -2697,6 +2736,27 @@ const infoBackdrop = document.getElementById('info-backdrop');
     invoke('unread_session_mqtt', {
       id: row.id,
       targets: targets.length ? targets : [{ base: '', http: managerHttpHere() }],
+    })
+      .catch((e) => { error = String(e); render(); });
+  }
+
+  /**
+   * Поставить тип проекта (пункт `Type` в ^K): у строки проекта — её `cwd`, у
+   * сессии — её проекта-владельца (`projectTypeTarget`). `none` — снять тип.
+   *
+   * Просьба уходит менеджеру **своей** машины (`CONFIG.windowHost`): у строки
+   * проекта окна нет, и рассылка по трекерам окна, как у `markUnread`, тут не
+   * годится. Транспорт тот же — http менеджера этой машины, иначе MQTT с базой
+   * из своего конфига. Ответа не ждём: тип приезжает файлом трекера на
+   * следующей публикации, строка переедет в свою секцию сама.
+   */
+  function setProjectType(row, type) {
+    const cwd = window.SessionActions.projectTypeTarget(row);
+    if (!cwd || !managerReachable()) return;
+    invoke('project_type_set', {
+      target: { base: '', http: managerHttpHere() },
+      cwd,
+      projectType: type === 'none' ? null : type,
     })
       .catch((e) => { error = String(e); render(); });
   }
@@ -3441,21 +3501,6 @@ const infoBackdrop = document.getElementById('info-backdrop');
     return row && row.kind === 'section' ? row.sectionKey : '';
   }
 
-  /**
-   * Переставить ключ в списке.
-   *
-   * `to` считается по видимому списку, где перетаскиваемая секция ещё стоит на
-   * своём месте: убрав её раньше, чем поправлен номер, мы съехали бы на
-   * единицу при движении вниз.
-   */
-  function moveKey(keys, key, to) {
-    const from = keys.indexOf(key);
-    const rest = keys.filter(k => k !== key);
-    const at = from !== -1 && from < to ? to - 1 : to;
-    rest.splice(Math.max(0, Math.min(rest.length, at)), 0, key);
-    return rest;
-  }
-
   /** Сколько заголовков выше указателя — столько и позиция вставки. */
   function dropIndexOf(nodes, y) {
     let at = 0;
@@ -3560,22 +3605,22 @@ const infoBackdrop = document.getElementById('info-backdrop');
       const target = wideDropTarget(x, y);
       if (!target) return;
       // Ключ вынимается из всех колонок и кладётся в названную: секция одна,
-      // и остаться в прежней колонке она не может.
-      const columns = order.wide.map(keys => keys.filter(k => k !== drag.key));
+      // и остаться в прежней колонке она не может. Типовая секция (`type:*`)
+      // в порядке — это `live`: блок типов переносится целиком (orderKeyOf).
+      const moving = window.PickerSections.orderKeyOf(drag.key);
+      const columns = order.wide.map(keys => keys.filter(k => k !== moving));
       // Видимый порядок колонки, а не сохранённый: сохранённого может не быть
       // вовсе, а поставить секцию надо туда, куда смотрит человек.
-      const visible = target.keys.filter(k => k !== drag.key);
-      const at = Math.max(0, Math.min(visible.length, target.at
-        - (target.keys.indexOf(drag.key) !== -1 && target.keys.indexOf(drag.key) < target.at ? 1 : 0)));
-      visible.splice(at, 0, drag.key);
-      columns[target.column - 1] = visible;
+      columns[target.column - 1] = window.PickerSections.moveBlockKey(target.keys, drag.key, target.at);
       order = { ...order, wide: columns };
     } else {
       // Видимый порядок, а не сохранённый: в файле может не быть ничего, а
       // человек переносит то, что видит.
       const headers = narrowHeaders();
       const visible = headers.map(sectionKeyOf).filter(Boolean);
-      order = { ...order, narrow: moveKey(visible, drag.key, dropIndexOf(headers, y)) };
+      // moveBlockKey, а не прежний moveKey: типовые секции стоят одним блоком
+      // на месте `live`, и в порядок уходит ключ `live`, а не `type:*`.
+      order = { ...order, narrow: window.PickerSections.moveBlockKey(visible, drag.key, dropIndexOf(headers, y)) };
     }
     // Порядок секций, которых сейчас нет на экране (лёг трекер — нет и его
     // секции), в файле не сохраняется: он записывается по видимому списку.
@@ -3783,6 +3828,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
   function actionsFor(row) {
     const actions = window.SessionActions.availableActions(row, CONFIG, {
       os: PICKER_OS, editorLabel: (editorInfo || {}).label, editorId: (editorInfo || {}).id,
+      // Пункт `Type` — просьба к менеджеру своей машины (`setProjectType`):
+      // без дороги до него выбора нет, и пункта тоже.
+      projectTypes: managerReachable() ? window.SessionActions.projectTypeChoices(projectRows) : undefined,
     });
     if (window.OpenTransport.canOpenRemote(row, openManagerHere(), CONFIG.windowHost, managerReachable())) {
       actions.push({
@@ -4268,6 +4316,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
     }
     if (id === 'unread') {
       markUnread(row);
+      return;
+    }
+    if (id.startsWith('type:')) {
+      setProjectType(row, id.slice('type:'.length));
       return;
     }
     if (id === 'seen') {

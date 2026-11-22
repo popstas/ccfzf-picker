@@ -2384,7 +2384,7 @@ function wideColumnsHtml(columns, wideSplit, ctxBase) {
   ctx.SECTIONS = SECTIONS;
   ctx.wideSplit = wideSplit;
   vm.runInContext(
-    `${pageFunctions('blockCellHtml(section)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)', 'renderWide(sections, nowSec)')}
+    `${pageFunctions('blockCellHtml(section)', 'wideColumnHtml(column)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)', 'renderWide(sections, nowSec)')}
      renderWide(SECTIONS, 0);`,
     ctx, { filename: 'sessions.html' });
   return { html: ctx.list.html, ctx };
@@ -2862,4 +2862,12 @@ test('shell: ответ старого ccfzf без поля — строка б
   assert.strictEqual(row.shell, false);
   assert.strictEqual(row.shellCmd, '');
   assert.strictEqual(Glyph.shellHtml(row), '');
+});
+
+test('regroup подаёт CONFIG.groupByProjectType в buildSessionsPayload', () => {
+  assert.strictEqual(regroupWith(true, {}, undefined, {}, { groupByProjectType: true }).groupByProjectType, true);
+  assert.strictEqual(regroupWith(true, {}, undefined, {}, {}).groupByProjectType, false);
+  // Раскладка, а не отсев: запрос её не отменяет.
+  assert.strictEqual(regroupWith(true, {}, { mode: 'sessions', query: 'x' }, {}, { groupByProjectType: true })
+    .groupByProjectType, true);
 });
