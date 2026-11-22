@@ -1627,6 +1627,29 @@ test('hide dimmed: свёрнутое окно этой машины пряче�
   assert.strictEqual(opts.isDimmed(row), true);
 });
 
+test('hide dimmed насквозь: regroup → buildSessionsPayload прячет старую и свёрнутую', () => {
+  // Сквозная дорога, а не подставной предикат: ответ в форме агрегатора, строки
+  // собирает настоящий buildSessionList, гасит настоящий isStale.
+  const now = Math.floor(Date.now() / 1000);
+  const win = (title, minimized) => ({ title, host: 'win-host', pid: 7, canFocus: true, lastSeen: now,
+    minimized });
+  const lastState = {
+    ok: true,
+    sessions: [
+      { id: 'old', title: 'Старая', live: true, mtime: now - 7200 },
+      { id: 'fresh', title: 'Свежая', live: true, mtime: now - 60, window: win('Свежая', false) },
+      { id: 'min', title: 'Свёрнутая', live: true, mtime: now - 60, window: win('Свёрнутая', true) },
+    ],
+  };
+  const opts = regroupWith(false, { hideStale: true, dimStale: true }, undefined, lastState, DIM_CONFIG);
+  const out = Groups.buildSessionsPayload(opts.input, 'recent', opts);
+  assert.deepStrictEqual(out.groups.flatMap(g => g.sessions.map(r => r.id)), ['fresh']);
+  // Без dim stale ничего не погашено — ничего и не спрятано.
+  const off = regroupWith(false, { hideStale: true, dimStale: false }, undefined, lastState, DIM_CONFIG);
+  const all = Groups.buildSessionsPayload(off.input, 'recent', off);
+  assert.deepStrictEqual(all.groups.flatMap(g => g.sessions.map(r => r.id)).sort(), ['fresh', 'min', 'old']);
+});
+
 test('hide dimmed снимается запросом', () => {
   const opts = regroupWith(true, { hideStale: true, dimStale: true }, { mode: 'sessions', query: 'x' }, {},
     DIM_CONFIG);
