@@ -223,16 +223,25 @@
    * Внутри колонки панель встаёт в конец: место внутри колонки задаётся
    * перетаскиванием, и подставлять сюда номер значило бы решать за человека
    * то, о чём он не спрашивал.
+   *
+   * Но только та, что приходит из другой колонки. Уже стоящая в названной
+   * остаётся на своём месте: окно настроек зовёт эту функцию на каждую
+   * тронутую панель (`overlayDirtyPanels`), в том числе на галки «show» и
+   * «expanded», и до 22.11.2026 снятая и возвращённая галка «show» уводила
+   * панель в низ колонки — место, назначенное перетаскиванием, терялось.
    */
   function withColumn(order, key, column) {
     const src = order && typeof order === 'object' ? order : {};
     const wide = [];
     const saved = Array.isArray(src.wide) ? src.wide : [];
+    const at = Number(column);
+    const stays = Number.isInteger(at) && at >= 1 && at <= WIDE_COLUMNS
+      && Array.isArray(saved[at - 1]) && saved[at - 1].includes(key);
     for (let i = 0; i < WIDE_COLUMNS; i++) {
       const column_i = Array.isArray(saved[i]) ? saved[i] : [];
-      wide.push(column_i.filter(k => k !== key));
+      wide.push(stays && i === at - 1 ? column_i.slice() : column_i.filter(k => k !== key));
     }
-    const at = Number(column);
+    if (stays) return { ...src, wide };
     if (Number.isInteger(at) && at >= 1 && at <= WIDE_COLUMNS) wide[at - 1].push(key);
     return { ...src, wide };
   }

@@ -452,6 +452,46 @@
     return rest;
   }
 
+  /**
+   * Новый сохранённый порядок: видимый после переноса, слитый со старым.
+   *
+   * `visible` — ключи, которые сейчас на экране, уже в новом порядке (вывод
+   * `moveBlockKey`); `saved` — то, что лежало в файле. Видимые идут ровно так,
+   * как их поставил человек, а ключ, которого на экране нет (лёг трекер чужой
+   * машины, пусты снимки, панель спрятана), встаёт сразу за своим прежним
+   * соседом сверху — ближайшим из видимых в старом порядке; соседа нет —
+   * в начало. Отсутствующие обходятся в старом порядке, поэтому стоявшие
+   * подряд остаются цепочкой.
+   *
+   * `moving` якорем не служит: переносили его, а не соседей, и уйди он в
+   * конец — отсутствующий за ним уехал бы следом, хотя его никто не трогал.
+   * По той же причине сам `moving` из старого порядка не берётся вовсе.
+   *
+   * Цена — в файле живут ключи, про которые не сказать, вернутся ли они:
+   * `past:<N>` ушедшего рабочего стола остаётся в порядке и после следующих
+   * перестановок. Это та же цена, что уже принята в `applyNarrowOrder` —
+   * незнакомый ключ не выбрасывается, потому что место опустевшего
+   * забылось бы за один опрос.
+   */
+  function mergeOrder(saved, visible, moving) {
+    const out = Array.isArray(visible) ? visible.slice() : [];
+    const shown = new Set(out);
+    let anchor = null;
+    // Сколько отсутствующих уже вставлено за каждым якорем: следующий
+    // встаёт за ними, а не перед, — иначе цепочка развернулась бы.
+    const after = new Map();
+    for (const key of Array.isArray(saved) ? saved : []) {
+      if (key === moving) continue;
+      if (shown.has(key)) { anchor = key; continue; }
+      if (out.includes(key)) continue;
+      const tail = after.get(anchor) || 0;
+      const at = anchor === null ? tail : out.indexOf(anchor) + 1 + tail;
+      out.splice(at, 0, key);
+      after.set(anchor, tail + 1);
+    }
+    return out;
+  }
+
   /** Место ключа в списке; неназванный — в конец. */
   function placeOf(keys, key) {
     const at = keys.indexOf(key);
@@ -594,7 +634,7 @@
 
   return {
     buildSections, sectionHeaderText, moveInBlocks, moveBetweenBlocks, firstRowInPanel,
-    orderKeyOf, moveBlockKey,
+    orderKeyOf, moveBlockKey, mergeOrder,
     wideColumnGrow,
   };
 });
