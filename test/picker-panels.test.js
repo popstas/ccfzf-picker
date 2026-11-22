@@ -248,3 +248,11 @@ test('ключи секций типа проекта из ui.json в списо
     assert.ok(!panelRows(state, layout).some(r => r.key.startsWith('type:')), layout);
   }
 });
+
+test('withColumn не теряет порядок типов (order.types) при сохранении вкладки Panels', () => {
+  // Окно настроек пишет order целиком: забудь withColumn поле — и первый же
+  // перенос панели в настройках сбросил бы перетащенный порядок типов.
+  const order = { narrow: ['live'], wide: [['live'], [], [], [], []], types: ['home', 'work'] };
+  assert.deepStrictEqual(withColumn(order, 'past', 2).types, ['home', 'work']);
+  assert.deepStrictEqual(withColumn(order, 'live', 1).types, ['home', 'work']);
+});

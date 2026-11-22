@@ -1244,7 +1244,7 @@
   // загрузки ui.json это единственный порядок, который есть у страницы, и
   // короткий список оставил бы `commitDrag` дыру в массиве при переносе в
   // колонку, которой в нём нет.
-  let order = { narrow: [], wide: Array.from({ length: WIDE_COLUMNS }, () => []) };
+  let order = { narrow: [], wide: Array.from({ length: WIDE_COLUMNS }, () => []), types: [] };
   // Спрятанные панели. Шестое поле ui.json; ставится только из окна настроек —
   // клавиши для этого нет намеренно: случайно нажатая убрала бы панель без
   // следа, а вернуть её можно было бы только там же, в настройках.
@@ -2274,7 +2274,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
         icons: window.SessionWindows.trackerIcons(lastState, CONFIG.windowHost),
         // Живые — секциями по типу проекта вместо машин. Раскладка, а не
         // отсев: запрос и префикс её не отменяют.
-        groupByProjectType: CONFIG.groupByProjectType === true },
+        groupByProjectType: CONFIG.groupByProjectType === true,
+        // Порядок типовых секций, выставленный перетаскиванием (ui.json).
+        typeOrder: order.types || [] },
     );
     groups = payload.groups;
     sortMode = payload.sort;
@@ -3601,8 +3603,24 @@ const infoBackdrop = document.getElementById('info-backdrop');
 
   /** Записать новый порядок и вернуть список к обычной жизни. */
   function commitDrag(x, y) {
+    // Типовую секцию бросили внутри её блока — меняется порядок типов, а не
+    // место блока (typeDrop). Порядок общий для обеих раскладок и сливается
+    // со старым так же, как ключи секций: тип, которого сейчас нет, остаётся
+    // за своим соседом. Решает его groupSessions, поэтому после отпускания
+    // список перегруппировывается (`drag.regroup`, endDrag).
+    const wideTarget = fullscreen ? wideDropTarget(x, y) : null;
+    const typeKeys = fullscreen ? (wideTarget || {}).keys : narrowHeaders().map(sectionKeyOf).filter(Boolean);
+    const typeAt = fullscreen ? (wideTarget || {}).at : dropIndexOf(narrowHeaders(), y);
+    const types = typeKeys ? window.PickerSections.typeDrop(typeKeys, drag.key, typeAt) : null;
+    if (types) {
+      const movingType = String(drag.key).slice('type:'.length);
+      order = { ...order, types: window.PickerSections.mergeOrder(order.types || [], types, movingType) };
+      drag.regroup = true;
+      saveUi();
+      return;
+    }
     if (fullscreen) {
-      const target = wideDropTarget(x, y);
+      const target = wideTarget;
       if (!target) return;
       // Ключ вынимается из всех колонок и кладётся в названную: секция одна,
       // и остаться в прежней колонке она не может. Типовая секция (`type:*`)
@@ -3641,6 +3659,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
   function endDrag() {
     if (!drag) return;
     const moved = drag.moved;
+    const regroupAfter = drag.regroup === true;
     if (drag.node) drag.node.classList.remove('dragging');
     drag = null;
     dropLine.classList.remove('on');
@@ -3651,6 +3670,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
       const payload = heldState;
       heldState = null;
       applyState(payload);
+    } else if (regroupAfter) {
+      // Порядок типов решает группировка, одна перерисовка показала бы старый.
+      regroup();
     } else if (moved) {
       render();
     }

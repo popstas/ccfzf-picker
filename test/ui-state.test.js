@@ -25,7 +25,7 @@ test('пустой файл даёт вид по умолчанию', () => {
     },
     fullscreen: false,
     collapsed: { narrow: {}, wide: {} },
-    order: { narrow: [], wide: [[], [], [], [], []] },
+    order: { narrow: [], wide: [[], [], [], [], []], types: [] },
     hidden: { narrow: {}, wide: {} },
     tree: false,
     wideSplit: 'equal',
@@ -44,7 +44,7 @@ test('сохранённый вид возвращается как был', () 
     },
     fullscreen: true,
     collapsed: { narrow: { past: true }, wide: {} },
-    order: { narrow: ['past', 'live'], wide: [['live'], [], ['past'], [], []] },
+    order: { narrow: ['past', 'live'], wide: [['live'], [], ['past'], [], []], types: [] },
     hidden: { narrow: { projects: true }, wide: {} },
     tree: true,
     wideSplit: 'twoThirds',
@@ -156,7 +156,7 @@ test('в файл уходит ровно то, что читается обра
   const saved = uiStateToSave('name', toggles);
   assert.deepStrictEqual(saved,
     { sort: 'name', toggles, fullscreen: false, collapsed: { narrow: {}, wide: {} },
-      order: { narrow: [], wide: [[], [], [], [], []] },
+      order: { narrow: [], wide: [[], [], [], [], []], types: [] },
       hidden: { narrow: {}, wide: {} }, tree: false, wideSplit: 'equal' });
   assert.deepStrictEqual(normalizeUiState(saved, DEFAULTS), saved);
   // Мусорная сортировка не должна попасть даже в файл: перезапуск молча
@@ -212,6 +212,7 @@ test('порядок секций читается по раскладкам', (
   assert.deepStrictEqual(ui.order, {
     narrow: ['past', 'live', 'projects'],
     wide: [['live'], ['remote', 'projects'], ['past', 'snapshots'], [], []],
+    types: [],
   });
 });
 
@@ -222,7 +223,7 @@ test('старый ui.json без order читается как «человек
   for (const raw of [{}, { order: null }, { order: 'нет' }, { order: 42 }]) {
     assert.deepStrictEqual(
       normalizeUiState(raw, { toggles: {} }).order,
-      { narrow: [], wide: [[], [], [], [], []] },
+      { narrow: [], wide: [[], [], [], [], []], types: [] },
       JSON.stringify(raw),
     );
   }
@@ -273,7 +274,7 @@ test('число колонок объявлено и вывешено нару�
 });
 
 test('порядок доезжает до файла пятым аргументом', () => {
-  const order = { narrow: ['past', 'live'], wide: [['live'], [], ['past'], [], []] };
+  const order = { narrow: ['past', 'live'], wide: [['live'], [], ['past'], [], []], types: ['home'] };
   const saved = uiStateToSave('cost', {}, false, { narrow: {}, wide: {} }, order);
   assert.deepStrictEqual(saved.order, order);
   // И читается обратно тем же: файл пишет и читает одна пара функций.
@@ -309,4 +310,14 @@ test('свёрнутость секции типа проекта пережив
   const saved = uiStateToSave('recent', {}, false, { narrow: { 'type:home': true }, wide: {} },
     { narrow: [], wide: [] }, { narrow: {}, wide: {} }, false, 'equal');
   assert.strictEqual(normalizeUiState(JSON.parse(JSON.stringify(saved))).collapsed.narrow['type:home'], true);
+});
+
+test('order.types — порядок типов проекта, общий для обеих раскладок', () => {
+  const ui = normalizeUiState({ order: { types: ['home', ' work ', 'home', 7, ''] } }, { toggles: {} });
+  assert.deepStrictEqual(ui.order.types, ['home', 'work']);
+  // Старый файл без поля — «ничего не двигали».
+  assert.deepStrictEqual(normalizeUiState({ order: { narrow: ['live'] } }, { toggles: {} }).order.types, []);
+  // И уходит в файл тем же полем.
+  const saved = uiStateToSave('recent', {}, false, {}, { narrow: [], wide: [], types: ['work'] }, {}, false, undefined);
+  assert.deepStrictEqual(saved.order.types, ['work']);
 });

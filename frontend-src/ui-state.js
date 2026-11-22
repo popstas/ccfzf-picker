@@ -166,7 +166,10 @@
       // колонках сразу, и вторая запись про неё — спор, а не вторая секция.
       wide.push(normalizeKeys(savedWide[i], wideSeen));
     }
-    return { narrow: normalizeKeys(src.narrow, new Set()), wide };
+    // `types` — порядок типовых секций внутри блока типов проекта, общий для
+    // обеих раскладок: блок в них один и тот же. Имена типов, а не ключи
+    // `type:*` — в `narrow`/`wide` блок и так стоит одним ключом `live`.
+    return { narrow: normalizeKeys(src.narrow, new Set()), wide, types: normalizeKeys(src.types, new Set()) };
   }
 
   function normalizeUiState(raw, defaults) {

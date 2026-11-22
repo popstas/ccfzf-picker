@@ -284,7 +284,7 @@
     // Группировка по типу проекта — вместо деления по машинам, только живых.
     // Живые без окна — за последней типовой секцией: вопрос у той секции «окна
     // нет», а не тип.
-    if (opts.groupByProjectType) return [...typeGroups(open), ...bare, ...past, ...tail];
+    if (opts.groupByProjectType) return [...typeGroups(open, opts.typeOrder), ...bare, ...past, ...tail];
     // Сразу под своими живыми, раньше чужих машин: окна нет — значит, и
     // машины окна нет, и сессия почти всегда своя (`windowlessGroup`).
     const active = activeGroups(open);
@@ -348,11 +348,20 @@
    * данными, и ключ, которого нет в `order`, уехал бы в конец списка — та же
    * цена, за которую `remote:<host>` склеили в `remote`.
    *
-   * Порядок внутри блока фиксирован: `work`, `home`, прочие по алфавиту,
-   * `untyped` последней. Сессии внутри группы уже отсортированы — `open`
-   * приходит отсортированным, и фильтр порядок сохраняет.
+   * Порядок внутри блока: сначала типы из `typeOrder` (`order.types` в
+   * ui.json — человек их перетаскивал) в его порядке, за ними прочие по
+   * зашитому правилу: `work`, `home`, остальные по алфавиту, `untyped`
+   * последней. Тип из `typeOrder`, которого сейчас нет, секции не заводит.
+   *
+   * `untyped` стоит особняком. Перенос пишет в файл все видимые типы, и
+   * `untyped` в том числе, — без поправки новый тип вставал бы за ней, а её
+   * место — хвост. Поэтому, пока человек не поставил что-то после неё, она
+   * остаётся последней и при новых типах.
+   *
+   * Сессии внутри группы уже отсортированы — `open` приходит отсортированным,
+   * и фильтр порядок сохраняет.
    */
-  function typeGroups(open) {
+  function typeGroups(open, typeOrder) {
     const byType = new Map();
     for (const s of open) {
       const type = (typeof s.projectType === 'string' && s.projectType) || UNTYPED;
@@ -360,8 +369,14 @@
       byType.get(type).push(s);
     }
     const rank = t => (t === UNTYPED ? 2 : TYPE_FIRST.includes(t) ? -1 : 0);
-    const types = [...byType.keys()].sort((a, b) => (rank(a) - rank(b))
+    const saved = (Array.isArray(typeOrder) ? typeOrder : []).filter(t => byType.has(t));
+    const rest = [...byType.keys()].filter(t => !saved.includes(t)).sort((a, b) => (rank(a) - rank(b))
       || (rank(a) === -1 ? TYPE_FIRST.indexOf(a) - TYPE_FIRST.indexOf(b) : a.localeCompare(b)));
+    const types = [...saved, ...rest];
+    if (saved.length && saved[saved.length - 1] === UNTYPED) {
+      types.splice(types.indexOf(UNTYPED), 1);
+      types.push(UNTYPED);
+    }
     return types.map(type => ({
       desktop: null, key: `type:${type}`, label: type, sessions: byType.get(type),
       remote: false, host: '', typeBlock: true,
@@ -584,6 +599,8 @@
       onlyWindow: !!opts.onlyWindow,
       // Раскладка, а не отсев: запрос и префикс её не отменяют.
       groupByProjectType: opts.groupByProjectType === true,
+      // Порядок типов, который человек выставил перетаскиванием (order.types).
+      typeOrder: Array.isArray(opts.typeOrder) ? opts.typeOrder : [],
     });
     return { ok: true, groups, sort: mode };
   }
