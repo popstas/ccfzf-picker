@@ -373,7 +373,10 @@
     const rest = [...byType.keys()].filter(t => !saved.includes(t)).sort((a, b) => (rank(a) - rank(b))
       || (rank(a) === -1 ? TYPE_FIRST.indexOf(a) - TYPE_FIRST.indexOf(b) : a.localeCompare(b)));
     const types = [...saved, ...rest];
-    if (saved.length && saved[saved.length - 1] === UNTYPED) {
+    // Хвост решает исходный порядок, а не отфильтрованный: `['untyped',
+    // 'home']` без живых `home` — это всё ещё «untyped поставили первой».
+    const named = Array.isArray(typeOrder) ? typeOrder : [];
+    if (saved.includes(UNTYPED) && named[named.length - 1] === UNTYPED) {
       types.splice(types.indexOf(UNTYPED), 1);
       types.push(UNTYPED);
     }

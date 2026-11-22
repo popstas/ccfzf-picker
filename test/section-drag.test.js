@@ -328,8 +328,30 @@ test('широкая: перенос внутри блока своей коло
   assert.deepStrictEqual(order.wide, [['live', 'past'], ['projects']]);
 });
 
+function endDragWith(ctx) {
+  const calls = [];
+  const full = {
+    dropLine: { classList: { remove: () => {} } }, clearDropZones: () => {},
+    applyState: () => calls.push('applyState'), regroup: () => calls.push('regroup'),
+    render: () => calls.push('render'), heldState: null, ...ctx,
+  };
+  vm.createContext(full);
+  vm.runInContext(`${sourceOf('endDrag')}\nendDrag();`, full, { filename: 'sessions.html' });
+  return calls;
+}
+
 test('после переноса внутри блока список перегруппировывается, а не только перерисовывается', () => {
   // Порядок типов решает groupSessions — одна перерисовка показала бы старый.
-  const source = sourceOf('endDrag');
-  assert.ok(/regroup\(\)/.test(source), 'endDrag не перегруппировывает список после переноса типа');
+  assert.deepStrictEqual(endDragWith({ drag: { moved: true, regroup: true } }), ['regroup']);
+});
+
+test('перегруппировка после переноса типа — и когда такт был придержан', () => {
+  // Перенос длится дольше секунды, такт почти всегда придержан. applyState
+  // доходит до regroup не на всяком ответе (отказ, кривая форма) — поэтому
+  // endDrag зовёт его сам.
+  assert.deepStrictEqual(endDragWith({ drag: { moved: true, regroup: true }, heldState: { state: null } }),
+    ['applyState', 'regroup']);
+  // Обычный перенос без типов — прежнее поведение.
+  assert.deepStrictEqual(endDragWith({ drag: { moved: true }, heldState: { state: null } }), ['applyState']);
+  assert.deepStrictEqual(endDragWith({ drag: { moved: true } }), ['render']);
 });

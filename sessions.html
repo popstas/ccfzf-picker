@@ -3670,12 +3670,14 @@ const infoBackdrop = document.getElementById('info-backdrop');
       const payload = heldState;
       heldState = null;
       applyState(payload);
-    } else if (regroupAfter) {
-      // Порядок типов решает группировка, одна перерисовка показала бы старый.
-      regroup();
-    } else if (moved) {
+    } else if (moved && !regroupAfter) {
       render();
     }
+    // Порядок типов решает группировка, одна перерисовка показала бы старый.
+    // Зовётся и после придержанного ответа: applyState доходит до regroup не
+    // всегда — ответ с отказом или кривой формы кончается одним render(), и
+    // перенос выглядел бы несработавшим до следующего удачного ответа.
+    if (regroupAfter) regroup();
   }
 
   list.addEventListener('pointerdown', (e) => {

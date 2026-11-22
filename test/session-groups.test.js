@@ -1138,3 +1138,9 @@ test('buildSessionsPayload подаёт typeOrder в groupSessions', () => {
   const out = buildSessionsPayload(res, 'recent', { groupByProjectType: true, typeOrder: ['home', 'work'] });
   assert.deepStrictEqual(out.groups.map(g => g.key), ['type:home', 'type:work']);
 });
+
+test('untyped, поставленная первой, не уезжает в хвост, когда её соседа сейчас нет', () => {
+  // ['untyped', 'gone']: живых gone нет, work/home/alpha не названы. Правило
+  // хвоста смотрит на исходный порядок — untyped там не последняя.
+  assert.deepStrictEqual(typeKeys(['untyped', 'gone']), ['untyped', 'work', 'home', 'alpha']);
+});
