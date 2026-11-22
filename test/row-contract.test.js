@@ -1272,6 +1272,41 @@ test('вынесена часть — статуслайн рисует ровн
   assert.ok(statusChecks.innerHTML.includes('class="status-check gap"'), statusChecks.innerHTML);
 });
 
+test('щелчок dim stale при включённой hide dimmed пересчитывает состав', () => {
+  // Затемнение само по себе состав не меняет, и обработчику dim stale хватало
+  // render. При hide dimmed меняет: выключил затемнение — спрятанные обязаны
+  // вернуться сразу, а не на следующем ответе агрегатора (тот может не прийти
+  // вовсе — неизменившееся состояние отсекается по отпечатку).
+  const on = renderChecksWith({
+    dimStale: { list: true, statusline: true },
+    hideStale: { list: true, statusline: true },
+  });
+  const input = on.toggleInputs.get('dimStale');
+  input.checked = false;
+  input.listeners.change();
+  assert.strictEqual(on.calls.regroup, 1, 'regroup не позван');
+  assert.strictEqual(on.calls.render, 0);
+
+  const off = renderChecksWith({
+    dimStale: { list: true, statusline: true },
+    hideStale: { list: false, statusline: true },
+  });
+  const plain = off.toggleInputs.get('dimStale');
+  plain.checked = false;
+  plain.listeners.change();
+  assert.strictEqual(off.calls.regroup, 0, 'без hide dimmed пересобирать нечего');
+  assert.strictEqual(off.calls.render, 1);
+});
+
+test('hide dimmed — фильтр: щелчок по нему зовёт regroup', () => {
+  const { toggleInputs, calls } = renderChecksWith({ hideStale: { list: false, statusline: true } });
+  const input = toggleInputs.get('hideStale');
+  assert.ok(input, 'галки hide dimmed нет в статуслайне');
+  input.checked = true;
+  input.listeners.change();
+  assert.strictEqual(calls.regroup, 1);
+});
+
 test('клик по нарисованному чекбоксу правит ось list, не трогая statusline', () => {
   const uiToggles = {
     showPrompt: { list: true, statusline: true },
@@ -1441,12 +1476,18 @@ test('подписи колонок совпадают в пикере и в н�
 // Показанные режим и запрос подставные, а `activeFilters` — настоящая, из
 // session-groups.js: правило «спрошенное перебивает отобранное» проверяется
 // здесь вместе с проводкой, а не вместо неё.
-function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query: '' }, lastState = {}) {
+function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query: '' }, lastState = {},
+  config = {}) {
   const source = SESSIONS_HTML.match(/\n {2}function regroup\(\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'regroup не найден в sessions.html — тест сторожит не то');
+  // staleSettings — настоящая, из страницы: предикат isDimmed обязан гасить
+  // ровно то, что гасит отрисовщик строки, а тот спрашивает её.
+  const staleSource = SESSIONS_HTML.match(/\n {2}function staleSettings\(\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(staleSource, 'staleSettings не найден в sessions.html — тест сторожит не то');
   let opts = null;
   const ctx = {
     window: {
+      StaleItems,
       SessionGroups: {
         activeFilters: Groups.activeFilters,
         payloadSource: Groups.payloadSource,
@@ -1460,7 +1501,7 @@ function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query:
       },
       SessionWindows,
     },
-    CONFIG: { onlyLive: configOnlyLive, windowHost: 'win-host' },
+    CONFIG: { onlyLive: configOnlyLive, windowHost: 'win-host', ...config },
     toggles,
     shownModeAndQuery: () => shown,
     lastSessions: [],
@@ -1473,7 +1514,7 @@ function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query:
     render: () => {},
   };
   vm.createContext(ctx);
-  vm.runInContext(`${source[0]}\nregroup();`, ctx, { filename: 'sessions.html' });
+  vm.runInContext(`${staleSource[0]}\n${source[0]}\nregroup();`, ctx, { filename: 'sessions.html' });
   assert.ok(opts, 'buildSessionsPayload не позван');
   return opts;
 }
@@ -1535,6 +1576,133 @@ test('пустой запрос без префикса отсевы не тро
   });
   assert.strictEqual(opts.onlyLive, true);
   assert.strictEqual(opts.onlyWindow, true);
+});
+
+test('regroup подаёт CONFIG.searchDesktop: при запросе и searchDesktop: false уезжает hideDesktop: true', () => {
+  // Галка списка показывает Desktop, но при поиске решает не она, а ключ
+  // конфига. Без проводки ключ значил бы что-то только в тестах activeFilters.
+  const opts = regroupWith(true, { showDesktop: true }, { mode: 'sessions', query: 'x' }, {},
+    { searchDesktop: false });
+  assert.strictEqual(opts.hideDesktop, true);
+  // Без запроса решает галка списка, как и раньше.
+  const plain = regroupWith(true, { showDesktop: true }, { mode: 'sessions', query: '' }, {},
+    { searchDesktop: false });
+  assert.strictEqual(plain.hideDesktop, false);
+});
+
+// ── hide dimmed: спрятана ⇔ погашена ───────────────────────────────────────
+//
+// Предикат isDimmed уезжает из regroup в buildSessionsPayload, и гасить он
+// обязан ровно то, что гасит отрисовщик строки: те же staleSettings, тот же
+// isStale, тот же довод свёрнутого окна. Разойдись они — пряталась бы яркая
+// строка или оставалась бы тусклая.
+const DIM_CONFIG = { stale: { enabled: true, sessionHours: 1, projectHours: 1 } };
+
+test('hide dimmed: уехавший isDimmed гасит старую строку и не трогает свежую', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const opts = regroupWith(true, { hideStale: true, dimStale: true }, undefined, {}, DIM_CONFIG);
+  assert.strictEqual(opts.hideStale, true);
+  assert.strictEqual(typeof opts.isDimmed, 'function', 'isDimmed не передан');
+  assert.strictEqual(opts.isDimmed({ id: 'old', lastActivity: now - 7200 }), true);
+  assert.strictEqual(opts.isDimmed({ id: 'new', lastActivity: now - 60 }), false);
+});
+
+test('hide dimmed при выключенной dim stale прятать нечего', () => {
+  // Решение Стаса 22.11: прятать ⇔ гасить. Ничего не погашено — ничего и не
+  // спрятано, сколько бы часов строке ни было.
+  const now = Math.floor(Date.now() / 1000);
+  const opts = regroupWith(true, { hideStale: true, dimStale: false }, undefined, {}, DIM_CONFIG);
+  assert.strictEqual(opts.isDimmed({ id: 'old', lastActivity: now - 7200 }), false);
+  assert.strictEqual(opts.isDimmed({ id: 'new', lastActivity: now - 60 }), false);
+});
+
+test('hide dimmed: свёрнутое окно этой машины прячет и свежую строку', () => {
+  // Без исключений: свёрнутое гасится — значит, и прячется.
+  const now = Math.floor(Date.now() / 1000);
+  const opts = regroupWith(true, { hideStale: true, dimStale: true }, undefined, {}, DIM_CONFIG);
+  const row = { id: 'min', lastActivity: now - 60,
+    windows: [{ host: 'win-host', title: 'x', minimized: true }] };
+  assert.strictEqual(SessionWindows.minimizedHere(row, null, 'win-host'), true,
+    'строка теста не свёрнута — тест сторожит не то');
+  assert.strictEqual(opts.isDimmed(row), true);
+});
+
+test('hide dimmed насквозь: regroup → buildSessionsPayload прячет старую и свёрнутую', () => {
+  // Сквозная дорога, а не подставной предикат: ответ в форме агрегатора, строки
+  // собирает настоящий buildSessionList, гасит настоящий isStale.
+  const now = Math.floor(Date.now() / 1000);
+  const win = (title, minimized) => ({ title, host: 'win-host', pid: 7, canFocus: true, lastSeen: now,
+    minimized });
+  const lastState = {
+    ok: true,
+    sessions: [
+      { id: 'old', title: 'Старая', live: true, mtime: now - 7200 },
+      { id: 'fresh', title: 'Свежая', live: true, mtime: now - 60, window: win('Свежая', false) },
+      { id: 'min', title: 'Свёрнутая', live: true, mtime: now - 60, window: win('Свёрнутая', true) },
+    ],
+  };
+  const opts = regroupWith(false, { hideStale: true, dimStale: true }, undefined, lastState, DIM_CONFIG);
+  const out = Groups.buildSessionsPayload(opts.input, 'recent', opts);
+  assert.deepStrictEqual(out.groups.flatMap(g => g.sessions.map(r => r.id)), ['fresh']);
+  // Без dim stale ничего не погашено — ничего и не спрятано.
+  const off = regroupWith(false, { hideStale: true, dimStale: false }, undefined, lastState, DIM_CONFIG);
+  const all = Groups.buildSessionsPayload(off.input, 'recent', off);
+  assert.deepStrictEqual(all.groups.flatMap(g => g.sessions.map(r => r.id)).sort(), ['fresh', 'min', 'old']);
+});
+
+test('hide dimmed снимается запросом', () => {
+  const opts = regroupWith(true, { hideStale: true, dimStale: true }, { mode: 'sessions', query: 'x' }, {},
+    DIM_CONFIG);
+  assert.strictEqual(opts.hideStale, false);
+});
+
+// hide dimmed прячет и проекты, но только в секциях: projectRows читают хоткеи
+// проектов, `/p` и справочник клавиш, и спрятанный с глаз проект там обязан
+// остаться — его хоткей и `/p <проект>` продолжают работать.
+function sectionsForWith(projectRows, toggles, mode = 'sessions', query = '') {
+  const source = pageFunctions('staleSettings()', 'sectionsFor(mode, query)', 'layoutName()');
+  let projects = null;
+  const ctx = {
+    window: {
+      StaleItems,
+      SessionGroups: { activeFilters: Groups.activeFilters },
+      PickerSections: { buildSections: (o) => { projects = o.projects; return []; } },
+    },
+    CONFIG: DIM_CONFIG,
+    toggles,
+    tree: false,
+    fullscreen: false,
+    groups: [],
+    projectRows,
+    snapshotItemsFor: () => [],
+    trackerIsHere: () => false,
+    snapshotsUnavailableHere: () => null,
+    collapsed: { narrow: {}, wide: {} },
+    order: { narrow: [], wide: [] },
+    hidden: { narrow: {}, wide: {} },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${source}\nsectionsFor(${JSON.stringify(mode)}, ${JSON.stringify(query)});`, ctx,
+    { filename: 'sessions.html' });
+  assert.ok(projects, 'buildSections не позван');
+  return projects;
+}
+
+test('hide dimmed прячет погашенный проект только в секциях', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const rows = [
+    { path: '/p/old', name: 'old', lastActivity: now - 7200 },
+    { path: '/p/new', name: 'new', lastActivity: now - 60 },
+  ];
+  const shown = sectionsForWith(rows, { hideStale: true, dimStale: true });
+  assert.deepStrictEqual(Array.from(shown, r => r.name), ['new']);
+  // Глобальный список не тронут: хоткеи и `/p` читают его.
+  assert.strictEqual(rows.length, 2);
+  // Без hide dimmed, при выключенной dim stale и при запросе — все на месте.
+  assert.strictEqual(sectionsForWith(rows, { hideStale: false, dimStale: true }).length, 2);
+  assert.strictEqual(sectionsForWith(rows, { hideStale: true, dimStale: false }).length, 2);
+  assert.strictEqual(sectionsForWith(rows, { hideStale: true, dimStale: true }, 'sessions', 'old').length, 2);
+  assert.strictEqual(sectionsForWith(rows, { hideStale: true, dimStale: true }, 'projects', '').length, 2);
 });
 
 test('правка запроса пересчитывает состав списка, а не только рисунок', () => {
@@ -1746,6 +1914,8 @@ function renderSessionRows(state, query, toggles, stale, treeMode, extra = {}) {
       StaleItems,
       SessionWindows,
       SessionTree,
+      // sectionsFor спрашивает activeFilters, прятать ли погашенные проекты.
+      SessionGroups: Groups,
     },
     CONFIG: {
       stale: staleConfig,

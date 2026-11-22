@@ -157,6 +157,9 @@
           hint: 'Raising needs an open window of that project on this machine; '
             + 'without one the picker starts a new session.' },
         { id: 'onlyLive', label: 'Only running sessions', type: 'bool', default: true },
+        { id: 'searchDesktop', label: 'Search Claude Desktop sessions', type: 'bool', default: true,
+          hint: 'Off: searching and modes like /h skip Claude Desktop sessions; '
+            + 'the list itself follows the "claude desktop" toggle.' },
         { id: 'hideOnBlur', label: 'Hide the window when it loses focus', type: 'bool', default: true },
         { id: 'backgroundRefresh', label: 'Keep polling while the window is closed', type: 'bool',
           default: true,

@@ -53,7 +53,7 @@ test('галка без ключа в конфиге показывает сво
   // unwrap_or(true). Пустая галка показывала бы выключенным то, что работает
   // включённым, и проверить это можно было бы только по поведению пикера.
   const fields = configToFields({ sshHost: 'host' });
-  for (const id of ['onlyLive', 'hideOnBlur', 'backgroundRefresh']) {
+  for (const id of ['onlyLive', 'hideOnBlur', 'backgroundRefresh', 'searchDesktop']) {
     assert.strictEqual(fields[id], true, id);
   }
   // А те, у кого умолчание false, остаются пустыми: незнание про ту сторону
