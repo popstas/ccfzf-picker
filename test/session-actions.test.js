@@ -96,14 +96,23 @@ test('reopenableRows — те же строки, у которых меню пр
 test('пункт трея Reopen ждёт свежего ответа и открывает общей openSession', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'sessions.html'), 'utf8');
   assert.match(html, /listen\('reopen-disconnected'/);
-  const fn = html.match(/\n {2}async function reopenDisconnected\(state\) \{[\s\S]*?\n {2}\}\n/);
+  const targets = html.match(/\n {2}function reopenTargets\(state\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(targets, 'reopenTargets не найден — тест сторожит не то');
+  assert.match(targets[0], /reopenableRows\(/);
+  const fn = html.match(/\n {2}async function reopenDisconnected\(targets\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(fn, 'reopenDisconnected не найден — тест сторожит не то');
-  assert.match(fn[0], /reopenableRows\(/);
-  assert.match(fn[0], /openSession\(row, \{ reopen: true, confirmed: true \}\)/);
+  assert.match(fn[0], /openSession\(row, \{ reopen: true, confirmed: true, keepShown: true \}\)/);
   assert.ok(!/buildOpenCommand/.test(fn[0]), 'своей сборки команды у пункта трея быть не должно');
+  // Гасится один раз, после цикла: иначе строки со второй собирались бы в
+  // скрытой, то есть усыплённой, странице.
+  assert.match(fn[0], /\n {4}invoke\('hide_picker'\);\n {2}\}\n$/);
   const apply = html.match(/\n {2}function applyState\(payload\) \{[\s\S]*?\n {2}\}\n/)[0];
   assert.match(apply, /reopenWait && --reopenWait\.left <= 0/);
-  assert.match(html, /reopenWait = \{\s*left: 2,/);
+  // Пустой список до прогрева признака — ещё не «нет разорванных».
+  assert.match(apply, /targets\.length \|\| Date\.now\(\) >= reopenWait\.until/);
+  assert.match(html, /reopenWait = \{\s*left: 2,\s*until: Date\.now\(\) \+ REOPEN_WARMUP_MS,/);
+  const open = html.match(/\n {2}async function openSession\(row, opts = \{\}\) \{[\s\S]*?\n {2}\}\n/)[0];
+  assert.match(open, /if \(!opts\.keepShown\) invoke\('hide_picker'\);/);
 });
 
 test('информация о сессии есть всегда', () => {
