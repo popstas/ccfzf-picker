@@ -147,6 +147,23 @@
             min-height: 2em;
         }
         #list.blocks .block-rows { overflow-y: auto; min-height: 0; flex: 0 1 auto; }
+        /* Блок типов проекта (`type:*`, группировка по типу) — одна общая
+           обёртка с одним скроллом во всю высоту колонки (Стас 22.11: «скролл
+           должен быть один на все группы»). Каждой типовой секции своя доля
+           колонки, как у прочих блоков, давала бы своих полос по числу типов,
+           а развёрнутый блок короче своей доли — пустоту под ним: зазор между
+           раскрытыми типами вырастал до полэкрана. Внутри обёртки блоки — по
+           содержимому, зазор тот же, что между свёрнутыми (`gap` колонки), а
+           прокручивается вся обёртка. Собирает её `wideColumnHtml`. */
+        #list.blocks .block-stack {
+            flex: 1 1 0; min-height: 2em; overflow-y: auto;
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        #list.blocks .block-stack > .block,
+        #list.blocks .block-stack > .block:last-child:not(:only-child) {
+            flex: 0 0 auto; max-height: none; min-height: 0; overflow: visible;
+        }
+        #list.blocks .block-stack .block-rows { overflow-y: visible; }
         /* Карточка — только у строки сессии (`.row.session`), не у голого
            `.row`: тот же `.text`/`.meta`/`.name`/`.dot` носят и строка
            проекта, и снимок (заголовок и его сессия), и свёрнутый блок, и
@@ -1879,6 +1896,25 @@ const infoBackdrop = document.getElementById('info-backdrop');
   }
 
   /**
+   * Разметка одной колонки широкой раскладки: блок на секцию, а подряд идущие
+   * типовые секции (`typeBlock`) — в общей обёртке `.block-stack` с одним
+   * скроллом (см. стиль `.block-stack`). Блоки внутри обёртки те же
+   * `.block[data-block]`: тело ищется по ключу (`blockBodies`), а
+   * перетаскивание (`wideDropTarget`) ищет `.block` в колонке вглубь.
+   */
+  function wideColumnHtml(column) {
+    let html = '';
+    let stack = '';
+    for (const section of column) {
+      if (section.typeBlock === true) { stack += blockCellHtml(section); continue; }
+      if (stack) { html += `<div class="block-stack">${stack}</div>`; stack = ''; }
+      html += blockCellHtml(section);
+    }
+    if (stack) html += `<div class="block-stack">${stack}</div>`;
+    return html;
+  }
+
+  /**
    * Подзаголовок машины внутри блока чужих сессий.
    *
    * В `rows` не кладётся намеренно: это подпись, а не строка списка. Выбирать
@@ -1994,7 +2030,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
         byColumn.map(column => column[0].column), wideSplit);
       list.innerHTML = byColumn.map((column, i) =>
         `<div class="block-col col-${column[0].column}${grow[i] === 2 ? ' grow-2' : ''}">` +
-        column.map(blockCellHtml).join('') + '</div>').join('');
+        wideColumnHtml(column) + '</div>').join('');
       blocksShape = shape;
       renderedBlocks = new Map();
       blockBodies = new Map(Array.from(list.querySelectorAll('.block'),

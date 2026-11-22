@@ -172,3 +172,26 @@ test('широкая: блок типов уезжает в другую кол�
   });
   assert.deepStrictEqual(order.wide, [['past'], ['projects', 'live']]);
 });
+
+// ── wideColumnHtml: блок типов — одна обёртка с одним скроллом ─────────────
+
+test('типовые секции подряд — в одной .block-stack, прочие блоки — сами по себе', () => {
+  const column = [
+    { key: 'type:work', typeBlock: true, collapsed: false },
+    { key: 'type:home', typeBlock: true, collapsed: true },
+    { key: 'nowindow', collapsed: false },
+    { key: 'past', collapsed: false },
+  ];
+  const escapeHtml = s => String(s);
+  const html = run(['blockCellHtml', 'wideColumnHtml'], `wideColumnHtml(${JSON.stringify(column)})`, { escapeHtml });
+  assert.strictEqual(html,
+    '<div class="block-stack">'
+    + '<div class="block" data-block="type:work"><div class="block-rows"></div></div>'
+    + '<div class="block collapsed" data-block="type:home"><div class="block-rows"></div></div>'
+    + '</div>'
+    + '<div class="block" data-block="nowindow"><div class="block-rows"></div></div>'
+    + '<div class="block" data-block="past"><div class="block-rows"></div></div>');
+  // Без типовых секций разметка прежняя: блок на секцию, обёртки нет.
+  const plain = run(['blockCellHtml', 'wideColumnHtml'], `wideColumnHtml(${JSON.stringify(column.slice(2))})`, { escapeHtml });
+  assert.ok(!plain.includes('block-stack'), plain);
+});

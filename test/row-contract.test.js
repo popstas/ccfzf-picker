@@ -2384,7 +2384,7 @@ function wideColumnsHtml(columns, wideSplit, ctxBase) {
   ctx.SECTIONS = SECTIONS;
   ctx.wideSplit = wideSplit;
   vm.runInContext(
-    `${pageFunctions('blockCellHtml(section)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)', 'renderWide(sections, nowSec)')}
+    `${pageFunctions('blockCellHtml(section)', 'wideColumnHtml(column)', 'sectionItem(section)', 'itemsOfSection(section, nowSec)', 'renderWide(sections, nowSec)')}
      renderWide(SECTIONS, 0);`,
     ctx, { filename: 'sessions.html' });
   return { html: ctx.list.html, ctx };
