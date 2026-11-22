@@ -92,6 +92,11 @@ pub fn live_names(state: &serde_json::Value) -> Vec<String> {
         if !s.get("live").and_then(|v| v.as_bool()).unwrap_or(false) {
             continue;
         }
+        // Разорванная сессия имени не держит — та же мерка, что у
+        // `liveSessionNames` на странице: признак агрегатора, а не отсутствие окна.
+        if s.get("disconnected").and_then(|v| v.as_bool()).unwrap_or(false) {
+            continue;
+        }
         let windows: Vec<&serde_json::Value> = match s.get("windows").and_then(|v| v.as_array()) {
             Some(list) if !list.is_empty() => list.iter().collect(),
             _ => s.get("window").filter(|w| w.is_object()).into_iter().collect(),

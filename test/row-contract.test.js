@@ -146,6 +146,14 @@ test('agentSeen гасит кружок ровно с той стороны, с 
     '<div class="dot idle"></div>');
 });
 
+test('disconnected доезжает до строки и только булевым', () => {
+  // Признак считает агрегатор (застрявшая очередь ssh-сокета); страница его
+  // не выводит сама, а только несёт. Без поля — false: старый агрегатор.
+  assert.strictEqual(firstRow([aggregatorSession({ disconnected: true })]).disconnected, true);
+  assert.strictEqual(firstRow([aggregatorSession()]).disconnected, false);
+  assert.strictEqual(firstRow([aggregatorSession({ disconnected: 'yes' })]).disconnected, false);
+});
+
 test('сессия без записи агента рисуется пусто, а не «undefined»', () => {
   const row = firstRow([aggregatorSession({ agent: null, live: false })]);
   assert.strictEqual(Glyph.statusDotHtml(row), '<div class="dot closed"></div>');

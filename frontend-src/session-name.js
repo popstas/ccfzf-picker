@@ -55,7 +55,10 @@
   function liveSessionNames(sessions) {
     const out = [];
     for (const s of Array.isArray(sessions) ? sessions : []) {
-      if (!s || !s.live) continue;
+      // Разорванная сессия имени не держит: войти в неё нечем, и `^N` рядом
+      // обязан получить прежнее имя, а не `-2`. Мерка — признак агрегатора,
+      // а не отсутствие окна: у разорванной окно-труп бывает и есть.
+      if (!s || !s.live || s.disconnected === true) continue;
       const windows = Array.isArray(s.windows) && s.windows.length
         ? s.windows
         : (s.window ? [s.window] : []);
