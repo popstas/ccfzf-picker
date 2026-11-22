@@ -3609,9 +3609,12 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // в порядке — это `live`: блок типов переносится целиком (orderKeyOf).
       const moving = window.PickerSections.orderKeyOf(drag.key);
       const columns = order.wide.map(keys => keys.filter(k => k !== moving));
-      // Видимый порядок колонки, а не сохранённый: сохранённого может не быть
-      // вовсе, а поставить секцию надо туда, куда смотрит человек.
-      columns[target.column - 1] = window.PickerSections.moveBlockKey(target.keys, drag.key, target.at);
+      // Видимый порядок колонки главный: сохранённого может не быть вовсе, а
+      // поставить секцию надо туда, куда смотрит человек. Но сливается он со
+      // старым, а не заменяет его — иначе из колонки выпали бы секции,
+      // которых сейчас нет на экране.
+      const visible = window.PickerSections.moveBlockKey(target.keys, drag.key, target.at);
+      columns[target.column - 1] = window.PickerSections.mergeOrder(columns[target.column - 1], visible, moving);
       order = { ...order, wide: columns };
     } else {
       // Видимый порядок, а не сохранённый: в файле может не быть ничего, а
@@ -3620,13 +3623,18 @@ const infoBackdrop = document.getElementById('info-backdrop');
       const visible = headers.map(sectionKeyOf).filter(Boolean);
       // moveBlockKey, а не прежний moveKey: типовые секции стоят одним блоком
       // на месте `live`, и в порядок уходит ключ `live`, а не `type:*`.
-      order = { ...order, narrow: window.PickerSections.moveBlockKey(visible, drag.key, dropIndexOf(headers, y)) };
+      const moved = window.PickerSections.moveBlockKey(visible, drag.key, dropIndexOf(headers, y));
+      const moving = window.PickerSections.orderKeyOf(drag.key);
+      order = { ...order, narrow: window.PickerSections.mergeOrder(order.narrow, moved, moving) };
     }
-    // Порядок секций, которых сейчас нет на экране (лёг трекер — нет и его
-    // секции), в файле не сохраняется: он записывается по видимому списку.
-    // Вернувшаяся машина встанет в конец, по тому же правилу, по которому
-    // туда встаёт всё неназванное. Помнить место того, чего нет, значило бы
-    // держать в файле ключи, про которые уже не сказать, живые они или мусор.
+    // Новый видимый порядок сливается со старым сохранённым, а не заменяет
+    // его (mergeOrder): секция, которой сейчас нет на экране (лёг трекер чужой
+    // машины, пусты снимки), остаётся в файле за своим прежним соседом и,
+    // вернувшись, встаёт туда же, а не в конец колонки. До 22.11.2026 порядок
+    // писался по одному видимому списку, и место отсутствующей забывалось —
+    // на глаз это выглядело потерянной настройкой. Цена слияния — в файле
+    // доживают ключи, про которые не сказать, вернутся ли они (`past:<N>`
+    // ушедшего стола); та же, что уже принята в applyNarrowOrder.
     saveUi();
   }
 
