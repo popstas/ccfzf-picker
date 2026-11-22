@@ -25,8 +25,11 @@ python program out of the bundled copy and runs it directly — `python` or
 `python3` has to be on `PATH`.
 
 With `localSource` on, `sshHost` may be left empty — one source is a working
-setup. Local sessions get no window mark and no Enter-to-focus until the window
-tracker on this machine learns to bind them; that is a separate task.
+setup. On macOS local sessions get their window mark and Enter-to-focus too:
+macos-windows-manager writes its tracker file for the local aggregator as well
+(its `features.localSource`). On Windows the tracker still writes for one
+aggregator only, the one behind its shared folder, so local sessions there have
+no window mark yet; that is a separate task.
 
 ## Mapped directories and folder actions
 
