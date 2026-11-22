@@ -1134,7 +1134,7 @@ test('saveUi пишет двухосный uiToggles, ось statusline не т�
     // Свёрнутых секций человек не трогал — обе половинки пусты.
     collapsed: { narrow: {}, wide: {} },
     // Порядка не назначал — тоже пусто, то есть «как по умолчанию».
-    order: { narrow: [], wide: [[], [], [], [], []] },
+    order: { narrow: [], wide: [[], [], [], [], []], types: [] },
     hidden: { narrow: {}, wide: {} },
     // Иерархию не включали — режим выключен.
     tree: false,
@@ -1509,6 +1509,7 @@ function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query:
     seen: {},
     sortMode: 'recent',
     groups: [],
+    order: { narrow: [], wide: [], types: config.typeOrder || [] },
     paintSort: () => {},
     paintToggles: () => {},
     render: () => {},
@@ -2862,6 +2863,11 @@ test('shell: ответ старого ccfzf без поля — строка б
   assert.strictEqual(row.shell, false);
   assert.strictEqual(row.shellCmd, '');
   assert.strictEqual(Glyph.shellHtml(row), '');
+});
+
+test('regroup подаёт порядок типов из ui.json (order.types) в buildSessionsPayload', () => {
+  const opts = regroupWith(true, {}, undefined, {}, { groupByProjectType: true, typeOrder: ['home', 'work'] });
+  assert.deepStrictEqual([...opts.typeOrder], ['home', 'work']);
 });
 
 test('regroup подаёт CONFIG.groupByProjectType в buildSessionsPayload', () => {

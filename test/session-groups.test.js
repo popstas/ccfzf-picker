@@ -1102,3 +1102,45 @@ test('buildSessionsPayload подаёт groupByProjectType в groupSessions', ()
   const off = buildSessionsPayload(res, 'recent', {});
   assert.deepStrictEqual(off.groups.map(g => g.key), ['live']);
 });
+
+// ── Свой порядок типов (order.types в ui.json) ─────────────────────────────
+
+const typeKeys = (typeOrder) => groupSessions(TYPED.map(s => ({ ...s })), 'recent',
+  { groupByProjectType: true, typeOrder })
+  .filter(g => g.typeBlock).map(g => g.label);
+
+test('сохранённый порядок типов перебивает зашитый', () => {
+  assert.deepStrictEqual(typeKeys(['alpha', 'home', 'work', 'untyped']), ['alpha', 'home', 'work', 'untyped']);
+});
+
+test('типы, которых нет в сохранённом порядке, — за названными по прежнему правилу', () => {
+  // home и work не двигали: встают после alpha, в зашитом порядке.
+  assert.deepStrictEqual(typeKeys(['alpha']), ['alpha', 'work', 'home', 'untyped']);
+});
+
+test('untyped остаётся последней, пока её не поставили выше другого типа', () => {
+  // После любого переноса в файл уходят все видимые типы, untyped тоже.
+  // Новый тип при этом не должен вставать за untyped: её место — хвост.
+  assert.deepStrictEqual(typeKeys(['home', 'work', 'untyped']), ['home', 'work', 'alpha', 'untyped']);
+  // Человек сам поднял untyped выше — её место уважается.
+  assert.deepStrictEqual(typeKeys(['untyped', 'home']), ['untyped', 'home', 'work', 'alpha']);
+});
+
+test('тип из сохранённого порядка, которого сейчас нет, секции не заводит', () => {
+  assert.deepStrictEqual(typeKeys(['gone', 'home']), ['home', 'work', 'alpha', 'untyped']);
+});
+
+test('buildSessionsPayload подаёт typeOrder в groupSessions', () => {
+  const res = { ok: true, seen: {}, sessions: [
+    { id: 'a', title: 'A', cwd: '/p/a', live: true, projectType: 'home' },
+    { id: 'b', title: 'B', cwd: '/p/b', live: true, projectType: 'work' },
+  ] };
+  const out = buildSessionsPayload(res, 'recent', { groupByProjectType: true, typeOrder: ['home', 'work'] });
+  assert.deepStrictEqual(out.groups.map(g => g.key), ['type:home', 'type:work']);
+});
+
+test('untyped, поставленная первой, не уезжает в хвост, когда её соседа сейчас нет', () => {
+  // ['untyped', 'gone']: живых gone нет, work/home/alpha не названы. Правило
+  // хвоста смотрит на исходный порядок — untyped там не последняя.
+  assert.deepStrictEqual(typeKeys(['untyped', 'gone']), ['untyped', 'work', 'home', 'alpha']);
+});

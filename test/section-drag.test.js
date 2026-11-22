@@ -284,3 +284,74 @@ test('типовые секции подряд — в одной .block-stack, �
   const plain = run(['blockCellHtml', 'wideColumnHtml'], `wideColumnHtml(${JSON.stringify(column.slice(2))})`, { escapeHtml });
   assert.ok(!plain.includes('block-stack'), plain);
 });
+
+// ── typeDrop: перенос типовой секции внутри блока меняет порядок типов ─────
+
+test('typeDrop: внутри блока — новый порядок имён типов', () => {
+  const { typeDrop } = require('../frontend-src/picker-sections');
+  const keys = ['projects', 'type:work', 'type:home', 'type:untyped', 'past'];
+  // home на место work (позиция 1 — над первой типовой).
+  assert.deepStrictEqual(typeDrop(keys, 'type:home', 1), ['home', 'work', 'untyped']);
+  // work за последнюю типовую (позиция 4 — сразу под блоком).
+  assert.deepStrictEqual(typeDrop(keys, 'type:work', 4), ['home', 'untyped', 'work']);
+});
+
+test('typeDrop: вне блока и для нетиповой секции — null, переносится блок', () => {
+  const { typeDrop } = require('../frontend-src/picker-sections');
+  const keys = ['projects', 'type:work', 'type:home', 'past'];
+  assert.strictEqual(typeDrop(keys, 'type:home', 0), null);
+  assert.strictEqual(typeDrop(keys, 'type:home', 4), null);
+  assert.strictEqual(typeDrop(keys, 'past', 2), null);
+  // Колонка без блока (широкая, перенос в соседнюю) — тоже блок.
+  assert.strictEqual(typeDrop(['projects'], 'type:home', 0), null);
+});
+
+test('узкая: перенос типовой внутри блока пишет order.types, а narrow не трогает', () => {
+  const headers = ['type:work', 'type:home', 'type:untyped', 'past'].map(key => ({ key }));
+  const { order, saved } = commitWith({
+    fullscreen: false, drag: { key: 'type:home' }, order: { narrow: ['live', 'past'], wide: [], types: [] },
+    narrowHeaders: () => headers, sectionKeyOf: n => n.key, dropIndexOf: () => 0,
+  });
+  assert.deepStrictEqual(order.types, ['home', 'work', 'untyped']);
+  assert.deepStrictEqual(order.narrow, ['live', 'past']);
+  assert.strictEqual(saved, 1);
+});
+
+test('широкая: перенос внутри блока своей колонки пишет order.types, колонки не трогает', () => {
+  const { order } = commitWith({
+    fullscreen: true, drag: { key: 'type:untyped' },
+    order: { narrow: [], wide: [['live', 'past'], ['projects']], types: ['work', 'home', 'untyped', 'gone'] },
+    wideDropTarget: () => ({ column: 1, at: 0, keys: ['type:work', 'type:home', 'type:untyped', 'past'] }),
+  });
+  // Отсутствующий сейчас `gone` остаётся за своим соседом (mergeOrder).
+  assert.deepStrictEqual(order.types, ['untyped', 'work', 'home', 'gone']);
+  assert.deepStrictEqual(order.wide, [['live', 'past'], ['projects']]);
+});
+
+function endDragWith(ctx) {
+  const calls = [];
+  const full = {
+    dropLine: { classList: { remove: () => {} } }, clearDropZones: () => {},
+    applyState: () => calls.push('applyState'), regroup: () => calls.push('regroup'),
+    render: () => calls.push('render'), heldState: null, ...ctx,
+  };
+  vm.createContext(full);
+  vm.runInContext(`${sourceOf('endDrag')}\nendDrag();`, full, { filename: 'sessions.html' });
+  return calls;
+}
+
+test('после переноса внутри блока список перегруппировывается, а не только перерисовывается', () => {
+  // Порядок типов решает groupSessions — одна перерисовка показала бы старый.
+  assert.deepStrictEqual(endDragWith({ drag: { moved: true, regroup: true } }), ['regroup']);
+});
+
+test('перегруппировка после переноса типа — и когда такт был придержан', () => {
+  // Перенос длится дольше секунды, такт почти всегда придержан. applyState
+  // доходит до regroup не на всяком ответе (отказ, кривая форма) — поэтому
+  // endDrag зовёт его сам.
+  assert.deepStrictEqual(endDragWith({ drag: { moved: true, regroup: true }, heldState: { state: null } }),
+    ['applyState', 'regroup']);
+  // Обычный перенос без типов — прежнее поведение.
+  assert.deepStrictEqual(endDragWith({ drag: { moved: true }, heldState: { state: null } }), ['applyState']);
+  assert.deepStrictEqual(endDragWith({ drag: { moved: true } }), ['render']);
+});

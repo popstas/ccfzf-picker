@@ -453,6 +453,32 @@
   }
 
   /**
+   * Перенос типовой секции внутри блока типов: новый видимый порядок имён
+   * типов либо `null`, если это перенос блока целиком.
+   *
+   * `keys` и `to` — те же, что у `moveBlockKey`: видимые заголовки и позиция
+   * вставки. Внутри блока — позиция от первой типовой до места сразу под
+   * последней включительно, причём только если блок есть среди `keys`: в
+   * широкой раскладке это значит «в своей колонке». Края считаются внутренними
+   * намеренно — бросить тип над первым или под последним значит поставить его
+   * первым или последним, а блок при этом и так остался бы на месте.
+   */
+  function typeDrop(keys, key, to) {
+    if (!String(key).startsWith('type:')) return null;
+    const first = keys.findIndex(k => String(k).startsWith('type:'));
+    if (first < 0) return null;
+    let last = first;
+    while (last + 1 < keys.length && String(keys[last + 1]).startsWith('type:')) last++;
+    if (to < first || to > last + 1) return null;
+    const block = keys.slice(first, last + 1);
+    const at = to - first;
+    const rest = block.filter(k => k !== key);
+    const before = block.slice(0, at).filter(k => k !== key).length;
+    rest.splice(before, 0, key);
+    return rest.map(k => String(k).slice('type:'.length));
+  }
+
+  /**
    * Новый сохранённый порядок: видимый после переноса, слитый со старым.
    *
    * `visible` — ключи, которые сейчас на экране, уже в новом порядке (вывод
@@ -634,7 +660,7 @@
 
   return {
     buildSections, sectionHeaderText, moveInBlocks, moveBetweenBlocks, firstRowInPanel,
-    orderKeyOf, moveBlockKey, mergeOrder,
+    orderKeyOf, moveBlockKey, typeDrop, mergeOrder,
     wideColumnGrow,
   };
 });
