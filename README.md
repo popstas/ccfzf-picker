@@ -28,8 +28,8 @@ and a session opens in the terminal of your choice.
   is installed, or the one you pick in settings. With Zed, **Use SSH Remote**
   opens remote sessions over SSH instead of a network drive, so Zed notices
   files the agents change and warns before overwriting them.
-- **Raises windows instead of opening new ones** — over MQTT, together with the
-  [window tracker](https://github.com/popstas/macos-windows-manager).
+- **Raises windows instead of opening new ones** — together with a window
+  tracker for your system, see [Stack](#stack).
 - **Tile and cascade layouts** — a global hotkey asks the tracker to arrange the
   windows in the order you see in the list.
 - **Layout snapshots** — `^S` restores a whole remembered arrangement of
@@ -42,6 +42,63 @@ and a session opens in the terminal of your choice.
   columns, panel layout, window size and MQTT.
 - **Works with the window closed** — background polling keeps the list ready and
   the aggregator's dump fresh for Home Assistant and openHASP.
+
+## Stack
+
+The picker is one part of a small stack, and **the only part you have to
+install**. On its own it lists the Claude Code sessions of the machine it runs
+on: the aggregator is bundled into the binary. Everything else is optional, and
+each piece adds features to the same window.
+
+```mermaid
+flowchart TB
+  claude["Claude Code<br/>transcripts, session registry"]
+  hooks["agent hooks<br/>(ship with ccfzf)"]
+  ccfzf["ccfzf aggregator<br/>bundled, or installed<br/>on another machine"]
+  picker["ccfzf-picker<br/>(required)"]
+  w11["windows11-manager<br/>(Windows)"]
+  mwm["macos-windows-manager<br/>(macOS)"]
+  broker["MQTT broker"]
+  ha["Home Assistant<br/>+ openHASP panel"]
+
+  claude --> ccfzf
+  ccfzf -- "ccfzf --state<br/>(here, or over ssh)" --> picker
+  claude -. "hook events" .-> hooks
+  hooks -. "summary, context, cost" .-> ccfzf
+  w11 -. "tracker file:<br/>windows, snapshots, hotkeys" .-> ccfzf
+  mwm -. "tracker file:<br/>windows, snapshots" .-> ccfzf
+  picker -. "http: open, raise,<br/>restore, tile" .-> w11
+  picker -. "raise, tile" .-> broker
+  broker -.-> mwm
+  broker -.-> w11
+  w11 -. "session slots" .-> broker
+  broker -.-> ha
+  ha -. "tap a slot: raise" .-> broker
+
+  classDef optional stroke-dasharray: 5 5
+  class hooks,w11,mwm,broker,ha optional
+```
+
+| Part | Install it when | What it adds |
+|---|---|---|
+| **ccfzf-picker** | always | The session list of this machine (`localSource: true`), search and modes, the projects panel, status circles, the prompt-cache timer, Enter to resume in a terminal or in Claude Desktop, `^O` to open the folder in an editor, the `^K` menu, wide mode, the settings window. The bundled aggregator needs `bash` and `python3` on Linux and macOS, `python` on `PATH` on Windows. |
+| **[ccfzf]** on another machine | the agents run elsewhere | That machine's sessions, read over ssh (`sshHost`); there it is also an fzf picker in the terminal. One remote machine, merged with this one's list. |
+| **Agent hooks** (part of ccfzf) | you want more than the status | The last prompt and the agent's last reply under each row, context used, cost, the permission request a session waits on, the PR link, a session kept live across `/clear`. They need `bash` and `jq`, so not on native Windows. Without hooks the status, the agent's question, the cache timer and the compaction mark still come — read from the transcript tail. |
+| **[windows11-manager]** | Windows | Terminal windows bound to sessions: the window letter in the row, Enter raises the open window instead of starting a second one, sessions open in their Windows Terminal profile, per-project hotkeys, layout snapshots that restore, tile / cascade / group layouts, seen and unread marks shared with the tracker and the taskbar button. Its file reaches the aggregator through a shared folder; it talks to the picker over http, no broker needed. |
+| **[macos-windows-manager]** | macOS | Terminal windows bound to sessions, tile and cascade layouts, layout snapshots (the picker restores them itself, session by session). Its file reaches the aggregator over ssh, and the bundled one as well. Raising a window on Enter and tiling from the picker need an MQTT broker; without one the tracker still binds windows, and lays them out from its tray menu. |
+| **MQTT broker** | macOS window raising, or the panel | The transport to the macOS tracker and for the Home Assistant export, and a fallback to the Windows one when it gives no http address. |
+| **Home Assistant + openHASP** | a wall panel | Sessions as rows on a touch panel; a tap raises the session's window. Published by windows11-manager over MQTT. |
+
+**windows-mqtt is not part of the stack any more.** Everything it used to do for
+sessions moved into windows11-manager and the picker; install it only for its
+own home-automation modules.
+
+What is written in Rust, Node, Python and shell in each part, and where the
+boundaries lie: [docs/stack.md](docs/stack.md) (ru).
+
+[ccfzf]: https://github.com/popstas/ccfzf
+[windows11-manager]: https://github.com/popstas/windows11-manager
+[macos-windows-manager]: https://github.com/popstas/macos-windows-manager
 
 ## Install
 
@@ -124,6 +181,7 @@ comments**, keeping the previous version as `config.yaml.bak`.
 - [docs/configuration.md](docs/configuration.md) — `config.yaml`, local sources, path mapping, MQTT
 - [docs/settings.md](docs/settings.md) — the settings window
 - [docs/architecture.md](docs/architecture.md) — source layout, build and tests
+- [docs/stack.md](docs/stack.md) — Rust, Node, Python and shell in each part of the stack (ru)
 - [docs/window-layouts.md](docs/window-layouts.md) — asking the tracker to tile or cascade (ru)
 - [docs/TODO.md](docs/TODO.md) — what is deferred, and why (ru)
 - [CLAUDE.md](CLAUDE.md) — build rules and the bugs already paid for (ru)
@@ -133,3 +191,6 @@ comments**, keeping the previous version as `config.yaml.bak`.
 - [ccfzf](https://github.com/popstas/ccfzf) — the aggregator this picker reads.
 - [macos-windows-manager](https://github.com/popstas/macos-windows-manager) —
   the window tracker that binds terminal windows to sessions and lays them out.
+- [windows11-manager](https://github.com/popstas/windows11-manager) — the same
+  on Windows, plus opening sessions, snapshot restore and the Home Assistant
+  export.
