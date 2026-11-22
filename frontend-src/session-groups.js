@@ -472,6 +472,29 @@
     };
   }
 
+  /**
+   * Вход buildSessionsPayload из последнего ответа агрегатора и местных
+   * отметок «просмотрено».
+   *
+   * Ответ передаётся целиком, а не собирается поимённо: поле, которое сборка
+   * не назвала, до списка не доезжало, и не доезжало молча. Так терялись
+   * `windowHost`/`windowPid` (машина окна на старом агрегаторе), а потом и
+   * `zellij` — группы Zellij в окне не было никогда, хотя тесты на
+   * buildSessionsPayload с настоящим ответом её видели.
+   *
+   * `ok: true` ставится здесь: опрос кладёт в lastState только удачный ответ,
+   * а до первого ответа там `{}` — и список должен быть пустым, а не ошибкой.
+   */
+  function payloadSource(state, seen) {
+    const s = state || {};
+    return {
+      ...s,
+      ok: true,
+      sessions: Array.isArray(s.sessions) ? s.sessions : [],
+      seen: seen || {},
+    };
+  }
+
   function buildSessionsPayload(res, sort = DEFAULT_SORT, opts = {}) {
     const mode = normalizeSort(sort);
     if (!res.ok) return { ok: false, reason: res.reason };
@@ -479,8 +502,8 @@
     // верхними полями ответа, и по одной записи окна её не узнать.
     let rows = listApi.buildSessionList({
       sessions: res.sessions, seen: res.seen, state: res, configHost: opts.configHost,
-      // Иконки строк без окна — готовой картой: ответ здесь бывает пересобран
-      // без `projects`/`windowHosts` (см. icons в buildSessionList).
+      // Иконки строк без окна — готовой картой, если её дали (см. icons в
+      // buildSessionList).
       icons: opts.icons,
     });
     if (opts.onlyLive) rows = rows.filter(r => r.live);
@@ -515,6 +538,7 @@
     labelSessions,
     groupSessions,
     activeFilters,
+    payloadSource,
     buildSessionsPayload,
   };
 });

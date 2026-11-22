@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   normalizeSort, cycleSort, compareSessions, groupSessions, labelSessions, SORT_MODES,
-  DEFAULT_SORT, buildSessionsPayload, activeFilters,
+  DEFAULT_SORT, buildSessionsPayload, activeFilters, payloadSource,
 } = require('../frontend-src/session-groups');
 
 // Сырые сессии — то, что отдаёт `ccfzf --state`, а не строки списка.
@@ -950,3 +950,38 @@ test('история берёт иконку проекта из opts.icons, к�
   assert.strictEqual(icon('c'), 'X:\\i\\a.ico');
   assert.strictEqual(icon('x'), '');
 });
+
+// ── вход buildSessionsPayload из regroup ────────────────────────────────────
+//
+// Тесты выше зовут buildSessionsPayload с настоящим ответом агрегатора, а окно
+// подаёт ему не ответ, а то, что из него собрал regroup(). Собирал он новый
+// объект поимённо, и поле, не названное там, до списка не доезжало: так
+// пропадала группа Zellij целиком (`res.zellij` — undefined). Сборка теперь
+// живёт здесь, payloadSource; сторож самой дороги окна — в row-contract.test.js,
+// где исполняется настоящий regroup().
+
+test('payloadSource доносит до списка всё, что пришло в ответе, — и зелийные сессии тоже', () => {
+  const state = {
+    sessions: [{ id: 'a', title: 'жив', live: true }],
+    zellij: [{ name: 'home', created: 50 }],
+    windowHost: 'win', windowPid: 7,
+  };
+  const src = payloadSource(state, { a: 1 });
+  assert.strictEqual(src.ok, true);
+  assert.deepStrictEqual(src.seen, { a: 1 });
+  assert.strictEqual(src.windowHost, 'win');
+  assert.strictEqual(src.windowPid, 7);
+  const out = buildSessionsPayload(src, 'recent');
+  const z = out.groups.find(g => g.key === 'zellij');
+  assert.ok(z, 'группы Zellij нет: ' + out.groups.map(g => g.key).join(' '));
+  assert.deepStrictEqual(z.sessions.map(s => s.id), ['zellij:home']);
+});
+
+test('payloadSource до первого ответа даёт пустой, но рабочий список', () => {
+  // regroup зовут и раньше первого опроса (клавиши проектов приходят из
+  // setup()), когда lastState ещё `{}`.
+  const out = buildSessionsPayload(payloadSource({}, {}), 'recent');
+  assert.strictEqual(out.ok, true);
+  assert.ok(Array.isArray(out.groups));
+});
+

@@ -2157,15 +2157,12 @@ const infoBackdrop = document.getElementById('info-backdrop');
       hideDesktop: !toggles.showDesktop,
     });
     const payload = window.SessionGroups.buildSessionsPayload(
-      // Верхние поля ответа переезжают сюда поимённо: на старом агрегаторе
-      // только они и называют машину окна, а пересобранный ответ их терял.
-      {
-        ok: true, sessions: lastSessions, seen,
-        windowHost: lastState.windowHost, windowPid: lastState.windowPid,
-      },
+      // Ответ целиком, а не пересобранный поимённо: пересборка теряла всё,
+      // что в ней не названо, — так пропадала группа Zellij (payloadSource).
+      window.SessionGroups.payloadSource(lastState, seen),
       sortMode,
-      // Иконки истории (проект по каталогу, корона head) — с полного ответа:
-      // пересобранный выше их источников (`projects`, `windowHosts`) не несёт.
+      // Иконки истории (проект по каталогу, корона head) — готовой картой
+      // трекера этой машины, тем же trackerIcons, что у списка проектов.
       { ...filters, configHost: CONFIG.windowHost,
         icons: window.SessionWindows.trackerIcons(lastState, CONFIG.windowHost) },
     );
@@ -2960,9 +2957,14 @@ const infoBackdrop = document.getElementById('info-backdrop');
       os: PICKER_OS,
     });
     if (!cmd) {
-      // Пустая команда у терминала с помощником значит, что путь не приехал:
-      // молчать нельзя, иначе Enter не сработал бы без единого слова.
-      if (helperNeeded(terminal)) { error = helperError || 'terminal helper is not available'; render(); }
+      // Две причины пустой команды, и обе называются: путь с `;` (Windows
+      // Terminal порезал бы его на панели, см. pathProblem) и не приехавший
+      // путь помощника терминала. Молчать нельзя — иначе Enter не сработал бы
+      // без единого слова.
+      const refused = (strategy === 'resume' || strategy === 'takeover')
+        && window.OpenStrategy.pathProblem(row.cwd);
+      if (refused) { error = refused; render(); }
+      else if (helperNeeded(terminal)) { error = helperError || 'terminal helper is not available'; render(); }
       return;
     }
     if (cmd.destructive) {
@@ -3716,7 +3718,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     const remote = window.OpenStrategy.newSessionCommand(cwd, taken, prompt);
     if (!remote) {
       error = window.OpenStrategy.promptProblem(prompt)
-        || `The path contains ";", there is nothing to open such a directory with: ${cwd}`;
+        || window.OpenStrategy.pathProblem(cwd);
       render();
       return false;
     }
@@ -3778,7 +3780,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // иначе пункт меню молча ничего не делает.
     const remote = window.OpenStrategy.terminalCommand(cwd);
     if (!remote) {
-      error = `The path contains ";", there is nothing to open such a directory with: ${cwd}`;
+      error = window.OpenStrategy.pathProblem(cwd);
       render();
       return;
     }
