@@ -2165,6 +2165,8 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // Переворот здесь, а не в activeFilters: галка спрашивает «показывать
       // ли», а отсевам по ту сторону все поля значат «отсев включён».
       hideDesktop: !toggles.showDesktop,
+      // А при поиске и в режимах Desktop прячет ключ конфига, не галка списка.
+      searchDesktop: CONFIG.searchDesktop,
     });
     const payload = window.SessionGroups.buildSessionsPayload(
       // Ответ целиком, а не пересобранный поимённо: пересборка теряла всё,

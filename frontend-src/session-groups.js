@@ -460,6 +460,11 @@
    * Галки при этом остаются нажатыми: отступление временное и кончается вместе
    * с запросом — то же, что со свёрнутостью, которую запрос разворачивает, не
    * забывая.
+   *
+   * Исключение одно — `hideDesktop` при спрошенном берётся не из галки списка, а
+   * из `searchDesktop` конфига (`false` — прятать, не задан — как `true`):
+   * сессии Claude Desktop мешают именно в поиске и в `/h`, а в обычном списке их
+   * можно и оставить, — две настройки независимы (Стас 22.11, решение B).
    */
   function activeFilters(opts = {}) {
     const mode = opts.mode == null ? 'sessions' : String(opts.mode);
@@ -468,7 +473,7 @@
     return {
       onlyLive: asked ? false : !!opts.onlyLive,
       onlyWindow: asked ? false : !!opts.onlyWindow,
-      hideDesktop: asked ? false : !!opts.hideDesktop,
+      hideDesktop: asked ? opts.searchDesktop === false : !!opts.hideDesktop,
     };
   }
 

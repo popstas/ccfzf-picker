@@ -922,6 +922,29 @@ test('любой префикс режима снимает отсевы и на
   }
 });
 
+// searchDesktop — исключение из правила для одного отсева (Стас 22.11, решение
+// B): сессии Claude Desktop мешают в поиске и в `/h`, а галка списка решает
+// только за обычный список.
+test('searchDesktop: false прячет Desktop при запросе, даже если галка списка его показывает', () => {
+  assert.strictEqual(
+    activeFilters({ query: 'x', hideDesktop: false, searchDesktop: false }).hideDesktop, true);
+});
+
+test('searchDesktop: false прячет Desktop и в /h', () => {
+  assert.strictEqual(
+    activeFilters({ mode: 'history', query: '', searchDesktop: false }).hideDesktop, true);
+});
+
+test('без запроса searchDesktop не участвует', () => {
+  assert.strictEqual(
+    activeFilters({ query: '', hideDesktop: false, searchDesktop: false }).hideDesktop, false);
+});
+
+test('searchDesktop по умолчанию — поиск показывает Desktop', () => {
+  // Ключа нет — как true: сегодняшнее поведение у всех, кто его не трогал.
+  assert.strictEqual(activeFilters({ query: 'x', hideDesktop: true }).hideDesktop, false);
+});
+
 test('пустой вход не роняет и не выдумывает отсевов', () => {
   // Зовётся она из regroup, а тот бывает позван и до первого ответа.
   assert.deepStrictEqual(activeFilters(), { onlyLive: false, onlyWindow: false, hideDesktop: false });

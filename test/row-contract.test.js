@@ -1441,7 +1441,8 @@ test('подписи колонок совпадают в пикере и в н�
 // Показанные режим и запрос подставные, а `activeFilters` — настоящая, из
 // session-groups.js: правило «спрошенное перебивает отобранное» проверяется
 // здесь вместе с проводкой, а не вместо неё.
-function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query: '' }, lastState = {}) {
+function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query: '' }, lastState = {},
+  config = {}) {
   const source = SESSIONS_HTML.match(/\n {2}function regroup\(\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'regroup не найден в sessions.html — тест сторожит не то');
   let opts = null;
@@ -1460,7 +1461,7 @@ function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query:
       },
       SessionWindows,
     },
-    CONFIG: { onlyLive: configOnlyLive, windowHost: 'win-host' },
+    CONFIG: { onlyLive: configOnlyLive, windowHost: 'win-host', ...config },
     toggles,
     shownModeAndQuery: () => shown,
     lastSessions: [],
@@ -1535,6 +1536,18 @@ test('пустой запрос без префикса отсевы не тро
   });
   assert.strictEqual(opts.onlyLive, true);
   assert.strictEqual(opts.onlyWindow, true);
+});
+
+test('regroup подаёт CONFIG.searchDesktop: при запросе и searchDesktop: false уезжает hideDesktop: true', () => {
+  // Галка списка показывает Desktop, но при поиске решает не она, а ключ
+  // конфига. Без проводки ключ значил бы что-то только в тестах activeFilters.
+  const opts = regroupWith(true, { showDesktop: true }, { mode: 'sessions', query: 'x' }, {},
+    { searchDesktop: false });
+  assert.strictEqual(opts.hideDesktop, true);
+  // Без запроса решает галка списка, как и раньше.
+  const plain = regroupWith(true, { showDesktop: true }, { mode: 'sessions', query: '' }, {},
+    { searchDesktop: false });
+  assert.strictEqual(plain.hideDesktop, false);
 });
 
 test('правка запроса пересчитывает состав списка, а не только рисунок', () => {
