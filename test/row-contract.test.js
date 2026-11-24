@@ -1484,6 +1484,10 @@ function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query:
   // ровно то, что гасит отрисовщик строки, а тот спрашивает её.
   const staleSource = SESSIONS_HTML.match(/\n {2}function staleSettings\(\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(staleSource, 'staleSettings не найден в sessions.html — тест сторожит не то');
+  // dimmedAt — тоже из страницы: этот же предикат берёт набор для панели задач,
+  // и копия в regroup разошлась бы с ним молча.
+  const dimmedSource = SESSIONS_HTML.match(/\n {2}function dimmedAt\(nowSec\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(dimmedSource, 'dimmedAt не найден в sessions.html — тест сторожит не то');
   let opts = null;
   const ctx = {
     window: {
@@ -1515,7 +1519,7 @@ function regroupWith(configOnlyLive, toggles, shown = { mode: 'sessions', query:
     render: () => {},
   };
   vm.createContext(ctx);
-  vm.runInContext(`${staleSource[0]}\n${source[0]}\nregroup();`, ctx, { filename: 'sessions.html' });
+  vm.runInContext(`${staleSource[0]}\n${dimmedSource[0]}\n${source[0]}\nregroup();`, ctx, { filename: 'sessions.html' });
   assert.ok(opts, 'buildSessionsPayload не позван');
   return opts;
 }
@@ -1655,6 +1659,41 @@ test('hide dimmed снимается запросом', () => {
   const opts = regroupWith(true, { hideStale: true, dimStale: true }, { mode: 'sessions', query: 'x' }, {},
     DIM_CONFIG);
   assert.strictEqual(opts.hideStale, false);
+});
+
+// ── Панель задач: набор берёт галку, а не activeFilters ────────────────────
+//
+// activeFilters снимает hideStale при непустом запросе и префиксе — для
+// списка. Набор для панели задач обязан взять саму галку: иначе каждая
+// набранная буква возвращала бы все кнопки на панель.
+function taskbarHideEnabledWith(config, toggles) {
+  const source = SESSIONS_HTML.match(/\n {2}function taskbarHideEnabled\(\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(source, 'taskbarHideEnabled не найден в sessions.html — тест сторожит не то');
+  const staleSource = SESSIONS_HTML.match(/\n {2}function staleSettings\(\) \{[\s\S]*?\n {2}\}\n/);
+  // Ни shownModeAndQuery, ни activeFilters в контексте нет: обратись функция
+  // к запросу или режиму — вызов упал бы.
+  const ctx = { CONFIG: { stale: { enabled: true }, ...config }, toggles, window: {} };
+  vm.createContext(ctx);
+  return vm.runInContext(`${staleSource[0]}\n${source[0]}\ntaskbarHideEnabled();`, ctx,
+    { filename: 'sessions.html' });
+}
+
+test('запрос не меняет набор: включённость панели задач не смотрит на запрос и режим', () => {
+  assert.strictEqual(taskbarHideEnabledWith({ hideDimmedFromTaskbar: true },
+    { hideStale: true, dimStale: true }), true);
+  // При запросе список свой отсев снимает, а набор — нет.
+  const shown = regroupWith(true, { hideStale: true, dimStale: true }, { mode: 'history', query: 'x' }, {},
+    { ...DIM_CONFIG, hideDimmedFromTaskbar: true });
+  assert.strictEqual(shown.hideStale, false, 'запрос не снял отсев списка — тест сторожит не то');
+  const body = SESSIONS_HTML.match(/\n {2}function taskbarHideEnabled\(\) \{[\s\S]*?\n {2}\}\n/)[0];
+  assert.doesNotMatch(body, /shownModeAndQuery|activeFilters|query|mode/);
+});
+
+test('панель задач: нужны опция, hide dimmed и dim stale разом', () => {
+  const on = { hideStale: true, dimStale: true };
+  assert.strictEqual(taskbarHideEnabledWith({ hideDimmedFromTaskbar: false }, on), false);
+  assert.strictEqual(taskbarHideEnabledWith({ hideDimmedFromTaskbar: true }, { ...on, hideStale: false }), false);
+  assert.strictEqual(taskbarHideEnabledWith({ hideDimmedFromTaskbar: true }, { ...on, dimStale: false }), false);
 });
 
 // hide dimmed прячет и проекты, но только в секциях: projectRows читают хоткеи

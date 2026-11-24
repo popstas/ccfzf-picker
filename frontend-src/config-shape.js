@@ -140,6 +140,11 @@
     // (мигает служба windows11-manager, набор шлёт пикер). Ноль выключает.
     // Умолчание — решение Стаса 21.11.2026.
     cacheWarnMinutes: 10,
+    // Прятать с панели задач кнопки погашенных сессий этой машины (прячет
+    // служба windows11-manager, набор шлёт пикер, см. taskbar-hide.js).
+    // Выключено, пока человек сам не попросил: окно без кнопки ищут через
+    // Alt+Tab. Работает только вместе с галками `hide dimmed` и `dim stale`.
+    hideDimmedFromTaskbar: false,
     // Подложка позади пикера — своя половинка на каждую раскладку, обе
     // выключены по умолчанию: затемнение стола позади списка меняет то, что
     // человек видит на всём экране, а не только в самом пикере, и включать
@@ -437,6 +442,7 @@
       stale: normalizeStale(src.stale),
       contextLevels: normalizeContextLevels(src.contextLevels),
       cacheWarnMinutes: normalizeCacheWarnMinutes(src.cacheWarnMinutes),
+      hideDimmedFromTaskbar: src.hideDimmedFromTaskbar === true,
       scrim: normalizeScrim(src.scrim),
       showOnActiveDisplay: typeof src.showOnActiveDisplay === 'boolean'
         ? src.showOnActiveDisplay

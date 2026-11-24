@@ -8,6 +8,11 @@
   const windowsApi = typeof module === 'object' && module.exports
     ? require('./session-windows')
     : globalThis.SessionWindows;
+  // Сосед берётся в момент вызова, а не загрузки: session-glyph.js стоит в
+  // sessions.html ниже этого файла, и на загрузке его ещё нет.
+  const glyphApi = () => (typeof module === 'object' && module.exports
+    ? require('./session-glyph')
+    : globalThis.SessionGlyph);
 
   /*
    * Мигание кнопки окна перед остыванием кеша промпта (спека
@@ -65,6 +70,33 @@
   }
 
   /**
+   * Id сессий набора, чья кнопка мигает **сейчас**.
+   *
+   * Набор `cacheWarnSets` — не «мигающие», а «могущие мигать»: метка кеша —
+   * время последнего ответа, и с остыванием кеша она не пропадает. То есть в
+   * наборе стоит почти всякая неработающая сессия, а мигает из них та, у
+   * которой до конца часа осталось не больше `warnMin` минут, — то же окно
+   * `cacheAt + 3595 − warnMin·60 ≤ now < cacheAt + 3595`, что у службы.
+   * Остаток считает `cacheRemainingSec` из session-glyph.js — тот, по которому
+   * рисуется таймер строки: свой запас в пять секунд здесь разошёлся бы с ним.
+   *
+   * Служба вдобавок снимает мигание по фокусу и «Mark seen», то есть здесь —
+   * надмножество мигающего. Для того, кто спрашивает (набор панели задач
+   * держит по нему кнопку), это безопасная сторона.
+   */
+  function blinkingIds(sets, nowSec) {
+    const out = new Set();
+    for (const { body } of sets.values()) {
+      const limit = (Number(body.warnMin) || 0) * 60;
+      for (const s of body.sessions) {
+        const left = glyphApi().cacheRemainingSec({ agentCacheAt: s.cacheAt }, nowSec);
+        if (left !== null && left <= limit) out.add(s.id);
+      }
+    }
+    return out;
+  }
+
+  /**
    * Отправитель наборов. `update(sets)` зовётся на каждом ответе опроса (раз в
    * секунду при показанном окне) и шлёт цели только изменившийся набор либо
    * повтор после `heartbeatMs`. Цель, пропавшая из `sets`, один раз получает
@@ -75,10 +107,14 @@
    * `retryMs`, для набора и для пустого списка одинаково. Отправка,
    * которая ещё идёт, второй раз не уходит — http-просьба ждёт до пяти секунд,
    * а ответы опроса приходят каждую.
+   *
+   * `emptyOf(body)` — что получает пропавшая цель, по последнему ушедшему ей
+   * телу. Умолчание — `{warnMin, sessions: []}` мигания; тем же отправителем
+   * ездит набор для панели задач, и его пустое тело — `{sessions: []}`.
    */
   function createCacheWarnSender({
     send, onError = () => {}, nowMs = Date.now, heartbeatMs = CACHE_WARN_HEARTBEAT_MS,
-    retryMs = CACHE_WARN_RETRY_MS,
+    retryMs = CACHE_WARN_RETRY_MS, emptyOf = body => ({ warnMin: body.warnMin, sessions: [] }),
   }) {
     const sent = new Map();
     const pending = new Set();
@@ -103,12 +139,12 @@
         const prev = sent.get(key);
         if (prev && prev.json === json && now - prev.at < heartbeatMs) continue;
         jobs.push(push(key, target, body, () => {
-          sent.set(key, { json, at: now, target, warnMin: body.warnMin });
+          sent.set(key, { json, at: now, target, body });
         }, now));
       }
       for (const [key, prev] of sent) {
         if (sets.has(key) || resting(key)) continue;
-        jobs.push(push(key, prev.target, { warnMin: prev.warnMin, sessions: [] }, () => {
+        jobs.push(push(key, prev.target, emptyOf(prev.body), () => {
           sent.delete(key);
         }, now));
       }
@@ -118,5 +154,7 @@
     return { update };
   }
 
-  return { cacheWarnSets, createCacheWarnSender, CACHE_WARN_HEARTBEAT_MS, CACHE_WARN_RETRY_MS };
+  return {
+    cacheWarnSets, blinkingIds, createCacheWarnSender, CACHE_WARN_HEARTBEAT_MS, CACHE_WARN_RETRY_MS,
+  };
 });

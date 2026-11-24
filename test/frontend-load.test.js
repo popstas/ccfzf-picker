@@ -215,3 +215,17 @@ test('settings.html попадает в сборку', () => {
   // приложении, а npm test при этом останется зелёным.
   assert.ok(script.includes('settings.html'), 'settings.html не копируется');
 });
+
+test('набор для панели задач и мигающие собираются и при загрузке тегами', () => {
+  // TaskbarHide берёт SessionWindows на загрузке, CacheWarn.blinkingIds —
+  // SessionGlyph в момент вызова (тот стоит ниже): тесты на require этого не видят.
+  const ctx = loadAsBrowser(TAGS);
+  const state = { windowHosts: [{ host: 'nb', http: { port: 9722 } }] };
+  const row = { id: 'a', agentState: 'idle', agentCacheAt: 1000, windows: [{ host: 'nb' }],
+    sessionWindows: [{ host: 'nb' }] };
+  const sets = ctx.TaskbarHide.taskbarHideSets([row], state,
+    { enabled: true, configHost: 'nb', isDimmed: () => true, warnIds: new Set() });
+  assert.deepStrictEqual([...[...sets.values()][0].body.sessions], ['a']);
+  const warn = ctx.CacheWarn.cacheWarnSets([row], state, 10);
+  assert.deepStrictEqual([...ctx.CacheWarn.blinkingIds(warn, 1000 + 3000)], ['a']);
+});

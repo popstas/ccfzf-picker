@@ -895,6 +895,7 @@
 <script src="stale-items.js"></script>
 <script src="session-windows.js"></script>
 <script src="cache-warn.js"></script>
+<script src="taskbar-hide.js"></script>
 <script src="session-list.js"></script>
 <script src="zellij-list.js"></script>
 <script src="open-transport.js"></script>
@@ -1369,6 +1370,30 @@ let commentRow = null;
    */
   function staleSettings() {
     return { ...CONFIG.stale, enabled: toggles.dimStale };
+  }
+
+  /**
+   * Предикат «строка погашена» на момент `nowSec` — те же доводы, что у
+   * staleClass в sessionItem: staleSettings (галка dim stale) и свёрнутое окно
+   * этой машины. Один на двоих: им прячет строки hide dimmed (regroup) и им
+   * же собирается набор для панели задач (sendWindowSets). Вторая копия
+   * разошлась бы с первой молча — пряталась бы кнопка яркой строки.
+   */
+  function dimmedAt(nowSec) {
+    return row => window.StaleItems.isStale(row, nowSec, staleSettings(), 'session',
+      window.SessionWindows.minimizedHere(row, null, CONFIG.windowHost));
+  }
+
+  /**
+   * Прятать ли кнопки погашенных с панели задач. Галка hide dimmed берётся
+   * сама, а не через activeFilters: тот снимает отсев списка при запросе и
+   * префиксе, и каждая набранная буква возвращала бы все кнопки на панель.
+   * Гашение — staleSettings, как у предиката: ничего не погашено — нечего и
+   * прятать.
+   */
+  function taskbarHideEnabled() {
+    return CONFIG.hideDimmedFromTaskbar === true && toggles.hideStale === true
+      && staleSettings().enabled === true;
   }
 
   /**
@@ -2299,15 +2324,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
       searchDesktop: CONFIG.searchDesktop,
       hideStale: toggles.hideStale,
     });
-    // hide dimmed прячет ровно то, что погашено: те же доводы, что у
-    // staleClass в sessionItem, — staleSettings (галка dim stale) и свёрнутое
-    // окно этой машины. Время — на момент пересборки; строка, перешедшая порог
-    // в тишине, спрячется на следующем изменившемся ответе — ровно тогда, когда
-    // и погаснет: периодической перерисовки у страницы нет ни для того, ни
-    // для другого.
-    const nowSec = Math.floor(Date.now() / 1000);
-    const isDimmed = row => window.StaleItems.isStale(row, nowSec, staleSettings(), 'session',
-      window.SessionWindows.minimizedHere(row, null, CONFIG.windowHost));
+    // hide dimmed прячет ровно то, что погашено (dimmedAt). Время — на момент
+    // пересборки; строка, перешедшая порог в тишине, спрячется на следующем
+    // изменившемся ответе — ровно тогда, когда и погаснет: периодической
+    // перерисовки у страницы нет ни для того, ни для другого.
+    const isDimmed = dimmedAt(Math.floor(Date.now() / 1000));
     const payload = window.SessionGroups.buildSessionsPayload(
       // Ответ целиком, а не пересобранный поимённо: пересборка теряла всё,
       // что в ней не названо, — так пропадала группа Zellij (payloadSource).
@@ -2543,7 +2564,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // своём экране человеку нечего.
     snapshotRows = window.PickerSnapshots.snapshotsHere(state, CONFIG.windowHost);
     lastState = state;
-    sendCacheWarn(state);
+    sendWindowSets(state);
     regroup();
     // Пункт трея «Reopen disconnected sessions» ждёт свежего ответа и, если
     // разорванных в нём нет, прогрева признака (см. requestReopenDisconnected).
@@ -2639,19 +2660,56 @@ const infoBackdrop = document.getElementById('info-backdrop');
     onError: (e) => { error = String(e); render(); },
   });
 
-  function sendCacheWarn(state) {
-    // Ноль — строки не строятся вовсе: пустая карта и так гасит у трекеров
-    // всё, что им слали раньше.
-    const rows = CONFIG.cacheWarnMinutes > 0
+  /*
+   * Кнопки погашенных сессий на панели задач (frontend-src/taskbar-hide.js).
+   * Тот же отправитель, что у мигания, — те же повтор и пауза после отказа;
+   * своё у набора только тело и маршрут. Пустая карта (опция или галка
+   * выключены) один раз шлёт пустой список — кнопки возвращаются.
+   */
+  const taskbarHide = window.CacheWarn.createCacheWarnSender({
+    send: (target, body) => invoke('taskbar_hide_send', { target, body }),
+    onError: (e) => { error = String(e); render(); },
+    emptyOf: () => ({ sessions: [] }),
+  });
+
+  /** Оба набора для трекеров — мигание кеша и панель задач — с одного ответа. */
+  function sendWindowSets(state) {
+    const hideOn = taskbarHideEnabled();
+    // Строки одни на оба набора. Не нужны ни одному — не строятся вовсе:
+    // пустые карты и так гасят у трекеров всё, что им слали раньше.
+    const rows = CONFIG.cacheWarnMinutes > 0 || hideOn
       ? window.SessionList.buildSessionList({
         sessions: state.sessions, seen, state, configHost: CONFIG.windowHost,
       })
       : [];
-    const sets = window.CacheWarn.cacheWarnSets(rows, state, CONFIG.cacheWarnMinutes);
-    for (const [key, { target }] of sets) {
-      if (!target.http && !CONFIG.mqtt.configured) sets.delete(key);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const warnSets = window.CacheWarn.cacheWarnSets(rows, state, CONFIG.cacheWarnMinutes);
+    // Мигающие держат кнопку: сигнал, спрятанный с панели, не видно нигде —
+    // строка в списке тоже спрятана hide dimmed. Берутся до отсева целей без
+    // дороги: мигание, которое пикер не довёз, всё равно может идти у службы.
+    const hideSets = window.TaskbarHide.taskbarHideSets(rows, state, {
+      enabled: hideOn,
+      configHost: CONFIG.windowHost,
+      isDimmed: dimmedAt(nowSec),
+      warnIds: window.CacheWarn.blinkingIds(warnSets, nowSec),
+    });
+    for (const sets of [warnSets, hideSets]) {
+      for (const [key, { target }] of sets) {
+        if (!target.http && !CONFIG.mqtt.configured) sets.delete(key);
+      }
     }
-    cacheWarn.update(sets);
+    cacheWarn.update(warnSets);
+    taskbarHide.update(hideSets);
+  }
+
+  /**
+   * Наборы по последнему ответу — после правки конфига или ui.json из окна
+   * настроек. Пикер при этом скрыт, а такт скрытого опроса уходит в минуты:
+   * выключенная опция без этого вызова возвращала бы кнопки только к
+   * следующему ответу. До первого ответа слать нечего.
+   */
+  function resendWindowSets() {
+    if (Array.isArray(lastState.sessions)) sendWindowSets(lastState);
   }
 
   // Опрос идёт в Rust и не останавливается вместе с показом: он же держит
@@ -5008,6 +5066,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // надо собрать заново, а не просто проставить отметки.
       renderChecks();
       regroup();
+      resendWindowSets();
     });
 
     // Хоткеи и хост опроса Rust уже переставил сам; здесь остаётся то, что
@@ -5023,6 +5082,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // regroup() иконок не читает — их читает только renderMenu; список не
       // обязан ждать похода за иконками, чтобы перерисоваться.
       regroup();
+      resendWindowSets();
       // Настроенные действия могли смениться вместе с конфигом: иконки от
       // прежних приложений остались бы висеть у новых пунктов. Редактор —
       // первым: иконка его пункта берётся с найденного им файла.

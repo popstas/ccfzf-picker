@@ -187,6 +187,11 @@
         { id: 'stale.opacity', label: 'Stale opacity', type: 'range', default: 0.5,
           min: 0.1, max: 1, step: 0.1,
           hint: 'From 0.1 (very dim) to 1.0 (fully opaque).' },
+        // Вкладка гашения, а не соседка cacheWarnMinutes: опция работает только
+        // вместе с dim stale и hide dimmed, и ищут её рядом с ними.
+        { id: 'hideDimmedFromTaskbar', label: 'Hide dimmed sessions from the taskbar', type: 'bool',
+          default: false,
+          hint: 'Needs "hide dimmed" in the status line. Windows, machines running windows11-manager.' },
       ],
     },
     // Пороги подсветки процента контекста в колонке usage. Своя вкладка по

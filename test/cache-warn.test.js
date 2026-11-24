@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { cacheWarnSets, createCacheWarnSender } = require('../frontend-src/cache-warn');
+const { cacheWarnSets, createCacheWarnSender, blinkingIds } = require('../frontend-src/cache-warn');
 
 // Строки — как их строит buildSessionList: окна сессии в `sessionWindows`.
 const NB = { host: 'nb', mqttBase: 'home/nb/windows' };
@@ -134,4 +134,39 @@ test('пока отправка идёт, тот же набор второй р
   assert.strictEqual(sent.length, 1);
   release();
   await first;
+});
+
+test('без emptyOf пропавшая цель получает прежнее тело с warnMin', async () => {
+  const { s, sent } = sender();
+  await s.update(cacheWarnSets([row('a')], STATE, 10));
+  await s.update(new Map());
+  assert.deepStrictEqual(sent[1].body, { warnMin: 10, sessions: [] });
+});
+
+test('emptyOf решает, что получает пропавшая цель', async () => {
+  // Тот же отправитель возит набор для панели задач, а у того тела warnMin нет.
+  const sent = [];
+  const s = createCacheWarnSender({
+    send: (target, body) => { sent.push({ target, body }); return Promise.resolve(); },
+    nowMs: () => 0,
+    emptyOf: () => ({ sessions: [] }),
+  });
+  const target = { base: '', http: 'nb:9722' };
+  await s.update(new Map([['|nb:9722', { target, body: { sessions: ['a'] } }]]));
+  await s.update(new Map());
+  assert.deepStrictEqual(sent[1], { target, body: { sessions: [] } });
+});
+
+test('blinkingIds: только сессии, чей кеш мигает сейчас', () => {
+  // Метка кеша — время последнего ответа, и с остыванием кеша она не пропадает:
+  // в наборе мигания стоит почти всякая неработающая сессия. Мигает же из них
+  // та, у которой до конца часа осталось не больше warnMin минут.
+  const now = 100000;
+  const sets = cacheWarnSets([
+    row('cold', { agentCacheAt: now - 7200 }),
+    row('calm', { agentCacheAt: now - 600 }),
+    row('warn', { agentCacheAt: now - 3000 }),
+    row('edge', { agentCacheAt: now - 3595 }),
+  ], STATE, 10);
+  assert.deepStrictEqual([...blinkingIds(sets, now)].sort(), ['warn']);
 });
