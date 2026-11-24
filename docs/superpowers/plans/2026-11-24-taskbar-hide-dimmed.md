@@ -21,9 +21,9 @@ windows11-manager сводит набор с явными отметками CLI
 (в ccfzf-picker). Исполнители читают её целиком.
 
 **Репозитории и ветки** — везде `feat/taskbar-hide-dimmed`:
-- windows11-manager: `/home/popstas/projects/js/windows11-manager` (Tasks 1–5)
-- ccfzf-picker: `/home/popstas/projects/js/ccfzf-picker` (Tasks 6–7; ветка уже есть, на ней спека)
-- ccfzf: `/home/popstas/projects/shell/ccfzf` — это живой чекаут, на него
+- windows11-manager: `~/projects/js/windows11-manager` (Tasks 1–5)
+- ccfzf-picker: `~/projects/js/ccfzf-picker` (Tasks 6–7; ветка уже есть, на ней спека)
+- ccfzf: `~/projects/shell/ccfzf` — это живой чекаут, на него
   смотрит `~/bin/claude-wt`; работать в worktree, в `main` — только мержем (Task 8)
 
 ## Global Constraints
@@ -89,7 +89,7 @@ windows11-manager сводит набор с явными отметками CLI
 - [ ] **Step 3:** C++ и обёртки по Interfaces. Комментарий в `.cc`
   по-английски, как у соседей.
 - [ ] **Step 4:** `npm test` — зелёное. Сборку аддона проверить нельзя на
-  pc-virt — это Task 2.
+  машина сессий — это Task 2.
 - [ ] **Step 5: commit** `feat(addon): deleteTab/addTab — кнопка окна на панели задач`.
 
 ### Task 2: спайк на nb — что возвращает кнопку
@@ -347,7 +347,7 @@ windows11-manager сводит набор с явными отметками CLI
 
 ### Task 8: `claude-wt window taskbar` и скилл (ccfzf)
 
-**Files** (worktree от `main` в `/home/popstas/projects/shell/ccfzf`):
+**Files** (worktree от `main` в `~/projects/shell/ccfzf`):
 - Create: `cli/lib/commands/window-taskbar.mjs` по образцу
   `window-icon.mjs`; `tests/cli/window-taskbar.test.mjs` по образцу
   `window-icon.test.mjs`.
@@ -385,7 +385,7 @@ windows11-manager сводит набор с явными отметками CLI
 - [ ] **Step 2:** пикер: `BRANCH=feat/taskbar-hide-dimmed
   ./data/scripts/deploy-win.sh` в фоне; штамп сборки в трее — новый. Чужая
   ветка под ревью на nb — сборная `deploy/<a>-<b>`.
-- [ ] **Step 3:** ccfzf: CLI на pc-virt живёт из `main` — до мержа проверять
+- [ ] **Step 3:** ccfzf: CLI на машине сессий живёт из `main` — до мержа проверять
   `node <worktree>/cli/claude-wt.mjs`.
 - [ ] **Step 4: живьём на nb** — сценарии из раздела «Выкатка» спеки, каждый
   с итогом да/нет: опция + `hide dimmed` — кнопки погашенных пропали; свернуть
