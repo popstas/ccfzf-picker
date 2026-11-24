@@ -24,22 +24,25 @@
    * галка «dim stale» — единственное, чем человек гасит затемнение целиком, и
    * строка, тускнеющая вопреки снятой галке, читалась бы как поломка.
    *
-   * Третий повод — сессию сжали и не продолжили (`agentCompactAt`, метку
-   * ставит агрегатор). Решение владельца 20.11.2026: контекст после `/compact`
-   * пуст, дальнейших действий нет, и ждать порога возраста незачем. Знание это
-   * строка несёт сама, поэтому оно не довод, как свёрнутость, а поле. Только
-   * у сессии: у проекта своего сжатия нет. Работающую строку метка не гасит:
-   * хук мог уже написать `active`, а хвост транскрипта до ответа агента ещё не
-   * дорос — так бывает сразу после автосжатия посреди хода.
+   * Сжатие (`agentCompactAt`, метку ставит агрегатор, пока сжатую сессию не
+   * продолжили) — не повод гасить, а активность: возраст отсчитывается от
+   * более позднего из `lastActivity` и сжатия. Решение владельца 24.11.2026
+   * заменило прежнее «гаснет сразу» (20.11): сразу погашенная сжатая сессия
+   * теряла и кнопку на панели задач (`hideDimmedFromTaskbar`), а это
+   * нелогично; нетронутая же гаснет обычным порогом после сжатия. Отдельный
+   * отсчёт нужен потому, что хук на `/compact` свою отметку не двигает
+   * (`KEEP_UPDATED` в `wt-progress.sh`), и `lastActivity` старше сжатия.
+   * Только у сессии: у проекта своего сжатия нет.
    */
   function isStale(row, nowSec, stale, kind, minimized) {
     if (!stale || stale.enabled !== true || !AGE_KINDS.has(kind)) return false;
     if (minimized === true) return true;
-    if (kind === 'session' && Number(row && row.agentCompactAt) > 0
-      && row.agentState !== 'active') return true;
-    const rawLastActivity = row && row.lastActivity;
-    if (typeof rawLastActivity !== 'number' || !Number.isFinite(rawLastActivity)) return false;
-    const lastActivity = rawLastActivity;
+    const compactAt = kind === 'session' ? Number(row && row.agentCompactAt) : 0;
+    const rawActivity = row && row.lastActivity;
+    const activity = typeof rawActivity === 'number' && Number.isFinite(rawActivity) ? rawActivity : null;
+    const compacted = Number.isFinite(compactAt) && compactAt > 0 ? compactAt : null;
+    if (activity === null && compacted === null) return false;
+    const lastActivity = Math.max(activity ?? 0, compacted ?? 0);
     const now = Number(nowSec);
     const amount = Number(kind === 'project' ? stale.projectHours : stale.sessionHours);
     // Порог — не ранняя граница по amount: только произведение способно

@@ -480,6 +480,8 @@ test('stale-настройки находятся только на отдель
     'stale.sessionHours',
     'stale.projectHours',
     'stale.opacity',
+    // Не ключ stale, но живёт здесь: работает только вместе с гашением.
+    'hideDimmedFromTaskbar',
   ]);
   assert.ok(!general.fields.some(field => field.id.startsWith('stale.')));
 
@@ -748,4 +750,15 @@ test('галка группировки по типу проекта — bool с
   assert.strictEqual(field.label, 'Group active sessions by project type');
   assert.strictEqual(configToFields({ sshHost: 'h' }).groupByProjectType, false);
   assert.strictEqual(configToFields({ groupByProjectType: true }).groupByProjectType, true);
+});
+
+test('hideDimmedFromTaskbar живёт на вкладке гашения', () => {
+  // Опция работает только вместе с гашением (dim stale + hide dimmed), и
+  // рядом с его порогами её и ищут.
+  const field = PAGES.find(p => p.id === 'stale').fields.find(f => f.id === 'hideDimmedFromTaskbar');
+  assert.ok(field, 'поля нет на вкладке stale');
+  assert.deepStrictEqual({ ...field }, {
+    id: 'hideDimmedFromTaskbar', label: 'Hide dimmed sessions from the taskbar', type: 'bool', default: false,
+    hint: 'Needs "hide dimmed" in the status line. Windows, machines running windows11-manager.',
+  });
 });

@@ -41,6 +41,9 @@ const SEEN_TOPIC: &str = "/claude-session-seen";
 /// Набор сессий для мигания кнопки окна перед остыванием кеша промпта.
 /// Тело то же, что у http-пути `/claude-wt/cache-warn`.
 const CACHE_WARN_TOPIC: &str = "/claude-cache-warn";
+/// Набор погашенных сессий, чьи кнопки прячутся с панели задач. Тело то же,
+/// что у http-пути `/claude-wt/taskbar-hide`.
+const TASKBAR_HIDE_TOPIC: &str = "/claude-taskbar-hide";
 /// Поставить или снять тип проекта (`work`, `home`, свой) в `claudeWt.projects`
 /// менеджера: пункт `Type` в `^K`. Тело то же, что у http-пути
 /// `/claude-wt/project-type`; ответа пикер не ждёт — тип приезжает файлом
@@ -314,6 +317,12 @@ pub fn seen(broker: &Broker, base: &str, id: &str) -> Result<(), String> {
 /// `manager_http::cache_warn` для машины без http-адреса.
 pub fn cache_warn(broker: &Broker, base: &str, body: &str) -> Result<(), String> {
     publish(broker, base, CACHE_WARN_TOPIC, body)
+}
+
+/// Отдать трекеру набор погашенных сессий для сокрытия кнопок. Зеркало
+/// `manager_http::taskbar_hide` для машины без http-адреса.
+pub fn taskbar_hide(broker: &Broker, base: &str, body: &str) -> Result<(), String> {
+    publish(broker, base, TASKBAR_HIDE_TOPIC, body)
 }
 
 /// Попросить открыть сессию на машине трекера.

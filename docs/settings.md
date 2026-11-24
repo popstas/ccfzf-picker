@@ -5,7 +5,11 @@ a Mac). Tabs on the left, the page on the right.
 
 - **General** — the session host, the terminal, whether to show only working
   sessions, whether to hide the window when it loses focus, whether to poll with
-  the window closed, dimming of stale sessions and projects, and the name of
+  the window closed, dimming of stale sessions and projects, hiding the taskbar
+  buttons of dimmed sessions (`hideDimmedFromTaskbar`, off by default; needs
+  `hide dimmed` in the status line and windows11-manager on this machine; a
+  session that needs you keeps its button, and the service brings the buttons
+  back on its own if the picker goes quiet), and the name of
   this machine (Enter uses it to decide whether to raise an already-open
   window).
 - **Window popup** — the theme first: `As system` (the default, following the

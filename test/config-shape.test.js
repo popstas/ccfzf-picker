@@ -500,3 +500,11 @@ test('groupByProjectType — только строгое true', () => {
   assert.strictEqual(normalizeConfig({ groupByProjectType: true }).groupByProjectType, true);
   assert.strictEqual(normalizeConfig({ groupByProjectType: 'yes' }).groupByProjectType, false);
 });
+
+test('hideDimmedFromTaskbar: умолчание false, только строгое true', () => {
+  // Кнопки панели задач прячутся только по явной просьбе: окно без кнопки
+  // ищут через Alt+Tab, и включать такое без спроса нельзя.
+  assert.strictEqual(normalizeConfig({}).hideDimmedFromTaskbar, false);
+  assert.strictEqual(normalizeConfig({ hideDimmedFromTaskbar: 'yes' }).hideDimmedFromTaskbar, false);
+  assert.strictEqual(normalizeConfig({ hideDimmedFromTaskbar: true }).hideDimmedFromTaskbar, true);
+});
