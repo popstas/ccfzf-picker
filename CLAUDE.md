@@ -283,7 +283,7 @@ Developer ID нет, universal удвоил бы вес ровно в той з�
 | Хоткеи, трей и меню `^K` | [`docs/rules/hotkeys-and-tray.md`](docs/rules/hotkeys-and-tray.md) | 13 | глобальные клавиши и `none` у клавиш раскладки, проектные хоткеи, жесты мыши, пункты трея и строки, метка связи с брокером, пункт `Type` |
 | Строки списка | [`docs/rules/list-rows.md`](docs/rules/list-rows.md) | 18 | что и где рисуется в строке: иконка окна, имена, id, хоткеи, подпись head-сессии и режим иерархии, задача вольта, ширины колонок, таймер кеша, гашение сжатых |
 | Настройки и `ui.json` | [`docs/rules/settings-and-ui-state.md`](docs/rules/settings-and-ui-state.md) | 7 | восемь полей `ui.json`, слияние `config.yaml`, создание окна, гашение пикера |
-| Терминалы | [`docs/rules/terminals.md`](docs/rules/terminals.md) | 7 | argv, пресеты, подстановки `{command}` и `{helper}`, iTerm2, папки |
+| Терминалы | [`docs/rules/terminals.md`](docs/rules/terminals.md) | 8 | argv, пресеты, подстановки `{command}` и `{helper}`, iTerm2, папки, звук звонка WezTerm |
 | Источники состояния | [`docs/rules/state-sources.md`](docs/rules/state-sources.md) | 10 | откуда берётся список, местный и ssh-источник, состояние агента, бэкофф, условный опрос, сигнал трекера, простой машины |
 | Фильтры и режимы | [`docs/rules/filtering.md`](docs/rules/filtering.md) | 8 | `onlyLive`, `onlyWindow`, `showAll`, `showDesktop`, `hideStale`, префиксы и что их перебивает, `/p <проект> <промпт>` |
 | Секции и раскладки | [`docs/rules/layouts.md`](docs/rules/layouts.md) | 5 | `buildSections`, узкий и широкий список, перетаскивание, блок типов проекта, размер окна, плитка, раскладка группы head |

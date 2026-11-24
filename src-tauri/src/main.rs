@@ -36,6 +36,7 @@ mod state_memo;
 mod state_source;
 mod tracker_signal;
 mod user_idle;
+mod wezterm_bell;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
 /// только что открытое окно. Тот же ограничитель стоит в соседнем пикере.
@@ -3461,7 +3462,8 @@ fn main() {
             restore_snapshot_mqtt, place_windows_mqtt, set_picker_selection, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
-            set_comment, open_in_editor, editor_info, read_log, tracker_signal_status, open_desktop_session, open_folder
+            set_comment, open_in_editor, editor_info, read_log, tracker_signal_status, open_desktop_session, open_folder,
+            wezterm_bell::wezterm_bell, wezterm_bell::set_wezterm_bell
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
