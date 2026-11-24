@@ -39,7 +39,7 @@ test('погашенная сессия своей машины в наборе,
 
 test('вопрос, непросмотренный review и мигающая — не в наборе', () => {
   const sets = taskbarHideSets([
-    card('q', NB, { agentState: 'question', agentSeen: false }),
+    card('q', NB, { agentState: 'question' }),
     card('r', NB, { agentState: 'review', agentSeen: false }),
     card('seen', NB, { agentState: 'review', agentSeen: true }),
     card('warn'),
@@ -57,9 +57,9 @@ test('idle с уведомлением, не просмотренная — не
   assert.deepStrictEqual(only(sets)[0].body.sessions, ['s']);
 });
 
-test('просмотренный вопрос сигналом не считается — как у кружка строки', () => {
+test('просмотренный вопрос тоже держит кнопку — агент ждёт ответа', () => {
   const sets = taskbarHideSets([card('q', NB, { agentState: 'question', agentSeen: true })], STATE, opts());
-  assert.deepStrictEqual(only(sets)[0].body.sessions, ['q']);
+  assert.deepStrictEqual(only(sets)[0].body.sessions, []);
 });
 
 test('две карточки одной сессии — один id', () => {

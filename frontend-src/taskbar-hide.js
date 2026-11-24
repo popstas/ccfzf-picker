@@ -26,13 +26,15 @@
   const normHost = windowsApi.normHost;
 
   /**
-   * Есть ли у карточки то, ради чего человеку нужна кнопка: ровно то, что
-   * зажигает оранжевый кружок строки (`needsAttention` и не просмотрено), или
-   * мигание кеша. Свой предикат разошёлся бы со строкой: кнопка пряталась бы
+   * Есть ли у карточки то, ради чего человеку нужна кнопка: вопрос агента
+   * (ждёт ответа — и просмотренный тоже), то, что зажигает оранжевый кружок
+   * строки (`needsAttention` и не просмотрено), или мигание кеша. Свой предикат разошёлся бы со строкой: кнопка пряталась бы
    * у сессии, у которой в списке горит кружок.
    */
   function hasSignal(row, warnIds) {
-    return (glyphApi.needsAttention(row) && !row.agentSeen) || warnIds.has(row.id);
+    return row.agentState === 'question'
+      || (glyphApi.needsAttention(row) && !row.agentSeen)
+      || warnIds.has(row.id);
   }
 
   /**
