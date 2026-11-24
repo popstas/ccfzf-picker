@@ -11,7 +11,7 @@ taskbar`.
 своей машины и шлёт его менеджеру (как мигание кеша, `cache-warn.js`). Служба
 windows11-manager сводит набор с явными отметками CLI и сигналами агента и
 зовёт `ITaskbarList::DeleteTab`/`AddTab` по hwnd. Кнопки возвращает служба:
-на старте (по своему журналу), на `stop()`, по протуханию набора, пунктом трея.
+на старте (всем окнам терминалов — замер Task 2: `addTab` на показанной кнопке ничего не меняет), на `stop()`, по протуханию набора, пунктом трея.
 
 **Tech Stack:** C++ N-API аддон (`vendor/node-window-manager`), Node + vitest
 (windows11-manager), ванильный JS + `node --test` через `npm test` и Rust/Tauri
@@ -52,8 +52,7 @@ windows11-manager сводит набор с явными отметками CLI
 ## Review Focus
 
 - **Служба убита `taskkill` с спрятанными кнопками** → на следующем старте они
-  вернулись, а нетронутые кнопки не переехали в конец панели (Task 4: тест
-  старта по журналу).
+  вернулись (Task 4: тест — старт зовёт `addTab` всем окнам терминалов).
 - **Пикер выключен/убит, набор не обновляется** → через 20 мин кнопки
   вернулись (Task 4: тест TTL).
 - **Explorer перезапущен** → спрятанные снова спрятаны (Task 4: тест смены
@@ -135,11 +134,11 @@ windows11-manager сводит набор с явными отметками CLI
   - `planTabs(hidden, wanted, present, reapply) → { remove: hwnd[], add: hwnd[] }`
     — `remove`: `wanted` минус `hidden` (при `reapply` — весь `wanted`), только
     `present`; `add`: `hidden` минус `wanted`, только `present`. Отсортированы.
-- Produces (store): `createTaskbarHideStore({ file, hiddenFile, now })` →
+- Produces (store): `createTaskbarHideStore({ file, now })` →
   `{ version, get(id) → {mode, hwnd?, sawIdle?} | undefined, set(id, mode |
-  null), patch(id, fields), ids() → string[], clearAll(), readHidden() →
-  number[], writeHidden(hwnds: number[]) }`. Файлы `data/session-taskbar.json` и
-  `data/taskbar-hidden.json`. Разбор терпимый, без прототипа (как
+  null), patch(id, fields), ids() → string[], clearAll() }`. Файл
+  `data/session-taskbar.json` (журнала спрятанных hwnd нет — ruling после
+  Task 2: старт возвращает кнопки всем окнам терминалов). Разбор терпимый, без прототипа (как
   `session-icons.js`: битый файл — пусто), запись `writeFileAtomic`. Записи без
   окна дольше 30 дней выбрасываются (`KEEP_MS` как у иконок).
 
@@ -156,7 +155,7 @@ windows11-manager сводит набор с явными отметками CLI
   - `planTabs`: закрытое окно не попадает ни в `remove`, ни в `add`; `reapply`
     повторяет уже спрятанные.
   - store: `set`/`get`/`set(id, null)` удаляет; переживает пересоздание из
-    файла; битый файл → пусто; `writeHidden`/`readHidden` круг.
+    файла; битый файл → пусто; `clearAll` очищает и файл.
 - [ ] **Step 2:** `npm test -- taskbar-hide` — падает.
 - [ ] **Step 3:** реализовать по Interfaces.
 - [ ] **Step 4:** `npm test` — зелёное.
@@ -172,7 +171,7 @@ windows11-manager сводит набор с явными отметками CLI
 **Interfaces:**
 - Consumes: Task 1 (`winMan.hasTabControl/deleteTab/addTab`), Task 3.
 - Produces: `startTaskbarHide({ winMan, log, store, onShown = () => {},
-  intervalMs = 3000, ttlMs = TASKBAR_HIDE_TTL_MS, reapplyEveryTick, now,
+  intervalMs = 3000, ttlMs = TASKBAR_HIDE_TTL_MS, now,
   setIntervalFn, clearIntervalFn })` → `{ tick(), setSet(body) → number,
   statusOf(sessionId) → {applied, reason?}, showAll() → number, stop() }`.
   Без `hasTabControl()` — заглушка с `reason: 'no taskbar tab support'` и
@@ -182,25 +181,28 @@ windows11-manager сводит набор с явными отметками CLI
   `applied`, чтобы следующий тик поставил вид заново.
 
 Поведение (по спеке, раздел «Служба»):
-- старт: `store.readHidden()` → `addTab` каждому, `writeHidden([])`;
+- старт: `addTab` всем окнам терминалов (на показанной кнопке это no-op — замер
+  Task 2, AGENTS.md), до первого тика;
 - тик: окна терминалов (тот же отбор, что `terminalWindows()` в
   `window-icons.js`); если набор пуст/протух, явных отметок нет и спрятанного
   нет — выход без сети; иначе `claudeWtWindowSessions`, затем
   `claudeWtWindowAgents` только для кандидатов → `nextExplicit` (обновить
   store), `hasSignal` → `wantedHidden` → `planTabs` → вызовы; удавшееся —
-  в `hidden`, `writeHidden` при изменении; вернувшиеся → `onShown(hwnds)`;
+  в `hidden`; вернувшиеся → `onShown(hwnds)`;
 - явная отметка с `hwnd`, которого нет среди окон, — снимается (окно
   закрылось); без `hwnd` — получает его, когда окно сессии появилось;
 - смена `getTaskbarWindow()` — все спрятанные снова в `remove`;
 - `setSet` заменяет набор и время; набор старше `ttlMs` считается пустым
   (строка лога `taskbar hide: набор протух` один раз);
 - `showAll`: `store.clearAll()`, набор пуст, `addTab` всем спрятанным;
-- `stop`: таймер, `addTab` всем спрятанным, `writeHidden([])`;
+- `stop`: таймер, `addTab` всем спрятанным;
+- перепрятывание — только по смене `getTaskbarWindow()` (`planTabs(..., reapply=true)`
+  на этом тике): замер Task 2 — кнопку возвращает лишь перезапуск explorer;
 - лог: `taskbar hide: <hwnd> <sessionId> спрятана|возвращена`.
 
 - [ ] **Step 1: failing tests** (winMan подменён, время — `now`):
-  - «старт возвращает кнопки из журнала и только их» — `addTab` зовётся ровно
-    для hwnd из `readHidden`, журнал очищен;
+  - «старт возвращает кнопки всем окнам терминалов» — `addTab` зовётся для
+    каждого окна терминала и ни для какого другого окна;
   - «набор прячет, сигнал возвращает» — сессия в наборе → `deleteTab`;
     тот же hwnd с `agentState: 'question'` → `addTab` и `onShown([hwnd])`;
   - «набор старше 20 минут — кнопки вернулись»;
@@ -216,7 +218,7 @@ windows11-manager сводит набор с явными отметками CLI
     окна ставится заново. `taskbar.test.js`: `resync([id])` → вид ставится
     заново.
 - [ ] **Step 2:** `npm test -- taskbar-hide window-icons taskbar` — падает.
-- [ ] **Step 3:** реализовать; `reapplyEveryTick` — по итогу Task 2. В
+- [ ] **Step 3:** реализовать. В
   `service.js` `onShown: ids => { windowIcons?.resync(ids); taskbar.resync(ids) }`
   (`windowIcons` заводится позже — замыкание, как у `sessionIcons`).
 - [ ] **Step 4:** `npm test` — зелёное.
