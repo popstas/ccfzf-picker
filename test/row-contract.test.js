@@ -1209,7 +1209,7 @@ function renderChecksWith(uiToggles) {
     /\n {2}const toggleInputs = new Map\(\);\n\n {2}function renderChecks\(\) \{[\s\S]*?\n {2}\}\n/,
   );
   assert.ok(renderSource, 'renderChecks не найден в sessions.html — тест сторожит не то');
-  const calls = { render: 0, regroup: 0, saveUi: 0 };
+  const calls = { render: 0, regroup: 0, saveUi: 0, resend: 0 };
   const ctx = {
     window: { UiState: require('../frontend-src/ui-state') },
     escapeHtml: Glyph.escapeHtml,
@@ -1219,6 +1219,7 @@ function renderChecksWith(uiToggles) {
     render: () => { calls.render += 1; },
     regroup: () => { calls.regroup += 1; },
     saveUi: () => { calls.saveUi += 1; },
+    resendWindowSets: () => { calls.resend += 1; },
   };
   vm.createContext(ctx);
   // `toggleInputs` объявлен внутри вычитанного исходника через const — такие
@@ -2915,4 +2916,22 @@ test('regroup подаёт CONFIG.groupByProjectType в buildSessionsPayload', (
   // Раскладка, а не отсев: запрос её не отменяет.
   assert.strictEqual(regroupWith(true, {}, { mode: 'sessions', query: 'x' }, {}, { groupByProjectType: true })
     .groupByProjectType, true);
+});
+
+test('галки hideStale и dimStale в статуслайне пересылают набор панели задач сразу', () => {
+  // Без resendWindowSets кнопки возвращались бы только на следующем такте —
+  // а скрытый пикер ждёт его минутами.
+  assert.match(
+    SESSIONS_HTML,
+    /if \(key === 'hideStale' \|\| key === 'dimStale'\) resendWindowSets\(\);/,
+    'обработчик галки не зовёт resendWindowSets для hideStale/dimStale',
+  );
+  for (const [key, want] of [['hideStale', 1], ['dimStale', 1], ['showAll', 0]]) {
+    const r = renderChecksWith({ [key]: { list: true, statusline: true } });
+    const input = r.toggleInputs.get(key);
+    if (!input) continue;
+    input.checked = false;
+    input.listeners.change();
+    assert.strictEqual(r.calls.resend, want, `галка ${key}: resendWindowSets зван ${r.calls.resend} раз`);
+  }
 });

@@ -8,6 +8,9 @@
   const windowsApi = typeof module === 'object' && module.exports
     ? require('./session-windows')
     : globalThis.SessionWindows;
+  const glyphApi = typeof module === 'object' && module.exports
+    ? require('./session-glyph')
+    : globalThis.SessionGlyph;
 
   /*
    * Кнопки погашенных сессий на панели задач (спека
@@ -22,11 +25,14 @@
 
   const normHost = windowsApi.normHost;
 
-  /** Есть ли у карточки то, ради чего человеку нужна кнопка. */
+  /**
+   * Есть ли у карточки то, ради чего человеку нужна кнопка: ровно то, что
+   * зажигает оранжевый кружок строки (`needsAttention` и не просмотрено), или
+   * мигание кеша. Свой предикат разошёлся бы со строкой: кнопка пряталась бы
+   * у сессии, у которой в списке горит кружок.
+   */
   function hasSignal(row, warnIds) {
-    return row.agentState === 'question'
-      || (row.agentState === 'review' && !row.agentSeen)
-      || warnIds.has(row.id);
+    return (glyphApi.needsAttention(row) && !row.agentSeen) || warnIds.has(row.id);
   }
 
   /**

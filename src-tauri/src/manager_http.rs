@@ -33,7 +33,7 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 /// Хвост топика → путь у приёмника. Общего источника правды у этих пар нет,
 /// как нет его и у имён команд; согласие держит сторож
 /// `test/manager-routes.test.js`.
-pub const ROUTES: [(&str, &str); 8] = [
+pub const ROUTES: [(&str, &str); 9] = [
     ("/claude-focus", "/claude-wt/focus"),
     ("/claude-session-unread", "/claude-wt/session-unread"),
     ("/claude-session-seen", "/claude-wt/session-seen"),
@@ -42,6 +42,7 @@ pub const ROUTES: [(&str, &str); 8] = [
     ("/claude-place", "/claude-wt/place"),
     ("/claude-cache-warn", "/claude-wt/cache-warn"),
     ("/claude-project-type", "/claude-wt/project-type"),
+    ("/claude-taskbar-hide", "/claude-wt/taskbar-hide"),
 ];
 
 fn route_for(topic_tail: &str) -> Option<&'static str> {
@@ -139,6 +140,14 @@ pub fn seen(endpoint: &str, id: &str) -> Result<(), String> {
 /// проверяет его служба (`parseCacheWarn` в windows11-manager).
 pub fn cache_warn(endpoint: &str, body: &str) -> Result<(), String> {
     post(endpoint, "/claude-cache-warn", body.to_string())
+}
+
+/// Отдать менеджеру набор погашенных сессий, чьи кнопки прячутся с панели
+/// задач, — `{"sessions": [<uuid>, …]}`, собранный страницей
+/// (`frontend-src/taskbar-hide.js`). Набор заменяет прежний целиком; тело
+/// уходит как есть, проверяет его служба.
+pub fn taskbar_hide(endpoint: &str, body: &str) -> Result<(), String> {
+    post(endpoint, "/claude-taskbar-hide", body.to_string())
 }
 
 /// Поставить или снять тип проекта у менеджера (`project_type_body`). Ответ
@@ -324,6 +333,7 @@ mod tests {
         assert_eq!(route_for("/claude-place"), Some("/claude-wt/place"));
         assert_eq!(route_for("/claude-cache-warn"), Some("/claude-wt/cache-warn"));
         assert_eq!(route_for("/claude-project-type"), Some("/claude-wt/project-type"));
+        assert_eq!(route_for("/claude-taskbar-hide"), Some("/claude-wt/taskbar-hide"));
         assert_eq!(route_for("/claude-unknown"), None);
     }
 
@@ -375,7 +385,7 @@ mod tests {
     #[test]
     fn every_public_request_carries_its_own_route() {
         let placement = Placement::default();
-        let cases: [(&str, Result<(), String>); 11] = [
+        let cases: [(&str, Result<(), String>); 12] = [
             ("/claude-wt/focus", focus("bad", "id")),
             ("/claude-wt/session-unread", unread("bad", "id")),
             ("/claude-wt/session-seen", seen("bad", "id")),
@@ -387,6 +397,7 @@ mod tests {
             ("/claude-wt/place", place("bad", "tile", &[])),
             ("/claude-wt/cache-warn", cache_warn("bad", "{}")),
             ("/claude-wt/project-type", project_type("bad", "{}")),
+            ("/claude-wt/taskbar-hide", taskbar_hide("bad", "{}")),
         ];
         for (route, result) in cases {
             let want = format!("manager address is malformed: bad (route {route})");

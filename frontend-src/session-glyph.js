@@ -34,6 +34,18 @@
    * раньше красили любую живую, теперь нельзя: зелёный стал означать «агент
    * прямо сейчас работает», и врать им не стоит.
    */
+  /**
+   * Зовёт ли сессия человека: вопрос, review или простой с уведомлением.
+   * Решение о цвете кружка и о том, что кнопку окна на панели задач прятать
+   * нельзя (`taskbar-hide.js`), — одно, поэтому и предикат один. Гаснет по
+   * `agentSeen` у вызывающего: здесь только «зовёт ли вообще».
+   */
+  function needsAttention(session) {
+    return session.agentState === 'question'
+      || session.agentState === 'review'
+      || (session.agentState === 'idle' && session.agentEvent === 'attention');
+  }
+
   function dotState(session) {
     // «Работа встала, посмотри» приходит двумя путями: stop и fail пишут
     // review сразу, а «Claude is waiting for your input» — через минуту после
@@ -47,10 +59,7 @@
     // Вопрос гаснет по тому же правилу. Агент при этом остаётся заблокированным,
     // и это осознанный размен: список, который продолжает звать после того, как
     // на сессию уже сходили, быстро перестаёт что-либо значить.
-    const needsAttention = session.agentState === 'question'
-      || session.agentState === 'review'
-      || (session.agentState === 'idle' && session.agentEvent === 'attention');
-    if (needsAttention && !session.agentSeen) {
+    if (needsAttention(session) && !session.agentSeen) {
       return session.agentState === 'question' ? 'question' : 'review';
     }
     // Ход закончен, а фоновая команда идёт — циан вместо серого. Ниже
@@ -60,7 +69,7 @@
     // агрегатор `shell` ему не ставит. Старый ccfzf поля не шлёт вовсе —
     // тогда всё как раньше.
     if (session.shell && session.agentState !== 'active') return 'shell';
-    if (needsAttention) return 'idle';
+    if (needsAttention(session)) return 'idle';
     return AGENT_DOT[session.agentState] || 'idle';
   }
 
@@ -1026,7 +1035,7 @@
   }
 
   return {
-    statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
+    needsAttention, statusDotHtml, formatAge, ageHtml, stateText, shortSessionId, stateHtml,
     sessionIdHtml, sessionName, hotkeyHtml, CONTEXT_LEVELS, contextLevel, usageHtml,
     cacheRemainingSec, cacheLevel, cacheText, windowHtml, windowHostHtml,
     todoHtml, todoText, projectCountHtml, projectCountText, projectColumnWidths, ageText,

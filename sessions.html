@@ -895,7 +895,6 @@
 <script src="stale-items.js"></script>
 <script src="session-windows.js"></script>
 <script src="cache-warn.js"></script>
-<script src="taskbar-hide.js"></script>
 <script src="session-list.js"></script>
 <script src="zellij-list.js"></script>
 <script src="open-transport.js"></script>
@@ -904,6 +903,9 @@
      загрузки, и в обратном порядке ему достался бы undefined. -->
 <script src="ui-state.js"></script>
 <script src="session-glyph.js"></script>
+<!-- taskbar-hide после session-glyph: предикат «зовёт человека» берётся
+     оттуда в момент загрузки. -->
+<script src="taskbar-hide.js"></script>
 <script src="session-info.js"></script>
 <!-- session-name до open-strategy: тот берёт из него uniqueSessionName в
      момент загрузки, и в обратном порядке ему достался бы undefined. -->
@@ -1488,6 +1490,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
         // затемнение — спрятанные обязаны вернуться сразу.
         if (isFilter || (key === 'dimStale' && toggles.hideStale)) regroup();
         else render();
+        // Набор для панели задач следует за этими двумя галками: кнопки должны
+        // вернуться сразу, а не на следующем такте.
+        if (key === 'hideStale' || key === 'dimStale') resendWindowSets();
         saveUi();
       });
     }

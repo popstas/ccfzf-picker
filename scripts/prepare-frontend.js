@@ -21,12 +21,12 @@ const FILES = [
   'frontend-src/session-windows.js',
   // После session-windows: берёт SessionWindows из globalThis на загрузке.
   'frontend-src/cache-warn.js',
-  // После session-windows: берёт SessionWindows из globalThis на загрузке.
-  'frontend-src/taskbar-hide.js',
   'frontend-src/open-transport.js',
   'frontend-src/session-groups.js',
   'frontend-src/ui-state.js',
   'frontend-src/session-glyph.js',
+  // После session-windows и session-glyph: берёт оба из globalThis на загрузке.
+  'frontend-src/taskbar-hide.js',
   'frontend-src/session-info.js',
   'frontend-src/path-map.js',
   'frontend-src/action-hotkey.js',
