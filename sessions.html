@@ -1499,8 +1499,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
       && (!os || os === PICKER_OS) && (uiToggles[key] || {}).statusline);
     // Отбивка между группами — на первом чекбоксе каждой следующей: отдельный
     // пустой элемент-разделитель пришлось бы ещё и прятать, когда группа пуста.
+    // `taskbar` на глаз — продолжение фильтров: hide dimmed windows стоит
+    // вплотную к hide dimmed (дизайн 25.11), хотя обработчику она не фильтр.
+    const look = side => (side === 'taskbar' ? 'filter' : side);
     statusChecks.innerHTML = shown.map(({ key, label, side }, i) => {
-      const gap = i > 0 && shown[i - 1].side !== side ? ' gap' : '';
+      const gap = i > 0 && look(shown[i - 1].side) !== look(side) ? ' gap' : '';
       return `<label class="status-check${gap}"><input type="checkbox" data-toggle="${key}"> ${escapeHtml(label)}</label>`;
     }).join('');
     for (const input of statusChecks.querySelectorAll('input[data-toggle]')) {

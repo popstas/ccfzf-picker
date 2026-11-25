@@ -1742,6 +1742,20 @@ test('hide dimmed windows рисуется в статуслайне тольк�
   }
 });
 
+test('hide dimmed windows стоит вплотную к hide dimmed, отбивка — перед dim stale', () => {
+  // Своя группа у галки — ради обработчика, а не ради вида: отбивка между
+  // hide dimmed и hide dimmed windows развела бы две галки об одном.
+  const { statusChecks } = renderChecksWith({
+    hideStale: { list: false, statusline: true },
+    hideDimmedWindows: { list: false, statusline: true },
+    dimStale: { list: true, statusline: true },
+  });
+  const labels = statusChecks.innerHTML.match(/<label class="[^"]*"><input[^>]*data-toggle="[^"]+"/g);
+  const gapOf = key => / gap"/.test(labels.find(l => l.includes(`data-toggle="${key}"`)));
+  assert.strictEqual(gapOf('hideDimmedWindows'), false, 'отбивка между hide dimmed и hide dimmed windows');
+  assert.strictEqual(gapOf('dimStale'), true, 'нет отбивки перед dim stale');
+});
+
 test('умолчание hide dimmed windows одинаково в обоих окнах', () => {
   // Выключена (прячет кнопки только по явной просьбе: окно без кнопки ищут
   // через Alt+Tab), но вынесена в статуслайн — ради быстрого щелчка и
