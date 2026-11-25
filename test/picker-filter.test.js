@@ -170,3 +170,16 @@ test('дочерняя сессия head находится по имени ро
   assert.deepStrictEqual(filterSessions(groups, 'head:lead').flatMap(g => g.sessions.map(s => s.label)),
     ['lead-cup-dashboard']);
 });
+
+test('сессия из worktree находится по основному проекту, который назван под ней', () => {
+  // Подпись каталога у неё — основной проект (projectLine), а worktree может
+  // лежать где угодно, и в его пути имени проекта нет вовсе.
+  const rows = [
+    { label: 'child', cwd: '/home/user/wt/feature-x', projectCwd: '/home/user/projects/site',
+      worktree: { path: '/home/user/wt/feature-x', branch: 'feat/x' } },
+    // Владелец подкаталога известен, но подписан он своим basename — и
+    // находиться по владельцу не обязан.
+    { label: 'other', cwd: '/home/user/elsewhere', projectCwd: '/home/user/projects/site' },
+  ];
+  assert.deepStrictEqual(filterRows(rows, 'site').map(r => r.label), ['child']);
+});

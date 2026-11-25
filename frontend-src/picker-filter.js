@@ -92,12 +92,16 @@
       // Текст задачи вольта — седьмым: он стоит подписью после имени
       // (taskNameHtml), а показанное обязано и находиться.
       //
+      // Каталог основного проекта у сессии из git worktree — восьмым: подпись
+      // каталога у неё называет его, а не worktree (projectLine), а сам
+      // worktree может лежать где угодно, и имени проекта в его пути нет.
+      //
       // `?? ''` обязателен у всех: ни окна, ни комментария, ни zellij у строки
       // может не быть вовсе, и undefined уехало бы в стог словом, которое нашло бы
       // разом всю историю.
       .map(g => ({ ...g, sessions: g.sessions.filter(s =>
         matchesText(
-          `${s.label} ${searchableCwd(s.cwd)} ${s.windowTitle ?? ''} ${s.comment ?? ''} ${s.zellij ?? ''} ${s.head ? `head:${s.head}` : ''} ${s.task?.text ?? ''}`, q)
+          `${s.label} ${searchableCwd(s.cwd)} ${s.windowTitle ?? ''} ${s.comment ?? ''} ${s.zellij ?? ''} ${s.head ? `head:${s.head}` : ''} ${s.task?.text ?? ''} ${s.worktree ? searchableCwd(s.projectCwd) : ''}`, q)
         || matchesId(s.id, q)) }))
       .filter(g => g.sessions.length > 0);
   }

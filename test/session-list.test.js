@@ -687,6 +687,16 @@ test('нет метки сжатия — ноль', () => {
     const [row] = build([state()], 'mac-host');
     assert.strictEqual(row.windowIcon, '');
   });
+
+  test('сессия из worktree без окна берёт иконку основного проекта', () => {
+    // Менеджер ставит окну иконку по `projectCwd || cwd` — закрытая строка
+    // обязана выглядеть так же, как выглядела с окном.
+    const [row] = build([state({
+      cwd: '/home/user/x.wt', projectCwd: '/home/user/x',
+      worktree: { path: '/home/user/x.wt', branch: 'feat/x' },
+    })]);
+    assert.strictEqual(row.windowIcon, 'X:\\i\\x.ico');
+  });
 }
 
 // ── Задача вольта (поле `task` от ccfzf, sess2task) ─────────────────────────
