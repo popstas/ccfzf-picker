@@ -1,9 +1,9 @@
-// Кнопка звука звонка WezTerm в статуслайне.
+// Кнопка звука звонка WezTerm в статуслайне: три режима по кругу.
 //
-// Состояние живёт в флаг-файле (`~/.wezterm-bell-off`, src-tauri/src/wezterm_bell.rs),
-// и страница обязана красить кнопку по ответу Rust, а не по собственной
-// догадке: переверни она копию сама — и после того, как человек снял файл
-// руками, кнопка врала бы ровно наоборот.
+// Режим живёт в флаг-файлах (`~/.wezterm-bell-off`, `~/.wezterm-bell-children-off`,
+// src-tauri/src/wezterm_bell.rs), и страница обязана красить кнопку по ответу
+// Rust, а не по собственной догадке: переверни она копию сама — и после того,
+// как человек снял файл руками, кнопка врала бы.
 //
 // Проверяется настоящий код страницы: функции вычитываются из sessions.html и
 // исполняются в vm — тем же приёмом, что и в wide-button.test.js.
@@ -35,14 +35,16 @@ function fakeButton() {
   };
 }
 
+const PAGE_FUNCTIONS = ['bellModeOf', 'nextBellMode', 'refreshBell', 'toggleBell', 'paintToggles'];
+
 /**
  * Прогнать названную функцию страницы.
  * `answer` — что ответит Rust на любую команду.
  */
-async function run(fn, { bellMuted = null, answer } = {}) {
+async function run(fn, { bellMode = null, answer } = {}) {
   const calls = [];
   const ctx = {
-    bellMuted,
+    bellMode,
     bellButton: fakeButton(),
     wideButton: fakeButton(),
     treeButton: fakeButton(),
@@ -56,54 +58,86 @@ async function run(fn, { bellMuted = null, answer } = {}) {
     render: () => { calls.push(['render']); },
   };
   vm.createContext(ctx);
-  const code = ['refreshBell', 'toggleBell', 'paintToggles'].map(sourceOf).join('\n');
-  vm.runInContext(code, ctx, { filename: 'sessions.html' });
+  vm.runInContext(PAGE_FUNCTIONS.map(sourceOf).join('\n'), ctx, { filename: 'sessions.html' });
   await vm.runInContext(`${fn}()`, ctx);
   return { ctx, calls, names: calls.map(c => c[0]) };
 }
 
-test('клик просит обратное текущему', async () => {
-  const off = await run('toggleBell', { bellMuted: false, answer: true });
-  const call = off.calls.find(c => c[0] === 'set_wezterm_bell');
-  assert.ok(call, 'set_wezterm_bell не позван');
-  assert.strictEqual(call[1].muted, true);
-  const on = await run('toggleBell', { bellMuted: true, answer: false });
-  assert.strictEqual(on.calls.find(c => c[0] === 'set_wezterm_bell')[1].muted, false);
+/** Кнопка после ответа Rust `mode` на чтение. */
+async function painted(mode) {
+  return (await run('refreshBell', { answer: mode })).ctx.bellButton;
+}
+
+test('клик идёт по кругу all → noChildren → off → all', async () => {
+  for (const [from, to] of [['all', 'noChildren'], ['noChildren', 'off'], ['off', 'all']]) {
+    const { calls } = await run('toggleBell', { bellMode: from, answer: to });
+    const call = calls.find(c => c[0] === 'set_wezterm_bell');
+    assert.ok(call, `set_wezterm_bell не позван из ${from}`);
+    assert.deepStrictEqual({ ...call[1] }, { mode: to }, `из ${from} попросили не тот режим`);
+  }
 });
 
 test('состояние берётся из ответа Rust, а не из просьбы', async () => {
-  // Просили выключить, а на диске флаг не лёг (или лёг и тут же снят):
-  // кнопка обязана показать то, что есть, — звук включён.
-  const { ctx } = await run('toggleBell', { bellMuted: false, answer: false });
-  assert.strictEqual(ctx.bellMuted, false);
-  assert.ok(ctx.bellButton.classList.contains('on'), 'кнопка погасла, хотя звук остался');
-  assert.ok(!ctx.bellButton.classList.contains('muted'));
+  // Просили noChildren, а на диске вышло all (флаг не лёг или снят тут же):
+  // кнопка обязана показать то, что есть.
+  const { ctx } = await run('toggleBell', { bellMode: 'all', answer: 'all' });
+  assert.strictEqual(ctx.bellMode, 'all');
+  assert.ok(!ctx.bellButton.classList.contains('children-off'), 'кнопка показала режим, которого нет на диске');
 });
 
-test('выключенный звук: перечёркнутый рисунок, без подсветки, подпись с состоянием', async () => {
-  const { ctx } = await run('toggleBell', { bellMuted: false, answer: true });
-  assert.strictEqual(ctx.bellButton.hidden, false);
-  assert.ok(ctx.bellButton.classList.contains('muted'));
-  assert.ok(!ctx.bellButton.classList.contains('on'));
-  assert.match(ctx.bellButton.title, /off/);
+test('all: обе волны, подсветка, подпись называет режим и следующий шаг', async () => {
+  const b = await painted('all');
+  assert.strictEqual(b.hidden, false);
+  assert.ok(b.classList.contains('on'));
+  assert.ok(!b.classList.contains('children-off'));
+  assert.ok(!b.classList.contains('muted'));
+  assert.match(b.title, /all sessions/);
+  assert.match(b.title, /click to mute child sessions/);
 });
 
-test('нет выключателя на машине — кнопка скрыта', async () => {
-  // Rust вне Windows отвечает null; без Tauri invoke отвечает undefined.
-  for (const answer of [null, undefined]) {
-    const { ctx } = await run('refreshBell', { bellMuted: false, answer });
-    assert.strictEqual(ctx.bellMuted, null);
+test('noChildren: одна волна, подсветка остаётся — звук ещё есть', async () => {
+  const b = await painted('noChildren');
+  assert.strictEqual(b.hidden, false);
+  assert.ok(b.classList.contains('on'), 'звонят обычные сессии — кнопка не должна выглядеть выключенной');
+  assert.ok(b.classList.contains('children-off'));
+  assert.ok(!b.classList.contains('muted'));
+  assert.match(b.title, /child sessions muted/);
+  assert.match(b.title, /click to mute all/);
+});
+
+test('off: перечёркнутый рисунок, без подсветки, подпись с состоянием', async () => {
+  const b = await painted('off');
+  assert.strictEqual(b.hidden, false);
+  assert.ok(b.classList.contains('muted'));
+  assert.ok(!b.classList.contains('on'));
+  assert.ok(!b.classList.contains('children-off'));
+  assert.match(b.title, /off/);
+  assert.match(b.title, /click to turn on/);
+});
+
+test('у трёх режимов три разные подписи', async () => {
+  const titles = new Set();
+  for (const mode of ['all', 'noChildren', 'off']) titles.add((await painted(mode)).title);
+  assert.strictEqual(titles.size, 3);
+});
+
+test('нет выключателя на машине или непонятный ответ — кнопка скрыта', async () => {
+  // Rust вне Windows отвечает null; без Tauri invoke отвечает undefined;
+  // прежний бинарь отвечал булевым — его слов страница уже не знает.
+  for (const answer of [null, undefined, true, false, 'on', 'children']) {
+    const { ctx } = await run('refreshBell', { bellMode: 'all', answer });
+    assert.strictEqual(ctx.bellMode, null, `ответ ${answer} принят за режим`);
     assert.strictEqual(ctx.bellButton.hidden, true, `кнопка видна при ответе ${answer}`);
   }
 });
 
 test('скрытая кнопка ничего не шлёт', async () => {
-  const { names } = await run('toggleBell', { bellMuted: null, answer: true });
+  const { names } = await run('toggleBell', { bellMode: null, answer: 'all' });
   assert.ok(!names.includes('set_wezterm_bell'), 'выключатель позван там, где его нет');
 });
 
 test('чтение спрашивает Rust и красит кнопку', async () => {
-  const { ctx, names } = await run('refreshBell', { bellMuted: null, answer: true });
+  const { ctx, names } = await run('refreshBell', { bellMode: null, answer: 'off' });
   assert.ok(names.includes('wezterm_bell'));
   assert.strictEqual(ctx.bellButton.hidden, false);
   assert.ok(ctx.bellButton.classList.contains('muted'));
@@ -111,16 +145,24 @@ test('чтение спрашивает Rust и красит кнопку', asyn
 
 test('отказ Rust уходит в строку ошибки', async () => {
   const ctx = {
-    bellMuted: false, error: '',
+    bellMode: 'all', error: '',
     invoke: () => Promise.reject(new Error('cannot write')),
     render: () => {},
     paintToggles: () => {},
   };
   vm.createContext(ctx);
-  vm.runInContext(sourceOf('toggleBell'), ctx);
+  vm.runInContext(['nextBellMode', 'bellModeOf', 'toggleBell'].map(sourceOf).join('\n'), ctx);
   await vm.runInContext('toggleBell()', ctx);
   assert.match(ctx.error, /cannot write/);
-  assert.strictEqual(ctx.bellMuted, false, 'состояние сменилось при отказе');
+  assert.strictEqual(ctx.bellMode, 'all', 'состояние сменилось при отказе');
+});
+
+test('рисунок: дальняя волна отдельной линией, гаснет в noChildren', () => {
+  // Глиф — инлайн-SVG, не символ шрифта: квадратика-заглушки быть не может.
+  assert.match(SESSIONS_HTML, /<path class="bell-on bell-near" d="[^"]+"\/>/, 'ближней волны нет');
+  assert.match(SESSIONS_HTML, /<path class="bell-on bell-far" d="[^"]+"\/>/, 'дальней волны нет');
+  assert.match(SESSIONS_HTML, /#bell-button\.children-off \.bell-far \{ display: none; \}/,
+    'в noChildren рисунок не отличается от all');
 });
 
 test('состояние перечитывается на старте и на каждом показе', () => {

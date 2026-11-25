@@ -267,11 +267,14 @@
            иначе стоял бы выше `⛶` и `⚙`. */
         #tree-button svg, #bell-button svg { vertical-align: -2px; }
         /* Звук звонка показан и цветом (`.on`, как у соседей), и рисунком:
-           динамик с волнами — звук есть, перечёркнутый — выключен. Один цвет
-           на тусклой кнопке читался бы как «кнопка не работает». */
+           динамик с двумя волнами — звенят все, с одной ближней — все, кроме
+           дочерних (звук тише, но есть, поэтому и подсветка остаётся),
+           перечёркнутый — не звенит никто. Один цвет на тусклой кнопке
+           читался бы как «кнопка не работает». */
         #bell-button .bell-muted { display: none; }
         #bell-button.muted .bell-muted { display: inline; }
         #bell-button.muted .bell-on { display: none; }
+        #bell-button.children-off .bell-far { display: none; }
         .status-check {
             display: flex; align-items: center; gap: 6px;
             cursor: pointer; color: var(--fg-dim);
@@ -836,13 +839,14 @@
   <!-- Подпись и подсветку ставит paintToggles: режим переключается ещё и из
        окна настроек (событие `ui-changed`), и покрась мы кнопку по клику, она
        врала бы после чужой правки. -->
-  <!-- Звук звонка WezTerm (флаг-файл `~/.wezterm-bell-off`, см.
+  <!-- Звук звонка WezTerm, три режима по кругу (флаг-файлы
+       `~/.wezterm-bell-off` и `~/.wezterm-bell-children-off`, см.
        src-tauri/src/wezterm_bell.rs). Скрыта, пока Rust не ответил, что
        выключатель на этой машине есть: вне Windows своего звука у WezTerm нет,
        и кнопка выключала бы ничто. Подпись, подсветку и рисунок ставит
        paintToggles. Знак — рисунок, а не 🔔/🔇: эмодзи в половине системных
        шрифтов выходят квадратиком. -->
-  <span id="bell-button" class="icon-button" hidden><svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z"/><path class="bell-on" d="M11.5 5.5a3.5 3.5 0 0 1 0 5M13.5 3.5a6.3 6.3 0 0 1 0 9"/><path class="bell-muted" d="M11 6l4 4M15 6l-4 4"/></svg></span>
+  <span id="bell-button" class="icon-button" hidden><svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z"/><path class="bell-on bell-near" d="M11.5 5.5a3.5 3.5 0 0 1 0 5"/><path class="bell-on bell-far" d="M13.5 3.5a6.3 6.3 0 0 1 0 9"/><path class="bell-muted" d="M11 6l4 4M15 6l-4 4"/></svg></span>
   <span id="wide-button" class="icon-button"><span class="icon">⛶</span></span>
   <!-- Режим иерархии head-сессий. Знак — рисунок, а не символ шрифта: глифа
        ветвления нет в половине системных шрифтов, и вместо него вышел бы
@@ -1564,22 +1568,36 @@ const infoBackdrop = document.getElementById('info-backdrop');
   });
 
   // Звук звонка WezTerm: `null` — выключателя на этой машине нет (не Windows,
-  // либо страница без Tauri), кнопка скрыта; `true` — звук выключен.
-  // Источник — флаг-файл на диске, и копия здесь только для отрисовки: её
-  // перезаписывает каждый ответ Rust (старт, показ окна, клик), а сама она по
-  // клику не переворачивается — человек мог снять файл руками.
-  let bellMuted = null;
+  // либо страница без Tauri), кнопка скрыта; иначе режим `all` (звенят все),
+  // `noChildren` (все, кроме дочерних) или `off` (никто) — те же слова, что у
+  // `BellMode` в wezterm_bell.rs. Источник — флаг-файлы на диске, и копия здесь
+  // только для отрисовки: её перезаписывает каждый ответ Rust (старт, показ
+  // окна, клик), а сама она по клику не сдвигается — человек мог снять файл руками.
+  let bellMode = null;
+
+  // Ответ Rust → режим. Незнакомое (булево от прежнего бинаря, `null` вне
+  // Windows, `undefined` без Tauri) режимом не считается: кнопка прячется, а не
+  // показывает догадку.
+  function bellModeOf(state) {
+    return state === 'all' || state === 'noChildren' || state === 'off' ? state : null;
+  }
+
+  // Круг щелчка: all → noChildren → off → all. Четвёртого «звенят только
+  // дети» нет намеренно — смысла у него нет.
+  function nextBellMode(mode) {
+    return mode === 'all' ? 'noChildren' : mode === 'noChildren' ? 'off' : 'all';
+  }
 
   function refreshBell() {
     return invoke('wezterm_bell')
-      .then((state) => { bellMuted = typeof state === 'boolean' ? state : null; paintToggles(); })
+      .then((state) => { bellMode = bellModeOf(state); paintToggles(); })
       .catch((e) => { error = String(e); render(); });
   }
 
   function toggleBell() {
-    if (bellMuted === null) return Promise.resolve();
-    return invoke('set_wezterm_bell', { muted: !bellMuted })
-      .then((state) => { bellMuted = typeof state === 'boolean' ? state : null; paintToggles(); })
+    if (bellMode === null) return Promise.resolve();
+    return invoke('set_wezterm_bell', { mode: nextBellMode(bellMode) })
+      .then((state) => { bellMode = bellModeOf(state); paintToggles(); })
       .catch((e) => { error = String(e); render(); });
   }
 
@@ -1593,10 +1611,13 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // Head просил подпись с текущим состоянием, а правило ряда — называть то,
     // что кнопка сделает. Здесь оба: состояние у WezTerm не видно ниоткуда,
     // кроме этой кнопки, и одна подсветка его не договаривает.
-    bellButton.hidden = bellMuted === null;
-    bellButton.title = bellMuted ? 'WezTerm bell: off - click to turn on' : 'WezTerm bell: on - click to mute';
-    bellButton.classList.toggle('on', bellMuted === false);
-    bellButton.classList.toggle('muted', bellMuted === true);
+    bellButton.hidden = bellMode === null;
+    bellButton.title = bellMode === 'off' ? 'WezTerm bell: off - click to turn on for all sessions'
+      : bellMode === 'noChildren' ? 'WezTerm bell: child sessions muted - click to mute all'
+      : 'WezTerm bell: all sessions - click to mute child sessions';
+    bellButton.classList.toggle('on', bellMode === 'all' || bellMode === 'noChildren');
+    bellButton.classList.toggle('children-off', bellMode === 'noChildren');
+    bellButton.classList.toggle('muted', bellMode === 'off');
     // Подпись называет то, что кнопка сделает, а не то, что показано сейчас:
     // так читается всякая кнопка, а состояние видно подсветкой рядом.
     wideButton.title = fullscreen ? 'Narrow view (Ctrl+F)' : 'Wide view (Ctrl+F)';
