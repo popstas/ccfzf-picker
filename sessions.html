@@ -1151,6 +1151,15 @@
     // гасить, без исключений). Клавиши в окне нет намеренно: просили прятать,
     // а не гасить.
     { key: 'hideStale', label: 'hide dimmed', side: 'filter' },
+    // Соседка hide dimmed, но не фильтр: прячет не строки, а кнопки погашенных
+    // сессий этой машины на панели задач (набор — taskbar-hide.js, прячет
+    // служба windows11-manager). Галки независимы (Стас 25.11): строки в
+    // пикере остаются. Своя группа `taskbar` — в FILTER_KEYS ей нельзя:
+    // щелчок звал бы regroup впустую, а activeFilters снимал бы её при
+    // поиске, и кнопки мигали бы от набранных букв. `os` — где у галки есть
+    // эффект: панель задач и служба есть только на Windows, на других
+    // системах renderChecks её не рисует.
+    { key: 'hideDimmedWindows', label: 'hide dimmed windows', side: 'taskbar', os: 'windows' },
     // Четвёртая группа, `dim`, — и не колонка, и не фильтр. Само затемнение
     // состав списка не меняет (класс вешает отрисовщик строки), поэтому
     // обработчику обычно хватает render(); попади ключ в FILTER_KEYS, каждое
@@ -1222,6 +1231,11 @@
     // то, с чем пикер открывается. Вынесена в статуслайн: ради быстрого щелчка
     // её и заводили (Стас 22.11), без него она ничем не лучше dim stale.
     hideStale: { list: false, statusline: true },
+    // Выключена: окно без кнопки на панели задач ищут через Alt+Tab, и
+    // прятать такое без спроса нельзя. Вынесена в статуслайн — ради быстрого
+    // щелчка и заводилась (Стас 25.11). Ось list у включивших прежнюю опцию
+    // `hideDimmedFromTaskbar` включает toggleDefaults (миграция).
+    hideDimmedWindows: { list: false, statusline: true },
     // Умолчание подставляется при загрузке ui.json (toggleDefaults): здесь
     // CONFIG ещё пустой — load_config идёт позже, — и значение застыло бы на
     // встроенном. `true` тут только затем, чтобы ключ существовал.
@@ -1387,14 +1401,19 @@ let commentRow = null;
   }
 
   /**
-   * Прятать ли кнопки погашенных с панели задач. Галка hide dimmed берётся
-   * сама, а не через activeFilters: тот снимает отсев списка при запросе и
+   * Прятать ли кнопки погашенных с панели задач. Решает галка hide dimmed
+   * windows, и только она: hide dimmed прячет строки пикера и на набор не
+   * влияет (галки независимы, Стас 25.11), а опция `hideDimmedFromTaskbar`
+   * из config.yaml осталась лишь умолчанием галки (toggleDefaults). Галка
+   * берётся сама, а не через activeFilters: тот снимает отсевы при запросе и
    * префиксе, и каждая набранная буква возвращала бы все кнопки на панель.
    * Гашение — staleSettings, как у предиката: ничего не погашено — нечего и
-   * прятать.
+   * прятать. Система — та же, по которой renderChecks рисует галку (`os` в
+   * TOGGLE_CHECKS): включённая миграцией на маке, она не видна, и
+   * действовать молча ей нельзя.
    */
   function taskbarHideEnabled() {
-    return CONFIG.hideDimmedFromTaskbar === true && toggles.hideStale === true
+    return PICKER_OS === 'windows' && toggles.hideDimmedWindows === true
       && staleSettings().enabled === true;
   }
 
@@ -1402,9 +1421,20 @@ let commentRow = null;
    * Умолчания галок для normalizeUiState — с оглядкой на уже загруженный
    * конфиг. Одна функция на обе дороги (первая загрузка и `ui-changed`):
    * второе такое же выражение разошлось бы с первым молча.
+   *
+   * Здесь же миграция `hideDimmedFromTaskbar`: опция ушла из окна настроек,
+   * её заменила галка hide dimmed windows, и у включивших опцию кнопки
+   * обязаны прятаться и после обновления. Умолчание действует, пока ключа
+   * галки в ui.json нет; первый же saveUi записывает его туда, и дальше
+   * решает человек, а не оставшаяся в config.yaml строка. Окно настроек
+   * повторяет это строкой рядом с умолчанием dimStale.
    */
   function toggleDefaults() {
-    return { ...uiToggles, dimStale: { ...uiToggles.dimStale, list: CONFIG.stale.enabled } };
+    return {
+      ...uiToggles,
+      dimStale: { ...uiToggles.dimStale, list: CONFIG.stale.enabled },
+      hideDimmedWindows: { ...uiToggles.hideDimmedWindows, list: CONFIG.hideDimmedFromTaskbar === true },
+    };
   }
   const message = document.getElementById('message');
   const statusline = document.getElementById('statusline');
@@ -1462,7 +1492,11 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // строке не положена своя галка внизу списка (см. комментарий у
     // showTerminalIcon в TOGGLE_CHECKS), а не полагаться на то, что ось
     // всегда false, надёжнее — окно настроек её всё равно предлагает.
-    const shown = TOGGLE_CHECKS.filter(({ key, side }) => side !== 'glyph' && (uiToggles[key] || {}).statusline);
+    // `os` — галка, у которой эффект есть только на одной системе (hide
+    // dimmed windows: панель задач — Windows): в чужой системе она была бы
+    // мёртвым чекбоксом.
+    const shown = TOGGLE_CHECKS.filter(({ key, side, os }) => side !== 'glyph'
+      && (!os || os === PICKER_OS) && (uiToggles[key] || {}).statusline);
     // Отбивка между группами — на первом чекбоксе каждой следующей: отдельный
     // пустой элемент-разделитель пришлось бы ещё и прятать, когда группа пуста.
     statusChecks.innerHTML = shown.map(({ key, label, side }, i) => {
@@ -1491,8 +1525,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
         if (isFilter || (key === 'dimStale' && toggles.hideStale)) regroup();
         else render();
         // Набор для панели задач следует за этими двумя галками: кнопки должны
-        // вернуться сразу, а не на следующем такте.
-        if (key === 'hideStale' || key === 'dimStale') resendWindowSets();
+        // вернуться сразу, а не на следующем такте. hide dimmed сюда не
+        // входит — она прячет только строки пикера.
+        if (key === 'hideDimmedWindows' || key === 'dimStale') resendWindowSets();
         saveUi();
       });
     }
@@ -2668,8 +2703,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
   /*
    * Кнопки погашенных сессий на панели задач (frontend-src/taskbar-hide.js).
    * Тот же отправитель, что у мигания, — те же повтор и пауза после отказа;
-   * своё у набора только тело и маршрут. Пустая карта (опция или галка
-   * выключены) один раз шлёт пустой список — кнопки возвращаются.
+   * своё у набора только тело и маршрут. Пустая карта (галка hide dimmed
+   * windows или dim stale выключена) один раз шлёт пустой список — кнопки
+   * возвращаются.
    */
   const taskbarHide = window.CacheWarn.createCacheWarnSender({
     send: (target, body) => invoke('taskbar_hide_send', { target, body }),
@@ -2689,8 +2725,8 @@ const infoBackdrop = document.getElementById('info-backdrop');
       : [];
     const nowSec = Math.floor(Date.now() / 1000);
     const warnSets = window.CacheWarn.cacheWarnSets(rows, state, CONFIG.cacheWarnMinutes);
-    // Мигающие держат кнопку: сигнал, спрятанный с панели, не видно нигде —
-    // строка в списке тоже спрятана hide dimmed. Берутся до отсева целей без
+    // Мигающие держат кнопку: сигнал, спрятанный с панели, может быть не
+    // виден нигде — строку в списке прячет hide dimmed. Берутся до отсева целей без
     // дороги: мигание, которое пикер не довёз, всё равно может идти у службы.
     const hideSets = window.TaskbarHide.taskbarHideSets(rows, state, {
       enabled: hideOn,
@@ -2710,7 +2746,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
   /**
    * Наборы по последнему ответу — после правки конфига или ui.json из окна
    * настроек. Пикер при этом скрыт, а такт скрытого опроса уходит в минуты:
-   * выключенная опция без этого вызова возвращала бы кнопки только к
+   * выключенная галка без этого вызова возвращала бы кнопки только к
    * следующему ответу. До первого ответа слать нечего.
    */
   function resendWindowSets() {

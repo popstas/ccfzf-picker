@@ -5,11 +5,7 @@ a Mac). Tabs on the left, the page on the right.
 
 - **General** — the session host, the terminal, whether to show only working
   sessions, whether to hide the window when it loses focus, whether to poll with
-  the window closed, dimming of stale sessions and projects, hiding the taskbar
-  buttons of dimmed sessions (`hideDimmedFromTaskbar`, off by default; needs
-  `hide dimmed` in the status line and windows11-manager on this machine; a
-  session that needs you keeps its button, and the service brings the buttons
-  back on its own if the picker goes quiet), and the name of
+  the window closed, dimming of stale sessions and projects, and the name of
   this machine (Enter uses it to decide whether to raise an already-open
   window).
 - **Window popup** — the theme first: `As system` (the default, following the
@@ -24,6 +20,14 @@ a Mac). Tabs on the left, the page on the right.
 - **Columns** — two checkboxes per column: `list` — whether to draw the column
   in the row, `statusline` — whether to put its checkbox in the line at the
   bottom. Space in the status line is limited, and what goes there is your call.
+  On Windows the `Other` table also holds `hide dimmed windows`: it hides the
+  taskbar buttons of this machine's dimmed sessions and leaves their rows in
+  the list, while `hide dimmed` hides the rows and leaves the buttons — the two
+  are independent. It is off by default and sits in the status line; it needs
+  `dim stale` and windows11-manager on this machine, a session that needs you
+  keeps its button, and the service brings the buttons back on its own if the
+  picker goes quiet. It replaces the `hideDimmedFromTaskbar` option of
+  `config.yaml`: if that is `true`, the checkbox starts out on.
 - **Context highlight** — the context-share thresholds of the `usage` column
   (light text, yellow, red), and how many minutes before the prompt cache
   expires the taskbar button of the session window starts blinking yellow

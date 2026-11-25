@@ -1198,7 +1198,9 @@ function fakeStatusChecks() {
   };
 }
 
-function renderChecksWith(uiToggles) {
+// `os` — PICKER_OS страницы: галка hide dimmed windows рисуется только на
+// Windows, и без системы в контексте renderChecks упал бы ReferenceError.
+function renderChecksWith(uiToggles, os = 'windows') {
   const checksSource = SESSIONS_HTML.match(/\n {2}const TOGGLE_CHECKS = \[[\s\S]*?\n {2}\];\n/);
   assert.ok(checksSource, 'TOGGLE_CHECKS не найден в sessions.html — тест сторожит не то');
   // FILTER_KEYS считается из TOGGLE_CHECKS и стоит следом за ним; без него
@@ -1214,6 +1216,7 @@ function renderChecksWith(uiToggles) {
     window: { UiState: require('../frontend-src/ui-state') },
     escapeHtml: Glyph.escapeHtml,
     statusChecks: fakeStatusChecks(),
+    PICKER_OS: os,
     uiToggles,
     toggles: {},
     render: () => { calls.render += 1; },
@@ -1667,34 +1670,135 @@ test('hide dimmed снимается запросом', () => {
 // activeFilters снимает hideStale при непустом запросе и префиксе — для
 // списка. Набор для панели задач обязан взять саму галку: иначе каждая
 // набранная буква возвращала бы все кнопки на панель.
-function taskbarHideEnabledWith(config, toggles) {
+function taskbarHideEnabledWith(config, toggles, os = 'windows') {
   const source = SESSIONS_HTML.match(/\n {2}function taskbarHideEnabled\(\) \{[\s\S]*?\n {2}\}\n/);
   assert.ok(source, 'taskbarHideEnabled не найден в sessions.html — тест сторожит не то');
   const staleSource = SESSIONS_HTML.match(/\n {2}function staleSettings\(\) \{[\s\S]*?\n {2}\}\n/);
   // Ни shownModeAndQuery, ни activeFilters в контексте нет: обратись функция
   // к запросу или режиму — вызов упал бы.
-  const ctx = { CONFIG: { stale: { enabled: true }, ...config }, toggles, window: {} };
+  const ctx = { CONFIG: { stale: { enabled: true }, ...config }, toggles, window: {}, PICKER_OS: os };
   vm.createContext(ctx);
   return vm.runInContext(`${staleSource[0]}\n${source[0]}\ntaskbarHideEnabled();`, ctx,
     { filename: 'sessions.html' });
 }
 
 test('запрос не меняет набор: включённость панели задач не смотрит на запрос и режим', () => {
-  assert.strictEqual(taskbarHideEnabledWith({ hideDimmedFromTaskbar: true },
-    { hideStale: true, dimStale: true }), true);
+  assert.strictEqual(taskbarHideEnabledWith({}, { hideDimmedWindows: true, dimStale: true }), true);
   // При запросе список свой отсев снимает, а набор — нет.
-  const shown = regroupWith(true, { hideStale: true, dimStale: true }, { mode: 'history', query: 'x' }, {},
-    { ...DIM_CONFIG, hideDimmedFromTaskbar: true });
+  const shown = regroupWith(true, { hideStale: true, hideDimmedWindows: true, dimStale: true },
+    { mode: 'history', query: 'x' }, {}, DIM_CONFIG);
   assert.strictEqual(shown.hideStale, false, 'запрос не снял отсев списка — тест сторожит не то');
   const body = SESSIONS_HTML.match(/\n {2}function taskbarHideEnabled\(\) \{[\s\S]*?\n {2}\}\n/)[0];
   assert.doesNotMatch(body, /shownModeAndQuery|activeFilters|query|mode/);
 });
 
-test('панель задач: нужны опция, hide dimmed и dim stale разом', () => {
-  const on = { hideStale: true, dimStale: true };
-  assert.strictEqual(taskbarHideEnabledWith({ hideDimmedFromTaskbar: false }, on), false);
-  assert.strictEqual(taskbarHideEnabledWith({ hideDimmedFromTaskbar: true }, { ...on, hideStale: false }), false);
-  assert.strictEqual(taskbarHideEnabledWith({ hideDimmedFromTaskbar: true }, { ...on, dimStale: false }), false);
+test('панель задач: нужны hide dimmed windows и dim stale, hide dimmed не участвует', () => {
+  // Галки независимы (решение Стаса 25.11, 1a): hide dimmed прячет строки,
+  // hide dimmed windows — кнопки на панели задач.
+  const on = { hideDimmedWindows: true, dimStale: true };
+  assert.strictEqual(taskbarHideEnabledWith({}, { ...on, hideStale: false }), true,
+    'кнопки прячутся только вместе с hide dimmed — галки не независимы');
+  assert.strictEqual(taskbarHideEnabledWith({}, { ...on, hideStale: true }), true);
+  assert.strictEqual(taskbarHideEnabledWith({}, { ...on, hideDimmedWindows: false, hideStale: true }), false,
+    'hide dimmed снова прячет кнопки на панели задач');
+  // Ничего не погашено — нечего и прятать.
+  assert.strictEqual(taskbarHideEnabledWith({}, { ...on, dimStale: false }), false);
+  // Опция config.yaml больше не выключатель: решает галка.
+  assert.strictEqual(taskbarHideEnabledWith({ hideDimmedFromTaskbar: true }, { ...on, hideDimmedWindows: false }),
+    false, 'hideDimmedFromTaskbar из config.yaml всё ещё прячет кнопки мимо галки');
+  // Не на Windows галка не нарисована, и включённая миграцией действовать
+  // молча не вправе.
+  for (const os of ['macos', 'linux']) {
+    assert.strictEqual(taskbarHideEnabledWith({}, on, os), false, `на ${os} невидимая галка прячет кнопки`);
+  }
+  assert.strictEqual(taskbarHideEnabledWith({ hideDimmedFromTaskbar: false }, on), true,
+    'hideDimmedFromTaskbar из config.yaml всё ещё нужна галке');
+});
+
+test('hide dimmed windows — не фильтр и стоит в статуслайне сразу за hide dimmed', () => {
+  // Состав списка галка не меняет: попади она в FILTER_KEYS, щелчок звал бы
+  // regroup впустую, а activeFilters снимал бы её при поиске — и кнопки
+  // мигали бы от набранных букв.
+  const checks = checksFromPicker();
+  const at = checks.findIndex(c => c.key === 'hideDimmedWindows');
+  assert.ok(at > 0, 'галки hide dimmed windows нет в TOGGLE_CHECKS');
+  assert.strictEqual(checks[at].label, 'hide dimmed windows');
+  assert.notStrictEqual(checks[at].side, 'filter', 'hide dimmed windows стала фильтром');
+  assert.strictEqual(checks[at - 1].key, 'hideStale', 'hide dimmed windows стоит не рядом с hide dimmed');
+});
+
+test('hide dimmed windows рисуется в статуслайне только на Windows', () => {
+  // Панель задач и прячущая её служба windows11-manager есть только там: на
+  // маке галка была бы мёртвым чекбоксом.
+  const ui = {
+    hideStale: { list: false, statusline: true },
+    hideDimmedWindows: { list: false, statusline: true },
+  };
+  assert.deepStrictEqual([...renderChecksWith(ui, 'windows').toggleInputs.keys()],
+    ['hideStale', 'hideDimmedWindows']);
+  for (const os of ['macos', 'linux']) {
+    assert.deepStrictEqual([...renderChecksWith(ui, os).toggleInputs.keys()], ['hideStale'],
+      `на ${os} галка hide dimmed windows нарисована`);
+  }
+});
+
+test('умолчание hide dimmed windows одинаково в обоих окнах', () => {
+  // Выключена (прячет кнопки только по явной просьбе: окно без кнопки ищут
+  // через Alt+Tab), но вынесена в статуслайн — ради быстрого щелчка и
+  // заводилась (решение Стаса 25.11, 3a).
+  const picker = SESSIONS_HTML.match(/\n {2}let uiToggles = \{[\s\S]*?\n {2}\};\n/);
+  const settings = SETTINGS_HTML.match(/\n {2}const UI_DEFAULTS = \{[\s\S]*?\n {2}\};\n/);
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(
+    `${picker[0]}\n${settings[0]}\nvar a = uiToggles.hideDimmedWindows;\nvar b = UI_DEFAULTS.toggles.hideDimmedWindows;`,
+    ctx, { filename: 'two-windows.js' });
+  assert.deepStrictEqual({ ...ctx.a }, { list: false, statusline: true }, 'умолчание в пикере не то');
+  assert.deepStrictEqual({ ...ctx.b }, { list: false, statusline: true }, 'умолчание в настройках не то');
+});
+
+// ── Миграция hideDimmedFromTaskbar → галка hide dimmed windows ────────────
+//
+// Опция ушла из config.yaml, но у включивших её кнопки обязаны прятаться и
+// после обновления. Поэтому `hideDimmedFromTaskbar: true` становится
+// умолчанием оси list — тем же приёмом, каким `stale.enabled` даёт умолчание
+// `dim stale`: умолчание действует, пока ключа галки в ui.json нет, и первое
+// же сохранение пикера записывает его туда насовсем.
+function pickerUiWith(config, savedUi) {
+  const togglesSource = SESSIONS_HTML.match(/\n {2}let uiToggles = \{[\s\S]*?\n {2}\};\n/);
+  const defaultsSource = SESSIONS_HTML.match(/\n {2}function toggleDefaults\(\) \{[\s\S]*?\n {2}\}\n/);
+  assert.ok(defaultsSource, 'toggleDefaults не найден в sessions.html — тест сторожит не то');
+  const ctx = { CONFIG: { stale: { enabled: true }, ...config } };
+  vm.createContext(ctx);
+  const defaults = vm.runInContext(`${togglesSource[0]}\n${defaultsSource[0]}\ntoggleDefaults();`, ctx,
+    { filename: 'sessions.html' });
+  return require('../frontend-src/ui-state').normalizeUiState(savedUi, { sort: 'recent', toggles: defaults });
+}
+
+test('миграция: hideDimmedFromTaskbar: true включает галку, пока её нет в ui.json', () => {
+  assert.strictEqual(pickerUiWith({ hideDimmedFromTaskbar: true }, {}).toggles.hideDimmedWindows.list, true,
+    'включённая опция после обновления перестала прятать кнопки');
+  assert.strictEqual(pickerUiWith({}, {}).toggles.hideDimmedWindows.list, false);
+  assert.strictEqual(pickerUiWith({ hideDimmedFromTaskbar: false }, {}).toggles.hideDimmedWindows.list, false);
+  // Ось statusline опция не трогает: ею распоряжается только человек.
+  assert.strictEqual(pickerUiWith({ hideDimmedFromTaskbar: true }, {}).toggles.hideDimmedWindows.statusline, true);
+});
+
+test('миграция: ключ галки в ui.json сильнее опции', () => {
+  // Снятая человеком галка не должна включаться обратно на каждом запуске
+  // оттого, что в config.yaml осталась старая опция.
+  const saved = { toggles: { hideDimmedWindows: { list: false, statusline: true } } };
+  assert.strictEqual(pickerUiWith({ hideDimmedFromTaskbar: true }, saved).toggles.hideDimmedWindows.list, false);
+  const on = { toggles: { hideDimmedWindows: { list: true, statusline: false } } };
+  assert.strictEqual(pickerUiWith({}, on).toggles.hideDimmedWindows.list, true);
+});
+
+test('миграция повторена в окне настроек', () => {
+  // Иначе окно показало бы галку снятой, а первое же сохранение вкладки UI
+  // записало бы в ui.json false — и кнопки вернулись бы на панель.
+  assert.match(SETTINGS_HTML,
+    /UI_DEFAULTS\.toggles\.hideDimmedWindows\.list = config\?\.hideDimmedFromTaskbar === true;/,
+    'окно настроек не выводит умолчание галки из hideDimmedFromTaskbar');
 });
 
 // hide dimmed прячет и проекты, но только в секциях: projectRows читают хоткеи
@@ -2918,20 +3022,32 @@ test('regroup подаёт CONFIG.groupByProjectType в buildSessionsPayload', (
     .groupByProjectType, true);
 });
 
-test('галки hideStale и dimStale в статуслайне пересылают набор панели задач сразу', () => {
+test('галки hide dimmed windows и dim stale пересылают набор панели задач сразу, hide dimmed — нет', () => {
   // Без resendWindowSets кнопки возвращались бы только на следующем такте —
-  // а скрытый пикер ждёт его минутами.
+  // а скрытый пикер ждёт его минутами. hide dimmed на набор больше не
+  // влияет (галки независимы), и пересылать ей нечего.
   assert.match(
     SESSIONS_HTML,
-    /if \(key === 'hideStale' \|\| key === 'dimStale'\) resendWindowSets\(\);/,
-    'обработчик галки не зовёт resendWindowSets для hideStale/dimStale',
+    /if \(key === 'hideDimmedWindows' \|\| key === 'dimStale'\) resendWindowSets\(\);/,
+    'обработчик галки не зовёт resendWindowSets для hideDimmedWindows/dimStale',
   );
-  for (const [key, want] of [['hideStale', 1], ['dimStale', 1], ['showAll', 0]]) {
+  for (const [key, want] of [['hideDimmedWindows', 1], ['dimStale', 1], ['hideStale', 0], ['showAll', 0]]) {
     const r = renderChecksWith({ [key]: { list: true, statusline: true } });
     const input = r.toggleInputs.get(key);
-    if (!input) continue;
+    assert.ok(input, `галки ${key} нет в статуслайне — тест сторожит не то`);
     input.checked = false;
     input.listeners.change();
     assert.strictEqual(r.calls.resend, want, `галка ${key}: resendWindowSets зван ${r.calls.resend} раз`);
   }
+});
+
+test('щелчок hide dimmed windows не пересобирает список', () => {
+  // Состав списка галка не меняет — regroup был бы пустой работой.
+  const r = renderChecksWith({ hideDimmedWindows: { list: false, statusline: true } });
+  const input = r.toggleInputs.get('hideDimmedWindows');
+  assert.ok(input, 'галки hide dimmed windows нет в статуслайне');
+  input.checked = true;
+  input.listeners.change();
+  assert.deepStrictEqual({ ...r.calls }, { render: 1, regroup: 0, saveUi: 1, resend: 1 });
+  assert.deepStrictEqual({ ...r.ctx.uiToggles.hideDimmedWindows }, { list: true, statusline: true });
 });
