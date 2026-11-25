@@ -502,8 +502,8 @@ test('groupByProjectType — только строгое true', () => {
 });
 
 test('hideDimmedFromTaskbar: умолчание false, только строгое true', () => {
-  // Кнопки панели задач прячутся только по явной просьбе: окно без кнопки
-  // ищут через Alt+Tab, и включать такое без спроса нельзя.
+  // Ключ остался только ради миграции в галку hide dimmed windows, и включать
+  // её он вправе лишь явным true: окно без кнопки ищут через Alt+Tab.
   assert.strictEqual(normalizeConfig({}).hideDimmedFromTaskbar, false);
   assert.strictEqual(normalizeConfig({ hideDimmedFromTaskbar: 'yes' }).hideDimmedFromTaskbar, false);
   assert.strictEqual(normalizeConfig({ hideDimmedFromTaskbar: true }).hideDimmedFromTaskbar, true);

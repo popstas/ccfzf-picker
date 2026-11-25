@@ -137,6 +137,10 @@
     // всё, что не FILTER_LABELS, и парность двух окон проверяет именно это.
     dimStale: 'dim stale',
     dimProject: 'dim project',
+    // Не колонка и не фильтр (`side: 'taskbar'` в sessions.html): прячет
+    // кнопки погашенных на панели задач. Сюда по тому же правилу, что и
+    // dimStale: всё, что не FILTER_LABELS.
+    hideDimmedWindows: 'hide dimmed windows',
   };
   const FILTER_LABELS = {
     onlyWindow: 'only sessions with a window',
@@ -194,6 +198,10 @@
       // показывало бы галку не в том состоянии, в каком её видит человек в
       // списке, — ровно та болезнь, которой уже болел dimStale.
       dimProject: { list: true, statusline: false },
+      // `list` — плейсхолдер, как у dimStale: настоящее умолчание выводит из
+      // `hideDimmedFromTaskbar` строка ниже, после загрузки config (миграция,
+      // см. toggleDefaults в sessions.html).
+      hideDimmedWindows: { list: false, statusline: true },
     },
   };
 
@@ -494,6 +502,8 @@
     // про приглушение как таковое; что именно приглушается, говорит подсказка.
     dimStale: '◐',
     dimProject: '◐',
+    // Кнопка на панели задач.
+    hideDimmedWindows: '▭',
   };
 
   // Подсказка на подписи — только там, где название колонки само не говорит,
@@ -534,6 +544,9 @@
     // именно считается тусклым и что без dim stale прятать нечего.
     hideStale: 'Hides what "dim stale" dims: old (a compacted session counts from its compaction) and minimized here. '
       + 'With "dim stale" off nothing is dimmed, so nothing is hidden.',
+    // Подпись не говорит, где прячется и что строки в списке остаются.
+    hideDimmedWindows: 'Hides the taskbar buttons of this machine\u2019s dimmed sessions; their rows stay in the list. '
+      + 'A session asking a question or waiting for you keeps its button. Needs "dim stale" and windows11-manager.',
   };
 
   // Recommended — всё, кроме редко нужного: agent event и cost читаются не
@@ -548,7 +561,7 @@
   // просто не существует, и падает всё, что зовёт RECOMMENDED_KEYS.
   const RECOMMENDED_KEYS = Object.keys(TOGGLE_LABELS).filter(
     key => key !== 'showEvent' && key !== 'showCost' && key !== 'showTerminalIcon'
-      && key !== 'dimStale' && key !== 'dimProject',
+      && key !== 'dimStale' && key !== 'dimProject' && key !== 'hideDimmedWindows',
   );
 
   /**
@@ -681,7 +694,13 @@
         + statuslineCell + '</tr>';
     };
     const th = (label, hint) => `<th title="${esc(hint)}">${esc(label)}</th>`;
-    const otherKeys = Object.keys(TOGGLE_LABELS).filter(key => !RECOMMENDED_KEYS.includes(key));
+    // hide dimmed windows — только на Windows, как и в статуслайне пикера
+    // (`os` в TOGGLE_CHECKS): в другой системе панели задач нет, и строка
+    // правила бы оси, которые ничего не делают. Значение в ui.json при этом
+    // остаётся — его возвращает сохранение, строку прячет только таблица.
+    const os = window.TerminalPresets.osOf(platform());
+    const otherKeys = Object.keys(TOGGLE_LABELS).filter(key => !RECOMMENDED_KEYS.includes(key)
+      && (key !== 'hideDimmedWindows' || os === 'windows'));
     // Заголовок Recommended несёт свой чекбокс, а не общий `th('list', ...)`:
     // клик по нему решает ось list у всех строк группы разом. Обработчик и
     // расчёт indeterminate — в renderPage, отдельной веткой мимо
@@ -1424,6 +1443,11 @@
   // список остаётся без затемнения, — расхождение двух окон об одной
   // настройке.
   UI_DEFAULTS.toggles.dimStale.list = Boolean(config?.stale?.enabled);
+  // Миграция `hideDimmedFromTaskbar` → галка hide dimmed windows, та же, что
+  // в toggleDefaults() пикера: без неё окно показало бы галку снятой, а
+  // сохранение вкладки UI записало бы в ui.json false — и кнопки вернулись
+  // бы на панель задач.
+  UI_DEFAULTS.toggles.hideDimmedWindows.list = config?.hideDimmedFromTaskbar === true;
   try {
     ui = window.UiState.normalizeUiState(await invoke('load_ui'), UI_DEFAULTS);
   } catch (e) {

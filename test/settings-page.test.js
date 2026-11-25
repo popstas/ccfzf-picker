@@ -145,7 +145,9 @@ test('у галки задачи свой знак, ни с кем не общи
 //
 // Тем же приёмом, что и save(): настоящий axesTableHtml вычитывается из
 // страницы и выполняется в vm — копия разметки в тесте разошлась бы молча.
-function axesHtml() {
+// `os` — система окна настроек: галка hide dimmed windows показывается в
+// таблице только на Windows, как и в статуслайне пикера.
+function axesHtml(os = 'Win32') {
   const src = ['TOGGLE_LABELS', 'FILTER_LABELS', 'AXIS_HINTS', 'COLUMN_ICONS', 'COLUMN_HINTS']
     .map(name => sourceOf(new RegExp(`\\n {2}const ${name} = \\{[\\s\\S]*?\\n?(?: {2})?\\};\\n`), name))
     .join('\n')
@@ -162,6 +164,8 @@ function axesHtml() {
     esc: s => String(s).replace(/[&<>"]/g, c => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
     ui: defaults(),
+    window: { TerminalPresets: require('../frontend-src/terminal-presets') },
+    platform: () => os,
   };
   vm.createContext(ctx);
   vm.runInContext(`${src}\nvar out = axesTableHtml();`, ctx, { filename: 'settings.html' });
@@ -1590,4 +1594,27 @@ test('не вставший хоткей плитки виден человек�
   await vm.runInContext(`${src}\npersist()`, ctx, { filename: 'settings.html' });
   assert.strictEqual(status.className, 'bad');
   assert.match(status.textContent, /tile hotkey Ctrl\+Win\+F10 did not take/);
+});
+
+test('галка hide dimmed windows в таблице настроек — только на Windows', () => {
+  // Там же, где её рисует статуслайн пикера: на маке и в Linux панели задач
+  // нет, и строка таблицы правила бы ось, которая ничего не делает.
+  const row = html => html.split('<tr>').find(chunk => chunk.includes('data-key="hideDimmedWindows"'));
+  const win = row(axesHtml('Win32'));
+  assert.ok(win, 'на Windows строки hide dimmed windows нет');
+  assert.match(win, /title="[^"]*taskbar[^"]*"/, 'у hide dimmed windows нет подсказки про панель задач');
+  assert.ok(win.includes('data-axis="statusline"'), 'у hide dimmed windows нет оси statusline');
+  for (const os of ['MacIntel', 'Linux x86_64']) {
+    assert.strictEqual(row(axesHtml(os)), undefined, `на ${os} строка hide dimmed windows показана`);
+  }
+});
+
+test('hide dimmed windows не попадает в Recommended и не фильтр', () => {
+  // Не колонка: щёлкнутый заголовок Recommended не должен прятать кнопки на
+  // панели задач заодно с колонками. И не фильтр — состав списка не меняет.
+  const html = axesHtml();
+  const recommended = html.split('<label>Other</label>')[0];
+  const filters = html.split('<label>Filters</label>')[1];
+  assert.ok(!recommended.includes('data-key="hideDimmedWindows"'), 'hide dimmed windows среди Recommended');
+  assert.ok(!filters.includes('data-key="hideDimmedWindows"'), 'hide dimmed windows среди фильтров');
 });

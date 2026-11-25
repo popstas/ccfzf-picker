@@ -480,8 +480,6 @@ test('stale-настройки находятся только на отдель
     'stale.sessionHours',
     'stale.projectHours',
     'stale.opacity',
-    // Не ключ stale, но живёт здесь: работает только вместе с гашением.
-    'hideDimmedFromTaskbar',
   ]);
   assert.ok(!general.fields.some(field => field.id.startsWith('stale.')));
 
@@ -752,13 +750,16 @@ test('галка группировки по типу проекта — bool с
   assert.strictEqual(configToFields({ groupByProjectType: true }).groupByProjectType, true);
 });
 
-test('hideDimmedFromTaskbar живёт на вкладке гашения', () => {
-  // Опция работает только вместе с гашением (dim stale + hide dimmed), и
-  // рядом с его порогами её и ищут.
-  const field = PAGES.find(p => p.id === 'stale').fields.find(f => f.id === 'hideDimmedFromTaskbar');
-  assert.ok(field, 'поля нет на вкладке stale');
-  assert.deepStrictEqual({ ...field }, {
-    id: 'hideDimmedFromTaskbar', label: 'Hide dimmed sessions from the taskbar', type: 'bool', default: false,
-    hint: 'Needs "hide dimmed" in the status line. Windows, machines running windows11-manager.',
-  });
+test('hideDimmedFromTaskbar больше не поле формы', () => {
+  // Её заменила галка hide dimmed windows в ui.json (решение Стаса 25.11, 2a):
+  // два выключателя одного действия расходились бы. Ключ из config.yaml
+  // читается только ради миграции (toggleDefaults в sessions.html), окно
+  // настроек его больше не пишет.
+  for (const page of PAGES) {
+    assert.ok(!page.fields.some(f => f.id === 'hideDimmedFromTaskbar'),
+      `поле hideDimmedFromTaskbar осталось на вкладке ${page.id}`);
+  }
+  const config = { hideDimmedFromTaskbar: true };
+  assert.ok(!('hideDimmedFromTaskbar' in fieldsToPatch(configToFields(config), config)),
+    'окно настроек всё ещё пишет hideDimmedFromTaskbar в config.yaml');
 });
