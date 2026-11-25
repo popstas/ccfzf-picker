@@ -173,6 +173,23 @@
     };
   }
 
+  /**
+   * Сессия из git worktree — путь worktree и его ветка, либо `null`.
+   *
+   * Распознаёт worktree агрегатор (ccfzf читает `.git` у себя, рядом с
+   * каталогами), он же отдаёт сессии тип и владельца основного проекта
+   * (`projectType`/`projectCwd`). Здесь — только разбор белым списком: поле
+   * рисуется значком у имени (worktreeNameHtml) и переключает подпись
+   * каталога на основной проект (projectLine). Ветка пустая у отделённого
+   * HEAD; `null`, а не пустой объект, — у сессии не из worktree значка нет.
+   */
+  function worktreeOf(worktree) {
+    if (!worktree || typeof worktree !== 'object' || Array.isArray(worktree)) return null;
+    const path = typeof worktree.path === 'string' ? worktree.path.trim() : '';
+    if (!path) return null;
+    return { path, branch: typeof worktree.branch === 'string' ? worktree.branch.trim() : '' };
+  }
+
   function buildSessionList({ sessions, seen, state, configHost, icons: givenIcons } = {}) {
     const list = Array.isArray(sessions) ? sessions : [];
     const byId = {};
@@ -344,9 +361,14 @@
           // Нет её — иконка, которую трекер поставил бы окну этой сессии: у
           // head корона, у прочих иконка проекта по каталогу. Так закрытая
           // сессия в истории выглядит так же, как выглядела с окном.
+          //
+          // Каталог — проекта-владельца (`projectCwd` от агрегатора), а не
+          // `cwd`: менеджер ставит окну иконку по `projectCwd || cwd`, и
+          // сессия из git worktree или подкаталога иначе теряла бы иконку
+          // ровно тогда, когда закрывала окно.
           windowIcon: windowIconOf(w, configHost)
             || (headIds.has(s.id) ? icons.head : '')
-            || icons.projects.get(s.cwd || '') || '',
+            || icons.projects.get((typeof s.projectCwd === 'string' && s.projectCwd) || s.cwd || '') || '',
           // Все окна сессии целиком, без урезания до «своего». Единственный
           // потребитель — unreadTargets (session-windows.js): отмотка
           // «просмотрено» обязана уйти каждому трекеру сессии, а не только
@@ -378,6 +400,8 @@
           // только разбор белым списком (taskOf). `null`, а не пустой объект:
           // подписи и строки карточки у такой сессии нет вовсе.
           task: taskOf(s.task),
+          // Сессия из git worktree — см. worktreeOf.
+          worktree: worktreeOf(s.worktree),
           // Тип проекта-владельца — группировка живых по типу и отметка в ^K.
           // Считает его агрегатор (project_owner): сессия из worktree лежит в
           // подкаталоге проекта, а здесь есть только точное совпадение cwd.

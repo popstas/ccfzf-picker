@@ -687,6 +687,16 @@ test('нет метки сжатия — ноль', () => {
     const [row] = build([state()], 'mac-host');
     assert.strictEqual(row.windowIcon, '');
   });
+
+  test('сессия из worktree без окна берёт иконку основного проекта', () => {
+    // Менеджер ставит окну иконку по `projectCwd || cwd` — закрытая строка
+    // обязана выглядеть так же, как выглядела с окном.
+    const [row] = build([state({
+      cwd: '/home/user/x.wt', projectCwd: '/home/user/x',
+      worktree: { path: '/home/user/x.wt', branch: 'feat/x' },
+    })]);
+    assert.strictEqual(row.windowIcon, 'X:\\i\\x.ico');
+  });
 }
 
 // ── Задача вольта (поле `task` от ccfzf, sess2task) ─────────────────────────
@@ -744,4 +754,29 @@ test('projectCwd: поле есть — оно, флаг есть без пол�
   // Флаг — только строгое true: поле пишет чужой репозиторий.
   const junk = buildSessionList({ sessions: [state({ id: 'b' })], state: { projectOwners: 'yes' } });
   assert.deepStrictEqual(junk.map(r => r.projectCwd), ['']);
+});
+
+// ── git worktree: поле `worktree` от ccfzf ─────────────────────────────────
+
+test('worktree доезжает до строки путём и веткой', () => {
+  const rows = buildSessionList({ sessions: [
+    state({ id: 'a', worktree: { path: '/home/user/x.wt', branch: 'feat/x' } }),
+    state({ id: 'b', worktree: { path: '/home/user/x.wt', branch: '' } }),
+  ] });
+  assert.deepStrictEqual(rows.map(r => r.worktree), [
+    { path: '/home/user/x.wt', branch: 'feat/x' },
+    { path: '/home/user/x.wt', branch: '' },
+  ]);
+});
+
+test('без worktree и с мусором вместо него — null', () => {
+  // Сессия не из worktree (поля нет), старый агрегатор, чужая форма: значка
+  // нет во всех случаях, и строка от этого не ломается.
+  for (const worktree of [undefined, null, 'строка', 5, [], {}, { path: '' }, { path: 7 }]) {
+    const rows = buildSessionList({ sessions: [state({ worktree })], seen: {} });
+    assert.strictEqual(rows[0].worktree, null, JSON.stringify(worktree));
+  }
+  // Ветка не строкой — путь остаётся, ветка пустая.
+  const rows = buildSessionList({ sessions: [state({ worktree: { path: '/p', branch: 3 } })], seen: {} });
+  assert.deepStrictEqual(rows[0].worktree, { path: '/p', branch: '' });
 });
