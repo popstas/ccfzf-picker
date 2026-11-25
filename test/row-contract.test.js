@@ -2093,8 +2093,12 @@ function renderSessionRows(state, query, toggles, stale, treeMode, extra = {}) {
     hidden: { narrow: {}, wide: {} },
     // Своя машина — только когда тест её назвал: остальные тесты стоят на
     // прежнем «машина не названа», и отказ от неё их не касается.
+    // `payload` — прочие доводы сборки групп (groupByProjectType): тест,
+    // не назвавший их, получает прежнее умолчание.
     groups: buildSessionsPayload(state, 'recent',
-      extra.configHost ? { configHost: extra.configHost } : undefined).groups,
+      extra.configHost || extra.payload
+        ? Object.assign(extra.configHost ? { configHost: extra.configHost } : {}, extra.payload || {})
+        : undefined).groups,
     rows: [],
     items: [],
     toggles: toggleState,
@@ -2113,6 +2117,7 @@ function renderSessionRows(state, query, toggles, stale, treeMode, extra = {}) {
     zellijNameHtml: Glyph.zellijNameHtml,
     headNameHtml: Glyph.headNameHtml,
     taskNameHtml: Glyph.taskNameHtml,
+    worktreeNameHtml: Glyph.worktreeNameHtml,
     windowHtml: Glyph.windowHtml,
     windowHostHtml: Glyph.windowHostHtml,
     stateHtml: Glyph.stateHtml,
@@ -3064,4 +3069,61 @@ test('щелчок hide dimmed windows не пересобирает списо�
   input.listeners.change();
   assert.deepStrictEqual({ ...r.calls }, { render: 1, regroup: 0, saveUi: 1, resend: 1 });
   assert.deepStrictEqual({ ...r.ctx.uiToggles.hideDimmedWindows }, { list: true, statusline: true });
+});
+// ── сессия из git worktree ──────────────────────────────────────────────────
+//
+// Владельца считает агрегатор: `projectCwd`/`projectType` у сессии из worktree
+// — основного проекта, а `worktree` говорит, что это worktree. Строка пикера
+// своей логики про владельца не заводит, и проверяется здесь именно это: тип,
+// секция и дерево head сходятся без неё.
+const WT_PATH = '/home/user/projects/ccfzf-picker.bell-children';
+function worktreeFamily() {
+  return {
+    ok: true,
+    projectOwners: true,
+    sessions: [
+      aggregatorSession({ id: HEAD_ID, title: 'lead', mtime: 300,
+        cwd: '/home/user/projects/ccfzf-picker', projectType: 'home' }),
+      aggregatorSession({ id: 'aaaa0000-0000-4000-8000-000000000002', title: 'mid', mtime: 250,
+        cwd: '/home/user/projects/site', projectType: 'work' }),
+      aggregatorSession({ id: 'aaaa0000-0000-4000-8000-000000000003', title: 'zz-child', mtime: 200,
+        cwd: WT_PATH, projectCwd: '/home/user/projects/ccfzf-picker', projectType: 'home',
+        worktree: { path: WT_PATH, branch: 'feat/bell-children' },
+        head: 'lead', headId: HEAD_ID }),
+    ],
+  };
+}
+
+test('строка сессии из worktree несёт значок, а подпись каталога — основной проект', () => {
+  const { items } = renderSessionRows(worktreeFamily());
+  const child = items.find(i => i.html.includes('>zz-child<'));
+  assert.ok(child.html.includes('class="wtname"'), child.html);
+  assert.ok(child.html.includes('Git worktree: feat/bell-children — ' + WT_PATH), child.html);
+  assert.ok(child.html.includes('<div class="cwd">ccfzf-picker</div>'), child.html);
+  // Полный путь worktree не пропал: он в подсказке строки, как у всех.
+  assert.ok(child.html.includes('~/projects/ccfzf-picker.bell-children') || child.html.includes(WT_PATH),
+    child.html);
+  // Сессия не из worktree — без значка.
+  const parent = items.find(i => i.html.includes('>lead<'));
+  assert.ok(!parent.html.includes('wtname'), parent.html);
+});
+
+test('ребёнок head в worktree встаёт под head в секции его типа', () => {
+  const { items } = renderSessionRows(worktreeFamily(), '', null, null, true,
+    { payload: { groupByProjectType: true } });
+  // Секция home держит head и ребёнка подряд, ребёнок — с отступом; work —
+  // своя секция, и ребёнок туда не уехал.
+  const keys = items.map(i => i.key);
+  const home = keys.findIndex(k => /type:home/.test(k));
+  const work = keys.findIndex(k => /type:work/.test(k));
+  assert.ok(home >= 0 && work >= 0, JSON.stringify(keys));
+  const lead = items.findIndex(i => i.html.includes('>lead<'));
+  const child = items.findIndex(i => i.html.includes('>zz-child<'));
+  const mid = items.findIndex(i => i.html.includes('>mid<'));
+  const sectionOf = idx => (idx > home && (work < home || idx < work) ? 'home' : 'work');
+  assert.strictEqual(sectionOf(lead), 'home', JSON.stringify(keys));
+  assert.strictEqual(sectionOf(child), 'home', JSON.stringify(keys));
+  assert.strictEqual(sectionOf(mid), 'work', JSON.stringify(keys));
+  assert.strictEqual(child, lead + 1, JSON.stringify(keys));
+  assert.ok(items[child].html.includes(' tree-child'), items[child].html);
 });

@@ -1269,3 +1269,60 @@ test('текст задачи экранируется: его пишет чел
   assert.ok(!html.includes('<b>'), html);
   assert.ok(!html.includes('"><i>'), html);
 });
+
+// ── Значок git worktree у имени (поле `worktree` от ccfzf) ──────────────────
+
+const WT = { path: '/home/user/projects/ccfzf-picker.bell-children', branch: 'feat/bell-children' };
+
+test('сессия из worktree помечена значком с веткой и путём в подсказке', () => {
+  const { worktreeNameHtml } = require('../frontend-src/session-glyph');
+  const html = worktreeNameHtml({ worktree: WT });
+  assert.match(html, /^<span class="wtname"/, html);
+  assert.ok(html.includes(
+    'title="Git worktree: feat/bell-children — /home/user/projects/ccfzf-picker.bell-children"'), html);
+  // Знак — inline SVG, а не символ шрифта: о ⎇ в системных шрифтах Windows
+  // ничего не известно, а свой контур рисуется везде.
+  assert.ok(html.includes('<svg'), html);
+  // Цвет — от подписи, а не вшит: inline SVG каскад страницы видит, в отличие
+  // от <img>, и литерал здесь выпал бы из одной из тем.
+  assert.ok(html.includes('fill="currentColor"'), html);
+  assert.ok(!/#[0-9a-f]{3,8}\b/i.test(html), html);
+});
+
+test('у отделённого HEAD ветки в подсказке нет — только путь', () => {
+  const { worktreeNameHtml } = require('../frontend-src/session-glyph');
+  const html = worktreeNameHtml({ worktree: { path: WT.path, branch: '' } });
+  assert.ok(html.includes(`title="Git worktree: ${WT.path}"`), html);
+});
+
+test('без поля worktree значка нет, строка как раньше', () => {
+  const { worktreeNameHtml } = require('../frontend-src/session-glyph');
+  assert.strictEqual(worktreeNameHtml({}), '');
+  assert.strictEqual(worktreeNameHtml({ worktree: null }), '');
+  assert.strictEqual(worktreeNameHtml({ worktree: { path: '', branch: 'x' } }), '');
+  assert.strictEqual(worktreeNameHtml(null), '');
+});
+
+test('ветка и путь worktree экранируются в подсказке', () => {
+  const { worktreeNameHtml } = require('../frontend-src/session-glyph');
+  const html = worktreeNameHtml({ worktree: { path: '/p/"><i>', branch: '<b>' } });
+  assert.ok(!html.includes('"><i>'), html);
+  assert.ok(!html.includes('<b>'), html);
+});
+
+test('projectLine у сессии из worktree называет основной проект, а не каталог worktree', () => {
+  const session = { worktree: WT, projectCwd: '/home/user/projects/ccfzf-picker' };
+  assert.strictEqual(projectLine('bell-children-picker', WT.path, session), 'ccfzf-picker');
+  // Мерка повтора — та же, но против имени основного проекта.
+  assert.strictEqual(projectLine('ccfzf-picker', WT.path, session), '');
+});
+
+test('projectLine без worktree берёт cwd, даже если владелец — другой каталог', () => {
+  // Подкаталог проекта: владелец известен, но подпись остаётся basename cwd,
+  // как была, — правка касается только worktree.
+  const sub = { projectCwd: '/home/user/projects/ccfzf-picker' };
+  assert.strictEqual(projectLine('other', '/home/user/projects/ccfzf-picker/vendor/ccfzf', sub), 'ccfzf');
+  // worktree без известного владельца (старый агрегатор так не пришлёт, но
+  // строка всё равно не должна опустеть) — откат на cwd.
+  assert.strictEqual(projectLine('other', WT.path, { worktree: WT, projectCwd: '' }), 'ccfzf-picker.bell-children');
+});

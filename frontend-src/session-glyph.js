@@ -814,9 +814,18 @@
    * это каталог», не «где он на диске».
    *
    * Пустая строка, когда имя уже сказало то же самое: см. hidesProject.
+   *
+   * У сессии из git worktree (`session.worktree`) каталог — основного
+   * проекта, `session.projectCwd`, а не basename worktree: сессия принадлежит
+   * ему (тип, секция, дерево head — оттуда же), а что это worktree, говорит
+   * значок у имени (worktreeNameHtml), ветка — в его подсказке. Сосед
+   * `ccfzf-picker.bell-children` в подписи читался бы отдельным проектом.
+   * У подкаталога проекта владелец тоже известен, но подпись там прежняя:
+   * basename подкаталога и есть ответ на «какой это каталог».
    */
-  function projectLine(name, cwd) {
-    return hidesProject(name, cwd) ? '' : pathBasename(cwd);
+  function projectLine(name, cwd, session) {
+    const dir = session && session.worktree && session.projectCwd ? session.projectCwd : cwd;
+    return hidesProject(name, dir) ? '' : pathBasename(dir);
   }
 
   /**
@@ -898,6 +907,40 @@
     const name = String(session?.head ?? '').trim();
     if (!name) return '';
     return `<span class="hname" title="Opened by head session ${escapeHtml(name)}">head:${escapeHtml(name)}</span>`;
+  }
+
+  /**
+   * Знак ветки — октикон `git-branch` 16×16 (MIT, тот же набор, что знак
+   * GitHub в action-icons.js).
+   *
+   * Контур, а не символ `⎇` (U+2387): пикер набран системным шрифтом, и есть
+   * ли этот знак в Segoe UI Symbol на машине пикера, отсюда не проверить, —
+   * вместо знака там встал бы пустой квадрат. Свой контур рисуется везде.
+   * Inline `<svg>`, а не `<img>` с `data:`-URI: в разметку страницы каскад
+   * попадает, и `currentColor` берёт цвет подписи — тёмная тема, светлая и
+   * погашенная строка сходятся без второй заливки, в отличие от GITHUB_FILL.
+   */
+  const WORKTREE_SVG = '<svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true">'
+    + '<path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/>'
+    + '</svg>';
+
+  /**
+   * Значок git worktree у имени сессии — или ничего.
+   *
+   * Сессия из worktree стоит под основным проектом (его тип, секция, дерево
+   * head; владельца считает агрегатор), и без значка её было бы не отличить от
+   * сессии в самом проекте, а Enter на ней открывает другой каталог. Подпись
+   * того же рода, что head и имя окна, но без текста: ветка длинная
+   * (`feat/bell-children`) и спорила бы с именем за место, — она и путь
+   * worktree в подсказке. У отделённого HEAD ветки нет, подсказка — один путь.
+   */
+  function worktreeNameHtml(session) {
+    const wt = session?.worktree;
+    const path = typeof wt?.path === 'string' ? wt.path.trim() : '';
+    if (!path) return '';
+    const branch = typeof wt.branch === 'string' ? wt.branch.trim() : '';
+    const title = `Git worktree: ${branch ? `${branch} — ` : ''}${path}`;
+    return `<span class="wtname" title="${escapeHtml(title)}">${WORKTREE_SVG}</span>`;
   }
 
   /**
@@ -1042,7 +1085,7 @@
     TERMINAL_GLYPHS, terminalOf,
     shortPath, rowTitle, titleAttr, escapeHtml,
     prNumber, prBadgeHtml, wordSet, sameWords, hidesProject, projectLine, windowNameHtml, windowIconHtml, zellijNameHtml, headNameHtml, taskNameHtml,
-    snapshotNameHtml,
+    worktreeNameHtml, snapshotNameHtml,
     docsBadgeHtml, docKindOf, promptsHtml, commentHtml, shellHtml,
   };
 });

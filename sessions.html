@@ -482,6 +482,14 @@
         .name .wname, .name .sname, .name .zname, .name .hname {
             margin-left: 6px; font-size: 11px; color: var(--fg-dim); font-weight: normal;
         }
+        /* Значок git worktree (worktreeNameHtml) — подпись того же рода и той
+           же тусклостью, но без текста: inline SVG красится `currentColor`,
+           то есть цветом отсюда, и в обеих темах. Поднят на базовую линию
+           имени, иначе контур 11×11 садился бы ниже букв. */
+        .name .wtname {
+            margin-left: 5px; color: var(--fg-dim); font-weight: normal;
+            display: inline-flex; vertical-align: -1px;
+        }
         /* Задача вольта (taskNameHtml) — подпись, но длинная: до 120 знаков от
            агрегатора. Поэтому своя обрезка многоточием и сжатие вдесятеро
            быстрее имени — в узком окне уступает место задача, а не имя, по
@@ -1480,6 +1488,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     docsBadgeHtml, promptsHtml, commentHtml, shellHtml,
     windowHtml, windowHostHtml, shortPath, titleAttr, escapeHtml, prBadgeHtml, projectLine,
     windowNameHtml, windowIconHtml, zellijNameHtml, headNameHtml, taskNameHtml, snapshotNameHtml,
+    worktreeNameHtml,
   } = window.SessionGlyph;
 
   // Чекбоксы статуслайна и их обработчики — из одной таблицы. Клик по самому
@@ -1877,7 +1886,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // Basename каталога, а не сокращённый путь — и вовсе без строки, когда
     // имя сессии уже назвало тот же проект (projectLine, Task 11). Полный
     // путь остаётся в titleAttr ниже, через shortPath — подсказка не меняется.
-    const sessionCwdLine = toggles.showPaths ? projectLine(session.label, session.cwd) : '';
+    // У сессии из git worktree — основной проект, а не каталог worktree: см.
+    // projectLine.
+    const sessionCwdLine = toggles.showPaths ? projectLine(session.label, session.cwd, session) : '';
     // Глубина в дереве head-сессий — только в режиме иерархии и только у
     // строки, чей родитель стоит в той же секции (nestByHead). У неё подпись
     // `head:` не рисуется: родство уже сказано местом и отступом. Отступ —
@@ -1896,6 +1907,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // не сдвигается. См. windowIconHtml и requestWindowIcons.
       windowIconHtml(session, windowIcons) +
       `<span class="label">${escapeHtml(session.label)}</span>` +
+      // Сессия из git worktree — значок вплотную к имени, ветка и путь в
+      // подсказке: см. worktreeNameHtml.
+      worktreeNameHtml(session) +
       // Второе имя строки — то, которым сессию завёл человек. Рисуется, только
       // когда расходится с первым: см. windowNameHtml.
       `${windowNameHtml(session)}` +
