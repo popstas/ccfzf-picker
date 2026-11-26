@@ -61,6 +61,16 @@ test('unreadAt новее отметки взгляда — не видел', ()
   assert.strictEqual(seenSinceUpdate({ updated: 100 }, 99, 0), false);
 });
 
+// Тихий конец хода не требует взгляда: сравнение с loudAt, а не с updated.
+test('тихий ход — просмотрено, если видел последний нетихий', () => {
+  const quiet = { updated: 200, quiet: true, loudAt: 100 };
+  assert.strictEqual(seenSinceUpdate(quiet, 150), true);
+  assert.strictEqual(seenSinceUpdate(quiet, 99), false, 'нетихий итог не видел');
+  assert.strictEqual(seenSinceUpdate(quiet, 150, 160), false, 'unreadAt сильнее');
+  assert.strictEqual(seenSinceUpdate({ updated: 200, quiet: true }, 150), false, 'без loudAt — как раньше');
+  assert.strictEqual(seenSinceUpdate({ updated: 200, quiet: false, loudAt: 100 }, 150), false);
+});
+
 test('работу сессии говорит тот, чья запись свежее', () => {
   const parent = { id: 'p', agent: { updated: 100 } };
   const byId = {
