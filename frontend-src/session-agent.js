@@ -47,11 +47,17 @@
    * отметка, считается взглядом после неё (так же, как с записью состояния).
    */
   function seenSinceUpdate(agent, focusedAt, unreadAt) {
-    const updated = (agent || {}).updated || 0;
+    const a = agent || {};
+    const updated = a.updated || 0;
     if (!updated) return false;
+    // Тихий конец хода (хук: `quiet`, решение Стаса 26.11) — итог не для
+    // человека, и смотреть его не нужно: сравнивается с концом последнего
+    // нетихого хода (`loudAt`), как у windows11-manager (`agentLoudUnseen`).
+    // Без `loudAt` (старый хук) — как раньше, по `updated`.
+    const ref = a.quiet === true && a.loudAt > 0 ? Math.min(a.loudAt, updated) : updated;
     const seen = Number.isFinite(focusedAt) ? focusedAt : 0;
     const unread = Number.isFinite(unreadAt) ? unreadAt : 0;
-    return seen >= updated && !(unread > seen);
+    return seen >= ref && !(unread > seen);
   }
 
   /**
