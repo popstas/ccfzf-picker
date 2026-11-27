@@ -508,3 +508,30 @@ test('hideDimmedFromTaskbar: умолчание false, только строго
   assert.strictEqual(normalizeConfig({ hideDimmedFromTaskbar: 'yes' }).hideDimmedFromTaskbar, false);
   assert.strictEqual(normalizeConfig({ hideDimmedFromTaskbar: true }).hideDimmedFromTaskbar, true);
 });
+
+// Выключатели блоков статуслайна живут в config.yaml, а не в ui.json, — и это
+// выбор, а не недосмотр (coord co-autocompact, 27.11.2026, вариант 1a).
+// `toggles` в ui.json — поколоночные галки с двумя осями, а не показ блоков, и
+// девятое поле верхнего уровня тронуло бы дословно сторожимую арность
+// `uiStateToSave`. Меняются они на месте по `config-changed`. Ключа нет —
+// блок показан: так статуслайн выглядел до появления выключателей.
+test('statusline: без ключа оба блока показаны', () => {
+  assert.deepStrictEqual(normalizeConfig({}).statusline, { sortControl: true, menuHint: true });
+  assert.deepStrictEqual(normalizeConfig(null).statusline, { sortControl: true, menuHint: true });
+});
+
+test('statusline: каждый выключатель сам по себе, мусор — умолчание', () => {
+  assert.deepStrictEqual(normalizeConfig({ statusline: { menuHint: false } }).statusline,
+    { sortControl: true, menuHint: false });
+  assert.deepStrictEqual(normalizeConfig({ statusline: { sortControl: false, menuHint: 'no' } }).statusline,
+    { sortControl: false, menuHint: true });
+  assert.deepStrictEqual(normalizeConfig({ statusline: 'off' }).statusline,
+    { sortControl: true, menuHint: true });
+});
+
+test('claudeUsageUrl: пусто по умолчанию, строка обрезается, не-строка — пусто', () => {
+  assert.strictEqual(normalizeConfig({}).claudeUsageUrl, '');
+  assert.strictEqual(normalizeConfig({ claudeUsageUrl: '  https://example.com/u.json  ' }).claudeUsageUrl,
+    'https://example.com/u.json');
+  assert.strictEqual(normalizeConfig({ claudeUsageUrl: 42 }).claudeUsageUrl, '');
+});

@@ -771,10 +771,11 @@ test('вкладки называются по спеке и Integrations нет
   // 2026-08-17-stale-settings-tab-design.md); список из семи здесь был верен
   // только до слияния с той веткой.
   // 'Context highlight' — вслед за ней, тот же вид: три порога в config.yaml.
+  // 'Statusline' — за ней: выключатели блоков статуслайна и адрес usage.
   // 'Log' — последняя: она не правит конфиг вовсе, а показывает
   // буфер строк лога, и потому стоит за всеми, кто правит.
   assert.deepStrictEqual(PAGES.map(p => p.title), [
-    'General', 'Dim stale sessions', 'Context highlight', 'Window popup', 'Columns', 'Layout panels',
+    'General', 'Dim stale sessions', 'Context highlight', 'Statusline', 'Window popup', 'Columns', 'Layout panels',
     'Hotkeys', 'MQTT', 'Paths', 'Log',
   ]);
 });

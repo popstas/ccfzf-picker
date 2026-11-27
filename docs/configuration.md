@@ -78,3 +78,22 @@ as soon as something changes.
 That way the list is ready for the next opening, and `ccfzf --state` keeps its
 own dump fresh, the one the Home Assistant export and the openHASP panel live
 on. Turned off with `backgroundRefresh: false`.
+
+## Statusline
+
+The two blocks on the left of the statusline — the sort switch and the session
+menu hint — are shown by default and can be hidden with `statusline.sortControl`
+and `statusline.menuHint`, or on the Statusline tab of the settings window. The
+change applies at once, without a restart.
+
+`claudeUsageUrl` adds a usage block after them:
+
+```
+5h: 43% -117m 54m left | week: 87% +1.4d
+```
+
+The offset says how far usage runs ahead of (`+`) or behind (`-`) an even pace:
+in minutes for the five-hour window (red above `+15m`), in days for the week.
+The picker fetches the JSON once a minute; data older than about five minutes
+or a failed fetch turns the whole block grey, keeping the last known values,
+and the failure is written to the Log tab. Empty — no block.

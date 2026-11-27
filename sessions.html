@@ -228,13 +228,20 @@
             cursor: pointer;
         }
         #sort-control:hover { color: var(--fg-hover); }
+        /* Блоки слева выключаются из настроек атрибутом `hidden`, а
+           `display: flex` у #sort-control по специфичности его перебивает —
+           без этого правила выключенный переключатель оставался бы на месте. */
+        #statusline [hidden] { display: none; }
         #statusline .icon { font-size: 12px; line-height: 1; }
         /* Подсказка про Ctrl+K, между переключателем сортировки и чекбоксами.
            min-width: 0 + ellipsis — тем же приёмом, что .text у строки списка:
            при узком окне подсказка обрезается первой, а не толкает
-           status-checks (у него margin-left: auto) или не ломает раскладку. */
+           status-checks (у него margin-left: auto) или не ломает раскладку.
+           Не растягивается (flex-grow 0): за ней стоит блок usage, и
+           растянутая подсказка уносила бы его вправо, к галкам, — справа
+           статуслайн и так прижимает `margin-left: auto` у status-checks. */
         #menu-hint {
-            flex: 1 1 auto; min-width: 0; overflow: hidden;
+            flex: 0 1 auto; min-width: 0; overflow: hidden;
             text-overflow: ellipsis; white-space: nowrap;
         }
         .status-checks {
@@ -1641,6 +1648,20 @@ const infoBackdrop = document.getElementById('info-backdrop');
     // вовсе. Полный список уехал в модалку по `?`/F1, где условность каждой
     // клавиши доживает до строки; здесь остаётся вход в меню строки.
     menuHint.textContent = '^K / right click - Session menu';
+  }
+
+  /**
+   * Блоки слева в статуслайне — показать или спрятать по конфигу.
+   *
+   * Из config.yaml, а не из ui.json (см. `statusline` в config-shape.js), и
+   * потому зовётся из тех же двух мест, что `applyTheme`: с загрузки и с
+   * `config-changed`, — то есть меняется на месте, без перезапуска. Спрятанный
+   * переключатель сортировки клавишей не заменяется: сортировка остаётся какой
+   * была, её просто не видно.
+   */
+  function applyStatusline() {
+    sortControl.hidden = !CONFIG.statusline.sortControl;
+    menuHint.hidden = !CONFIG.statusline.menuHint;
   }
 
   /**
@@ -5026,6 +5047,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     }
     applyStaleOpacity();
     applyTheme();
+    applyStatusline();
 
     // Вид списка — до первой отрисовки: иначе первый показ рисуется чужой
     // сортировкой и перекладывается на глазах.
@@ -5160,6 +5182,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
       }
       applyStaleOpacity();
       applyTheme();
+      applyStatusline();
       // regroup() иконок не читает — их читает только renderMenu; список не
       // обязан ждать похода за иконками, чтобы перерисоваться.
       regroup();

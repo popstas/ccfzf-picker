@@ -16,7 +16,7 @@ test('страницы перечисляют поля без повторов',
   const ids = PAGES.flatMap(p => p.fields.map(f => f.id));
   assert.deepStrictEqual([...new Set(ids)], ids);
   assert.deepStrictEqual(PAGES.map(p => p.id),
-    ['general', 'stale', 'context', 'window', 'columns', 'panels', 'hotkeys', 'mqtt', 'paths', 'log']);
+    ['general', 'stale', 'context', 'statusline', 'window', 'columns', 'panels', 'hotkeys', 'mqtt', 'paths', 'log']);
 });
 
 test('windowHost живёт на General, mqtt и pathMap — на своих вкладках', () => {
@@ -762,4 +762,33 @@ test('hideDimmedFromTaskbar больше не поле формы', () => {
   const config = { hideDimmedFromTaskbar: true };
   assert.ok(!('hideDimmedFromTaskbar' in fieldsToPatch(configToFields(config), config)),
     'окно настроек всё ещё пишет hideDimmedFromTaskbar в config.yaml');
+});
+
+// Вкладка Statusline: два выключателя блоков слева и адрес usage. Своя
+// вкладка, а не поля на Window popup: все три — про одну строку внизу окна.
+// Хранятся в config.yaml, а не в ui.json, — см. тест про statusline в
+// config-shape.test.js.
+test('вкладка Statusline: два выключателя и адрес usage', () => {
+  const page = PAGES.find(p => p.id === 'statusline');
+  assert.ok(page, 'вкладки statusline нет');
+  assert.strictEqual(page.title, 'Statusline');
+  const byId = id => page.fields.find(f => f.id === id);
+  assert.deepStrictEqual(page.fields.map(f => f.id),
+    ['statusline.sortControl', 'statusline.menuHint', 'claudeUsageUrl']);
+  assert.strictEqual(byId('statusline.sortControl').type, 'bool');
+  assert.strictEqual(byId('statusline.sortControl').default, true);
+  assert.strictEqual(byId('statusline.menuHint').type, 'bool');
+  assert.strictEqual(byId('statusline.menuHint').default, true);
+  assert.strictEqual(byId('claudeUsageUrl').type, 'text');
+});
+
+test('выключатели статуслайна без ключа показаны включёнными, и в патч сами не едут', () => {
+  const original = { sshHost: 'host', ...NO_PICKER_SIZE };
+  const fields = configToFields(original);
+  assert.strictEqual(fields['statusline.sortControl'], true);
+  assert.strictEqual(fields['statusline.menuHint'], true);
+  assert.strictEqual(fields.claudeUsageUrl, '');
+  assert.deepStrictEqual(fieldsToPatch(fields, original), {});
+  assert.deepStrictEqual(fieldsToPatch({ ...fields, 'statusline.menuHint': false }, original),
+    { statusline: { menuHint: false } });
 });
