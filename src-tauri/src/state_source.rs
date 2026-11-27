@@ -275,6 +275,69 @@ pub fn set_comment(source: &Source, id: &str, text: &str, from: &str) -> Result<
     Ok(())
 }
 
+/// Аргументы флага автокомпакта — та же форма, что у `comment_args`.
+fn auto_compact_args(source: &Source, id: &str, on: bool) -> Vec<String> {
+    let mut out = match source {
+        Source::Ssh(_) => vec!["ccfzf".to_string()],
+        Source::Local => vec![],
+    };
+    out.push("--auto-compact".to_string());
+    out.push(id.to_string());
+    out.push(if on { "on" } else { "off" }.to_string());
+    out
+}
+
+/// Включить или выключить автокомпакт сессии на машине её источника.
+pub fn set_auto_compact(source: &Source, id: &str, on: bool) -> Result<(), String> {
+    if !looks_like_session_id(id) {
+        return Err("not a session id".into());
+    }
+    let out = command_for(source, false)?
+        .args(auto_compact_args(source, id, on))
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("failed to start: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("ccfzf exited with {}: {}", out.status, err.trim()));
+    }
+    Ok(())
+}
+
+/// Удалённая команда автокомпакта — одной строкой для удалённого шелла.
+///
+/// Через интерактивный шелл, как всё, что пикер зовёт на той машине
+/// (CLAUDE.md, `inDir`): `claude-wt` и его окружение — из rc. Без `;`: правило
+/// общее для удалённых команд связки. Подставляются только id, уже проверенный
+/// `looks_like_session_id`, и целое число — кавычить нечего.
+fn compact_remote(id: &str, min_idle: i64) -> String {
+    format!("exec $SHELL -ic 'claude-wt session compact {id} --min-idle {min_idle} --json'")
+}
+
+/// Послать сессии `/compact` через `claude-wt session compact` на машине
+/// агрегатора. Возвращает код выхода и вывод (stdout, следом stderr) —
+/// разбирает их `auto_compact::outcome`.
+///
+/// Местного источника нет намеренно: `claude-wt` живёт на машине
+/// агрегатора, а не на машине пикера.
+pub fn run_compact(source: &Source, id: &str, min_idle: i64) -> Result<(Option<i32>, String), String> {
+    if !looks_like_session_id(id) {
+        return Err("not a session id".into());
+    }
+    let Source::Ssh(host) = source else {
+        return Err("claude-wt lives on the aggregator machine, not on a local source".into());
+    };
+    let out = ssh(host)
+        .arg(compact_remote(id, min_idle))
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("failed to start ssh: {e}"))?;
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    text.push('\n');
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    Ok((out.status.code(), text))
+}
+
 /// Форма id сессии: тридцать шесть знаков UUID и ничего больше.
 ///
 /// Проверяется здесь, а не только на той стороне, потому что строка уезжает
@@ -299,7 +362,7 @@ pub fn looks_like_session_id(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        command_for, comment_args, dump_args, dump_env_prefix, looks_like_session_id, sources_from,
+        auto_compact_args, command_for, comment_args, compact_remote, dump_args, run_compact, dump_env_prefix, looks_like_session_id, sources_from,
         state_args, Source, DUMP_ENV,
     };
 
@@ -457,6 +520,35 @@ mod tests {
 
     /// То же и у комментария: id и имя машины едут аргументами по обеим
     /// дорогам, а текст — на stdin, потому что через ssh его разбирал бы шелл.
+    #[test]
+    fn compact_remote_idyot_cherez_interaktivnyy_shell() {
+        let line = compact_remote("b5a54ce3-a022-4c9a-aa91-e306d75bdc76", 58);
+        assert_eq!(
+            line,
+            "exec $SHELL -ic 'claude-wt session compact b5a54ce3-a022-4c9a-aa91-e306d75bdc76 --min-idle 58 --json'"
+        );
+        assert!(!line.contains(';'), "`;` для Windows Terminal — разделитель панелей");
+    }
+
+    #[test]
+    fn auto_compact_args_kak_u_kommentariya() {
+        let id = "b5a54ce3-a022-4c9a-aa91-e306d75bdc76";
+        assert_eq!(
+            auto_compact_args(&Source::Ssh("remote-host".into()), id, false),
+            vec!["ccfzf".to_string(), "--auto-compact".to_string(), id.to_string(), "off".to_string()]
+        );
+        assert_eq!(
+            auto_compact_args(&Source::Local, id, true),
+            vec!["--auto-compact".to_string(), id.to_string(), "on".to_string()]
+        );
+    }
+
+    #[test]
+    fn run_compact_ne_hodit_s_krivym_id_i_mestnym_istochnikom() {
+        assert!(run_compact(&Source::Ssh("remote-host".into()), "x; rm -rf ~", 58).is_err());
+        assert!(run_compact(&Source::Local, "b5a54ce3-a022-4c9a-aa91-e306d75bdc76", 58).is_err());
+    }
+
     #[test]
     fn comment_args_differ_by_transport() {
         let id = "b5a54ce3-a022-4c9a-aa91-e306d75bdc76";
