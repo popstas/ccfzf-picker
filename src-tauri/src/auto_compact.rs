@@ -264,12 +264,19 @@ pub fn skip_line(name: &str, id: &str, reason: &str) -> String {
 /// Исход `claude-wt session compact … --json`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Outcome {
-    /// Закрыть ли простой. Не закрывает его только отказ `min-idle`.
+    /// Закрыть ли простой. Не закрывают его только отказы из [`RETRIED`].
     pub settled: bool,
     /// Ключ строки журнала для [`Memory::note_once`].
     pub what: String,
     pub line: String,
 }
+
+/// Отказы, после которых простой остаётся открытым и следующий такт пробует
+/// снова. `min-idle` — часы команды и пикера разошлись на секунды; `ssh` и
+/// `state` — связь до окна или чтение состояния, то есть ничего не отправлено
+/// и сессия тут ни при чём. Прочие отказы говорят о самой сессии (поле занято,
+/// окна нет, флаг выключен) — повтор в тот же простой ничего не изменит.
+const RETRIED: [&str; 3] = ["min-idle", "ssh", "state"];
 
 /// Разобрать ответ команды. JSON — последняя строка, начинающаяся с `{`:
 /// интерактивный шелл мог напечатать что-то своё раньше, а stderr команды
@@ -311,9 +318,9 @@ pub fn outcome(name: &str, id: &str, code: Option<i32>, output: &str, detail: &s
             what: "unknown".into(),
             line: format!("auto-compact: {who}: outcome unknown, not retrying: {why}{detail}"),
         },
-        (_, true) if reason == "min-idle" => Outcome {
+        (_, true) if RETRIED.contains(&reason.as_str()) => Outcome {
             settled: false,
-            what: "min-idle".into(),
+            what: reason.clone(),
             line: format!("auto-compact: {who} refused: {why}{detail}; will retry until the cache expires"),
         },
         (_, true) => Outcome {
@@ -620,6 +627,13 @@ mod tests {
 
         let o = outcome("work", ID, Some(1), "{\"code\":1,\"reason\":\"min-idle\",\"error\":\"idle 57m\"}", "");
         assert!(!o.settled, "min-idle повторяется на следующем такте");
+        for retried in ["ssh", "state"] {
+            let o = outcome("work", ID, Some(1), &format!("{{\"code\":1,\"reason\":\"{retried}\"}}"), "");
+            assert!(!o.settled, "{retried}: ничего не отправлено, повтор на следующем такте");
+            assert_eq!(o.what, retried, "строка журнала — раз за простой на причину");
+        }
+        let o = outcome("work", ID, Some(2), "{\"code\":2,\"reason\":\"no-window\"}", "");
+        assert!(o.settled, "окна нет — в этот простой его и не будет");
 
         let o = outcome("work", ID, Some(3), "{\"code\":3,\"error\":\"ssh dropped\"}", "");
         assert!(o.settled, "исход неизвестен — не повторять");
