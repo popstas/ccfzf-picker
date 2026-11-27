@@ -62,7 +62,12 @@
     return out;
   }
 
-  function nestSegment(rows) {
+  /**
+   * Узлы дерева со связанными родителями — общая часть `nestSegment` и
+   * `rootRowOf`. Правила родства живут только здесь: вторая их копия (для
+   * группировки по типу) разошлась бы с деревом молча.
+   */
+  function linkNodes(rows) {
     // Узел — сессия целиком: id → карточки по порядку. Строка без id
     // становится узлом сама по себе, под своим номером.
     const nodes = [];
@@ -101,6 +106,30 @@
         seen.add(up);
       }
     }
+    return nodes;
+  }
+
+  /**
+   * Корень дерева head для каждой карточки: `Map<строка, строка корня>`.
+   *
+   * Нужен группировке по типу проекта (`typeGroups` в session-groups.js):
+   * ребёнок стоит в секции типа своего head, даже если тип его проекта другой
+   * (решение Стаса 27.11.2026). Правила родства — те же, что у дерева
+   * (`linkNodes`), по строкам, которые переданы, — то есть родителя вне их
+   * нет, и строка без него сама себе корень.
+   */
+  function rootRowOf(rows) {
+    const out = new Map();
+    for (const node of linkNodes(Array.isArray(rows) ? rows : [])) {
+      let top = node;
+      while (top.parent) top = top.parent;
+      for (const card of node.cards) out.set(card, top.row);
+    }
+    return out;
+  }
+
+  function nestSegment(rows) {
+    const nodes = linkNodes(rows);
     for (const node of nodes) if (node.parent) node.parent.children.push(node);
 
     const out = [];
@@ -112,5 +141,5 @@
     return out;
   }
 
-  return { nestByHead, INDENT_PX };
+  return { nestByHead, rootRowOf, INDENT_PX };
 });
