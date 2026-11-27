@@ -672,3 +672,41 @@ test('у зелийной строки и снимка пункта Type нет'
   assert.deepStrictEqual(typeItems({ kind: 'zellij', cwd: '/p', projectCwd: '/p' }, TYPES), []);
   assert.deepStrictEqual(typeItems({ kind: 'snapshot', id: 'sn', cwd: '/p' }, TYPES), []);
 });
+
+// ── Автокомпакт одной сессии ────────────────────────────────────────────────
+//
+// Подпись называет текущее состояние, нажатие его переворачивает. Пункт есть
+// только при включённом режиме: без таймера флаг ничего не значит.
+
+const COMPACT_ON = normalizeConfig({ autoCompact: { enabled: true } });
+const compactItem = (row, config = COMPACT_ON, opts) =>
+  availableActions(row, config, opts).find(a => a.id === 'auto-compact');
+
+test('пункт автокомпакта называет текущее состояние', () => {
+  assert.strictEqual(compactItem({ id: 'a', live: true, autoCompact: true }).label, 'Auto-compact: on');
+  assert.strictEqual(compactItem({ id: 'a', live: true, autoCompact: false }).label, 'Auto-compact: off');
+});
+
+test('пункта автокомпакта нет без режима, у неживой строки и строки без id', () => {
+  assert.strictEqual(compactItem({ id: 'a', live: true, autoCompact: true }, normalizeConfig({})), undefined);
+  assert.strictEqual(compactItem({ id: 'a', live: false, autoCompact: true }), undefined);
+  assert.strictEqual(compactItem({ live: true, autoCompact: true }), undefined);
+});
+
+test('у своей строки на Windows пункта автокомпакта нет', () => {
+  // Та же причина, что у комментария: ветку `--auto-compact` местный
+  // агрегатор на Windows не разбирает, и пикер принял бы молчание за успех.
+  assert.strictEqual(
+    compactItem({ id: 'a', live: true, autoCompact: true, source: 'local' }, COMPACT_ON, { os: 'windows' }),
+    undefined,
+  );
+});
+
+test('у местного источника пункта автокомпакта нет и на маке с Linux', () => {
+  // Таймер местному источнику не шлёт: `claude-wt` живёт на машине агрегатора.
+  for (const os of ['macos', 'linux']) {
+    assert.strictEqual(compactItem({ id: 'a', live: true, autoCompact: true, source: 'local' }, COMPACT_ON, { os }),
+      undefined, os);
+  }
+  assert.ok(compactItem({ id: 'a', live: true, autoCompact: true, source: 'remote-host' }, COMPACT_ON, { os: 'macos' }));
+});

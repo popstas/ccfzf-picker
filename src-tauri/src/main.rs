@@ -38,6 +38,8 @@ mod state_source;
 mod tracker_signal;
 mod user_idle;
 mod wezterm_bell;
+// После `mod log`: макрос `ccfzf_log!` виден модулю только ниже своего объявления.
+mod auto_compact;
 
 /// Кнопка, снятая неровно, даёт две посылки подряд, и вторая закрывала бы
 /// только что открытое окно. Тот же ограничитель стоит в соседнем пикере.
@@ -924,6 +926,19 @@ async fn set_comment(
     })
     .await
     .map_err(|e| format!("comment task failed: {e}"))?
+}
+
+/// Включить или выключить автокомпакт одной сессии на машине её источника.
+///
+/// Флаг живёт рядом с комментарием (`ccfzf --auto-compact`) и приезжает в
+/// `--state` полем `autoCompact: false`. `async` — по той же причине, что у
+/// `set_comment`: ssh идёт до пяти секунд.
+#[tauri::command]
+async fn set_auto_compact(source: String, id: String, on: bool) -> Result<(), String> {
+    let source = state_source::Source::from_label(&source);
+    tauri::async_runtime::spawn_blocking(move || state_source::set_auto_compact(&source, &id, on))
+        .await
+        .map_err(|e| format!("auto-compact task failed: {e}"))?
 }
 
 /// Отдать фронтенду то, что уже известно, и подтолкнуть опрос.
@@ -3135,7 +3150,7 @@ fn group_press(app: &tauri::AppHandle) {
         // детей, жму клавишу», а снимок на скрытом окне отстаёт до восьми минут.
         let state = app
             .try_state::<poller::Poller>()
-            .map(|p| p.fresh_state())
+            .map(|p| p.fresh_state("the group layout"))
             .unwrap_or(serde_json::Value::Null);
         let Some(ctx) = place_context(state, "a group layout") else { return };
         let groups = place_order::group_ids(&ctx.state, &ctx.host, &ctx.sort);
@@ -3488,7 +3503,7 @@ fn main() {
             restore_snapshot_mqtt, place_windows_mqtt, set_picker_selection, open_session_mqtt, open_project_mqtt,
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
-            set_comment, open_in_editor, editor_info, read_log, tracker_signal_status, open_desktop_session, open_folder,
+            set_comment, set_auto_compact, open_in_editor, editor_info, read_log, tracker_signal_status, open_desktop_session, open_folder,
             wezterm_bell::wezterm_bell, wezterm_bell::set_wezterm_bell,
             claude_usage::claude_usage, claude_usage::claude_usage_refresh
         ])
@@ -3517,6 +3532,10 @@ fn main() {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
             app.manage(poller::Poller::start(app.handle().clone(), sources, background));
+            // Таймер автокомпакта — свой поток, а не такт поллера: на скрытом
+            // окне поллер уходит в бэкофф до восьми минут, а окно отправки —
+            // две. Включён ли режим, поток читает из конфига сам каждый такт.
+            auto_compact::start(app.handle().clone());
 
             // Клик мимо окна закрывает пикер. Окно безрамочное и всегда
             // поверх: не закрывшись само, оно осталось бы висеть над той

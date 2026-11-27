@@ -780,3 +780,12 @@ test('без worktree и с мусором вместо него — null', () =
   const rows = buildSessionList({ sessions: [state({ worktree: { path: '/p', branch: 3 } })], seen: {} });
   assert.deepStrictEqual(rows[0].worktree, { path: '/p', branch: '' });
 });
+
+test('флаг автокомпакта: выключает только явное false', () => {
+  // Агрегатор пишет поле, только когда автокомпакт сессии выключен; нет поля —
+  // включён, как у комментария нет поля — пусто.
+  const row = (extra) => buildSessionList({ sessions: [state(extra)], seen: {} })[0];
+  assert.strictEqual(row({ autoCompact: false }).autoCompact, false);
+  assert.strictEqual(row({}).autoCompact, true);
+  assert.strictEqual(row({ autoCompact: 'off' }).autoCompact, true);
+});

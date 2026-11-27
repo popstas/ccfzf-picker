@@ -140,6 +140,13 @@
     // (мигает служба windows11-manager, набор шлёт пикер). Ноль выключает.
     // Умолчание — решение Стаса 21.11.2026.
     cacheWarnMinutes: 10,
+    // Автокомпакт: `/compact` idle-сессии с контекстом от `threshold`
+    // процентов, когда с последнего ответа прошло `after` минут, — пока кэш
+    // ещё тёплый. Шлёт таймер в Rust (`auto_compact.rs`), и правила разбора у
+    // него те же, что у `normalizeAutoCompact` ниже. Выключен, пока человек
+    // сам не попросил: режим печатает в чужие окна. Умолчания — решение Стаса
+    // 27.11.2026.
+    autoCompact: { enabled: false, threshold: 16, after: 58 },
     // Блоки слева в статуслайне — переключатель сортировки и подсказка про
     // меню строки. Оба показаны, пока человек не выключил: так статуслайн
     // выглядел до выключателей. Здесь, а не в ui.json, сознательно (coord
@@ -394,6 +401,28 @@
       ? number : DEFAULTS.cacheWarnMinutes;
   }
 
+  /** Целое в границах, иначе умолчание; строка с числом — тоже число. */
+  function wholeIn(value, min, max, fallback) {
+    const number = typeof value === 'number' ? value
+      : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+    return Number.isInteger(number) && number >= min && number <= max ? number : fallback;
+  }
+
+  /**
+   * Ключ `autoCompact`. Копия `settings_from` в `src-tauri/src/auto_compact.rs`:
+   * таймер живёт по Rust, а форма показывает по этому разбору. Минут не больше
+   * 59 — после часа кэш мёртв, и окно отправки пустое.
+   */
+  function normalizeAutoCompact(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const d = DEFAULTS.autoCompact;
+    return {
+      enabled: src.enabled === true,
+      threshold: wholeIn(src.threshold, 1, 100, d.threshold),
+      after: wholeIn(src.after, 1, 59, d.after),
+    };
+  }
+
   /**
    * Флаги подложки — по одному на раскладку, независимо друг от друга: порча
    * одного не должна гасить другой, тем же правилом, что и у `normalizeStale`.
@@ -463,6 +492,7 @@
       stale: normalizeStale(src.stale),
       contextLevels: normalizeContextLevels(src.contextLevels),
       cacheWarnMinutes: normalizeCacheWarnMinutes(src.cacheWarnMinutes),
+      autoCompact: normalizeAutoCompact(src.autoCompact),
       statusline: normalizeStatusline(src.statusline),
       claudeUsageUrl: typeof src.claudeUsageUrl === 'string'
         ? src.claudeUsageUrl.trim() : DEFAULTS.claudeUsageUrl,
