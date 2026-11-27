@@ -42,6 +42,7 @@ const FILES = [
   'frontend-src/open-strategy.js',
   'frontend-src/session-name.js',
   'frontend-src/session-tree.js',
+  'frontend-src/claude-usage.js',
   'frontend-src/picker-selection.js',
   'frontend-src/terminal-presets.js',
   'frontend-src/settings-form.js',

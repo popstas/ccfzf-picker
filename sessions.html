@@ -244,6 +244,14 @@
             flex: 0 1 auto; min-width: 0; overflow: hidden;
             text-overflow: ellipsis; white-space: nowrap;
         }
+        /* Usage лимитов Claude. Не сжимается: обрезанное число хуже
+           обрезанной подсказки, и при узком окне первой уступает она. Свежие
+           данные — на ступень ярче соседей, устаревшие (или не скачанные) —
+           на ступень тусклее: серость и есть сигнал «это прошлое». Красный
+           offset 5h — только у свежих (класс `hot` ставит claude-usage.js). */
+        #usage-block { flex: 0 0 auto; white-space: nowrap; color: var(--fg-muted); }
+        #usage-block.stale { color: var(--fg-dimmer); }
+        #usage-block .usage-off.hot { color: var(--danger); }
         .status-checks {
             display: flex; align-items: center; gap: 12px; margin-left: auto;
         }
@@ -846,6 +854,9 @@
   <!-- Пусто: текст ставит paintToggles. Полный список клавиш живёт в модалке
        по `?`/F1 — здесь остаётся только вход в меню строки. -->
   <span id="menu-hint"></span>
+  <!-- Usage лимитов Claude (`claudeUsageUrl`): после блоков, которые можно
+       выключить, — на их месте, когда они выключены. Наполняет paintUsage. -->
+  <span id="usage-block" hidden></span>
   <!-- Наполняется из TOGGLE_CHECKS: разметка и обработчики не должны
        расходиться в именах ключей. -->
   <span class="status-checks" id="status-checks"></span>
@@ -932,6 +943,7 @@
      момент загрузки, и в обратном порядке ему достался бы undefined. -->
 <script src="session-name.js"></script>
 <script src="session-tree.js"></script>
+<script src="claude-usage.js"></script>
 <script src="picker-selection.js"></script>
 <!-- terminal-presets: страница берёт отсюда osOf — ту же мерку системы,
      какой выбирает пресет окно настроек. Второй разбор navigator.platform
@@ -1467,6 +1479,7 @@ let commentRow = null;
   const treeButton = document.getElementById('tree-button');
   const bellButton = document.getElementById('bell-button');
   const menuHint = document.getElementById('menu-hint');
+  const usageBlock = document.getElementById('usage-block');
   const actionsBackdrop = document.getElementById('actions-backdrop');
   const actionsTitle = document.getElementById('actions-title');
   const actionsList = document.getElementById('actions-list');
@@ -1662,6 +1675,40 @@ const infoBackdrop = document.getElementById('info-backdrop');
   function applyStatusline() {
     sortControl.hidden = !CONFIG.statusline.sortControl;
     menuHint.hidden = !CONFIG.statusline.menuHint;
+    paintUsage();
+  }
+
+  /**
+   * Usage лимитов Claude — последний снимок от Rust (`claude_usage.rs`):
+   * адрес, последнее удачное значение, удалась ли последняя попытка.
+   * Приезжает событием `claude-usage` и разовой командой на старте.
+   */
+  let claudeUsage = { url: '', data: null, failed: false };
+
+  /**
+   * Нарисовать блок usage. Зовётся на каждый снимок, на показ окна и своим
+   * минутным таймером: «left», offset и серость меняются и без новых данных —
+   * время идёт, а файл может не обновляться десятки минут.
+   *
+   * Адрес берётся из конфига страницы, а не из снимка: стёртый в настройках,
+   * он убирает блок сразу, не дожидаясь ответа потока.
+   */
+  function paintUsage() {
+    const view = CONFIG.claudeUsageUrl && claudeUsage.url === CONFIG.claudeUsageUrl
+      ? window.ClaudeUsage.usageView(claudeUsage.data, Date.now() / 1000, { failed: claudeUsage.failed })
+      : null;
+    usageBlock.hidden = !view;
+    usageBlock.classList.toggle('stale', !!(view && view.stale));
+    usageBlock.innerHTML = window.ClaudeUsage.usageHtml(view);
+    usageBlock.title = !view ? ''
+      : claudeUsage.failed ? 'Claude usage: the last fetch failed, showing the last known values (see the Log tab)'
+      : view.stale ? 'Claude usage: the data is older than 5 minutes'
+      : 'Claude usage: offset is how far usage runs ahead (+) or behind (-) an even pace';
+  }
+
+  function applyUsage(snapshot) {
+    if (snapshot && typeof snapshot === 'object') claudeUsage = snapshot;
+    paintUsage();
   }
 
   /**
@@ -4934,6 +4981,7 @@ const infoBackdrop = document.getElementById('info-backdrop');
     closeMenu();
     closeInfo();
     closeKeys();
+    paintUsage();
     search.value = '';
     active = 0;
     selectionReset = true;
@@ -5137,6 +5185,19 @@ const infoBackdrop = document.getElementById('info-backdrop');
     await listen('state', (event) => applyState(event.payload));
     await listen('reopen-disconnected', requestReopenDisconnected);
 
+    // Usage лимитов Claude: снимок приезжает событием, когда поток в Rust его
+    // поменял. Разовая команда следом — тем же приёмом, что `poll_now` ниже:
+    // первый снимок мог уйти раньше подписки. Таймер — на минуту: «left» и
+    // серость обязаны идти и без новых данных, а на скрытом окне страницу
+    // никто не будит; показ окна (`beginShow`) рисует блок сразу.
+    await listen('claude-usage', (event) => applyUsage(event.payload));
+    try {
+      applyUsage(await invoke('claude_usage'));
+    } catch (e) {
+      error = String(e);
+    }
+    setInterval(paintUsage, 60 * 1000);
+
     // Настройки правит другое окно, и своего ui.json пикер сам не перечитает.
     await listen('ui-changed', async () => {
       try {
@@ -5183,6 +5244,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
       applyStaleOpacity();
       applyTheme();
       applyStatusline();
+      // Новый или стёртый адрес usage — толкнуть поток сейчас, а не через
+      // минуту: блок со старого адреса не должен висеть до следующего такта.
+      invoke('claude_usage_refresh').catch((e) => { error = String(e); });
       // regroup() иконок не читает — их читает только renderMenu; список не
       // обязан ждать похода за иконками, чтобы перерисоваться.
       regroup();

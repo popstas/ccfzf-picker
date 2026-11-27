@@ -22,6 +22,10 @@ and a session opens in the terminal of your choice.
   (lighter from 15%, yellow from 30%, red from 40%; thresholds in settings),
   minutes left on the prompt cache (yellow under 30, red under 15), and the age
   of the last activity.
+- **Claude usage in the statusline** — `5h: 43% -117m 54m left | week: 87% +1.4d`:
+  how far you run ahead of an even pace in the five-hour window and the week,
+  red when the five-hour lead passes 15 minutes, grey when the data is stale.
+  Set `claudeUsageUrl` to a JSON with the limits.
 - **Enter opens the session** — in a terminal, or back inside Claude Desktop for
   the sessions that came from it.
 - **Reopen disconnected sessions** — a session whose ssh link died while the
