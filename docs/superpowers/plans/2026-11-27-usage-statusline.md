@@ -132,6 +132,7 @@
 ### Task 6: Деплой (только по команде coord)
 
 - Что: пикер, `BRANCH=feat/usage-statusline ./data/scripts/deploy-win.sh` из основного каталога (у worktree нет `data/`) на Windows-цель (имя — в скрипте). Мак пропущен, недоступен.
+- Выкатка одной ветки пикера снимает с цели другую: `deploy-win.sh` делает checkout ветки. Параллельно под ревью ветка compact-ui, поэтому нужна сборная `deploy/<a>-<b>` или очередь. Решает coord.
 - Живой конфиг Windows-цели `~/.config/ccfzf-picker/config.yaml` (Windows: `%USERPROFILE%`): прописать `claudeUsageUrl`. Бэкап `.bak-<дата>-usage`, сверка `cmp`.
 - Проверка:
   - процесс поднят свежий: `tasklist`, PID ≠ прежнему;
