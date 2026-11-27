@@ -316,6 +316,16 @@
     // сохранённым. Через ssh пункт по-прежнему работает, поэтому мерка по
     // строке, а не по системе.
     if (row && row.id && !winLocal) actions.push({ id: 'comment', label: 'Edit comment' });
+    // Автокомпакт одной сессии: подпись — текущее состояние, нажатие его
+    // переворачивает. Флаг живёт там же, где комментарий, и мерка у пункта та
+    // же; сверху — включённый режим (без таймера флаг ничего не значит) и
+    // живая сессия (неживой слать `/compact` некому).
+    if (row && row.id && row.live && !winLocal && (cfg.autoCompact || {}).enabled === true) {
+      actions.push({
+        id: 'auto-compact',
+        label: row.autoCompact === false ? 'Auto-compact: off' : 'Auto-compact: on',
+      });
+    }
     actions.push({ id: 'info', label: 'Session info' });
     return actions;
   }
