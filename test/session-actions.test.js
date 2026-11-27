@@ -701,3 +701,12 @@ test('у своей строки на Windows пункта автокомпак�
     undefined,
   );
 });
+
+test('у местного источника пункта автокомпакта нет и на маке с Linux', () => {
+  // Таймер местному источнику не шлёт: `claude-wt` живёт на машине агрегатора.
+  for (const os of ['macos', 'linux']) {
+    assert.strictEqual(compactItem({ id: 'a', live: true, autoCompact: true, source: 'local' }, COMPACT_ON, { os }),
+      undefined, os);
+  }
+  assert.ok(compactItem({ id: 'a', live: true, autoCompact: true, source: 'remote-host' }, COMPACT_ON, { os: 'macos' }));
+});

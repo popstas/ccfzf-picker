@@ -406,8 +406,12 @@ pub fn start(app: tauri::AppHandle) {
         .spawn(move || {
             let mut memory = Memory::default();
             loop {
-                std::thread::sleep(TICK);
+                // Спит остаток минуты, а не минуту после работы: опрос и
+                // отправки занимают секунды, и при `after: 59` окно в одну
+                // минуту дрейфующий такт мог бы перешагнуть целиком.
+                let started = std::time::Instant::now();
                 tick(&app, &mut memory);
+                std::thread::sleep(TICK.saturating_sub(started.elapsed()).max(std::time::Duration::from_secs(1)));
             }
         });
     if let Err(e) = spawned {
