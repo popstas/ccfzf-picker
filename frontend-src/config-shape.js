@@ -140,6 +140,13 @@
     // (мигает служба windows11-manager, набор шлёт пикер). Ноль выключает.
     // Умолчание — решение Стаса 21.11.2026.
     cacheWarnMinutes: 10,
+    // Автокомпакт: `/compact` idle-сессии с контекстом от `threshold`
+    // процентов, когда с последнего ответа прошло `after` минут, — пока кэш
+    // ещё тёплый. Шлёт таймер в Rust (`auto_compact.rs`), и правила разбора у
+    // него те же, что у `normalizeAutoCompact` ниже. Выключен, пока человек
+    // сам не попросил: режим печатает в чужие окна. Умолчания — решение Стаса
+    // 27.11.2026.
+    autoCompact: { enabled: false, threshold: 16, after: 58 },
     // Прежняя опция «прятать с панели задач кнопки погашенных». Её заменила
     // галка `hide dimmed windows` в ui.json (Стас 25.11), и окно настроек
     // ключ больше не пишет. Читается только ради миграции: `true` здесь —
@@ -384,6 +391,28 @@
       ? number : DEFAULTS.cacheWarnMinutes;
   }
 
+  /** Целое в границах, иначе умолчание; строка с числом — тоже число. */
+  function wholeIn(value, min, max, fallback) {
+    const number = typeof value === 'number' ? value
+      : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+    return Number.isInteger(number) && number >= min && number <= max ? number : fallback;
+  }
+
+  /**
+   * Ключ `autoCompact`. Копия `settings_from` в `src-tauri/src/auto_compact.rs`:
+   * таймер живёт по Rust, а форма показывает по этому разбору. Минут не больше
+   * 59 — после часа кэш мёртв, и окно отправки пустое.
+   */
+  function normalizeAutoCompact(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const d = DEFAULTS.autoCompact;
+    return {
+      enabled: src.enabled === true,
+      threshold: wholeIn(src.threshold, 1, 100, d.threshold),
+      after: wholeIn(src.after, 1, 59, d.after),
+    };
+  }
+
   /**
    * Флаги подложки — по одному на раскладку, независимо друг от друга: порча
    * одного не должна гасить другой, тем же правилом, что и у `normalizeStale`.
@@ -443,6 +472,7 @@
       stale: normalizeStale(src.stale),
       contextLevels: normalizeContextLevels(src.contextLevels),
       cacheWarnMinutes: normalizeCacheWarnMinutes(src.cacheWarnMinutes),
+      autoCompact: normalizeAutoCompact(src.autoCompact),
       hideDimmedFromTaskbar: src.hideDimmedFromTaskbar === true,
       scrim: normalizeScrim(src.scrim),
       showOnActiveDisplay: typeof src.showOnActiveDisplay === 'boolean'

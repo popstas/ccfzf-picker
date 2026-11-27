@@ -521,13 +521,16 @@ impl Poller {
     /// свежего опроса группа ушла бы без них. Отказ опроса откатывает на
     /// снимок и пишет об этом в журнал. Блокирует на время ssh — звать из
     /// `spawn_blocking`. Кэш не трогает: его держит поток поллера.
-    pub fn fresh_state(&self) -> serde_json::Value {
+    ///
+    /// `what` называет, ради чего опрос, — в строке отката: тем же путём ходит
+    /// таймер автокомпакта (`auto_compact.rs`).
+    pub fn fresh_state(&self, what: &str) -> serde_json::Value {
         let sources = self.settings.lock().unwrap().0.clone();
         let (fresh, error) = poll_once(&sources, false, &self.memo);
         let cached = self.snapshot().get("state").cloned().unwrap_or(serde_json::Value::Null);
         let (state, fell_back) = state_or_snapshot(fresh, cached);
         if fell_back {
-            ccfzf_log!("cannot poll before the group layout, using the cached state: {error}");
+            ccfzf_log!("cannot poll before {what}, using the cached state: {error}");
         }
         state
     }

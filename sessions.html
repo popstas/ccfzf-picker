@@ -3656,6 +3656,24 @@ const infoBackdrop = document.getElementById('info-backdrop');
     }
   }
 
+  /**
+   * Перевернуть автокомпакт сессии на машине её источника (`ccfzf
+   * --auto-compact`). Строка меняется сразу — тем же приёмом, что у
+   * комментария; отказ возвращает прежнее и говорит в статуслайн.
+   */
+  async function toggleAutoCompact(row) {
+    const on = row.autoCompact === false;
+    row.autoCompact = on;
+    render();
+    try {
+      await invoke('set_auto_compact', { source: row.source || CONFIG.sshHost, id: row.id, on });
+    } catch (e) {
+      row.autoCompact = !on;
+      error = String(e);
+      render();
+    }
+  }
+
   // ── Перетаскивание заголовков секций ───────────────────────────────────
   //
   // Тащат за заголовок, а не за строку: строки заняты кликом, который
@@ -4496,6 +4514,10 @@ const infoBackdrop = document.getElementById('info-backdrop');
       // `['open', url]` работал только на маке, на Windows молчал.
       invoke('open_pr', { url: row.pr_url }).catch(e => console.error('open_pr', e));
       invoke('hide_picker');
+      return;
+    }
+    if (id === 'auto-compact') {
+      toggleAutoCompact(row);
       return;
     }
     if (id === 'comment') {

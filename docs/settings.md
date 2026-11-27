@@ -34,6 +34,13 @@ a Mac). Tabs on the left, the page on the right.
   (`cacheWarnMinutes`, 10 by default, `0` turns it off). The blinking is drawn
   by windows11-manager, so it reaches only WezTerm windows on a machine running
   it; focusing the window stops it until the agent answers again.
+- **Auto-compact** — off by default. When on, once a minute the picker looks
+  for idle sessions with at least `threshold` percent of context (16) whose
+  last reply was `after` minutes ago (58) and less than an hour ago, and sends
+  them `/compact` through `claude-wt session compact` on the ssh host — once per
+  idle, while the prompt cache is still warm. Only sessions in a WezTerm window
+  on this machine; the others are skipped with the reason in the Log tab. `^K`
+  → **Auto-compact: on/off** turns it off for one session.
 - **Layout panels** — the order, collapsed state and visibility of the wide-mode
   (`^F`) panels: which column a panel occupies and along which axes. Below the
   wide table, **Column widths in the wide view** switches between `Equal` and

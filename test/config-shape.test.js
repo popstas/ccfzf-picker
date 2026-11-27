@@ -508,3 +508,27 @@ test('hideDimmedFromTaskbar: умолчание false, только строго
   assert.strictEqual(normalizeConfig({ hideDimmedFromTaskbar: 'yes' }).hideDimmedFromTaskbar, false);
   assert.strictEqual(normalizeConfig({ hideDimmedFromTaskbar: true }).hideDimmedFromTaskbar, true);
 });
+
+// Автокомпакт: те же правила, что `settings_from` в src-tauri/src/auto_compact.rs
+// — таймер живёт по Rust, форма показывает по этому файлу, и разойтись им
+// значило бы показывать человеку не то, по чему шлётся `/compact`.
+test('autoCompact: умолчание — выключен, 16% и 58 минут', () => {
+  assert.deepStrictEqual(normalizeConfig({}).autoCompact, { enabled: false, threshold: 16, after: 58 });
+});
+
+test('autoCompact: правильные значения проходят как есть', () => {
+  assert.deepStrictEqual(
+    normalizeConfig({ autoCompact: { enabled: true, threshold: 30, after: '50' } }).autoCompact,
+    { enabled: true, threshold: 30, after: 50 },
+  );
+});
+
+test('autoCompact: мусор берёт умолчания, включает только true', () => {
+  for (const bad of [0, 101, 'x', 16.5]) {
+    assert.strictEqual(normalizeConfig({ autoCompact: { threshold: bad } }).autoCompact.threshold, 16, String(bad));
+  }
+  for (const bad of [0, 60, 58.5]) {
+    assert.strictEqual(normalizeConfig({ autoCompact: { after: bad } }).autoCompact.after, 58, String(bad));
+  }
+  assert.strictEqual(normalizeConfig({ autoCompact: { enabled: 'yes' } }).autoCompact.enabled, false);
+});

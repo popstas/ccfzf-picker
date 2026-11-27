@@ -209,6 +209,23 @@
           hint: '0 turns it off. WezTerm windows on machines running windows11-manager.' },
       ],
     },
+    // Автокомпакт — своей вкладкой: три поля об одном режиме, и сам режим
+    // шлёт текст в окна сессий, то есть искать его выключатель должно быть
+    // легко. Умолчания — те же, что в config-shape.js и auto_compact.rs.
+    {
+      id: 'autocompact',
+      title: 'Auto-compact',
+      fields: [
+        { id: 'autoCompact.enabled', label: 'Compact idle sessions before the prompt cache expires',
+          type: 'bool', default: false,
+          hint: 'Sends /compact once per idle to a session in a WezTerm window on this machine, '
+            + 'so the compaction reads a warm cache. Turn it off for one session with '
+            + 'Auto-compact in the ^K menu.' },
+        { id: 'autoCompact.threshold', label: 'Context used at least, %', type: 'number', default: 16 },
+        { id: 'autoCompact.after', label: 'Idle for, minutes', type: 'number', default: 58,
+          hint: 'From 1 to 59: after an hour the cache is gone and compacting saves nothing.' },
+      ],
+    },
     {
       id: 'window',
       title: 'Window popup',
@@ -657,6 +674,14 @@
     if (fields.cacheWarnMinutes !== undefined && String(fields.cacheWarnMinutes).trim()
       && !Number.isInteger(Number(fields.cacheWarnMinutes))) {
       problems.push('cacheWarnMinutes must be a whole number');
+    }
+    // Автокомпакт: целые, иначе Rust молча взял бы умолчание (`settings_from`).
+    validNumber('autoCompact.threshold', 1, 100, 'must be from 1 to 100');
+    validNumber('autoCompact.after', 1, 59, 'must be from 1 to 59');
+    for (const id of ['autoCompact.threshold', 'autoCompact.after']) {
+      if (fields[id] !== undefined && String(fields[id]).trim() && !Number.isInteger(Number(fields[id]))) {
+        problems.push(`${id} must be a whole number`);
+      }
     }
     // Ступени идут вверх. Перепутанные не ломают отрисовку (`contextLevel`
     // берёт самую тревожную из достигнутых), но младшая тогда не показалась

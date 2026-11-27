@@ -16,7 +16,7 @@ test('страницы перечисляют поля без повторов',
   const ids = PAGES.flatMap(p => p.fields.map(f => f.id));
   assert.deepStrictEqual([...new Set(ids)], ids);
   assert.deepStrictEqual(PAGES.map(p => p.id),
-    ['general', 'stale', 'context', 'window', 'columns', 'panels', 'hotkeys', 'mqtt', 'paths', 'log']);
+    ['general', 'stale', 'context', 'autocompact', 'window', 'columns', 'panels', 'hotkeys', 'mqtt', 'paths', 'log']);
 });
 
 test('windowHost живёт на General, mqtt и pathMap — на своих вкладках', () => {
@@ -762,4 +762,35 @@ test('hideDimmedFromTaskbar больше не поле формы', () => {
   const config = { hideDimmedFromTaskbar: true };
   assert.ok(!('hideDimmedFromTaskbar' in fieldsToPatch(configToFields(config), config)),
     'окно настроек всё ещё пишет hideDimmedFromTaskbar в config.yaml');
+});
+
+test('autoCompact: своя вкладка, умолчания совпадают с config-shape', () => {
+  const page = PAGES.find(p => p.id === 'autocompact');
+  assert.ok(page, 'вкладки autocompact нет');
+  assert.deepStrictEqual(page.fields.map(f => f.id),
+    ['autoCompact.enabled', 'autoCompact.threshold', 'autoCompact.after']);
+  const fields = configToFields({});
+  const shape = normalizeConfig({}).autoCompact;
+  assert.strictEqual(fields['autoCompact.enabled'], shape.enabled);
+  assert.strictEqual(fields['autoCompact.threshold'], shape.threshold);
+  assert.strictEqual(fields['autoCompact.after'], shape.after);
+});
+
+test('autoCompact: порог 1…100 и минуты 1…59, только целые', () => {
+  const base = { ...configToFields({}), sshHost: 'host' };
+  const bad = (id, v) => validate({ ...base, [id]: v }).some(p => p.startsWith(id));
+  assert.ok(!bad('autoCompact.threshold', '1'));
+  assert.ok(!bad('autoCompact.threshold', '100'));
+  assert.ok(bad('autoCompact.threshold', '0'));
+  assert.ok(bad('autoCompact.threshold', '101'));
+  assert.ok(bad('autoCompact.threshold', '16.5'));
+  assert.ok(!bad('autoCompact.after', '59'));
+  assert.ok(bad('autoCompact.after', '60'));
+  assert.ok(bad('autoCompact.after', '0'));
+  assert.ok(bad('autoCompact.after', '58.5'));
+});
+
+test('autoCompact: включение уходит в патч одним ключом', () => {
+  const fields = { ...configToFields(NO_PICKER_SIZE), 'autoCompact.enabled': true };
+  assert.deepStrictEqual(fieldsToPatch(fields, NO_PICKER_SIZE), { autoCompact: { enabled: true } });
 });
