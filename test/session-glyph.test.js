@@ -1204,14 +1204,21 @@ test('shell: живая сессия с фоновой командой гори
     '<div class="dot shell"></div>');
 });
 
-test('shell: непросмотренное остаётся оранжевым, вопрос — жёлтым', () => {
+test('shell перебивает непросмотренное, вопрос остаётся жёлтым', () => {
   assert.strictEqual(statusDotHtml({ live: true, agentState: 'review', shell: true }),
-    '<div class="dot review"></div>');
+    '<div class="dot shell"></div>');
   assert.strictEqual(
     statusDotHtml({ live: true, agentState: 'idle', agentEvent: 'attention', shell: true }),
-    '<div class="dot review"></div>');
+    '<div class="dot shell"></div>');
   assert.strictEqual(statusDotHtml({ live: true, agentState: 'question', shell: true }),
     '<div class="dot question"></div>');
+});
+
+test('shell снялся — непросмотренное снова оранжевое', () => {
+  assert.strictEqual(statusDotHtml({ live: true, agentState: 'review', shell: false }),
+    '<div class="dot review"></div>');
+  assert.strictEqual(statusDotHtml({ live: true, agentState: 'question', agentSeen: true, shell: true }),
+    '<div class="dot shell"></div>');
 });
 
 test('shell: работающий агент остаётся зелёным, закрытая сессия — без кружка', () => {
