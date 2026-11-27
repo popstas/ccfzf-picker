@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { nestByHead, INDENT_PX } = require('../frontend-src/session-tree');
+const { nestByHead, rootRowOf, INDENT_PX } = require('../frontend-src/session-tree');
 
 const ids = rows => rows.map(r => r.id || r.key);
 const depths = rows => rows.map(r => r.treeDepth);
@@ -115,3 +115,27 @@ test('сессии одного процесса терминала не пут�
   assert.deepStrictEqual(ids(out), ['n1', 'p', 'c1', 'c2', 'n2']);
   assert.deepStrictEqual(depths(out), [0, 0, 1, 1, 0]);
 });
+
+// rootRowOf — корень дерева для каждой карточки, по тем же правилам родства,
+// что и nestByHead: второй копии правил не заводим, разошлись бы молча.
+test('rootRowOf: корень у каждой карточки, по headId и по имени', () => {
+  const root = { id: 'r', title: 'lead' };
+  const kid = { id: 'k', title: 'kid', headId: 'r' };
+  const grand = { id: 'g', title: 'grand', head: 'kid' };
+  const alone = { id: 'x', title: 'x', headId: 'nobody' };
+  const roots = rootRowOf([grand, kid, root, alone]);
+  assert.strictEqual(roots.get(root), root);
+  assert.strictEqual(roots.get(kid), root);
+  assert.strictEqual(roots.get(grand), root);
+  assert.strictEqual(roots.get(alone), alone);
+});
+
+test('rootRowOf: цикл разорван там же, где у nestByHead', () => {
+  const a = { id: 'a', headId: 'b' };
+  const b = { id: 'b', headId: 'a' };
+  const roots = rootRowOf([a, b]);
+  assert.strictEqual(roots.get(a), a);
+  assert.strictEqual(roots.get(b), a);
+  assert.deepStrictEqual(nestByHead([a, b]).map(r => [r.id, r.treeDepth]), [['a', 0], ['b', 1]]);
+});
+

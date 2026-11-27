@@ -363,8 +363,19 @@
    */
   function typeGroups(open, typeOrder) {
     const byType = new Map();
+    // Тип для группировки — тип корня дерева head, а не свой (решение Стаса
+    // 27.11.2026): ребёнок-coord с проектом другого типа иначе уезжал бы от
+    // своего head в чужую секцию. Корень ищется среди тех же `open` — head в
+    // секции без окна или закрытый корнем не считается, и ребёнок остаётся
+    // в своём типе. Свой `projectType` строки не трогается.
+    // Лениво, при вызове: в sessions.html session-tree.js грузится позже этого
+    // файла, а settings.html его не грузит вовсе.
+    const treeApi = typeof module === 'object' && module.exports
+      ? require('./session-tree') : globalThis.SessionTree;
+    const roots = treeApi.rootRowOf(open);
     for (const s of open) {
-      const type = (typeof s.projectType === 'string' && s.projectType) || UNTYPED;
+      const root = roots.get(s) || s;
+      const type = (typeof root.projectType === 'string' && root.projectType) || UNTYPED;
       if (!byType.has(type)) byType.set(type, []);
       byType.get(type).push(s);
     }

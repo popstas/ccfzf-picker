@@ -1144,3 +1144,87 @@ test('untyped, поставленная первой, не уезжает в х�
   // хвоста смотрит на исходный порядок — untyped там не последняя.
   assert.deepStrictEqual(typeKeys(['untyped', 'gone']), ['untyped', 'work', 'home', 'alpha']);
 });
+
+// ── Дети в дереве родителя при группировке по типу (часть 5) ──────────────
+// Решение Стаса 27.11.2026: ребёнок стоит в секции типа своего head, даже
+// если тип его проекта другой. Тип для группировки — тип корня дерева
+// (родство по правилу nestByHead, среди живых строк); свой projectType строки
+// не меняется и показывается как раньше.
+
+const typeOf = (groups, id) => (groups.find(g => g.typeBlock && g.sessions.some(s => s.id === id)) || {}).label;
+const byType = sessions => groupSessions(sessions, 'recent', { groupByProjectType: true });
+
+test('ребёнок другого типа стоит в секции своего head', () => {
+  const groups = byType([
+    row({ id: 'head', title: 'tg-gate-head', live: true, projectType: 'home' }),
+    row({ id: 'child', title: 'co-tg-gate', live: true, projectType: 'work', headId: 'head', head: 'tg-gate-head' }),
+  ]);
+  assert.strictEqual(typeOf(groups, 'head'), 'home');
+  assert.strictEqual(typeOf(groups, 'child'), 'home');
+  assert.ok(!groups.some(g => g.key === 'type:work'), 'секция work завелась ради ребёнка');
+  const child = groups.find(g => g.key === 'type:home').sessions.find(s => s.id === 'child');
+  assert.strictEqual(child.projectType, 'work', 'свой тип строки не меняется');
+});
+
+test('внук идёт за корнем, а не за своим родителем', () => {
+  const groups = byType([
+    row({ id: 'root', title: 'root', live: true, projectType: 'home' }),
+    row({ id: 'mid', title: 'mid', live: true, projectType: 'alpha', headId: 'root' }),
+    row({ id: 'leaf', title: 'leaf', live: true, projectType: 'work', headId: 'mid' }),
+  ]);
+  assert.deepStrictEqual(['root', 'mid', 'leaf'].map(id => typeOf(groups, id)), ['home', 'home', 'home']);
+});
+
+test('родство по имени head, без headId, — тот же итог', () => {
+  const groups = byType([
+    row({ id: 'head', title: 'tg-gate-head', live: true, projectType: 'home' }),
+    row({ id: 'child', title: 'co-tg-gate', live: true, projectType: 'work', head: 'tg-gate-head' }),
+  ]);
+  assert.strictEqual(typeOf(groups, 'child'), 'home');
+});
+
+test('head не среди живых — ребёнок по своему типу', () => {
+  const groups = byType([
+    row({ id: 'head', title: 'tg-gate-head', live: false, projectType: 'home' }),
+    row({ id: 'child', title: 'co-tg-gate', live: true, projectType: 'work', headId: 'head' }),
+  ]);
+  assert.strictEqual(typeOf(groups, 'child'), 'work');
+});
+
+test('head в секции без окна (onlyWindow) — ребёнок по своему типу', () => {
+  const groups = groupSessions([
+    row({ id: 'head', title: 'h', live: true, projectType: 'home', window: null }),
+    row({ id: 'child', title: 'c', live: true, projectType: 'work', headId: 'head', window: { host: 'x' } }),
+  ], 'recent', { groupByProjectType: true, onlyWindow: true });
+  assert.strictEqual(typeOf(groups, 'child'), 'work');
+});
+
+test('корень без типа уводит в untyped всё дерево', () => {
+  const groups = byType([
+    row({ id: 'root', title: 'root', live: true, projectType: '' }),
+    row({ id: 'child', title: 'child', live: true, projectType: 'work', headId: 'root' }),
+  ]);
+  assert.strictEqual(typeOf(groups, 'child'), 'untyped');
+});
+
+// Цикл разрывается так же, как в дереве: первый узел цикла остаётся корнем,
+// второй — его ребёнком. Секция обязана совпасть с тем, что дерево покажет.
+test('цикл в данных — разрыв как в дереве, без зависания', () => {
+  const groups = byType([
+    row({ id: 'a', title: 'a', live: true, projectType: 'home', headId: 'b' }),
+    row({ id: 'b', title: 'b', live: true, projectType: 'work', headId: 'a' }),
+  ]);
+  assert.strictEqual(typeOf(groups, 'a'), 'home');
+  assert.strictEqual(typeOf(groups, 'b'), 'home');
+});
+
+test('карточки одной сессии ребёнка — обе в типе корня', () => {
+  const groups = byType([
+    row({ id: 'head', title: 'h', live: true, projectType: 'home' }),
+    row({ id: 'child', title: 'c', live: true, projectType: 'work', headId: 'head', window: { id: 1 } }),
+    row({ id: 'child', title: 'c', live: true, projectType: 'work', headId: 'head', window: { id: 2 } }),
+  ]);
+  const home = groups.find(g => g.key === 'type:home');
+  assert.strictEqual(home.sessions.filter(s => s.id === 'child').length, 2);
+});
+

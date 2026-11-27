@@ -226,6 +226,21 @@
           hint: 'From 1 to 59: after an hour the cache is gone and compacting saves nothing.' },
       ],
     },
+    // Строка внизу пикера: блоки слева и usage лимитов Claude. Выключатели
+    // лежат в config.yaml, а не в ui.json, сознательно — см. `statusline` в
+    // config-shape.js; меняются на месте по `config-changed`.
+    {
+      id: 'statusline',
+      title: 'Statusline',
+      fields: [
+        { id: 'statusline.sortControl', label: 'Show the sort switch', type: 'bool', default: true },
+        { id: 'statusline.menuHint', label: 'Show the session menu hint', type: 'bool', default: true },
+        { id: 'claudeUsageUrl', label: 'Claude usage URL', type: 'text',
+          hint: 'A JSON with fiveHour and weekly limits, fetched every minute. '
+            + 'Shown on the left: 5h used, pace offset, time to reset; week used and pace offset in days. '
+            + 'Empty — no usage block.' },
+      ],
+    },
     {
       id: 'window',
       title: 'Window popup',

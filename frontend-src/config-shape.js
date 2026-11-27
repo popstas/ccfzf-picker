@@ -147,6 +147,16 @@
     // сам не попросил: режим печатает в чужие окна. Умолчания — решение Стаса
     // 27.11.2026.
     autoCompact: { enabled: false, threshold: 16, after: 58 },
+    // Блоки слева в статуслайне — переключатель сортировки и подсказка про
+    // меню строки. Оба показаны, пока человек не выключил: так статуслайн
+    // выглядел до выключателей. Здесь, а не в ui.json, сознательно (coord
+    // 27.11.2026): `toggles` там — поколоночные галки с двумя осями, а не
+    // показ блоков, и девятое поле верхнего уровня тронуло бы дословно
+    // сторожимую арность `uiStateToSave`. На месте их меняет `config-changed`.
+    statusline: { sortControl: true, menuHint: true },
+    // Адрес json с лимитами Claude (`fiveHour`/`weekly`). Пусто — блока usage
+    // в статуслайне нет. Качает Rust (`claude_usage.rs`): страницу держит CSP.
+    claudeUsageUrl: '',
     // Прежняя опция «прятать с панели задач кнопки погашенных». Её заменила
     // галка `hide dimmed windows` в ui.json (Стас 25.11), и окно настроек
     // ключ больше не пишет. Читается только ради миграции: `true` здесь —
@@ -425,6 +435,16 @@
     };
   }
 
+  /** Выключатели блоков статуслайна — каждый сам по себе, мусор — показан. */
+  function normalizeStatusline(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const out = {};
+    for (const key of Object.keys(DEFAULTS.statusline)) {
+      out[key] = typeof src[key] === 'boolean' ? src[key] : DEFAULTS.statusline[key];
+    }
+    return out;
+  }
+
   function normalizeConfig(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
 
@@ -473,6 +493,9 @@
       contextLevels: normalizeContextLevels(src.contextLevels),
       cacheWarnMinutes: normalizeCacheWarnMinutes(src.cacheWarnMinutes),
       autoCompact: normalizeAutoCompact(src.autoCompact),
+      statusline: normalizeStatusline(src.statusline),
+      claudeUsageUrl: typeof src.claudeUsageUrl === 'string'
+        ? src.claudeUsageUrl.trim() : DEFAULTS.claudeUsageUrl,
       hideDimmedFromTaskbar: src.hideDimmedFromTaskbar === true,
       scrim: normalizeScrim(src.scrim),
       showOnActiveDisplay: typeof src.showOnActiveDisplay === 'boolean'

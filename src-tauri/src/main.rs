@@ -12,6 +12,7 @@ use tauri::{Emitter, Manager};
 // не резолвится.
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+mod claude_usage;
 mod config_file;
 mod desktop_store;
 mod editor;
@@ -2129,6 +2130,8 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
         );
     }
 
+    // Новый или стёртый адрес usage — сейчас, а не через минуту (см. `claude_usage.rs`).
+    claude_usage::claude_usage_refresh();
     let _ = app.emit("config-changed", ());
     HotkeyOutcome {
         picker_registered: registered,
@@ -3501,7 +3504,8 @@ fn main() {
             new_session_mqtt,
             save_config, open_settings, project_hotkeys_taken, action_icons,
             set_comment, set_auto_compact, open_in_editor, editor_info, read_log, tracker_signal_status, open_desktop_session, open_folder,
-            wezterm_bell::wezterm_bell, wezterm_bell::set_wezterm_bell
+            wezterm_bell::wezterm_bell, wezterm_bell::set_wezterm_bell,
+            claude_usage::claude_usage, claude_usage::claude_usage_refresh
         ])
         .setup(move |app| {
             // Пикер живёт в строке меню, а не в Dock: его вызывают хоткеем из
@@ -3839,6 +3843,16 @@ fn main() {
             spawn_mqtt_watch(tray, mqtt_item);
 
             project_hotkeys::apply_cached(app.handle());
+
+            // Usage лимитов Claude для статуслайна — свой поток, адрес читается
+            // из конфига на каждом такте (см. `claude_usage.rs`).
+            let usage_app = app.handle().clone();
+            claude_usage::spawn(
+                || load_config().map(|raw| claude_usage::config_url(&raw)).unwrap_or_default(),
+                move |snapshot| {
+                    let _ = usage_app.emit("claude-usage", snapshot);
+                },
+            );
             Ok(())
         })
         .run(tauri::generate_context!())

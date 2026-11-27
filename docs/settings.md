@@ -41,6 +41,13 @@ a Mac). Tabs on the left, the page on the right.
   idle, while the prompt cache is still warm. Only sessions in a WezTerm window
   on this machine; the others are skipped with the reason in the Log tab. `^K`
   → **Auto-compact: on/off** turns it off for one session.
+- **Statusline** — whether to show the sort switch and the session menu hint on
+  the left of the statusline (both on by default, applied at once), and the URL
+  of a JSON with Claude usage limits (`claudeUsageUrl`). With a URL the
+  statusline shows `5h: 43% -117m 54m left | week: 87% +1.4d` — see
+  [configuration.md](configuration.md#statusline). The switches live in
+  `config.yaml`, not `ui.json`: they show or hide whole blocks rather than
+  columns.
 - **Layout panels** — the order, collapsed state and visibility of the wide-mode
   (`^F`) panels: which column a panel occupies and along which axes. Below the
   wide table, **Column widths in the wide view** switches between `Equal` and
