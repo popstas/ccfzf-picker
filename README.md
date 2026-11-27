@@ -29,6 +29,11 @@ and a session opens in the terminal of your choice.
   `^K` → **Reopen session**, or **Reopen disconnected sessions** in the tray menu,
   stops the orphaned agent and resumes it in a new terminal; the dead window is
   left as it is. The sign comes from `ccfzf` and works on Linux ssh hosts.
+- **Auto-compact before the cache expires** (off by default, settings →
+  Auto-compact) — an idle session with 16% of context or more gets `/compact`
+  at the 58th minute after its last reply, while the prompt cache is still warm.
+  Only sessions in a WezTerm window on this machine; `^K` → **Auto-compact**
+  turns it off for one session. Needs `claude-wt` from ccfzf on the ssh host.
 - **`^O` opens the folder in your editor** — Zed, VS Code or Cursor, whichever
   is installed, or the one you pick in settings. With Zed, **Use SSH Remote**
   opens remote sessions over SSH instead of a network drive, so Zed notices
