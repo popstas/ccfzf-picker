@@ -23,6 +23,10 @@ use serde_json::Value;
 /// Как часто качать. Раз в минуту — решение Стаса (5a).
 const TICK: Duration = Duration::from_secs(60);
 
+/// Тишина после толчка, после которой адрес перечитывается: толчки идут на
+/// каждое сохранение настроек, а оно — на паузу в наборе.
+const SETTLE: Duration = Duration::from_secs(2);
+
 /// Потолок на всю загрузку: поток один, и висящий запрос съел бы следующие такты.
 const FETCH_TIMEOUT_SECS: &str = "20";
 
@@ -41,7 +45,7 @@ pub struct UsageSnapshot {
 #[derive(Debug, Default)]
 pub struct UsageState {
     snapshot: UsageSnapshot,
-    /// Текст последней ошибки — чтобы писать в журнал на переходе, а не раз в
+    /// Ключ последней ошибки (`error_key`) — чтобы писать в журнал на переходе, а не раз в
     /// минуту: в кольце лога тысяча строк, а ошибка может держаться сутками.
     error: Option<String>,
 }
@@ -79,14 +83,32 @@ impl UsageState {
             }
             Err(e) => {
                 self.snapshot.failed = true;
-                if self.error.as_deref() == Some(e.as_str()) {
+                let key = error_key(&e);
+                if self.error.as_deref() == Some(key.as_str()) {
                     return None;
                 }
-                self.error = Some(e.clone());
+                self.error = Some(key);
                 Some(format!("claude usage: {e}; keeping the last values"))
             }
         }
     }
+}
+
+/// По чему ошибки считаются «той же». У curl — по коду выхода из начала
+/// строки (`curl: (28) …`), а не по тексту: в таймауте стоят миллисекунды
+/// (`after 1001 milliseconds`, следующим тактом — `after 1000`), и сравнение
+/// текстом писало бы строку в журнал каждую минуту, пока сеть лежит. Код 22 —
+/// ответ HTTP ≥ 400 — различается по статусу, он в тексте и стабилен: 404 и
+/// 500 — разные поломки. Прочее (разбор json, запуск curl) — по тексту.
+fn error_key(e: &str) -> String {
+    if let Some(rest) = e.strip_prefix("curl: (") {
+        if let Some((code, _)) = rest.split_once(')') {
+            if code != "22" {
+                return format!("curl {code}");
+            }
+        }
+    }
+    e.to_string()
 }
 
 /// Тело ответа → данные. Объект с `fiveHour` или `weekly`, иначе ошибка:
@@ -168,7 +190,11 @@ where
             on_change(&after);
         }
         match rx.recv_timeout(TICK) {
-            Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+            // Толчок — дождаться, пока толчки стихнут: окно настроек сохраняет
+            // поле через 400 мс после ввода, и без паузы каждый недописанный
+            // адрес стал бы запросом и строкой «url changed» в журнале.
+            Ok(()) => while rx.recv_timeout(SETTLE).is_ok() {},
+            Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
     });
@@ -185,8 +211,10 @@ pub fn claude_usage() -> UsageSnapshot {
     lock().snapshot.clone()
 }
 
-/// Толкнуть поток сейчас, не дожидаясь такта. Страница зовёт на
-/// `config-changed`: стёртый адрес обязан убрать блок сразу, новый — показать.
+/// Толкнуть поток сейчас, не дожидаясь такта. Зовёт Rust рядом с
+/// `config-changed` (`apply_config` в main.rs), а не страница: у скрытого окна
+/// WebView2 усыпляет страницу, а настройки правят как раз при скрытом пикере.
+/// Стёртый адрес обязан убрать блок сразу, новый — показать.
 #[tauri::command]
 pub fn claude_usage_refresh() {
     if let Some(tx) = kick().get() {
@@ -227,6 +255,20 @@ mod tests {
         assert!(s.on_fetch(Err("404".into())).is_some(), "другая ошибка — новая строка");
         assert_eq!(s.on_fetch(Ok(json!({"weekly":{}}))).as_deref(), Some("claude usage: recovered"));
         assert!(!s.snapshot().failed);
+    }
+
+    // Тексты сняты с настоящего curl: таймаут меняет число миллисекунд от
+    // такта к такту, и журнал не должен получать строку на каждый.
+    #[test]
+    fn timeouts_differing_only_in_milliseconds_log_once() {
+        let mut s = UsageState::default();
+        s.on_url("https://example.com/u.json");
+        assert!(s.on_fetch(Err("curl: (28) Connection timed out after 20001 milliseconds".into())).is_some());
+        assert_eq!(s.on_fetch(Err("curl: (28) Connection timed out after 20000 milliseconds".into())), None);
+        assert!(s.on_fetch(Err("curl: (6) Could not resolve host: example.com".into())).is_some());
+        assert!(s.on_fetch(Err("curl: (22) The requested URL returned error: 404".into())).is_some());
+        assert!(s.on_fetch(Err("curl: (22) The requested URL returned error: 500".into())).is_some(),
+            "другой статус HTTP — другая поломка");
     }
 
     #[test]

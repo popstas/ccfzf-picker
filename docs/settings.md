@@ -34,6 +34,13 @@ a Mac). Tabs on the left, the page on the right.
   (`cacheWarnMinutes`, 10 by default, `0` turns it off). The blinking is drawn
   by windows11-manager, so it reaches only WezTerm windows on a machine running
   it; focusing the window stops it until the agent answers again.
+- **Statusline** — whether to show the sort switch and the session menu hint on
+  the left of the statusline (both on by default, applied at once), and the URL
+  of a JSON with Claude usage limits (`claudeUsageUrl`). With a URL the
+  statusline shows `5h: 43% -117m 54m left | week: 87% +1.4d` — see
+  [configuration.md](configuration.md#statusline). The switches live in
+  `config.yaml`, not `ui.json`: they show or hide whole blocks rather than
+  columns.
 - **Layout panels** — the order, collapsed state and visibility of the wide-mode
   (`^F`) panels: which column a panel occupies and along which axes. Below the
   wide table, **Column widths in the wide view** switches between `Equal` and

@@ -23,6 +23,22 @@ test('спрятанный блок статуслайна действител�
   assert.match(html, /#statusline \[hidden\] \{ display: none; \}/);
 });
 
+// Usage лимитов собран из кусков в двух файлах, и `generate_handler!` в
+// main.rs правят параллельно другие ветки: при разрешении конфликта команда
+// или толчок теряются молча — блок просто не появится или не уйдёт после
+// стирания адреса. Поведением не поймать, сторож текстовый.
+test('usage лимитов: поток, команды, толчок на config-changed и слушатель на месте', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src-tauri', 'src', 'main.rs'), 'utf8');
+  const handler = main.match(/generate_handler!\[([\s\S]*?)\]/);
+  assert.ok(handler, 'generate_handler! не найден');
+  assert.match(handler[1], /claude_usage::claude_usage\b/);
+  assert.match(handler[1], /claude_usage::claude_usage_refresh\b/);
+  assert.match(main, /claude_usage::spawn\(/);
+  assert.match(main, /claude_usage::claude_usage_refresh\(\);\s*let _ = app\.emit\("config-changed"/);
+  assert.match(html, /listen\('claude-usage'/);
+  assert.match(html, /<span id="usage-block" hidden><\/span>/);
+});
+
 // Подсказка не растягивается: за ней стоит блок usage, и растянутая
 // подсказка уносила бы его вправо, к галкам.
 test('подсказка про меню не растягивается на всю строку', () => {

@@ -4981,7 +4981,9 @@ const infoBackdrop = document.getElementById('info-backdrop');
     closeMenu();
     closeInfo();
     closeKeys();
-    paintUsage();
+    // Снимок usage — забрать заново, а не только перерисовать: у скрытого окна
+    // WebView2 усыпляет страницу, и событие `claude-usage` могло пройти мимо.
+    invoke('claude_usage').then(applyUsage).catch(() => paintUsage());
     search.value = '';
     active = 0;
     selectionReset = true;
@@ -5244,9 +5246,6 @@ const infoBackdrop = document.getElementById('info-backdrop');
       applyStaleOpacity();
       applyTheme();
       applyStatusline();
-      // Новый или стёртый адрес usage — толкнуть поток сейчас, а не через
-      // минуту: блок со старого адреса не должен висеть до следующего такта.
-      invoke('claude_usage_refresh').catch((e) => { error = String(e); });
       // regroup() иконок не читает — их читает только renderMenu; список не
       // обязан ждать похода за иконками, чтобы перерисоваться.
       regroup();

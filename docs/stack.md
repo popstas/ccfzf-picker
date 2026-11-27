@@ -22,7 +22,8 @@
 (`project_hotkeys.rs`), опрос источников (`poller.rs`, `state_source.rs`: ssh
 или местный процесс), слияние ответов двух источников (`merge_state.rs`),
 MQTT-клиент (`mqtt.rs`, rumqttc), прямой http до менеджера
-(`manager_http.rs`), запуск терминалов, редактора и Claude Desktop, иконки
+(`manager_http.rs`), usage лимитов Claude (`claude_usage.rs`, системный
+`curl`: `ureq` собран без TLS), запуск терминалов, редактора и Claude Desktop, иконки
 окон, чтение и запись `config.yaml`, `ui.json`, `seen.json`. Опрос живёт
 здесь, а не на странице, по причине, которая записана в
 [rules/state-sources.md](rules/state-sources.md): у скрытого окна webview

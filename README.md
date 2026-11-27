@@ -176,7 +176,8 @@ Three things worth knowing before reaching for the file:
 ## Settings window
 
 The gear in the status line (or `Ctrl+,` / `Cmd+,`) opens a settings window with
-tabs for General, Window popup, Columns, Layout panels, Hotkeys, MQTT and Paths.
+tabs for General, Statusline, Window popup, Columns, Layout panels, Hotkeys, MQTT
+and Paths.
 Edits save themselves and apply at once, hotkeys included — no restart.
 
 Note that saving rewrites `config.yaml` in full and **does not preserve its

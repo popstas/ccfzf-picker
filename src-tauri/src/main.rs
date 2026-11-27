@@ -2115,6 +2115,8 @@ fn apply_config(app: &tauri::AppHandle) -> HotkeyOutcome {
         );
     }
 
+    // Новый или стёртый адрес usage — сейчас, а не через минуту (см. `claude_usage.rs`).
+    claude_usage::claude_usage_refresh();
     let _ = app.emit("config-changed", ());
     HotkeyOutcome {
         picker_registered: registered,
